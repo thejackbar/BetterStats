@@ -40,12 +40,20 @@ _SYSTEM = (
     "book). Read them with a scorer's eye:\n"
     "- The BATSMAN block lists each batter, then HOW OUT (Caught / Bowled / LBW / Run "
     "Out / Stumped / Not Out), the BOWLER who got them, and a TOTAL column which is the "
-    "runs that batter scored. The marks next to the name are the scoring strokes — use "
-    "the TOTAL column for runs, not your own count of the strokes.\n"
-    "- FALL OF WICKETS gives, per wicket, the team score when it fell and which batter "
-    "was out (BAT No.).\n"
+    "runs that batter scored. The marks next to the name are the scoring strokes, one "
+    "number per scoring shot. Use the TOTAL column for runs (not your own count), and "
+    "from those strokes count how many are 4s for `fours` and how many are 6s for "
+    "`sixes`. The strokes should add up to the batter's total, so use that as a check.\n"
+    "- FALL OF WICKETS gives, per wicket: the team score when it fell, which batter was "
+    "out (BAT No.), and often a STAND column which is that partnership's runs. Read every "
+    "row into fall_of_wickets, including stand and the time, so partnerships can be "
+    "worked out.\n"
     "- The BOWLING analysis (lower grid) lists each bowler with their over-by-over marks "
-    "and, on the right, their figures: Maidens, Wides, No Balls, Wickets, Runs.\n"
+    "and, on the right, their figures: Maidens, Wides, No Balls, Wickets, Runs. Work out "
+    "each bowler's overs from how many over-columns hold their marks: a full column is one "
+    "over of six balls, and a part-filled last column is that many balls (eight full "
+    "columns then two balls in the ninth is 8.2 overs). A column of all dots with no runs "
+    "is a maiden.\n"
     "- Extras are recorded as No Balls, Wides, Byes and Leg Byes.\n"
     "- Common shorthand: c = caught, b = bowled, lbw, st = stumped, ro/run out, "
     "ct = caught, '†' or (wk) = the wicketkeeper, * = not out / captain.\n"
@@ -65,8 +73,8 @@ _BAT = {
         "position": {"type": ["integer", "null"], "description": "Batting order number (1 = opener)."},
         "runs": {"type": ["integer", "null"], "description": "Runs scored (the TOTAL column)."},
         "balls": {"type": ["integer", "null"]},
-        "fours": {"type": ["integer", "null"]},
-        "sixes": {"type": ["integer", "null"]},
+        "fours": {"type": ["integer", "null"], "description": "Number of 4s, counted from the batter's scoring strokes."},
+        "sixes": {"type": ["integer", "null"], "description": "Number of 6s, counted from the batter's scoring strokes."},
         "how_out": {"type": ["string", "null"], "description": "Dismissal kind: caught, bowled, lbw, run out, stumped, not out, did not bat, absent."},
         "bowler": {"type": ["string", "null"], "description": "Bowler credited with the wicket, if any."},
         "fielder": {"type": ["string", "null"], "description": "Catcher / fielder for a catch, stumping or run out, if shown."},
@@ -81,8 +89,8 @@ _BOWL = {
     "type": "object",
     "properties": {
         "name": {"type": "string", "description": "Bowler's name exactly as written."},
-        "overs": {"type": ["number", "null"], "description": "Overs bowled in cricket notation (8.2 = 8 overs 2 balls)."},
-        "maidens": {"type": ["integer", "null"]},
+        "overs": {"type": ["number", "null"], "description": "Overs bowled (8.2 = 8 overs 2 balls), counted from how many over-columns hold marks; a part-filled last column gives the part over."},
+        "maidens": {"type": ["integer", "null"], "description": "Maiden overs (a column of all dots, no runs)."},
         "runs": {"type": ["integer", "null"], "description": "Runs conceded."},
         "wickets": {"type": ["integer", "null"]},
         "wides": {"type": ["integer", "null"]},
@@ -97,6 +105,7 @@ _FOW = {
         "wicket": {"type": "integer", "description": "Which wicket (1..10)."},
         "score": {"type": ["integer", "null"], "description": "Team score when it fell."},
         "batter_out": {"type": ["string", "null"], "description": "Name or bat number of the batter out, if shown."},
+        "stand": {"type": ["integer", "null"], "description": "Runs in the partnership that just ended (the STAND column), if shown."},
     },
     "required": ["wicket"],
 }
@@ -181,6 +190,18 @@ def _num(v):
     return int(f) if f == int(f) else f
 
 
+def overs_to_balls(o):
+    """Cricket-notation overs (10.2 = 10 overs 2 balls) → total balls. None-safe."""
+    if o is None:
+        return None
+    try:
+        o = float(o)
+    except (TypeError, ValueError):
+        return None
+    full = int(o)
+    return full * 6 + round((o - full) * 10)
+
+
 def reconcile(payload: dict) -> list[str]:
     """Advisory cross-checks that flag the cells most likely misread.
 
@@ -232,6 +253,29 @@ def reconcile(payload: dict) -> list[str]:
                     + (f" + {byes} byes/leg-byes" if byes else "")
                     + f" = {bowl_runs + byes}, but the innings total is {total} (off by {gap})."
                 )
+
+        # Boundaries can't be worth more than the batter's total runs.
+        for b in bats:
+            r = b.get("runs")
+            if r is None:
+                continue
+            bnd = 4 * (b.get("fours") or 0) + 6 * (b.get("sixes") or 0)
+            if bnd > r:
+                warnings.append(
+                    f"{label}: {b.get('name') or 'a batter'} is shown with {b.get('fours') or 0}x4 and "
+                    f"{b.get('sixes') or 0}x6 ({bnd} in boundaries) but only {r} runs."
+                )
+
+        # Bowlers' overs should add up to the innings, when the innings overs are shown.
+        inn_balls = overs_to_balls(inn.get("overs"))
+        bowl_balls = [overs_to_balls(b.get("overs")) for b in bowls]
+        if inn_balls and any(x is not None for x in bowl_balls):
+            tot = sum(x for x in bowl_balls if x is not None)
+            if abs(tot - inn_balls) > 6:
+                warnings.append(
+                    f"{label}: bowlers' overs add up to {tot // 6}.{tot % 6} but the innings is "
+                    f"{inn_balls // 6}.{inn_balls % 6} overs."
+                )
     return warnings
 
 
@@ -276,6 +320,7 @@ def _normalise(data: dict) -> dict:
                 "wicket": _num(f.get("wicket")),
                 "score": _num(f.get("score")),
                 "batter_out": (f.get("batter_out") or None),
+                "stand": _num(f.get("stand")),
             } for f in (inn.get("fall_of_wickets") or []) if f.get("wicket") is not None],
         })
     return {

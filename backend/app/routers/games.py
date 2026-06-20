@@ -481,12 +481,11 @@ async def get_scorecard(
         innings_totals[n].setdefault("extras", 0)
         innings_totals[n]["extras"] += (row["wides"] or 0) + (row["no_balls"] or 0)
 
-    if is_manual:
-        # Manual games have no FOW / partnerships / GR opposition feed.
-        fow, partnerships = [], []
-    else:
-        fow = await get_game_fall_of_wickets(db, game.id)
-        partnerships = await get_game_partnerships(db, game.id)
+    # Fall of wickets + partnerships read through the v_effective_* views, so an
+    # uploaded manual card (manual_fall_of_wickets / manual_partnerships) shows them
+    # too. Manual opposition batting/bowling still comes from extracted_payload below.
+    fow = await get_game_fall_of_wickets(db, game.id)
+    partnerships = await get_game_partnerships(db, game.id)
 
     # Live-fetch opposition data from GR API (not stored in DB).
     # game.id IS the GR match UUID, so we can call directly. Skip for

@@ -1048,7 +1048,33 @@ class ManualFieldingStat(Base):
     player = relationship("Player")
 
 
-class ManualSeasonAdjustment(Base):
+class ManualFallOfWicket(Base):
+    __tablename__ = "manual_fall_of_wickets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    innings_number = Column(Integer, nullable=False)
+    wicket_number = Column(Integer, nullable=False)
+    score_at_fall = Column(Integer, nullable=True)
+    overs_at_fall = Column(Numeric(5, 1), nullable=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter_name = Column(Text, nullable=True)
+
+
+class ManualPartnership(Base):
+    __tablename__ = "manual_partnerships"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    innings_number = Column(Integer, nullable=False)
+    wicket_number = Column(Integer, nullable=False)
+    batter1_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter2_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    runs = Column(Integer, server_default="0", nullable=True)
+    balls = Column(Integer, nullable=True)
+    batter1_runs = Column(Integer, nullable=True)
+    batter2_runs = Column(Integer, nullable=True)
+    is_club_innings = Column(Boolean, nullable=True)
     __tablename__ = "manual_season_adjustments"
     __table_args__ = (
         UniqueConstraint("player_id", "season_id", "grade_id", name="uq_manual_season_adj_player_season_grade"),
