@@ -665,6 +665,22 @@ export const api = {
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
   adminListManualEntryKnownValues: () => request('/club-admin/manual-entries/known-values'),
 
+  // Upload Historical Scorecard: POST photo(s), get a reviewed both-team scorecard
+  // back (the model reads them, we don't write anything until the admin imports).
+  adminExtractScorecard: (fileList) => {
+    const form = new FormData()
+    Array.from(fileList).forEach(f => form.append('files', f))
+    return fetch(`${BASE}/club-admin/manual-entries/scorecard/extract`, {
+      method: 'POST', body: form, credentials: 'include',
+    }).then(async r => {
+      const text = await r.text()
+      let body
+      try { body = JSON.parse(text) } catch { throw new Error(`Server error (${r.status}): ${text.slice(0, 200)}`) }
+      if (!r.ok) throw new Error(typeof body.detail === 'string' ? body.detail : `HTTP ${r.status}`)
+      return body
+    })
+  },
+
   adminDownloadSeasonAdjustmentTemplate: () =>
     fetch(`${BASE}/club-admin/manual-entries/season-adjustments/template.csv`, { credentials: 'include' }),
   adminImportSeasonAdjustments: (file) => {

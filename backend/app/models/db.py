@@ -967,6 +967,14 @@ class ManualGame(Base):
     is_final = Column(Boolean, server_default="false", nullable=False)
     match_format = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Opposition club's Grassroots org GUID (from the CA club search), so the manual
+    # game links up with head-to-head / BetterIQ opponent matching the same way a
+    # synced game's games.opp_org_id does. The display name lives in `opposition`.
+    opp_org_id = Column(Text, nullable=True)
+    # Full both-team scorecard the AI scorecard upload extracted (both innings,
+    # opposition batting/bowling, fall of wickets, toss, extras). Source of truth for
+    # rendering the OPPOSITION half of the match view (migration 091).
+    extracted_payload = Column(JSONB, nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

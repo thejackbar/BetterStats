@@ -108,6 +108,17 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE bowler_wickets ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
         ))
+        # Upload Historical Scorecard (migration 091): a manual game built from a
+        # photographed card carries the opposition club's Grassroots org GUID and the
+        # full both-team scorecard the AI extracted (renders the opposition half of
+        # the match view). Defensive idempotent adds so the API boots even if alembic
+        # lags.
+        await conn.execute(text(
+            "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS opp_org_id TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS extracted_payload JSONB"
+        ))
         # BetterSelect → Net Manager: net/practice attendance + batting-queue
         # sessions. Defensive idempotent creates so the API boots even if a
         # numbered migration hasn't run yet (mirrors the self-service block).
