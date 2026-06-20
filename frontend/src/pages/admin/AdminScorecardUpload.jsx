@@ -77,18 +77,41 @@ function OppClubSearch({ value, onPick }) {
   )
 }
 
-// ─── Player picker for our rows ────────────────────────────────────────────────
+// ─── Player picker for our rows (searchable, like the app's player search) ──────
 function PlayerSelect({ value, roster, cardName, onChange }) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const selected = roster.find(p => p.id === value)
+  const t = q.trim().toLowerCase()
+  const matches = (t ? roster.filter(p => (p.name || '').toLowerCase().includes(t)) : roster).slice(0, 40)
   return (
-    <select
-      className={`${SMALL_INPUT} ${value ? '' : 'border-amber-400/50'}`}
-      value={value || ''}
-      onChange={e => onChange(e.target.value)}
-      title={cardName ? `Card: ${cardName}` : ''}
-    >
-      <option value="">— match player —</option>
-      {roster.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-    </select>
+    <div ref={ref} className="relative">
+      <input
+        className={`${SMALL_INPUT} ${value ? '' : 'border-amber-400/50'}`}
+        value={open ? q : (selected ? selected.name : '')}
+        placeholder={cardName ? `match: ${cardName}` : 'search player…'}
+        onChange={e => { setQ(e.target.value); setOpen(true) }}
+        onFocus={() => { setQ(''); setOpen(true) }}
+        onBlur={() => setTimeout(() => setOpen(false), 180)}
+        title={cardName ? `Card: ${cardName}` : ''}
+      />
+      {open && (
+        <div className="absolute z-30 mt-1 w-full min-w-[190px] bg-pb-surface border pb-hairline rounded shadow-lg max-h-56 overflow-auto">
+          {value && (
+            <button type="button" className="block w-full text-left px-3 py-1.5 text-xs text-pb-faint hover:bg-pb-surface2"
+              onMouseDown={() => { onChange(''); setOpen(false) }}>— clear —</button>
+          )}
+          {matches.length === 0
+            ? <div className="px-3 py-2 text-xs text-pb-faint">No match</div>
+            : matches.map(p => (
+              <button type="button" key={p.id}
+                className="block w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
+                onMouseDown={() => { onChange(p.id); setOpen(false) }}>{p.name}</button>
+            ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -112,6 +135,22 @@ export default function AdminScorecardUpload() {
   const [form, setForm] = useState({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
   const [confirm, setConfirm] = useState(false)
   const [createdId, setCreatedId] = useState(null)
+  const [dupes, setDupes] = useState([])
+
+  // Warn if this club already has a game on that date — an uploaded game counts on
+  // top of what's already there, so importing one that's already synced (or uploaded)
+  // double-counts it.
+  useEffect(() => {
+    if (step !== 'review' || !form.played_at) { setDupes([]); return }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.adminCheckScorecardDuplicate(form.played_at, form.opp_name || '')
+        if (!cancelled) setDupes(res.matches || [])
+      } catch { if (!cancelled) setDupes([]) }
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [step, form.played_at, form.opp_name])
 
   useEffect(() => {
     ;(async () => {
@@ -313,6 +352,22 @@ export default function AdminScorecardUpload() {
 
         {step === 'review' && (
           <div className="space-y-6">
+            {dupes.length > 0 && (
+              <div className="px-4 py-3 rounded bg-red-500/10 border border-red-400/40">
+                <div className="text-red-300 text-sm font-semibold mb-1">Possible duplicate — this could double-count</div>
+                <p className="text-red-200/90 text-xs mb-2">
+                  Your club already has {dupes.length === 1 ? 'a game' : `${dupes.length} games`} on {form.played_at}. An uploaded game counts in the stats on top of what's already there, so importing a match that's already in your data double-counts it on profiles and lists.
+                </p>
+                <ul className="list-disc list-inside text-red-200/90 text-xs space-y-0.5">
+                  {dupes.map(d => (
+                    <li key={d.id}>
+                      {d.grade ? `${d.grade}: ` : ''}vs {d.opponent || 'unknown'} ({d.source === 'manual' ? 'manual upload' : 'synced'}){d.likely ? ' — same opponent' : ''}{' '}
+                      <Link to={`/games/${d.id}`} target="_blank" className="underline">view</Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {warnings.length > 0 && (
               <div className="px-4 py-3 rounded bg-amber-500/10 border border-amber-400/30">
                 <div className="text-amber-300 text-sm font-semibold mb-1">Worth a second look</div>
@@ -545,7 +600,9 @@ export default function AdminScorecardUpload() {
               <h3 className="text-lg font-semibold text-pb-text mb-2">Import this match?</h3>
               <div className="text-sm text-pb-faint mb-4 space-y-2">
                 <p>It will be saved as a manual game and counted in the stats. Reversible from the Audit tab.</p>
-                <p className="text-amber-300/90 text-xs">Check this match isn't already in the data from a sync (same date and opponent) before importing, so totals aren't double-counted.</p>
+                {dupes.length > 0
+                  ? <p className="text-red-300 text-xs">Heads up: your club already has {dupes.length === 1 ? 'a game' : `${dupes.length} games`} on {form.played_at}. If this is the same match, importing will double-count it. Only proceed if it's a different game.</p>
+                  : <p className="text-amber-300/90 text-xs">No existing game found on this date, so it won't double up.</p>}
               </div>
               <div className="flex justify-end gap-2">
                 <button className={BTN_SECONDARY} onClick={() => setConfirm(false)}>Cancel</button>

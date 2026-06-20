@@ -941,6 +941,50 @@ async def extract_scorecard_upload(
     return result
 
 
+@router.get("/scorecard/check-duplicate")
+async def check_scorecard_duplicate(
+    played_at: str,
+    opponent: str = "",
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find an existing game (synced OR manual) in this club on the given date, so the
+    upload can warn before double-counting a match that's already in the data. Uploaded
+    games roll into season/career totals (v_effective_player_season_stats) and show in
+    every per-game surface, so the same match in both places double-counts."""
+    try:
+        d = date_cls.fromisoformat((played_at or "").strip())
+    except Exception:
+        return {"matches": []}
+    rows = (await db.execute(_t("""
+        SELECT g.id::text AS id, g.played_at, g.home_team, g.away_team,
+               g.opp_club_name, g.source, gr.name AS grade
+        FROM v_effective_games g
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org AND g.played_at = :d
+        ORDER BY g.source
+    """), {"org": str(club.id), "d": d})).mappings().all()
+    opp_toks = [w for w in re.split(r"[^a-z0-9]+", (opponent or "").lower()) if len(w) > 2]
+
+    def _likely(r) -> bool:
+        if not opp_toks:
+            return False
+        hay = " ".join([r["opp_club_name"] or "", r["home_team"] or "", r["away_team"] or ""]).lower()
+        return any(w in hay for w in opp_toks)
+
+    matches = [{
+        "id": r["id"],
+        "played_at": r["played_at"].isoformat() if r["played_at"] else None,
+        "opponent": r["opp_club_name"] or r["away_team"] or r["home_team"],
+        "grade": r["grade"],
+        "source": r["source"],  # 'api' (synced) | 'manual'
+        "likely": _likely(r),
+    } for r in rows]
+    return {"matches": matches}
+
+
 @router.post("/games")
 async def create_manual_game(
     data: ManualGameIn,
