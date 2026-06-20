@@ -703,7 +703,7 @@ async def _their_danger_batters(
                 COUNT(*) AS times_out,
                 COALESCE(SUM(bw.batter_runs), 0) AS runs,
                 MAX(bw.batter_runs) AS top_score
-            FROM bowler_wickets bw
+            FROM v_effective_bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
@@ -755,7 +755,7 @@ async def search_opponent_players(session: AsyncSession, org_id: str, q: str) ->
                    COALESCE(SUM(bw.batter_runs), 0) AS runs,
                    MAX(bw.batter_runs) AS top_score,
                    MAX(g.played_at) AS last_played
-            FROM bowler_wickets bw
+            FROM v_effective_bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND bw.batter_name ILIKE :q
@@ -845,7 +845,7 @@ async def _our_bowler_dominance(
                     WHEN bw.dismissal_type = 'caught' AND bw.caught_behind IS TRUE
                         THEN 'caught behind'
                     ELSE LOWER(bw.dismissal_type) END) AS how
-            FROM bowler_wickets bw
+            FROM v_effective_bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             JOIN players p ON p.id = bw.bowler_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)

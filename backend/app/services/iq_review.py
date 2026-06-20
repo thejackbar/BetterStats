@@ -135,7 +135,7 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
             SELECT p.runs, p.wicket_number,
                    COALESCE(b1.display_name_override, b1.name) AS b1,
                    COALESCE(b2.display_name_override, b2.name) AS b2
-            FROM partnerships p
+            FROM v_effective_partnerships p
             LEFT JOIN players b1 ON b1.id = p.batter1_id
             LEFT JOIN players b2 ON b2.id = p.batter2_id
             WHERE p.game_id = CAST(:gid AS UUID) AND p.is_club_innings IS TRUE AND p.runs IS NOT NULL
@@ -159,7 +159,7 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
         text(
             """
             SELECT p.innings_number AS inn, p.wicket_number AS wk, p.runs AS runs
-            FROM partnerships p
+            FROM v_effective_partnerships p
             WHERE p.game_id = CAST(:gid AS UUID) AND p.is_club_innings IS TRUE
               AND p.wicket_number BETWEEN 1 AND 10 AND p.runs IS NOT NULL
             """

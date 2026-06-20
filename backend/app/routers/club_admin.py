@@ -1191,7 +1191,7 @@ async def _do_import_partnership_records(file, club, db):
         if b1_id and b2_id:
             syn_res = await db.execute(_text("""
                 SELECT 1
-                FROM partnerships pt
+                FROM v_effective_partnerships pt
                 JOIN games   g  ON g.id  = pt.game_id
                 JOIN grades  gr ON gr.id = g.grade_id
                 JOIN seasons s  ON s.id  = gr.season_id

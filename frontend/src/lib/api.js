@@ -664,6 +664,8 @@ export const api = {
     request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
   adminListManualEntryKnownValues: () => request('/club-admin/manual-entries/known-values'),
+  adminCheckScorecardDuplicate: (playedAt, opponent = '') =>
+    request(`/club-admin/manual-entries/scorecard/check-duplicate?played_at=${encodeURIComponent(playedAt)}&opponent=${encodeURIComponent(opponent)}`),
 
   // Upload Historical Scorecard: POST photo(s), get a reviewed both-team scorecard
   // back (the model reads them, we don't write anything until the admin imports).

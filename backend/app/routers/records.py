@@ -651,7 +651,7 @@ async def get_records(
             s.name AS season_name,
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual
-        FROM partnerships pt
+        FROM v_effective_partnerships pt
         JOIN v_effective_games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
@@ -692,7 +692,7 @@ async def get_records(
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual,
             ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rn
-        FROM partnerships pt
+        FROM v_effective_partnerships pt
         JOIN v_effective_games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
@@ -744,7 +744,7 @@ async def get_records(
                     PARTITION BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)), pt.wicket_number
                     ORDER BY pt.runs DESC
                 ) AS rn
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             JOIN v_effective_games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -821,7 +821,7 @@ async def get_records(
             COUNT(*)                            AS count,
             COALESCE(SUM(pt.runs), 0)           AS total_runs,
             MAX(pt.runs)                        AS best
-        FROM partnerships pt
+        FROM v_effective_partnerships pt
         JOIN players p1 ON p1.id = pt.batter1_id
         JOIN players p2 ON p2.id = pt.batter2_id
         {pairs_game_join}

@@ -1557,7 +1557,7 @@ async def query_partnership_list(
                 pt.batter2_runs                                       AS batter2_runs,
                 pt.is_club_innings                                    AS is_club_innings
             FROM game_universe gu
-            JOIN partnerships pt ON pt.game_id = gu.game_id
+            JOIN v_effective_partnerships pt ON pt.game_id = gu.game_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE pt.is_club_innings IS NOT FALSE
@@ -1720,7 +1720,7 @@ async def derived_best_partnership_pair(
                 gu.display_grade_name AS grade_name,
                 gu.season_name
             FROM game_universe gu
-            JOIN partnerships pt ON pt.game_id = gu.game_id
+            JOIN v_effective_partnerships pt ON pt.game_id = gu.game_id
             WHERE pt.is_club_innings IS NOT FALSE
               AND pt.batter1_id IS NOT NULL AND pt.batter2_id IS NOT NULL
         ),
@@ -2988,7 +2988,7 @@ async def derived_top_partnerships_by_wicket(
                 END                                                   AS opposition,
                 ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rk
             FROM game_universe gu
-            JOIN partnerships pt ON pt.game_id = gu.game_id
+            JOIN v_effective_partnerships pt ON pt.game_id = gu.game_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE pt.is_club_innings IS NOT FALSE
@@ -3019,7 +3019,7 @@ async def derived_partnership_aggregates_pair(
                 GREATEST(pt.batter1_id, pt.batter2_id) AS player_b_id,
                 pt.runs::int                            AS runs
             FROM game_universe gu
-            JOIN partnerships pt ON pt.game_id = gu.game_id
+            JOIN v_effective_partnerships pt ON pt.game_id = gu.game_id
             WHERE pt.is_club_innings IS NOT FALSE
               AND pt.batter1_id IS NOT NULL AND pt.batter2_id IS NOT NULL
         ),
@@ -3065,7 +3065,7 @@ async def derived_century_partnerships_pair(
                 GREATEST(pt.batter1_id, pt.batter2_id) AS player_b_id,
                 pt.runs::int                            AS runs
             FROM game_universe gu
-            JOIN partnerships pt ON pt.game_id = gu.game_id
+            JOIN v_effective_partnerships pt ON pt.game_id = gu.game_id
             WHERE pt.is_club_innings IS NOT FALSE
               AND pt.batter1_id IS NOT NULL AND pt.batter2_id IS NOT NULL
               AND pt.runs >= 100
@@ -3312,7 +3312,7 @@ async def derived_ducks_inflicted(
             COALESCE(p.display_name_override, p.name) AS player_name,
             COUNT(*)::int AS ducks_inflicted
         FROM game_universe gu
-        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
         LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
         WHERE p.organisation_id = :org_id
@@ -3344,7 +3344,7 @@ async def derived_golden_ducks_inflicted(
             COALESCE(p.display_name_override, p.name) AS player_name,
             COUNT(*)::int AS golden_ducks_inflicted
         FROM game_universe gu
-        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
         LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
         WHERE p.organisation_id = :org_id
@@ -3388,7 +3388,7 @@ async def derived_bowler_fielder_combo(
                 COALESCE(mb.canonical_id, bw.bowler_id)  AS bowler_id,
                 COALESCE(mf.canonical_id, bw.fielder_id) AS fielder_id
             FROM game_universe gu
-            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+            JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
             JOIN players pb ON pb.id = bw.bowler_id
             LEFT JOIN merge_map mb ON mb.removed_player_id = bw.bowler_id
             LEFT JOIN merge_map mf ON mf.removed_player_id = bw.fielder_id
@@ -3526,7 +3526,7 @@ async def derived_caught_and_bowled(
         FROM game_universe gu
         JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
         JOIN players p ON p.id = bi.player_id
-        JOIN bowler_wickets bw
+        JOIN v_effective_bowler_wickets bw
           ON bw.game_id = bi.game_id
          AND bw.innings_number = bi.innings_number
          AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
@@ -3566,7 +3566,7 @@ async def derived_caught_and_bowled_bowler(
             COALESCE(p.display_name_override, p.name) AS player_name,
             COUNT(*)::int                             AS c_and_b_count
         FROM game_universe gu
-        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
         LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
         WHERE p.organisation_id = :org_id
@@ -3615,7 +3615,7 @@ async def _wicket_collapse(
                 MAX(fw.wicket_number)          AS max_wkt,
                 MIN(fw.wicket_number)          AS min_wkt
             FROM game_universe gu
-            JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+            JOIN v_effective_fall_of_wickets fw ON fw.game_id = gu.game_id
             GROUP BY fw.game_id, fw.innings_number
             HAVING MIN(fw.wicket_number) = 1
                AND COUNT(*) = MAX(fw.wicket_number)
@@ -3632,7 +3632,7 @@ async def _wicket_collapse(
                     PARTITION BY fw.game_id, fw.innings_number ORDER BY fw.wicket_number
                 ) AS end_wicket
             FROM game_universe gu
-            JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+            JOIN v_effective_fall_of_wickets fw ON fw.game_id = gu.game_id
             JOIN innings_fow_quality q
               ON q.game_id = fw.game_id AND q.innings_number = fw.innings_number
         ),
