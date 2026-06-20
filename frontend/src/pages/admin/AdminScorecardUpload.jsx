@@ -27,6 +27,97 @@ function num(v) {
   return Number.isFinite(n) ? n : null
 }
 
+// ─── Dismissals ────────────────────────────────────────────────────────────────
+// Known modes for the dropdown. `fielder`/`bowler` say which of the two columns
+// apply: a bowled has a bowler but no fielder, a run out a fielder but no bowler,
+// a not out neither. '' is the "unknown / incomplete card" option, where everything
+// stays blank. Values match the backend dismissal parser's method strings.
+const DISMISSAL_MODES = [
+  { value: '', label: '— unknown —', fielder: false, bowler: false },
+  { value: 'caught', label: 'Caught (c)', fielder: true, bowler: true },
+  { value: 'caught & bowled', label: 'Caught & bowled (c & b)', fielder: false, bowler: true },
+  { value: 'bowled', label: 'Bowled (b)', fielder: false, bowler: true },
+  { value: 'lbw', label: 'LBW', fielder: false, bowler: true },
+  { value: 'stumped', label: 'Stumped (st)', fielder: true, bowler: true },
+  { value: 'run out', label: 'Run out', fielder: true, bowler: false },
+  { value: 'hit wicket', label: 'Hit wicket', fielder: false, bowler: true },
+  { value: 'not out', label: 'Not out', fielder: false, bowler: false },
+  { value: 'retired', label: 'Retired', fielder: false, bowler: false },
+  { value: 'did not bat', label: 'Did not bat', fielder: false, bowler: false },
+  { value: 'absent', label: 'Absent', fielder: false, bowler: false },
+]
+const MODE_BY_VALUE = Object.fromEntries(DISMISSAL_MODES.map(m => [m.value, m]))
+const modeHasFielder = v => !!MODE_BY_VALUE[(v || '').toLowerCase()]?.fielder
+const modeHasBowler = v => !!MODE_BY_VALUE[(v || '').toLowerCase()]?.bowler
+
+// Read a dismissal string into {mode, fielder, bowler}. Mirrors the backend
+// _parse_dismissal so the on-card text and the split columns always agree.
+function parseDismissalText(text) {
+  const s = (text || '').replace(/\s+/g, ' ').trim()
+  const sl = s.toLowerCase()
+  if (!sl) return { mode: '', fielder: '', bowler: '' }
+  if (sl.includes('not out')) return { mode: 'not out', fielder: '', bowler: '' }
+  if (sl === 'dnb' || sl === 'did not bat') return { mode: 'did not bat', fielder: '', bowler: '' }
+  if (sl.startsWith('absent')) return { mode: 'absent', fielder: '', bowler: '' }
+  if (sl.startsWith('retired')) return { mode: 'retired', fielder: '', bowler: '' }
+  let m
+  if ((m = s.match(/^c(?:aught)?\s*(?:&|and|\+)\s*b(?:owled)?\.?\s+(.+)$/i))) return { mode: 'caught & bowled', fielder: m[1].trim(), bowler: m[1].trim() }
+  if ((m = s.match(/^st(?:umped)?\.?\s+(.+?)\s+b(?:owled)?\.?\s+(.+)$/i))) return { mode: 'stumped', fielder: m[1].trim(), bowler: m[2].trim() }
+  if ((m = s.match(/^c(?:aught)?\.?\s+(.+?)\s+b(?:owled)?\.?\s+(.+)$/i))) return { mode: 'caught', fielder: m[1].trim(), bowler: m[2].trim() }
+  if ((m = s.match(/^hit\s*wicket(?:\s+b(?:owled)?\.?\s+(.+))?$/i))) return { mode: 'hit wicket', fielder: '', bowler: (m[1] || '').trim() }
+  if ((m = s.match(/^lbw(?:\s+b(?:owled)?\.?\s+(.+))?$/i))) return { mode: 'lbw', fielder: '', bowler: (m[1] || '').trim() }
+  if ((m = s.match(/^(?:run\s*out|ro)\b\s*\(?\s*([^)]*)\)?$/i))) return { mode: 'run out', fielder: (m[1] || '').trim(), bowler: '' }
+  if ((m = s.match(/^b(?:owled)?\.?\s+(.+)$/i))) return { mode: 'bowled', fielder: '', bowler: m[1].trim() }
+  return { mode: '', fielder: '', bowler: '' }
+}
+
+// Fall back to the model's structured how_out when there's no dismissal text.
+function modeFromHowOut(how) {
+  const h = (how || '').toLowerCase().trim()
+  if (!h) return ''
+  if (h.includes('not out')) return 'not out'
+  if (h.includes('did not bat') || h === 'dnb') return 'did not bat'
+  if (h.includes('absent')) return 'absent'
+  if (h.includes('retired')) return 'retired'
+  if (h.includes('hit wicket')) return 'hit wicket'
+  if (h.includes('&') || h.includes('and bowled')) return 'caught & bowled'
+  if (h.includes('stump') || h === 'st') return 'stumped'
+  if (h.includes('run')) return 'run out'
+  if (h.includes('lbw')) return 'lbw'
+  if (h.includes('caught') || h === 'c') return 'caught'
+  if (h.includes('bowled') || h === 'b') return 'bowled'
+  return ''
+}
+
+// Build the canonical dismissal string from the split parts, e.g.
+// ('caught','Smith','Jones') → 'c Smith b Jones'. Empty mode → '' (incomplete card).
+function composeDismissal(mode, fielder, bowler) {
+  const m = (mode || '').toLowerCase().trim()
+  const f = (fielder || '').trim()
+  const b = (bowler || '').trim()
+  if (!m) return ''
+  if (m === 'not out') return 'not out'
+  if (m === 'did not bat') return 'did not bat'
+  if (m === 'absent') return 'absent'
+  if (m === 'retired') return 'retired not out'
+  if (m === 'run out') return f ? `run out (${f})` : 'run out'
+  if (m === 'caught & bowled') return b ? `c & b ${b}` : 'c & b'
+  if (m === 'stumped') return b ? `st ${f} b ${b}`.replace(/\s+/g, ' ').trim() : (f ? `st ${f}` : 'stumped')
+  if (m === 'lbw') return b ? `lbw b ${b}` : 'lbw'
+  if (m === 'hit wicket') return b ? `hit wicket b ${b}` : 'hit wicket'
+  if (m === 'caught') return (f && b) ? `c ${f} b ${b}` : (b ? `c b ${b}` : (f ? `c ${f}` : 'caught'))
+  if (m === 'bowled') return b ? `b ${b}` : 'bowled'
+  return mode
+}
+
+function ModeSelect({ value, onChange }) {
+  return (
+    <select className={`${SMALL_INPUT} min-w-[120px]`} value={value || ''} onChange={e => onChange(e.target.value)}>
+      {DISMISSAL_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+    </select>
+  )
+}
+
 // ─── Opposition club search (CA / Grassroots, same lookup onboarding uses) ──────
 function OppClubSearch({ value, onPick }) {
   const [q, setQ] = useState(value || '')
@@ -129,7 +220,9 @@ export default function AdminScorecardUpload() {
   const [roster, setRoster] = useState([])
   const [match, setMatch] = useState({})
   const [innings, setInnings] = useState([])
-  const [fielding, setFielding] = useState([])
+  // Catches behind the stumps, per player id. The one fielding figure that can't be
+  // read off a dismissal ('c wk' isn't always marked); everything else is derived.
+  const [wkByPid, setWkByPid] = useState({})
   const [warnings, setWarnings] = useState([])
 
   const [form, setForm] = useState({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
@@ -185,11 +278,11 @@ export default function AdminScorecardUpload() {
       const sugg = data.suggestions || {}
       const inns = (data.innings || []).map(inn => ({
         ...inn,
-        batting: (inn.batting || []).map(b => ({ ...b, player_id: inn.is_our_team ? (sugg[b.name] || '') : undefined })),
+        batting: (inn.batting || []).map(b => prepBattingRow(b, inn.is_our_team, sugg)),
         bowling: (inn.bowling || []).map(b => ({ ...b, player_id: !inn.is_our_team ? (sugg[b.name] || '') : undefined })),
       }))
       setInnings(inns)
-      setFielding(buildFielding(data.innings || [], sugg, data.roster || []))
+      setWkByPid({})
 
       // Best-effort defaults: date, opponent name, season.
       const oppName = data.match?.our_team
@@ -212,24 +305,30 @@ export default function AdminScorecardUpload() {
     } finally { setBusy(false) }
   }
 
-  // Build our fielding rows from opposition dismissals (catcher / stumper / run-out).
-  function buildFielding(rawInnings, sugg, rost) {
-    const byPid = {}
-    for (const inn of rawInnings) {
-      if (inn.is_our_team) continue   // their dismissals are caused by OUR fielders
-      for (const b of (inn.batting || [])) {
-        const fielder = b.fielder
-        const how = (b.how_out || '').toLowerCase()
-        if (!fielder) continue
-        const pid = sugg[fielder]
-        if (!pid) continue
-        const row = byPid[pid] || (byPid[pid] = { player_id: pid, name: (rost.find(p => p.id === pid)?.name) || fielder, catches: 0, catches_wk: 0, run_outs: 0, stumpings: 0 })
-        if (how.includes('stump')) row.stumpings += 1
-        else if (how.includes('run')) row.run_outs += 1
-        else row.catches += 1
-      }
+  const rosterName = useCallback(id => (roster.find(p => p.id === id)?.name) || '', [roster])
+
+  // Normalise one extracted batting row into the split-dismissal shape: a canonical
+  // `how_out` mode + fielder/bowler. For an opposition innings the fielder/bowler are
+  // OUR players, so pre-match them to the roster (fielder_id/bowler_id); for our innings
+  // they're the opposition's, kept as free text.
+  function prepBattingRow(b, isOur, sugg) {
+    const parsed = parseDismissalText(b.dismissal_text)
+    let how_out = parsed.mode || modeFromHowOut(b.how_out)
+    if (b.not_out) how_out = 'not out'
+    if (b.did_not_bat) how_out = 'did not bat'
+    const fielder = parsed.fielder || b.fielder || ''
+    const bowler = parsed.bowler || b.bowler || ''
+    const row = {
+      ...b,
+      player_id: isOur ? (sugg[b.name] || '') : undefined,
+      how_out, fielder, bowler,
+      dismissal_text: b.dismissal_text || composeDismissal(how_out, fielder, bowler),
     }
-    return Object.values(byPid)
+    if (!isOur) {
+      row.fielder_id = sugg[fielder] || sugg[b.fielder] || ''
+      row.bowler_id = sugg[bowler] || sugg[b.bowler] || ''
+    }
+    return row
   }
 
   // ─── immutable editors ───────────────────────────────────────────────────────
@@ -240,7 +339,73 @@ export default function AdminScorecardUpload() {
     return { ...x, [kind]: rows }
   })
   )
-  const editField = (idx, patch) => setFielding(prev => prev.map((x, i) => i === idx ? { ...x, ...patch } : x))
+
+  // Mark an innings as ours / the opposition's and re-flow the player matching:
+  // batters match the roster when it's our innings, bowlers when it's the opposition's,
+  // and a dismissal's fielder/bowler become our roster picks for an opposition innings.
+  const setInningsTeam = (idx, isOur) => setInnings(prev => prev.map((x, i) => {
+    if (i !== idx) return x
+    const sugg = extract?.suggestions || {}
+    const batting = (x.batting || []).map(b => {
+      const row = { ...b }
+      if (isOur) {
+        row.player_id = b.player_id || sugg[b.name] || ''
+        delete row.fielder_id
+        delete row.bowler_id
+      } else {
+        row.player_id = undefined
+        row.fielder_id = b.fielder_id || sugg[b.fielder] || ''
+        row.bowler_id = b.bowler_id || sugg[b.bowler] || ''
+      }
+      return row
+    })
+    const bowling = (x.bowling || []).map(b => ({ ...b, player_id: !isOur ? (b.player_id || sugg[b.name] || '') : undefined }))
+    return { ...x, is_our_team: isOur, batting, bowling }
+  }))
+
+  // Edit a dismissal's mode / fielder / bowler and keep the canonical text in sync.
+  // Changing the mode clears the columns it doesn't use and updates the not-out flags.
+  const editDismissal = (innIdx, rowIdx, patch) => setInnings(prev => prev.map((x, i) => {
+    if (i !== innIdx) return x
+    const isOur = x.is_our_team
+    const rows = (x.batting || []).map((r, j) => {
+      if (j !== rowIdx) return r
+      const row = { ...r, ...patch }
+      if ('how_out' in patch) {
+        if (!modeHasFielder(row.how_out)) { row.fielder = ''; row.fielder_id = '' }
+        if (!modeHasBowler(row.how_out)) { row.bowler = ''; row.bowler_id = '' }
+        row.not_out = row.how_out === 'not out'
+        row.did_not_bat = row.how_out === 'did not bat'
+      }
+      const fName = isOur ? row.fielder : (rosterName(row.fielder_id) || row.fielder || '')
+      const bName = isOur ? row.bowler : (rosterName(row.bowler_id) || row.bowler || '')
+      row.dismissal_text = composeDismissal(row.how_out, fName, bName)
+      return row
+    })
+    return { ...x, batting: rows }
+  }))
+
+  // Our fielding, derived from the opposition's dismissals: a catch/stumping/run-out
+  // credits the fielder picked on that wicket (a c & b credits the bowler). Catches
+  // behind the stumps come from wkByPid since the card doesn't always mark them.
+  const fieldingDerived = useMemo(() => {
+    const byPid = {}
+    for (const inn of innings) {
+      if (inn.is_our_team) continue
+      for (const b of (inn.batting || [])) {
+        const m = (b.how_out || '').toLowerCase()
+        let pid = b.fielder_id || ''
+        if (m === 'caught & bowled') pid = b.bowler_id || ''
+        if (!pid) continue
+        if (!['caught', 'caught & bowled', 'stumped', 'run out'].includes(m)) continue
+        const row = byPid[pid] || (byPid[pid] = { player_id: pid, name: rosterName(pid), catches: 0, run_outs: 0, stumpings: 0 })
+        if (m === 'stumped') row.stumpings += 1
+        else if (m === 'run out') row.run_outs += 1
+        else row.catches += 1
+      }
+    }
+    return Object.values(byPid)
+  }, [innings, rosterName])
 
   const unmatched = useMemo(() => {
     let n = 0
@@ -262,7 +427,7 @@ export default function AdminScorecardUpload() {
             player_id: b.player_id, innings_number: inn.innings_number || 1,
             batting_position: num(b.position), runs: num(b.runs) || 0, balls: num(b.balls),
             fours: num(b.fours) || 0, sixes: num(b.sixes) || 0,
-            dismissal_type: b.dismissal_text || b.how_out || null,
+            dismissal_type: (b.dismissal_text || composeDismissal(b.how_out, b.fielder, b.bowler)) || null,
             not_out: !!b.not_out, did_not_bat: !!b.did_not_bat,
           })
         }
@@ -277,9 +442,12 @@ export default function AdminScorecardUpload() {
         }
       }
     }
-    const fieldingRows = fielding
+    const fieldingRows = fieldingDerived
+      .map(f => {
+        const wk = Math.min(num(wkByPid[f.player_id]) || 0, f.catches)
+        return { player_id: f.player_id, catches: f.catches, catches_wk: wk, run_outs: f.run_outs, stumpings: f.stumpings }
+      })
       .filter(f => f.player_id && (f.catches || f.catches_wk || f.run_outs || f.stumpings))
-      .map(f => ({ player_id: f.player_id, catches: num(f.catches) || 0, catches_wk: num(f.catches_wk) || 0, run_outs: num(f.run_outs) || 0, stumpings: num(f.stumpings) || 0 }))
 
     return {
       season_id: form.season_id,
@@ -440,17 +608,29 @@ export default function AdminScorecardUpload() {
             {/* Innings */}
             {innings.map((inn, ii) => (
               <div key={ii} className="bg-pb-surface border pb-hairline rounded-lg p-5">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
                   <h2 className="text-sm font-semibold text-pb-text">
-                    Innings {inn.innings_number}: {inn.batting_team || '—'} batting
-                    {inn.is_our_team
-                      ? <span className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-pb-accent/20 text-pb-accent">OUR INNINGS</span>
-                      : <span className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-faint">OPPOSITION</span>}
+                    Innings {inn.innings_number}: {inn.batting_team || 'Unknown'} batting
                   </h2>
-                  <div className="text-xs text-pb-faint">
-                    {inn.total_runs != null ? `${inn.total_runs}/${inn.total_wickets ?? '?'}` : ''}
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex rounded overflow-hidden border pb-hairline text-[10px] font-mono">
+                      <button type="button"
+                        className={`px-2 py-1 ${inn.is_our_team ? 'bg-pb-accent text-white' : 'bg-pb-surface2 text-pb-faint hover:text-pb-text'}`}
+                        onClick={() => setInningsTeam(ii, true)}>OUR TEAM</button>
+                      <button type="button"
+                        className={`px-2 py-1 ${!inn.is_our_team ? 'bg-pb-accent text-white' : 'bg-pb-surface2 text-pb-faint hover:text-pb-text'}`}
+                        onClick={() => setInningsTeam(ii, false)}>OPPOSITION</button>
+                    </span>
+                    <div className="text-xs text-pb-faint">
+                      {inn.total_runs != null ? `${inn.total_runs}/${inn.total_wickets ?? '?'}` : ''}
+                    </div>
                   </div>
                 </div>
+                <p className="text-[11px] text-pb-faint mb-3">
+                  {inn.is_our_team
+                    ? 'Our club batted. Match each batter to a player below.'
+                    : 'The opposition batted. Match the bowler and fielder who took each wicket to our players.'}
+                </p>
 
                 {/* Batting table */}
                 <div className="overflow-x-auto">
@@ -459,7 +639,8 @@ export default function AdminScorecardUpload() {
                       <th className={TH}>Batter</th>
                       {inn.is_our_team && <th className={TH}>Our player</th>}
                       <th className={TH}>Pos</th><th className={TH}>R</th><th className={TH}>B</th>
-                      <th className={TH}>4s</th><th className={TH}>6s</th><th className={TH}>How out</th>
+                      <th className={TH}>4s</th><th className={TH}>6s</th>
+                      <th className={TH}>How out</th><th className={TH}>Fielder</th><th className={TH}>Bowler</th>
                     </tr></thead>
                     <tbody>
                       {(inn.batting || []).map((b, ri) => (
@@ -477,7 +658,21 @@ export default function AdminScorecardUpload() {
                           <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.balls ?? ''} onChange={e => editRow(ii, 'batting', ri, { balls: e.target.value })} /></td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.fours ?? ''} onChange={e => editRow(ii, 'batting', ri, { fours: e.target.value })} /></td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.sixes ?? ''} onChange={e => editRow(ii, 'batting', ri, { sixes: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} min-w-[140px]`} value={b.dismissal_text || b.how_out || ''} onChange={e => editRow(ii, 'batting', ri, { dismissal_text: e.target.value })} /></td>
+                          <td className={TD}><ModeSelect value={b.how_out || ''} onChange={v => editDismissal(ii, ri, { how_out: v })} /></td>
+                          <td className={`${TD} min-w-[140px]`}>
+                            {!modeHasFielder(b.how_out)
+                              ? <span className="text-pb-faint/40 text-xs">—</span>
+                              : inn.is_our_team
+                                ? <input className={SMALL_INPUT} placeholder="fielder (opp)" value={b.fielder || ''} onChange={e => editDismissal(ii, ri, { fielder: e.target.value })} />
+                                : <PlayerSelect value={b.fielder_id || ''} roster={roster} cardName={b.fielder} onChange={v => editDismissal(ii, ri, { fielder_id: v, fielder: rosterName(v) })} />}
+                          </td>
+                          <td className={`${TD} min-w-[140px]`}>
+                            {!modeHasBowler(b.how_out)
+                              ? <span className="text-pb-faint/40 text-xs">—</span>
+                              : inn.is_our_team
+                                ? <input className={SMALL_INPUT} placeholder="bowler (opp)" value={b.bowler || ''} onChange={e => editDismissal(ii, ri, { bowler: e.target.value })} />
+                                : <PlayerSelect value={b.bowler_id || ''} roster={roster} cardName={b.bowler} onChange={v => editDismissal(ii, ri, { bowler_id: v, bowler: rosterName(v) })} />}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -546,24 +741,25 @@ export default function AdminScorecardUpload() {
             {/* Our fielding */}
             <div className="bg-pb-surface border pb-hairline rounded-lg p-5">
               <h2 className="text-sm font-semibold text-pb-text mb-1">Our fielding</h2>
-              <p className="text-xs text-pb-faint mb-3">Worked out from the opposition's dismissals. Adjust catches behind the stumps (wk) and run-outs as needed.</p>
-              {fielding.length === 0
-                ? <p className="text-xs text-pb-faint">No catches or stumpings matched to our players yet.</p>
+              <p className="text-xs text-pb-faint mb-3">Worked out from the fielder you matched on each opposition wicket above. Set how many of a player's catches were taken behind the stumps (wk), since the card doesn't always mark those.</p>
+              {fieldingDerived.length === 0
+                ? <p className="text-xs text-pb-faint">No catches, run-outs or stumpings matched to our players yet. Match the fielder on each opposition wicket above.</p>
                 : (
                   <table className="w-full text-sm">
                     <thead><tr className="border-b pb-hairline">
-                      <th className={TH}>Player</th><th className={TH}>Catches</th><th className={TH}>Ct (wk)</th><th className={TH}>Run outs</th><th className={TH}>Stumpings</th>
+                      <th className={TH}>Player</th><th className={TH}>Catches</th><th className={TH}>of which (wk)</th><th className={TH}>Run outs</th><th className={TH}>Stumpings</th>
                     </tr></thead>
                     <tbody>
-                      {fielding.map((f, i) => (
-                        <tr key={i} className="border-b pb-hairline/40">
-                          <td className={`${TD} min-w-[160px]`}>
-                            <PlayerSelect value={f.player_id} roster={roster} cardName={f.name} onChange={v => editField(i, { player_id: v })} />
+                      {fieldingDerived.map((f) => (
+                        <tr key={f.player_id} className="border-b pb-hairline/40">
+                          <td className={`${TD} min-w-[160px] text-pb-text`}>{f.name || '(unknown)'}</td>
+                          <td className={TD}>{f.catches}</td>
+                          <td className={TD}>
+                            <input className={`${SMALL_INPUT} w-14`} value={wkByPid[f.player_id] ?? ''} placeholder="0"
+                              onChange={e => setWkByPid(prev => ({ ...prev, [f.player_id]: e.target.value }))} />
                           </td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches} onChange={e => editField(i, { catches: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches_wk} onChange={e => editField(i, { catches_wk: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.run_outs} onChange={e => editField(i, { run_outs: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.stumpings} onChange={e => editField(i, { stumpings: e.target.value })} /></td>
+                          <td className={TD}>{f.run_outs}</td>
+                          <td className={TD}>{f.stumpings}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -587,7 +783,7 @@ export default function AdminScorecardUpload() {
             <div className="flex gap-3">
               {createdId && <Link to={`/games/${createdId}`} className={BTN_PRIMARY}>View match</Link>}
               <button className={BTN_SECONDARY} onClick={() => {
-                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setFielding([]); setWarnings([]); setCreatedId(null)
+                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setWarnings([]); setCreatedId(null)
                 setForm({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
               }}>Upload another</button>
             </div>
