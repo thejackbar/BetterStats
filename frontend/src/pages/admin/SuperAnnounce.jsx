@@ -314,7 +314,7 @@ export default function SuperAnnounce() {
         <div className="mb-5">
           <h1 className="text-xl font-semibold text-pb-text">Club announcements</h1>
           <p className="text-sm text-pb-dim mt-1">
-            Build a "now on Better Cricket" launch poster for a club. Pick a club and it pulls their
+            Build a "now on BetterCricket" launch poster for a club. Pick a club and it pulls their
             branding, headline stats, a featured player and the top performers. Edit anything, then
             export a square image ready for Instagram, Facebook or the group chat.
           </p>

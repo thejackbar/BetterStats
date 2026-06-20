@@ -1,6 +1,6 @@
 // Document favicon manager.
 //
-// Default is the Better Cricket mark — an adaptive SVG that flips white/black
+// Default is the BetterCricket mark — an adaptive SVG that flips white/black
 // with the OS light/dark scheme (mirroring BrandLogo), with PNG fallbacks for
 // older browsers and iOS home screens. On a club's white-labelled public pages
 // we swap the tab icon to the club's own uploaded logo when they have one, so
@@ -32,7 +32,7 @@ function addIconLink({ rel, type, href }) {
   document.head.appendChild(el)
 }
 
-/** Restore the Better Cricket brand favicon (admin, marketing, anything off a club page). */
+/** Restore the BetterCricket brand favicon (admin, marketing, anything off a club page). */
 export function setDefaultFavicon() {
   if (current === 'default') return
   current = 'default'

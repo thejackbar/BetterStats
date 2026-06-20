@@ -85,7 +85,7 @@ export default function Home() {
       {/* Clubs */}
       {orgs.length > 0 && (
         <section className="pb-hairline-t max-w-5xl mx-auto px-4 py-16">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-6 uppercase">Clubs on Better Cricket</p>
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-6 uppercase">Clubs on BetterCricket</p>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
             {orgs.map(org => (
               <Link

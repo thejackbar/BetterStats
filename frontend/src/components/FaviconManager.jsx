@@ -1,8 +1,8 @@
 // Keeps the browser tab icon in step with where the visitor is:
 //   - club public pages (/{slug}, /{slug}/players, /{slug}/website, …) → the
-//     club's uploaded logo when they have one, else the Better Cricket mark
+//     club's uploaded logo when they have one, else the BetterCricket mark
 //   - everything else (marketing, admin, login, global game/player routes) →
-//     the Better Cricket mark
+//     the BetterCricket mark
 // Mounted once at the App root; it renders nothing.
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'

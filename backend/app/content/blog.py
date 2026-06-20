@@ -25,13 +25,13 @@ IMAGE_HEIGHT = 1080
 BLOG_POSTS: list[dict[str, str]] = [
     {
         "slug": "how-to-merge-duplicate-player-records",
-        "title": "How to Merge Duplicate Player Records in Better Cricket",
+        "title": "How to Merge Duplicate Player Records in BetterCricket",
         "date": "2026-05-29",
         "image": "/marketing/blog/merge-duplicate-players.jpg",
         "description": (
             "Sometimes the same player ends up with two records: a Nick and a "
             "Nicholas, a maiden name and a married name. Here's how to combine "
-            "them in Better Cricket so a player's full career sits on one profile."
+            "them in BetterCricket so a player's full career sits on one profile."
         ),
     },
     {
@@ -55,7 +55,7 @@ BLOG_POSTS: list[dict[str, str]] = [
             "Most clubs only ever see their most recent season. Decades of "
             "innings, spells and records sit scattered across spreadsheets and "
             "old systems, out of sight. Here's why club history keeps "
-            "disappearing, and how Better Cricket brings it all back."
+            "disappearing, and how BetterCricket brings it all back."
         ),
     },
     {
@@ -65,7 +65,7 @@ BLOG_POSTS: list[dict[str, str]] = [
         "image": "/marketing/blog/season-yearbook.jpg",
         "description": (
             "Every season your club plays 100+ games and generates thousands of "
-            "performances. Better Cricket turns that data into a proper digital "
+            "performances. BetterCricket turns that data into a proper digital "
             "yearbook, auto-populated with stats and ready for your editorial "
             "content."
         ),
@@ -89,7 +89,7 @@ BLOG_POSTS: list[dict[str, str]] = [
         "description": (
             "Cricket is a sport of numbers. Runs, wickets, and games accumulate "
             "over careers spanning 20+ years. Along the way, certain thresholds "
-            "become landmarks. Better Cricket tracks every one of them "
+            "become landmarks. BetterCricket tracks every one of them "
             "automatically."
         ),
     },

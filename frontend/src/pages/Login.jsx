@@ -38,7 +38,7 @@ export default function Login() {
               BC
             </span>
             <span className="font-display font-bold text-xl tracking-wider uppercase text-pb-text">
-              Better Cricket
+              BetterCricket
             </span>
           </div>
           <p className="font-mono text-[11px] tracking-wide3 text-pb-faint">CLUB ADMIN LOGIN</p>
@@ -98,8 +98,8 @@ export default function Login() {
 
         <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
           Forgot your password? Contact{' '}
-          <a href="mailto:betterstatsau@gmail.com" className="text-pb-faint hover:text-pb-text transition-colors">
-            betterstatsau@gmail.com
+          <a href="mailto:betteratcricket@gmail.com" className="text-pb-faint hover:text-pb-text transition-colors">
+            betteratcricket@gmail.com
           </a>
         </p>
       </div>

@@ -1,4 +1,4 @@
-# Better Cricket — robots policy
+# BetterCricket — robots policy
 # Search and AI crawlers are welcome. Admin and API routes are off-limits.
 
 User-agent: *

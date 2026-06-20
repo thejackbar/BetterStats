@@ -16,7 +16,7 @@ function Hero() {
           The cricket platform <span className="gradient-text">your club deserves.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim leading-relaxed max-w-2xl mx-auto">
-          Better Cricket puts your whole club in one place: stats and history, weekend availability and selection, social posts, the back office, and match prep.
+          BetterCricket puts your whole club in one place: stats and history, weekend availability and selection, social posts, the back office, and match prep.
         </p>
       </div>
     </section>
@@ -31,7 +31,7 @@ function Story() {
           <p className="pill-neutral inline-flex mb-6">What we do</p>
           <div className="space-y-5 text-lg text-pb-dim leading-relaxed">
             <p>
-              Better Cricket was built by people who know cricket inside out and have run clubs themselves. We've picked the side, chased the fees and kept the scorebook, so we know how much of the week still runs on spreadsheets and group chats.
+              BetterCricket was built by people who know cricket inside out and have run clubs themselves. We've picked the side, chased the fees and kept the scorebook, so we know how much of the week still runs on spreadsheets and group chats.
             </p>
             <p>
               We built one platform to do those everyday jobs better, and to look after your club's history while we're at it. <span className="text-pb-text">It's our way of giving back to the clubs, and to the players, families and volunteers who keep them going.</span>
@@ -117,7 +117,7 @@ function Promise_() {
                 We welcome <span className="gradient-text">feedback and feature requests.</span>
               </h2>
               <p className="text-pb-dim leading-relaxed mb-5">
-                Better Cricket is built by cricketers, for cricketers. We listen to the captains, committee members, statisticians and the kids who just want to see their own century on a profile page.
+                BetterCricket is built by cricketers, for cricketers. We listen to the captains, committee members, statisticians and the kids who just want to see their own century on a profile page.
               </p>
               <p className="text-pb-text font-medium mb-6">
                 If something is missing, tell us. If it's important to you, it's important to us.
@@ -136,7 +136,7 @@ function Promise_() {
                 Built for Australian clubs.
               </h3>
               <p className="text-sm text-pb-dim leading-relaxed mb-4">
-                Better Cricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
+                BetterCricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
                 Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link>. It helps us prioritise.
@@ -156,14 +156,14 @@ function ContactBlock() {
         <p className="pill-neutral inline-flex mb-5">Get in touch</p>
         <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Have a question? <span className="gradient-text">Drop us a line.</span></h2>
         <p className="text-lg text-pb-dim mb-8">
-          Wondering if Better Cricket is right for your club? Email <a href={`mailto:${SUPPORT_EMAIL}`} className="text-accent hover:underline">{SUPPORT_EMAIL}</a>{' '}and we're happy to chat.
+          Wondering if BetterCricket is right for your club? Email <a href={`mailto:${SUPPORT_EMAIL}`} className="text-accent hover:underline">{SUPPORT_EMAIL}</a>{' '}and we're happy to chat.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link to="/contact" className="cta-primary">Get in touch →</Link>
           <Link to="/features" className="cta-secondary">See the product</Link>
         </div>
         <p className="mt-10 text-xs text-pb-faint">
-          Better Cricket is made by BetterSports (ABN 32 624 335 397), Perth, Western Australia.
+          BetterCricket is made by BetterSports (ABN 32 624 335 397), Perth, Western Australia.
         </p>
       </div>
     </section>
@@ -172,8 +172,8 @@ function ContactBlock() {
 
 export default function About() {
   usePageMeta({
-    title: 'About — Better Cricket',
-    description: 'Better Cricket puts everything an Australian cricket club runs on in one place: stats and history, weekend availability and selection, social posts, the back office and match prep.',
+    title: 'About — BetterCricket',
+    description: 'BetterCricket puts everything an Australian cricket club runs on in one place: stats and history, weekend availability and selection, social posts, the back office and match prep.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/about',
   })

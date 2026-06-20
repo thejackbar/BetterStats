@@ -76,7 +76,7 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
           ? <img src={club.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 shrink-0" />
           : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
-          <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
+          <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
         </div>
       </div>
       {/* Module lockup — which Better module this surface is */}

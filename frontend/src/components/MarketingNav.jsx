@@ -76,10 +76,10 @@ export default function MarketingNav() {
       </a>
 
       <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-10 h-16 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2.5 group" aria-label="Better Cricket home">
+        <Link to="/" className="flex items-center gap-2.5 group" aria-label="BetterCricket home">
           <BrandLogo className="w-7 h-7 object-contain" />
           <span className="font-bold text-base tracking-tight text-pb-text group-hover:text-accent transition-colors">
-            Better<span className="text-accent"> Cricket</span>
+            Better<span className="text-accent">Cricket</span>
           </span>
         </Link>
 

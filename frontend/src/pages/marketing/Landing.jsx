@@ -63,7 +63,7 @@ function Hero() {
             <span className="gradient-text">Better.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">
-            Better Cricket is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off, then add selection, socials, club admin and analytics, all fed by your club's own match data and synced automatically, so you never enter it by hand.
+            BetterCricket is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off, then add selection, socials, club admin and analytics, all fed by your club's own match data and synced automatically, so you never enter it by hand.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-4">
@@ -75,7 +75,7 @@ function Hero() {
 
           <div className="mb-7">
             <Link to="/overview" className="text-sm text-accent font-medium hover:underline inline-flex items-center gap-1">
-              See everything Better Cricket does →
+              See everything BetterCricket does →
             </Link>
           </div>
 
@@ -91,7 +91,7 @@ function Hero() {
             <div className="relative product-shadow rounded-2xl">
               <ScreenshotOrMock
                 src={SCREENSHOT_PATHS.frontPageProfile}
-                alt="A full player career profile on Better Cricket"
+                alt="A full player career profile on BetterCricket"
                 fallback={<MockHeritageCard />}
               />
             </div>
@@ -377,7 +377,7 @@ function ModulesTeaser() {
           ))}
         </div>
         <div className="text-center mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link to="/overview" className="cta-secondary">See everything Better Cricket does →</Link>
+          <Link to="/overview" className="cta-secondary">See everything BetterCricket does →</Link>
           <Link to="/modules" className="text-sm text-accent hover:underline">Tour all modules →</Link>
           <Link to="/pricing" className="text-sm text-accent hover:underline">See modular pricing →</Link>
         </div>
@@ -474,7 +474,7 @@ function Promise_() {
                 Player-first. <span className="gradient-text">Built by cricketers.</span>
               </h2>
               <p className="text-pb-dim leading-relaxed mb-5">
-                Better Cricket is built by people who play. We listen to the captains, the committee members, the statisticians and the kids who just want to see their own century on a profile page.
+                BetterCricket is built by people who play. We listen to the captains, the committee members, the statisticians and the kids who just want to see their own century on a profile page.
               </p>
               <p className="text-pb-text font-medium mb-5">
                 If something is missing, tell us. If it's important to you, it's important to us.
@@ -495,7 +495,7 @@ function Promise_() {
                 Australian clubs, for now.
               </h3>
               <p className="text-sm text-pb-dim leading-relaxed mb-4">
-                Better Cricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
+                BetterCricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
                 Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link>. It helps us prioritise where to head next.
@@ -539,7 +539,7 @@ function FinalCTA() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Landing() {
   usePageMeta({
-    title: 'Better Cricket — The platform Australian cricket clubs run on',
+    title: 'BetterCricket — The platform Australian cricket clubs run on',
     description: "The platform Australian cricket clubs run on: automated stats and a public club site (BetterStats core), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ analytics, all fed by your club's own match data and synced automatically, with no manual data entry.",
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/',

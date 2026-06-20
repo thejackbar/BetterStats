@@ -19,19 +19,19 @@ const CATEGORIES = [
       },
       {
         q: 'Where does the data come from?',
-        a: "Better Cricket imports your club's full match history automatically and keeps it current after every match, with no spreadsheets and no data entry. Anything that isn't already online can be imported with our simple CSV templates and automated import tools.",
+        a: "BetterCricket imports your club's full match history automatically and keeps it current after every match, with no spreadsheets and no data entry. Anything that isn't already online can be imported with our simple CSV templates and automated import tools.",
       },
       {
         q: 'Do we need to install anything?',
-        a: "No software, plugins or app store downloads. Better Cricket is a public website that works across phones, tablets and laptops, and your members and admins just open the URL.",
+        a: "No software, plugins or app store downloads. BetterCricket is a public website that works across phones, tablets and laptops, and your members and admins just open the URL.",
       },
       {
         q: 'Do we have to change how our club scores or registers?',
-        a: "No. Better Cricket sits on top of however your club already runs match day. We keep your history, analyse it and present it beautifully, plus we add modules that help automate and centralise practically all of your club functions. Nothing about your scoring or registration changes, and the stats just turn up on your site automatically.",
+        a: "No. BetterCricket sits on top of however your club already runs match day. We keep your history, analyse it and present it beautifully, plus we add modules that help automate and centralise practically all of your club functions. Nothing about your scoring or registration changes, and the stats just turn up on your site automatically.",
       },
       {
-        q: 'Do we have to move away from anything to use Better Cricket?',
-        a: "No. Better Cricket complements the way you already run your club rather than replacing it. Keep scoring exactly the way you do today, and Better Cricket adds the public stats website, historical archive, leaderboards and yearbook on top, plus player availability tracking, net management, team selection, opposition scouting, social posts, fee management, member emails and more.",
+        q: 'Do we have to move away from anything to use BetterCricket?',
+        a: "No. BetterCricket complements the way you already run your club rather than replacing it. Keep scoring exactly the way you do today, and BetterCricket adds the public stats website, historical archive, leaderboards and yearbook on top, plus player availability tracking, net management, team selection, opposition scouting, social posts, fee management, member emails and more.",
       },
     ],
   },
@@ -53,7 +53,7 @@ const CATEGORIES = [
       },
       {
         q: 'How are duplicate player records handled?',
-        a: "When the same player ends up with two records, their stats can split across both. Better Cricket has a one-click merge tool that combines the records and preserves every innings, spell, catch and partnership, and you can undo it if you change your mind.",
+        a: "When the same player ends up with two records, their stats can split across both. BetterCricket has a one-click merge tool that combines the records and preserves every innings, spell, catch and partnership, and you can undo it if you change your mind.",
       },
       {
         q: 'Do we own the data?',
@@ -66,20 +66,20 @@ const CATEGORIES = [
     title: 'Product & features',
     items: [
       {
-        q: 'What is Better Cricket?',
-        a: "Better Cricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (member fee management, bulk emailing, and merch and stock management, coming soon) and BetterIQ (deep analytics and opposition scouting).",
+        q: 'What is BetterCricket?',
+        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (member fee management, bulk emailing, and merch and stock management, coming soon) and BetterIQ (deep analytics and opposition scouting).",
       },
       {
-        q: 'Do we have to change how our club scores or registers to use Better Cricket?',
-        a: "No. Better Cricket sits on top of however your club already runs match day. We keep your history, analyse it and present it beautifully, plus we add modules that help automate and centralise practically all of your club functions. Nothing about your scoring or registration changes. We take your club's full match history and add the presentation, history and analytics layer that your club, members, parents and sponsors actually want.",
+        q: 'Do we have to change how our club scores or registers to use BetterCricket?',
+        a: "No. BetterCricket sits on top of however your club already runs match day. We keep your history, analyse it and present it beautifully, plus we add modules that help automate and centralise practically all of your club functions. Nothing about your scoring or registration changes. We take your club's full match history and add the presentation, history and analytics layer that your club, members, parents and sponsors actually want.",
       },
       {
         q: 'Does each player get their own profile?',
         a: 'Yes. Every player gets a public profile page with career stats, season-by-season breakdown, career progression charts, dismissal breakdowns, batting-position analysis, partnership history, milestone badges, club awards and a one-tap shareable social card.',
       },
       {
-        q: 'Can Better Cricket publish a season yearbook?',
-        a: 'Yes. Better Cricket automatically generates a publishable digital yearbook for each season, populated with results, batting/bowling/fielding/all-rounder honours, partnership records and a season-progression chart. Admins can layer on a President\'s Report, Coach\'s Report, photo galleries and custom awards.',
+        q: 'Can BetterCricket publish a season yearbook?',
+        a: 'Yes. BetterCricket automatically generates a publishable digital yearbook for each season, populated with results, batting/bowling/fielding/all-rounder honours, partnership records and a season-progression chart. Admins can layer on a President\'s Report, Coach\'s Report, photo galleries and custom awards.',
       },
       {
         q: 'Can I get a shareable cricket stat card?',
@@ -97,7 +97,7 @@ const CATEGORIES = [
       },
       {
         q: 'Can we use our own domain?',
-        a: "Every club gets a unique URL for its Better Cricket site by default (betterat.cricket/your-clubname). In addition, if you've selected the BetterSocials module, you'll also get a betterat.cricket/your-clubname/website URL.",
+        a: "Every club gets a unique URL for its BetterCricket site by default (betterat.cricket/your-clubname). In addition, if you've selected the BetterSocials module, you'll also get a betterat.cricket/your-clubname/website URL.",
       },
       {
         q: 'Where do sponsor logos appear?',
@@ -111,7 +111,7 @@ const CATEGORIES = [
     items: [
       {
         q: 'How much does it cost?',
-        a: "Better Cricket is modular. BetterStats is $399 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $149 a year each, and BetterIQ is $249. There's a set discount when you bundle two or more modules: $48 off for two, $97 off for three, and up to $146 off the full set, which brings BetterStats plus every module to $949 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
+        a: "BetterCricket is modular. BetterStats is $399 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $149 a year each, and BetterIQ is $249. There's a set discount when you bundle two or more modules: $48 off for two, $97 off for three, and up to $146 off the full set, which brings BetterStats plus every module to $949 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
       },
       {
         q: 'What does each module include?',
@@ -127,7 +127,7 @@ const CATEGORIES = [
       },
       {
         q: 'Monthly or annual?',
-        a: "Better Cricket is an annual licence, billed once a year.",
+        a: "BetterCricket is an annual licence, billed once a year.",
       },
       {
         q: 'Can we add modules later?',
@@ -135,15 +135,15 @@ const CATEGORIES = [
       },
       {
         q: 'Are there setup fees?',
-        a: "Up to two hours of dedicated support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time. We'll guide you through merging players and grades if needed, and show you how to load all of your club's history into Better Cricket.",
+        a: "Up to two hours of dedicated support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time. We'll guide you through merging players and grades if needed, and show you how to load all of your club's history into BetterCricket.",
       },
       {
         q: 'Do you offer a free trial?',
-        a: "Yes. We offer a 14-day free trial of every Better Cricket module, so you can try the lot before you commit.",
+        a: "Yes. We offer a 14-day free trial of every BetterCricket module, so you can try the lot before you commit.",
       },
       {
         q: 'Do you offer discounts for junior-only clubs?',
-        a: "Yes. A junior club linked to a senior club that's currently subscribed to Better Cricket gets a discount. Contact us for the code.",
+        a: "Yes. A junior club linked to a senior club that's currently subscribed to BetterCricket gets a discount. Contact us for the code.",
       },
       {
         q: 'How do we pay?',
@@ -156,16 +156,16 @@ const CATEGORIES = [
     title: 'Hosting & misc',
     items: [
       {
-        q: 'Where is Better Cricket hosted and what data does it store?',
-        a: 'Better Cricket is hosted on infrastructure in Australia. Stored data includes your club\'s public cricket statistics, club logos and admin login details. See the privacy policy for the full breakdown.',
+        q: 'Where is BetterCricket hosted and what data does it store?',
+        a: 'BetterCricket is hosted on infrastructure in Australia. Stored data includes your club\'s public cricket statistics, club logos and admin login details. See the privacy policy for the full breakdown.',
       },
       {
-        q: 'Who is Better Cricket for?',
+        q: 'Who is BetterCricket for?',
         a: "Australian cricket clubs of any size: premier grade, district, suburban, country, association and social clubs, plus the stats volunteers, captains, coaches, committees, members, players, parents and sponsors who care about the club.",
       },
       {
         q: 'How do I request access for my club?',
-        a: "Fill in the request-access form (tap the button on the homepage) or email betteratcricket@gmail.com. The Better Cricket team handles the technical setup.",
+        a: "Fill in the request-access form (tap the button on the homepage) or email betteratcricket@gmail.com. The BetterCricket team handles the technical setup.",
       },
     ],
   },
@@ -268,8 +268,8 @@ function CTA() {
 
 export default function FAQ() {
   usePageMeta({
-    title: 'FAQ — Better Cricket | Cricket club platform questions',
-    description: 'Frequently asked questions about Better Cricket: pricing, onboarding, historical data depth, player profiles, season yearbooks, and how it works for Australian cricket clubs.',
+    title: 'FAQ — BetterCricket | Cricket club platform questions',
+    description: 'Frequently asked questions about BetterCricket: pricing, onboarding, historical data depth, player profiles, season yearbooks, and how it works for Australian cricket clubs.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/faq',
     jsonLd: FAQ_JSONLD,

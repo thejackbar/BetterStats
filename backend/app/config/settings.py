@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # the From stays there until betterat.cricket's DNS is set up; then flip this
     # to noreply@betterat.cricket (or set EMAIL_FROM_ADDRESS in the server .env).
     email_from_address: str = "noreply@betterstats.cricket"
-    email_from_name: str = "Better Cricket"
+    email_from_name: str = "BetterCricket"
     email_reply_to: str = "betteratcricket@gmail.com"  # global default; per-club reply-to overrides
     # Public origin used to build the (mandatory) one-click unsubscribe link.
     # nginx strips the /api prefix, so the public route resolves at

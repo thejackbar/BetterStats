@@ -232,7 +232,7 @@ function Hero() {
           <span className="gradient-text">BetterStats.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
-          Your club’s reconciled history and a public site to be proud of, included in every Better Cricket plan. Here’s everything it does.
+          Your club’s reconciled history and a public site to be proud of, included in every BetterCricket plan. Here’s everything it does.
         </p>
       </div>
     </section>
@@ -356,8 +356,8 @@ function FeaturesCTA() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Features() {
   usePageMeta({
-    title: 'Features — Automated Cricket Club Stats | BetterStats',
-    description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks, the foundation of every Better Cricket plan. Plus partnership records, StatLab custom queries, awards & honours management, and admin tools.',
+    title: 'Features — Automated Cricket Club Stats | BetterCricket',
+    description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks, the foundation of every BetterCricket plan. Plus partnership records, StatLab custom queries, awards & honours management, and admin tools.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/features',
   })

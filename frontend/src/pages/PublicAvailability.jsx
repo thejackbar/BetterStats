@@ -334,7 +334,7 @@ export default function PublicAvailability() {
 
         {step !== 'loading' && step !== 'dead' && (
           <div className="text-center mt-10">
-            <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">Powered by BetterStats</span>
+            <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">Powered by BetterCricket</span>
           </div>
         )}
       </div>

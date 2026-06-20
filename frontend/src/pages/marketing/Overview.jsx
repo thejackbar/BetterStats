@@ -24,7 +24,7 @@ import { CORE, PRICED_MODULES } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
-// Old way vs Better Cricket — kept tight and scannable.
+// Old way vs BetterCricket — kept tight and scannable.
 const PROBLEMS = [
   { old: 'History trapped in a spreadsheet only one volunteer understands.', fix: 'Your full history online: every player, every season, kept forever.' },
   { old: 'A DIY website nobody updates, with stats that are always stale.', fix: 'A club-branded site wired to your match data. Always current.' },
@@ -56,7 +56,7 @@ function Hero() {
             <span className="gradient-text">From one place.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-7 max-w-xl">
-            Stats. A public site. Selection. Socials. Admin. Analytics. <span className="text-pb-text">Better Cricket is all of it</span>, one login, fed by one match feed, with no spreadsheets to keep and no data entry.
+            Stats. A public site. Selection. Socials. Admin. Analytics. <span className="text-pb-text">BetterCricket is all of it</span>, one login, fed by one match feed, with no spreadsheets to keep and no data entry.
           </p>
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-6">
             <Link to="/contact" className="cta-primary">Request club access →</Link>
@@ -74,7 +74,7 @@ function Hero() {
             <div className="relative product-shadow rounded-2xl">
               <ScreenshotOrMock
                 src={SCREENSHOT_PATHS.landingHeroCard}
-                alt="A full career profile on Better Cricket"
+                alt="A full career profile on BetterCricket"
                 fallback={<MockHeritageCard />}
               />
             </div>
@@ -383,8 +383,8 @@ function FinalCTA() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Overview() {
   usePageMeta({
-    title: 'Overview — Everything Better Cricket does | The cricket club platform',
-    description: 'A one-page tour of Better Cricket: automated stats and a public club site (BetterStats), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ. The whole platform Australian cricket clubs run on, with no manual data entry.',
+    title: 'Overview — Everything BetterCricket does | The cricket club platform',
+    description: 'A one-page tour of BetterCricket: automated stats and a public club site (BetterStats), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ. The whole platform Australian cricket clubs run on, with no manual data entry.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/overview',
   })

@@ -14,7 +14,7 @@ function formatDate(iso) {
 const BLOG_JSONLD = {
   '@context': 'https://schema.org',
   '@type': 'Blog',
-  name: 'Better Cricket Blog',
+  name: 'BetterCricket Blog',
   description: 'Cricket statistics guides and club management tips for Australian cricket clubs.',
   url: 'https://betterat.cricket/blog',
   inLanguage: 'en-AU',
@@ -47,8 +47,8 @@ function PostThumb({ src, title }) {
 
 export default function Blog() {
   usePageMeta({
-    title: 'Blog — Cricket Stats Guides & Club Tips | Better Cricket',
-    description: 'Cricket statistics guides and club management tips from the Better Cricket team: batting averages, bowling economy, historical data and more.',
+    title: 'Blog — Cricket Stats Guides & Club Tips | BetterCricket',
+    description: 'Cricket statistics guides and club management tips from the BetterCricket team: batting averages, bowling economy, historical data and more.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/blog',
     jsonLd: BLOG_JSONLD,

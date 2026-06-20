@@ -83,9 +83,9 @@ function CategoryOfOne() {
 
 export default function Compare() {
   usePageMeta({
-    title: 'Compare — Better Cricket vs the tools clubs already use',
+    title: 'Compare — BetterCricket vs the tools clubs already use',
     description:
-      'An honest, side-by-side look at how Better Cricket stacks up against the spreadsheets, website builders, design apps and bulk email tools your club is already paying for, surface by surface.',
+      'An honest, side-by-side look at how BetterCricket stacks up against the spreadsheets, website builders, design apps and bulk email tools your club is already paying for, surface by surface.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/compare',
   })
@@ -99,10 +99,10 @@ export default function Compare() {
           <div className="max-w-[900px] mx-auto text-center">
             <p className="pill mb-6 inline-flex"><span className="dot" />Side-by-side</p>
             <h1 className="font-display font-bold text-[44px] sm:text-[56px] lg:text-[72px] tracking-tight leading-[0.95] mb-5">
-              How Better Cricket <span className="gradient-text">stacks up.</span>
+              How BetterCricket <span className="gradient-text">stacks up.</span>
             </h1>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed">
-              An honest look at where Better Cricket sits next to the tools your club already uses:
+              An honest look at where BetterCricket sits next to the tools your club already uses:
               the spreadsheets, the website builder, the design app, the bulk email tool and the group
               chats. First we consider the whole platform, then we evaluate things surface by surface.
             </p>

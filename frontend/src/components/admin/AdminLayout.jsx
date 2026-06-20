@@ -178,7 +178,7 @@ export default function AdminLayout({ children }) {
             <Link to="/" className="flex items-center gap-2 group">
               <BrandLogo className="w-7 h-7 object-contain" />
               <span className="font-display font-bold text-base tracking-wider uppercase text-pb-text group-hover:text-pb-accent transition-colors">
-                Better Cricket
+                BetterCricket
               </span>
             </Link>
             <span className="hidden sm:block text-pb-faintest text-sm">/</span>
