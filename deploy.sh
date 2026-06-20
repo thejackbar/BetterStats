@@ -42,13 +42,13 @@ export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 export LANGFLOW_SUPERUSER="${LANGFLOW_SUPERUSER:-}"
 export LANGFLOW_SUPERUSER_PASSWORD="${LANGFLOW_SUPERUSER_PASSWORD:-}"
 
-echo "==> [1/4] Pulling latest main into /srv/docker/betterstats"
+echo "==> [1/5] Pulling latest main into /srv/docker/betterstats"
 git -C /srv/docker/betterstats pull origin main
 
-echo "==> [2/4] Rebuilding betterstats images (no cache)"
+echo "==> [2/5] Rebuilding betterstats images (no cache)"
 docker compose build --no-cache betterstats-backend betterstats-frontend
 
-echo "==> [3/4] Recreating betterstats only (db + other services untouched)"
+echo "==> [3/5] Recreating betterstats only (db + other services untouched)"
 # Why rm+up instead of `up --force-recreate`:
 # The central file pins fixed container_names (betterstats-frontend / -backend).
 # With a fixed name, `--force-recreate` does a fragile rename dance — it renames
@@ -66,7 +66,7 @@ echo "==> [3/4] Recreating betterstats only (db + other services untouched)"
 docker compose rm -sf betterstats-backend betterstats-frontend || true
 docker compose up -d --no-deps betterstats-backend betterstats-frontend
 
-echo "==> [4/4] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
+echo "==> [4/5] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
 # Recreating betterstats-frontend gives it a NEW Docker IP. nginx-proxy-manager
 # caches the old DNS result per worker and then 502s with
 #   "betterstats-frontend could not be resolved (2: Server failure)"
@@ -95,6 +95,37 @@ if [ -n "$NPM_SVC" ]; then
   esac
 else
   echo "    no proxy service found in this compose project — skipping proxy refresh"
+fi
+
+echo "==> [5/5] Backend API health check (end-to-end through the proxy)"
+# [4/5] only checks the frontend, which serves its static files even when the API
+# is dead — so a backend that fails to boot (e.g. 'alembic upgrade head' errors, so
+# uvicorn never starts) sails through as a green deploy while login and every club
+# page hang on "Loading club data…". Hit a real API endpoint and confirm BetterStats
+# is the one answering (this also catches the crossed-/api-proxy bug from the Jun
+# 2026 post-mortem, where /api was served by a different app). On failure, print the
+# backend's own state and logs so the cause is right here in the deploy output.
+api_ok=""
+for i in 1 2 3 4 5 6; do
+  body="$(curl -s -m 10 https://betterat.cricket/api/openapi.json || true)"
+  case "$body" in *BetterStats*) api_ok=1; break ;; esac
+  echo "    attempt $i/6: API not healthy yet, waiting…"; sleep 4
+done
+if [ -n "$api_ok" ]; then
+  echo "    backend API healthy ✓ — /api is answered by BetterStats"
+else
+  echo ""
+  echo "    ✗✗ BACKEND API IS DOWN — login and club data will fail."
+  echo "       (The frontend still serves static files, which is why [4/5] looked green.)"
+  echo "    --- betterstats-backend container state ---"
+  docker compose ps betterstats-backend || true
+  echo "    --- betterstats-backend last 50 log lines ---"
+  docker compose logs --tail=50 betterstats-backend 2>&1 | tail -50 || true
+  echo ""
+  echo "    The container runs 'alembic upgrade head && uvicorn …', so a failed migration"
+  echo "    stops uvicorn from ever starting and the container crash-loops. Fix forward and"
+  echo "    redeploy, or revert the last change on main to restore service."
+  exit 1
 fi
 
 echo "==> Status:"
