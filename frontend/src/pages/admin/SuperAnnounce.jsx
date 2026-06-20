@@ -45,6 +45,13 @@ function mix(hex, target, t) {
   const a = hexToRgb(hex), b = hexToRgb(target)
   return rgbToHex(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t)
 }
+// Relative luminance, so we can pick legible text over a chosen background.
+function relLum(hex) {
+  const { r, g, b } = hexToRgb(hex)
+  const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+}
+function isLight(hex) { return relLum(hex) > 0.5 }
 
 // ── Honour-badge formatting (mirrors PlayerProfile) ─────────────────────────
 function formatSeasonShort(value, seasons) {
@@ -164,12 +171,18 @@ export default function SuperAnnounce() {
     return () => window.removeEventListener('resize', fit)
   }, [data])
 
+  // Pull the club's own colours from settings: primary_color is the bright brand
+  // colour (the accent), accent_color is the darker one (the background), exactly
+  // how the rest of BetterSocials reads a club palette. Text colour is chosen for
+  // contrast against the background.
   const applyClubColours = (org) => {
-    const a = org?.primary_color || '#e21f26'
+    const a = org?.primary_color || '#e21f26'     // bright brand colour → accent
+    const base = org?.accent_color || '#0b0c10'   // darker brand colour → background
+    const light = isLight(base)
     setAccent(a)
-    setBg('#0b0c10')
-    setBg2(mix(a, '#000000', 0.8))
-    setInk('#ffffff')
+    setBg(base)
+    setBg2(mix(base, '#000000', light ? 0.08 : 0.45))
+    setInk(light ? '#14151a' : '#ffffff')
   }
 
   const loadClub = async (id) => {
@@ -369,6 +382,9 @@ export default function SuperAnnounce() {
                   <ColorRow label="Accent" value={accent} onChange={setAccent} />
                   <ColorRow label="Text" value={ink} onChange={setInk} />
                 </div>
+                <p className="text-[11px] text-pb-faint">
+                  Defaults come from the club's brand colours in settings. "Club" resets to them.
+                </p>
               </div>
 
               {/* Featured player */}
