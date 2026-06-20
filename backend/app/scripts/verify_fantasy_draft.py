@@ -16,21 +16,23 @@ It prints PASS / FAIL per format and then DELETES everything it created. It neve
 touches the real season, pool, players or any existing league — only its own
 VERIFY-* managers and league, which it removes on the way out (even on failure).
 
-Usage from the backend container:
-  docker exec -e PYTHONPATH=/app betterstats-backend \\
-    python -m app.scripts.verify_fantasy_draft <org_id>          # both formats
-  docker exec -e PYTHONPATH=/app betterstats-backend \\
-    python -m app.scripts.verify_fantasy_draft <org_id> auction  # one format
+The org can be a UUID, a slug, or a name (so `applecross` works). Run from
+/srv/docker with COMPOSE_PROJECT_NAME set, the same as a deploy:
+  docker compose exec betterstats-backend \\
+    python -m app.scripts.verify_fantasy_draft applecross          # both formats
+  docker compose exec betterstats-backend \\
+    python -m app.scripts.verify_fantasy_draft applecross auction  # one format
 """
 import asyncio
 import secrets
 import sys
+import uuid
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import select, func
 
 from app.models.db import (
-    async_session_maker, FantasySeason, FantasyManager, FantasyLeague,
+    async_session_maker, Organisation, FantasySeason, FantasyManager, FantasyLeague,
     FantasyLeagueMember, FantasyPoolPlayer, FantasySquad, FantasySquadPlayer,
     FantasyDraft, FantasyDraftPick,
 )
@@ -39,6 +41,22 @@ from app.services import fantasy_draft as fd
 
 def _past():
     return datetime.now(timezone.utc) - timedelta(seconds=1)
+
+
+async def _resolve_org(s, arg):
+    """Accept a UUID, a slug, or a (partial) name. Returns (org_id, name) or (None, None)."""
+    try:
+        return str(uuid.UUID(str(arg))), None
+    except (ValueError, AttributeError, TypeError):
+        pass
+    row = (await s.execute(
+        select(Organisation).where(func.lower(Organisation.slug) == str(arg).lower())
+    )).scalars().first()
+    if row is None:
+        row = (await s.execute(
+            select(Organisation).where(Organisation.name.ilike(f"%{arg}%")).order_by(Organisation.name)
+        )).scalars().first()
+    return (str(row.id), row.name) if row else (None, None)
 
 
 async def _latest_season(s, org_id):
@@ -254,8 +272,13 @@ async def _cleanup(s, lg, managers):
         print(f"  !! cleanup failed: {e} — look for VERIFY-* rows to remove by hand")
 
 
-async def verify(org_id: str, which: str = "both") -> bool:
+async def verify(org_arg: str, which: str = "both") -> bool:
     async with async_session_maker() as s:
+        org_id, org_name = await _resolve_org(s, org_arg)
+        if org_id is None:
+            print(f"No organisation matches '{org_arg}' — pass a UUID, slug, or name.")
+            return False
+        print(f"Org: {org_name or org_id} ({org_id})")
         fs = await _latest_season(s, org_id)
         if fs is None:
             print("No fantasy season for that org. Create one and Build the pool first.")
@@ -279,7 +302,7 @@ async def verify(org_id: str, which: str = "both") -> bool:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: python -m app.scripts.verify_fantasy_draft <org_id> [snake|auction|both]")
+        print("usage: python -m app.scripts.verify_fantasy_draft <org uuid|slug|name> [snake|auction|both]")
         raise SystemExit(2)
     org = sys.argv[1]
     which = sys.argv[2].lower() if len(sys.argv) > 2 else "both"
