@@ -16,8 +16,6 @@ Revises: 091
 Create Date: 2026-06-20
 """
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
 
 
 revision = '092'
@@ -27,41 +25,41 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'manual_fall_of_wickets',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('manual_game_id', UUID(as_uuid=True), nullable=False),
-        sa.Column('innings_number', sa.Integer(), nullable=False),
-        sa.Column('wicket_number', sa.Integer(), nullable=False),
-        sa.Column('score_at_fall', sa.Integer(), nullable=True),
-        sa.Column('overs_at_fall', sa.Numeric(5, 1), nullable=True),
-        sa.Column('player_id', UUID(as_uuid=True), nullable=True),
-        sa.Column('batter_name', sa.Text(), nullable=True),
-        sa.ForeignKeyConstraint(['manual_game_id'], ['manual_games.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['player_id'], ['players.id'], ondelete='SET NULL'),
-        sa.PrimaryKeyConstraint('id'),
-    )
-    op.create_index('idx_manual_fow_game', 'manual_fall_of_wickets', ['manual_game_id'])
+    # Idempotent raw DDL (byte-for-byte the main.py lifespan mirror) so the migration
+    # and the boot-time mirror can't collide. On this box the schema is layered (dump
+    # + lifespan + alembic): a plain CREATE TABLE can hit an already-existing object
+    # and abort `alembic upgrade head`, which then stops uvicorn from starting and
+    # crash-loops the backend. IF NOT EXISTS makes re-runs and either ordering safe.
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS manual_fall_of_wickets (
+            id SERIAL PRIMARY KEY,
+            manual_game_id UUID NOT NULL REFERENCES manual_games(id) ON DELETE CASCADE,
+            innings_number INTEGER NOT NULL,
+            wicket_number INTEGER NOT NULL,
+            score_at_fall INTEGER,
+            overs_at_fall NUMERIC(5,1),
+            player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+            batter_name TEXT
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_manual_fow_game ON manual_fall_of_wickets(manual_game_id)")
 
-    op.create_table(
-        'manual_partnerships',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('manual_game_id', UUID(as_uuid=True), nullable=False),
-        sa.Column('innings_number', sa.Integer(), nullable=False),
-        sa.Column('wicket_number', sa.Integer(), nullable=False),
-        sa.Column('batter1_id', UUID(as_uuid=True), nullable=True),
-        sa.Column('batter2_id', UUID(as_uuid=True), nullable=True),
-        sa.Column('runs', sa.Integer(), server_default='0', nullable=True),
-        sa.Column('balls', sa.Integer(), nullable=True),
-        sa.Column('batter1_runs', sa.Integer(), nullable=True),
-        sa.Column('batter2_runs', sa.Integer(), nullable=True),
-        sa.Column('is_club_innings', sa.Boolean(), nullable=True),
-        sa.ForeignKeyConstraint(['manual_game_id'], ['manual_games.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['batter1_id'], ['players.id'], ondelete='SET NULL'),
-        sa.ForeignKeyConstraint(['batter2_id'], ['players.id'], ondelete='SET NULL'),
-        sa.PrimaryKeyConstraint('id'),
-    )
-    op.create_index('idx_manual_partnerships_game', 'manual_partnerships', ['manual_game_id'])
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS manual_partnerships (
+            id SERIAL PRIMARY KEY,
+            manual_game_id UUID NOT NULL REFERENCES manual_games(id) ON DELETE CASCADE,
+            innings_number INTEGER NOT NULL,
+            wicket_number INTEGER NOT NULL,
+            batter1_id UUID REFERENCES players(id) ON DELETE SET NULL,
+            batter2_id UUID REFERENCES players(id) ON DELETE SET NULL,
+            runs INTEGER DEFAULT 0,
+            balls INTEGER,
+            batter1_runs INTEGER,
+            batter2_runs INTEGER,
+            is_club_innings BOOLEAN
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_manual_partnerships_game ON manual_partnerships(manual_game_id)")
 
     op.execute("""
         CREATE OR REPLACE VIEW v_effective_fall_of_wickets AS

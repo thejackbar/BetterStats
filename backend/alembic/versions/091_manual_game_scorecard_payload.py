@@ -26,8 +26,6 @@ Create Date: 2026-06-20
 
 """
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
 
 
 revision = '091'
@@ -37,8 +35,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('manual_games', sa.Column('opp_org_id', sa.Text(), nullable=True))
-    op.add_column('manual_games', sa.Column('extracted_payload', JSONB(), nullable=True))
+    # Idempotent (IF NOT EXISTS) so it coexists with the main.py lifespan mirror,
+    # which adds the same columns on boot. On this box the schema is layered (dump +
+    # lifespan + alembic), so a plain ADD COLUMN can hit an already-existing column
+    # and abort `alembic upgrade head`, which stops uvicorn from ever starting.
+    op.execute("ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS opp_org_id TEXT")
+    op.execute("ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS extracted_payload JSONB")
 
 
 def downgrade() -> None:
