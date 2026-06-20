@@ -5,8 +5,8 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Terms() {
   usePageMeta({
-    title: 'Terms of Service — Better Cricket',
-    description: 'Terms of service for Better Cricket, the cricket platform for Australian clubs, provided by BetterSports.',
+    title: 'Terms of Service — BetterCricket',
+    description: 'Terms of service for BetterCricket, the cricket platform for Australian clubs, provided by BetterSports.',
     url: 'https://betterat.cricket/terms',
   })
   return (
@@ -21,7 +21,7 @@ export default function Terms() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">1. About these terms</h2>
             <p>
-              Better Cricket ("the Service", "we", "us", "our") is a cricket platform for Australian clubs,
+              BetterCricket ("the Service", "we", "us", "our") is a cricket platform for Australian clubs,
               provided by BetterSports (ABN 32 624 335 397), a trading name based in Perth, Western Australia.
               These terms govern your club's use of the Service. By creating an account or using the Service,
               your club agrees to these terms.
@@ -31,7 +31,7 @@ export default function Terms() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">2. The service</h2>
             <p>
-              Better Cricket helps your club keep its records, statistics and history online, and run its
+              BetterCricket helps your club keep its records, statistics and history online, and run its
               season, back office and match preparation through the modules included in your plan. Some
               information published through the Service, such as club statistics pages, is public by design.
               We may add, change or remove features from time to time as the Service evolves.
@@ -124,7 +124,7 @@ export default function Terms() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">10. Contact</h2>
             <p>
-              Better Cricket is provided by BetterSports (ABN 32 624 335 397), Perth, Western Australia. Questions
+              BetterCricket is provided by BetterSports (ABN 32 624 335 397), Perth, Western Australia. Questions
               about these terms? Email{' '}
               <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>.
             </p>

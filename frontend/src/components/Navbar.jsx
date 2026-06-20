@@ -119,7 +119,7 @@ export default function Navbar() {
   };
 
   const customLogo = club?.logo_url || null;
-  const displayName = club?.name || slug || "Better Cricket";
+  const displayName = club?.name || slug || "BetterCricket";
   const displayShort = displayName
     .split(" ")
     .map((w) => w[0])
@@ -259,7 +259,7 @@ export default function Navbar() {
             <Link
               to="/"
               className="hidden md:flex items-center gap-1.5 shrink-0 ml-3 group"
-              title="Powered by Better Cricket"
+              title="Powered by BetterCricket"
             >
               <span className="hidden sm:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
                 Powered by
@@ -351,7 +351,7 @@ export default function Navbar() {
                 className="flex items-center gap-2 py-2 text-pb-faint text-[10px] font-mono tracking-wide2 uppercase"
               >
                 <BrandLogo alt="" className="w-5 h-5 opacity-75" />
-                Powered by Better Cricket
+                Powered by BetterCricket
               </Link>
             )}
           </div>

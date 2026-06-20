@@ -12,10 +12,10 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 const PRICING_JSONLD = {
   '@context': 'https://schema.org',
   '@type': 'Product',
-  name: 'Better Cricket — Cricket Club Platform',
+  name: 'BetterCricket — Cricket Club Platform',
   description:
     'A modular platform for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). Annual licence, one price per club.',
-  brand: { '@type': 'Brand', name: 'Better Cricket' },
+  brand: { '@type': 'Brand', name: 'BetterCricket' },
   url: 'https://betterat.cricket/pricing',
   image: 'https://betterat.cricket/og-cover.png',
   offers: {
@@ -143,7 +143,7 @@ function ImportIncluded() {
               </h2>
               <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed">
                 Bringing your club's old data across is included in your plan, with no setup or import fee.
-                Our easy import tool does most of the work, and Better Cricket support will help you load your
+                Our easy import tool does most of the work, and BetterCricket support will help you load your
                 full history into BetterStats and get every season looking right.
               </p>
             </div>
@@ -164,7 +164,7 @@ function ReplacesStack() {
             <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">One platform. One price.</h2>
             <p className="text-pb-dim max-w-xl mx-auto">
               To cover the same ground with separate tools, a club pays for each of these and retypes its
-              cricket into all of them. Better Cricket does the lot for one flat price.
+              cricket into all of them. BetterCricket does the lot for one flat price.
             </p>
           </div>
         </Reveal>
@@ -188,12 +188,12 @@ function ReplacesStack() {
                 <p className="text-sm font-bold">{COMPETITOR_STACK.length} separate subscriptions</p>
                 <p className="text-2xl font-bold tabular-nums text-pb-dim">${COMPETITOR_TOTAL}<span className="text-xs text-pb-faint font-normal">/yr</span></p>
               </div>
-              <p className="text-[11px] text-pb-faint mt-3">Plus ClubStats charges {IMPORT_NOTE} to load your history, a one-off fee Better Cricket doesn't.</p>
+              <p className="text-[11px] text-pb-faint mt-3">Plus ClubStats charges {IMPORT_NOTE} to load your history, a one-off fee BetterCricket doesn't.</p>
             </div>
 
-            {/* Better Cricket — one price + the saving */}
+            {/* BetterCricket — one price + the saving */}
             <div className="surface-strong p-6 lg:p-7 border-accent/40 bg-gradient-to-b from-accent/[0.07] to-transparent flex flex-col">
-              <p className="text-[10px] uppercase tracking-wide3 font-mono text-accent mb-4">Better Cricket, all in</p>
+              <p className="text-[10px] uppercase tracking-wide3 font-mono text-accent mb-4">BetterCricket, all in</p>
               <div className="flex-1 flex flex-col justify-center text-center py-4">
                 <div className="flex items-baseline justify-center gap-1.5">
                   <span className="text-6xl font-bold tabular-nums">${ALL_IN}</span>
@@ -213,7 +213,7 @@ function ReplacesStack() {
         <p className="text-center text-xs text-pb-faint mt-5 max-w-2xl mx-auto">
           Competitor prices are each tool's own published rate (AUD; Pitchero converted from GBP) on a
           representative plan, and scale with club size. CricketStatz, the desktop stats package, is another
-          stats option at $199 to $798 a year. Better Cricket loads your full history for free, where ClubStats
+          stats option at $199 to $798 a year. BetterCricket loads your full history for free, where ClubStats
           charges a one-off import fee. BetterIQ has no off-the-shelf equivalent.
         </p>
       </div>
@@ -229,11 +229,11 @@ function PricingFAQ() {
     { q: 'Does the price change based on club size?', a: "No. Every price is a flat rate per club. One team or fifty teams, juniors and seniors, men's and women's, the price is the same. There's no per-team, per-player or per-grade pricing." },
     { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
     { q: 'Is there a fantasy game?', a: "Yes. BetterFantasyCricket is a standalone add-on at $49 a year. It runs a club fantasy competition scored off your real games, with salary-cap and draft formats, so members and supporters can play along all season. It's priced on its own, separate from the module bundle." },
-    { q: 'Monthly or annual?', a: "Better Cricket is an annual licence, billed once a year." },
+    { q: 'Monthly or annual?', a: "BetterCricket is an annual licence, billed once a year." },
     { q: 'Can we add modules later?', a: "Yes. You can add new modules at any time and the entitlements switch on immediately. Adding a module is an annual commitment." },
     { q: 'Are there any setup or migration fees?', a: "Up to two hours of dedicated support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time, and we'll guide you through merging players and grades if needed." },
-    { q: 'Do you offer a free trial?', a: "Yes. We offer a 14-day free trial of every Better Cricket module, so you can try the lot before you commit." },
-    { q: 'Do you offer discounts for junior-only clubs?', a: "Yes. A junior club linked to a senior club that's currently subscribed to Better Cricket gets a discount. Contact us for the code." },
+    { q: 'Do you offer a free trial?', a: "Yes. We offer a 14-day free trial of every BetterCricket module, so you can try the lot before you commit." },
+    { q: 'Do you offer discounts for junior-only clubs?', a: "Yes. A junior club linked to a senior club that's currently subscribed to BetterCricket gets a discount. Contact us for the code." },
     { q: 'How do we pay?', a: "Right now it's bank transfer or PayID. Most clubs don't have a card and we don't want to put financial pressure on volunteers. Card payments are on the roadmap." },
   ]
   return (
@@ -269,7 +269,7 @@ function PricingFAQ() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Pricing() {
   usePageMeta({
-    title: 'Pricing — modular plans for cricket clubs | Better Cricket',
+    title: 'Pricing — modular plans for cricket clubs | BetterCricket',
     description:
       'Modular, flat-rate pricing for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). One annual price per club, whatever the size.',
     image: 'https://betterat.cricket/og-cover.png',

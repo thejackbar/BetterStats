@@ -88,7 +88,7 @@ export default function GamesPage() {
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
   usePageMeta({
-    title: club?.name ? `${club.name} Games — BetterStats` : null,
+    title: club?.name ? `${club.name} Games — BetterCricket` : null,
     description: club?.name ? `Match results for ${club.name}.` : null,
     image: club?.logo_url || null,
   })

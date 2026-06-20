@@ -94,7 +94,7 @@ function LeagueDetail({ token, leagueId, onBack, flash, fail }) {
   if (!data) return <p style={{ color: 'var(--faint)', font: `500 13px 'Hanken Grotesk'` }}>Loading…</p>
 
   const invite = async () => {
-    const text = `Join my Better Cricket fantasy league with code ${data.join_code}`
+    const text = `Join my BetterCricket fantasy league with code ${data.join_code}`
     try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(data.join_code); flash('Code copied.') } }
     catch { /* dismissed */ }
   }

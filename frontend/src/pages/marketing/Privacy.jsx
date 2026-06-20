@@ -4,8 +4,8 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Privacy() {
   usePageMeta({
-    title: 'Privacy Policy — Better Cricket',
-    description: 'How Better Cricket, provided by BetterSports, collects, stores and handles club, player and account information under the Australian Privacy Act.',
+    title: 'Privacy Policy — BetterCricket',
+    description: 'How BetterCricket, provided by BetterSports, collects, stores and handles club, player and account information under the Australian Privacy Act.',
     url: 'https://betterat.cricket/privacy',
   })
   return (
@@ -20,10 +20,10 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Who we are</h2>
             <p>
-              Better Cricket is provided by BetterSports (ABN 32 624 335 397), a trading name based in Perth,
+              BetterCricket is provided by BetterSports (ABN 32 624 335 397), a trading name based in Perth,
               Western Australia. This policy explains how we collect, use, store and handle personal information,
               in accordance with the Australian Privacy Act 1988 and the Australian Privacy Principles (APPs). It
-              applies to the Better Cricket service and websites.
+              applies to the BetterCricket service and websites.
             </p>
           </section>
 
@@ -49,7 +49,7 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Where match data comes from</h2>
             <p>
-              The statistics in Better Cricket are derived from your club's own match data, the records your club
+              The statistics in BetterCricket are derived from your club's own match data, the records your club
               produces and maintains. We are not the source of that underlying data, and we don't guarantee that
               every figure is complete or error-free. If something looks wrong, your club administrator can correct
               or update it.
@@ -109,7 +109,7 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Contact</h2>
             <p>
-              BetterSports (ABN 32 624 335 397), trading as Better Cricket · Perth, Western Australia ·{' '}
+              BetterSports (ABN 32 624 335 397), trading as BetterCricket · Perth, Western Australia ·{' '}
               <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>
             </p>
           </section>

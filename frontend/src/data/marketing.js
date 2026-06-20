@@ -2,8 +2,8 @@
 // Keeping data separated so the JSX files stay focused on layout.
 
 // ── Brand ────────────────────────────────────────────────────────────────────
-// Better Cricket is the cricket product of BetterSports (our trading name).
-export const BRAND = 'Better Cricket'
+// BetterCricket is the cricket product of BetterSports (our trading name).
+export const BRAND = 'BetterCricket'
 export const COMPANY = 'BetterSports'
 export const ABN = '32 624 335 397'
 export const DOMAIN = 'betterat.cricket'
@@ -78,7 +78,7 @@ export const HOW_IT_WORKS = [
   {
     n: '01',
     title: 'We start your first sync',
-    desc: 'You give us your club details and we pull every scrap of available history into Better Cricket automatically, with no spreadsheets to hand over.',
+    desc: 'You give us your club details and we pull every scrap of available history into BetterCricket automatically, with no spreadsheets to hand over.',
     mins: '5 minutes',
   },
   {
@@ -113,14 +113,14 @@ export const HOW_IT_WORKS = [
 //
 // BetterIQ is a category of one — see COMPARISON_SOLO below (no table).
 // ============================================================
-const US_COL = { key: 'us', name: 'Better Cricket', tag: 'One platform', sub: 'Stats, site & the modules that run your club', us: true }
+const US_COL = { key: 'us', name: 'BetterCricket', tag: 'One platform', sub: 'Stats, site & the modules that run your club', us: true }
 
 export const COMPARISONS = {
   // Home + one-pager — the whole platform vs the usual patchwork of tools.
   platform: {
     eyebrow: 'Why one platform',
     heading: 'Five tools worth of club admin. One subscription.',
-    sub: 'Most clubs run their season on a few spreadsheets, a website builder, a design app, a bulk email tool and a few group chats. Better Cricket replaces all of it, in one central place, fed by one match feed.',
+    sub: 'Most clubs run their season on a few spreadsheets, a website builder, a design app, a bulk email tool and a few group chats. BetterCricket replaces all of it, in one central place, fed by one match feed.',
     columns: [
       { key: 'patchwork', name: 'The usual patchwork', tag: 'A spreadsheet + 4 apps', sub: 'Spreadsheets · a DIY site · Canva · Mailchimp · group chats' },
       US_COL,
@@ -147,7 +147,7 @@ export const COMPARISONS = {
         ],
       },
     ],
-    cta: { line: 'Stop stitching five tools together every weekend. Run the whole club from one place.', label: 'See everything Better Cricket does →', to: '/overview' },
+    cta: { line: 'Stop stitching five tools together every weekend. Run the whole club from one place.', label: 'See everything BetterCricket does →', to: '/overview' },
   },
 
   // BetterStats (Core) — the public stats + site, vs dedicated stats tools.

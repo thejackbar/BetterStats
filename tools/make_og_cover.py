@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
-"""Generate the social-share cover image (og-cover.png).
+"""Generate the BetterCricket social images.
 
-This is the 1200x630 landscape card that Facebook, WhatsApp, iMessage,
-LinkedIn and the rest show when someone shares a Better Cricket link. The
-square logo (og-image.png) stays the favicon/app icon; this wider card is
-purpose-built for link previews.
+Produces both share assets from the one canonical brand mark:
+  * og-cover.png  — the 1200x630 landscape card Facebook, WhatsApp, iMessage,
+    LinkedIn and the rest show on a shared link (eyebrow, tagline, mark).
+  * og-image.png  — the 1200x1200 square brand logo used as the schema.org
+    Organization logo in structured data.
 
-It reuses the real logo mark out of og-image.png (transparent background)
-and renders the current "Better Cricket" wordmark + tagline beside it on the
-brand navy. Re-run after a brand tweak:
+The mark is read straight out of the canonical logo (the green "B" + growth
+bars), the same artwork BrandLogo renders in the nav, footer and admin header,
+so the social images can never drift from the in-app brand. Re-run after a
+brand tweak:
 
     python3 tools/make_og_cover.py
 """
+import base64
+import re
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "frontend" / "public"
-SRC_LOGO = PUBLIC / "og-image.png"
+# Canonical brand mark — white bars variant, for the navy social backgrounds.
+SRC_SVG = ROOT / "frontend" / "src" / "assets" / "bettercricket-white.svg"
 OUT = PUBLIC / "og-cover.png"
+OUT_SQUARE = PUBLIC / "og-image.png"
 
 W, H = 1200, 630
 
@@ -74,30 +81,42 @@ def draw_spaced(draw, xy, text, fnt, fill, tracking):
     return x
 
 
-def main():
+def load_mark():
+    """The canonical brand mark, tight-cropped, from the embedded PNG in the SVG.
+
+    The bettercricket-*.svg files are a square canvas wrapping one base64 PNG of
+    the green-B-plus-bars artwork. Decode it directly (no SVG rasteriser needed)
+    and trim the transparent margins so callers can scale it cleanly.
+    """
+    svg = SRC_SVG.read_text()
+    m = re.search(r'href="data:image/png;base64,([^"]+)"', svg)
+    if not m:
+        raise SystemExit(f"no embedded PNG found in {SRC_SVG}")
+    mark = Image.open(BytesIO(base64.b64decode(m.group(1)))).convert("RGBA")
+    bbox = mark.getbbox()
+    return mark.crop(bbox) if bbox else mark
+
+
+def scaled_to_height(mark, target_h):
+    scale = target_h / mark.height
+    return mark.resize((int(mark.width * scale), target_h), Image.LANCZOS)
+
+
+def render_cover(mark):
+    """The 1200x630 landscape share card."""
     img = vertical_gradient((W, H), NAVY_TOP, NAVY_BOT).convert("RGBA")
 
-    # --- logo mark (cropped out of the square logo, wordmark trimmed off) ---
-    logo = Image.open(SRC_LOGO).convert("RGBA")
-    lw, lh = logo.size
-    mark = logo.crop((0, 0, lw, int(lh * 0.66)))  # drop the "BetterStats" wordmark
-    bbox = mark.getbbox()
-    if bbox:
-        mark = mark.crop(bbox)
-    target_h = 326
-    scale = target_h / mark.height
-    mark = mark.resize((int(mark.width * scale), target_h), Image.LANCZOS)
+    m = scaled_to_height(mark, 300)
 
-    # Anchor by the right edge so the arrow never clips off-canvas.
-    right_margin = 70
-    paste_x = W - right_margin - mark.width
-    paste_y = (H - mark.height) // 2
-    mark_cx = paste_x + mark.width // 2
-    mark_cy = H // 2
+    # Anchor by the right edge so the mark never clips off-canvas.
+    right_margin = 80
+    paste_x = W - right_margin - m.width
+    paste_y = (H - m.height) // 2
+    mark_cx = paste_x + m.width // 2
 
-    glow = radial_glow((W, H), (mark_cx, mark_cy), 230, ACCENT, 52)
+    glow = radial_glow((W, H), (mark_cx, H // 2), 230, ACCENT, 52)
     img = Image.alpha_composite(img, glow)
-    img.alpha_composite(mark, (paste_x, paste_y))
+    img.alpha_composite(m, (paste_x, paste_y))
 
     d = ImageDraw.Draw(img)
 
@@ -108,9 +127,9 @@ def main():
     # accent rule
     d.rounded_rectangle([x, 96, x + 64, 104], radius=4, fill=ACCENT)
 
-    # brand eyebrow
+    # brand eyebrow (one word, the canonical BetterCricket name)
     f_eye = font(F_BOLD, 22)
-    draw_spaced(d, (x, 122), "BETTER CRICKET", f_eye, SLATE, tracking=3)
+    draw_spaced(d, (x, 122), "BETTERCRICKET", f_eye, SLATE, tracking=3)
 
     # tagline hero ("better." in accent, the brand pun). Size to fit the column.
     hero_lines = [("Making your", WHITE), ("cricket club", WHITE), ("better.", ACCENT)]
@@ -132,11 +151,29 @@ def main():
         "STATS  ·  SELECTION  ·  SOCIALS  ·  ADMIN  ·  ANALYTICS",
         f_mod, FAINT, tracking=1.5,
     )
-    print(f"mark={mark.width}x{mark.height} paste_x={paste_x} text_limit={text_limit} hero_size={hero_size}")
-
     OUT.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(OUT, "PNG", optimize=True)
     print(f"wrote {OUT} ({img.size[0]}x{img.size[1]})")
+
+
+def render_square(mark, size=1200):
+    """The square brand logo (schema.org Organization logo)."""
+    img = vertical_gradient((size, size), NAVY_TOP, NAVY_BOT).convert("RGBA")
+    m = scaled_to_height(mark, int(size * 0.40))
+    if m.width > size * 0.66:  # keep wide marks inside a comfortable margin
+        m = m.resize((int(size * 0.66), int(m.height * (size * 0.66) / m.width)), Image.LANCZOS)
+    cx, cy = size // 2, size // 2
+    glow = radial_glow((size, size), (cx, cy), int(size * 0.34), ACCENT, 60)
+    img = Image.alpha_composite(img, glow)
+    img.alpha_composite(m, (cx - m.width // 2, cy - m.height // 2))
+    img.convert("RGB").save(OUT_SQUARE, "PNG", optimize=True)
+    print(f"wrote {OUT_SQUARE} ({img.size[0]}x{img.size[1]})")
+
+
+def main():
+    mark = load_mark()
+    render_square(mark)
+    render_cover(mark)
 
 
 if __name__ == "__main__":

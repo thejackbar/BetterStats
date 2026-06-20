@@ -82,7 +82,7 @@ export default function BlogPost() {
       datePublished: post.date,
       dateModified: post.date,
       inLanguage: 'en-AU',
-      author: { '@type': 'Organization', name: 'Better Cricket', url: 'https://betterat.cricket/' },
+      author: { '@type': 'Organization', name: 'BetterCricket', url: 'https://betterat.cricket/' },
       publisher: {
         '@type': 'Organization',
         name: 'BetterSports',
@@ -103,7 +103,7 @@ export default function BlogPost() {
   ] : undefined
 
   usePageMeta(post ? {
-    title: `${post.title} | Better Cricket`,
+    title: `${post.title} | BetterCricket`,
     description: post.description,
     image: postImage,
     url: postUrl,

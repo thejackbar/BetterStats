@@ -70,7 +70,7 @@ export function ThemeToggle({ theme, onToggle, size = 30 }) {
 }
 
 // ── context (club crest + accent + token) ────────────────────────────────────
-// `logoUrl` is the club's own logo, falling back to the Better Cricket mark.
+// `logoUrl` is the club's own logo, falling back to the BetterCricket mark.
 export const FantasyCtx = createContext({ club: null, crest: 'ACC', token: '', logoUrl: null })
 export const useFantasy = () => useContext(FantasyCtx)
 
@@ -115,7 +115,7 @@ export function GradientRule({ className }) {
 
 // ── crest + avatar ───────────────────────────────────────────────────────────
 // The club brand mark: the club's own logo on a neutral tile, falling back to the
-// accent-tile text crest if neither a club logo nor the Better Cricket mark loads.
+// accent-tile text crest if neither a club logo nor the BetterCricket mark loads.
 export function Crest({ size = 38, radius = 11, fontSize, text }) {
   const { crest, logoUrl } = useFantasy()
   if (logoUrl) {

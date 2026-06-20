@@ -164,7 +164,7 @@ function ContactForm() {
           clubUrl:       fields.clubUrl || '—',
           heard:         fields.heard || '—',
           message:       fields.message || '—',
-          _subject: `Better Cricket enquiry — ${fields.club} · ${fields.association}`,
+          _subject: `BetterCricket enquiry — ${fields.club} · ${fields.association}`,
         }),
       })
       const data = await res.json()
@@ -381,7 +381,7 @@ function ContactForm() {
         {/* Message — optional */}
         <Field label="Anything else we should know?" id="message" optional>
           <textarea id="message" name="message" rows={3}
-            placeholder="Any extra context about your club's history, current setup, or what you're hoping to get out of Better Cricket."
+            placeholder="Any extra context about your club's history, current setup, or what you're hoping to get out of BetterCricket."
             value={fields.message} onChange={set('message')}
             className={`${inputCls('message', errors)} resize-none`} />
         </Field>
@@ -471,8 +471,8 @@ function ContactPanel() {
 
 export default function Contact() {
   usePageMeta({
-    title: 'Contact — Request Access for Your Cricket Club | Better Cricket',
-    description: 'Request access for your Australian cricket club, ask a question, or email the Better Cricket team directly at betteratcricket@gmail.com.',
+    title: 'Contact — Request Access for Your Cricket Club | BetterCricket',
+    description: 'Request access for your Australian cricket club, ask a question, or email the BetterCricket team directly at betteratcricket@gmail.com.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/contact',
   })

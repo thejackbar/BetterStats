@@ -101,7 +101,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
         fontSize: 12, color: hexWithAlpha(accent, 0.3),
         letterSpacing: 2, textTransform: 'uppercase',
       }}>
-        BetterStats
+        BetterCricket
       </div>
 
       {/* Header: org + player photo */}
@@ -327,11 +327,11 @@ export default function ShareCard() {
 
   const handleShare = async () => {
     const url = window.location.href
-    const text = `${player.name} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterStats`
+    const text = `${player.name} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${player.name} — BetterStats`, text, url })
+        await navigator.share({ title: `${player.name} — BetterCricket`, text, url })
       } catch {}
     } else {
       await navigator.clipboard.writeText(`${text}\n${url}`)

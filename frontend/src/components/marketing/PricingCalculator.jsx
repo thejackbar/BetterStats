@@ -7,7 +7,7 @@ import { ModuleWordmark } from './../ModuleLockup'
  * Modular plan builder. BetterStats is always in; tick the modules
  * you want and the annual price updates live, including the set-dollar bundle
  * discount (two modules save $48, three $97, all four $146). This is the main
- * way the Pricing page shows what Better Cricket costs.
+ * way the Pricing page shows what BetterCricket costs.
  */
 export default function PricingCalculator() {
   const [selected, setSelected] = useState(() => new Set())

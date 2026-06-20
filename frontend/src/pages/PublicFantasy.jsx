@@ -108,7 +108,7 @@ export default function PublicFantasy() {
   const onAuthed = async () => { const m = await loadApp(); setViewRaw(m.squad ? 'team' : 'pick'); setPhase('app') }
   const logout = async () => { await api.fanLogout(token).catch(() => {}); setManager(null); setSquad(null); setPhase('auth') }
 
-  // Brand mark: the club's own logo, or the Better Cricket mark when none is set.
+  // Brand mark: the club's own logo, or the BetterCricket mark when none is set.
   const ctx = { club, crest: crestText(club), token, logoUrl: club?.logo_url || bcMark }
   const rootSx = {
     minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)',

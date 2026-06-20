@@ -1,5 +1,5 @@
 // Club launch announcement poster — the whitelabel version of the "Applecross
-// is now on Better Cricket" social card. Renders at exactly 1080×1080px and
+// is now on BetterCricket" social card. Renders at exactly 1080×1080px and
 // reuses the BetterSocials primitives (AutoFitText, ClubLogo, grain/halftone/
 // stripes) so it captures cleanly through the shared modern-screenshot export.
 // Every panel is recreated from the club's own data (branding, headline stats,
@@ -164,7 +164,7 @@ export function ClubLaunchPoster({
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14 }}>
         <Mark club={club} accent={accent} size={72} />
         <div style={{ width: 2, height: 52, background: `${ink}26` }} />
-        <img src={brandWordmark} alt="Better Cricket" style={{ height: 34, objectFit: 'contain' }} />
+        <img src={brandWordmark} alt="BetterCricket" style={{ height: 34, objectFit: 'contain' }} />
       </div>
 
       {/* ── Main: headline + value props | recreated panels ──────────────── */}

@@ -1,6 +1,6 @@
-// Marketing copy + helpers for the Better Cricket module ecosystem.
+// Marketing copy + helpers for the BetterCricket module ecosystem.
 //
-// The platform is **Better Cricket** (from BetterSports). Every club gets the
+// The platform is **BetterCricket** (from BetterSports). Every club gets the
 // **Core (BetterStats)** — data ingestion, reconciled stats and the public club
 // site — and bolts on the modules below. Public prices live in
 // src/data/pricing.js (the modular pricing model + calculator).

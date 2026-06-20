@@ -2122,7 +2122,7 @@ export default function PlayerProfile() {
     if (bowling?.total_wickets != null) parts.push(`${bowling.total_wickets} wickets`)
     if (batting.games != null) parts.push(`${batting.games} matches`)
     const club = org?.name ? `${org.name} cricket` : 'club cricket'
-    return parts.length ? `${parts.join(' · ')} — ${club} statistics on Better Cricket.` : null
+    return parts.length ? `${parts.join(' · ')} — ${club} statistics on BetterCricket.` : null
   })()
   const playerJsonLd = (() => {
     if (!player || !metaName) return null
@@ -2145,7 +2145,7 @@ export default function PlayerProfile() {
     return ld
   })()
   usePageMeta({
-    title: metaName ? `${metaName} — Cricket Career Stats | Better Cricket` : null,
+    title: metaName ? `${metaName} — Cricket Career Stats | BetterCricket` : null,
     description: metaDesc,
     image: data?.player?.photo_url || org?.logo_url || null,
     jsonLd: playerJsonLd,

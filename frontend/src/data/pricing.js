@@ -1,4 +1,4 @@
-// Modular Better Cricket pricing for the public marketing pages.
+// Modular BetterCricket pricing for the public marketing pages.
 //
 // This is the public, marketing-facing price model: one Core plus the modules
 // you choose, billed as an annual licence. The in-app entitlement registry
@@ -69,10 +69,10 @@ export const MAX_BUNDLE_SAVING = bundleDiscount(PRICED_MODULES.length)          
 export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total            // 949
 
 // ── Competitor stack ─────────────────────────────────────────────────────────
-// What a club would otherwise pay to match Better Cricket's scope, using each
+// What a club would otherwise pay to match BetterCricket's scope, using each
 // tool's own published price (AUD; Pitchero converted from GBP) on a
 // representative plan. Conservative plans are used, so a busy multi-team club
-// pays more on the competitors and the gap only widens. Better Cricket replaces
+// pays more on the competitors and the gap only widens. BetterCricket replaces
 // the lot for one flat ALL_IN price, so the saving is the difference.
 export const COMPETITOR_STACK = [
   { tool: 'ClubStats', plan: 'Medium', forJob: 'Cricket stats & public site', replacedBy: 'BetterStats', cost: 399, note: '$299 to $599 by team count' },
@@ -85,7 +85,7 @@ export const COMPETITOR_STACK = [
 export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1904
 export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 955
 
-// Better Cricket loads your full history at no extra cost. The closest cricket
+// BetterCricket loads your full history at no extra cost. The closest cricket
 // rival (ClubStats) charges a one-off historical-import fee on top of the
 // subscription, from $499 up to about $1,000 for big clubs. CricketStatz, the
 // desktop stats package, is another stats option at $199 to $798 a year.

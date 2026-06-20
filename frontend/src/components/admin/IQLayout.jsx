@@ -96,7 +96,7 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
           ? <img src={club.logo_url} alt="" className="shrink-0 object-contain" style={{ width: 38, height: 38, borderRadius: 11, background: 'var(--pb-surface2)' }} />
           : <div className="flex items-center justify-center shrink-0 iq-display font-bold" style={{ width: 38, height: 38, borderRadius: 11, fontSize: 16, background: 'linear-gradient(150deg, var(--iq-violet-bright), var(--iq-violet-deep))', color: '#fff', boxShadow: '0 6px 18px -8px var(--pb-accent)' }}>{(club?.name || 'B')[0]}</div>}
         <div className="min-w-0">
-          <div className="iq-display font-bold text-[15px] leading-none truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
+          <div className="iq-display font-bold text-[15px] leading-none truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
         </div>
       </div>
       {/* Module lockup — which Better module this surface is */}

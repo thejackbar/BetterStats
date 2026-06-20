@@ -1,4 +1,4 @@
-// Per-module brand — the single source of truth for each Better Cricket
+// Per-module brand — the single source of truth for each BetterCricket
 // module's accent colour and logo mark. Imported by the marketing site, the
 // admin dashboard tiles, the sidebar and the per-module layouts so the colour
 // and mark never drift between them.

@@ -73,9 +73,9 @@ export default function ModuleDetail() {
     ...(priced ? [{
       '@context': 'https://schema.org',
       '@type': 'Product',
-      name: `${m.name} — Better Cricket`,
+      name: `${m.name} — BetterCricket`,
       description: m.summary,
-      brand: { '@type': 'Brand', name: 'Better Cricket' },
+      brand: { '@type': 'Brand', name: 'BetterCricket' },
       url: `https://betterat.cricket/modules/${m.slug}`,
       offers: {
         '@type': 'Offer',
@@ -88,8 +88,8 @@ export default function ModuleDetail() {
   ] : undefined
 
   usePageMeta({
-    title: m ? `${m.name} — ${m.tagline} | Better Cricket` : 'Modules | Better Cricket',
-    description: m ? `${m.name}: ${m.summary}` : 'The Better Cricket platform modules.',
+    title: m ? `${m.name} — ${m.tagline} | BetterCricket` : 'Modules | BetterCricket',
+    description: m ? `${m.name}: ${m.summary}` : 'The BetterCricket platform modules.',
     image: 'https://betterat.cricket/og-cover.png',
     url: m ? `https://betterat.cricket/modules/${m.slug}` : 'https://betterat.cricket/modules',
     jsonLd,
@@ -265,7 +265,7 @@ export default function ModuleDetail() {
             <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{modulePrice(m) || 'Included in every plan.'}</h2>
             <p className="text-pb-dim max-w-xl mx-auto mb-7">
               {m.isCore
-                ? 'BetterStats is included in every Better Cricket plan. Add the modules that fit how your club runs, and bundle two or more to save, up to $146 off the full set.'
+                ? 'BetterStats is included in every BetterCricket plan. Add the modules that fit how your club runs, and bundle two or more to save, up to $146 off the full set.'
                 : <>Every plan includes BetterStats. Add {m.name} on its own, or bundle two or more modules and save, up to $146 off the full set. The calculator on the pricing page works out your total.</>}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
