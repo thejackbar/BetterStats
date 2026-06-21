@@ -10,6 +10,10 @@
 :root {
   /* Brand + semantic colours (shared across light and dark) */
   --pb-accent:          #16c784;
+  /* Secondary club accent + the primary→secondary gradient built from it.
+     Club white-labelling overrides both (see buildThemeCss). */
+  --pb-accent-2:        #3b82f6;
+  --pb-gradient:        linear-gradient(135deg, #16c784 0%, #3b82f6 100%);
   /* Fixed BetterStats brand green — NEVER overridden by club white-labelling
      (buildThemeCss writes --pb-accent and friends, never this). Used for the
      BetterStats product wordmark so its identity stays green under any club
@@ -106,6 +110,17 @@
   to   { transform: translateY(0);   opacity: 1; }
 }
 .pb-rise { animation: pb-rise 700ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* Primary→secondary club gradient. `.pb-gradient` fills, `.pb-gradient-text`
+   clips it to the text. Both fall back gracefully to a solid accent when a
+   club has only set one colour (accent2 defaults to the accent's sibling). */
+.pb-gradient      { background: var(--pb-gradient); }
+.pb-gradient-text {
+  background: var(--pb-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
 
 .pb-card {
   background: var(--pb-surface);

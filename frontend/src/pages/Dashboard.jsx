@@ -193,6 +193,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
+          gradient
           eyebrow={`${org.short_name || org.name} · CLUB DASHBOARD`}
           title={org.name}
           meta={[

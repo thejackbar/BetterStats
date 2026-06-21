@@ -623,7 +623,7 @@ class SettingsPatch(BaseModel):
 
 # Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
 _THEME_COLOR_KEYS = {
-    "accent", "positive", "negative",
+    "accent", "accent2", "positive", "negative",
     "chart_runs", "chart_wickets", "chart_milestone",
     "cat_honour", "cat_role", "cat_award", "cat_milestone",
 }

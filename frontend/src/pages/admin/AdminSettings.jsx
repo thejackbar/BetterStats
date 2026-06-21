@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
-import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss } from '../../lib/theme'
+import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss, deriveDarkPalette, gradientCss } from '../../lib/theme'
 import { validateImageFile } from '../../lib/validation'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
@@ -261,6 +261,14 @@ export default function AdminSettings() {
               ))}
             </div>
 
+            {/* Gradient preview — shows how the two accents pair up */}
+            <div className="mt-4 rounded-md border pb-hairline overflow-hidden">
+              <div className="h-9" style={{ background: gradientCss(theme.accent, theme.accent2) }} />
+              <p className="font-mono text-[10px] text-pb-faintest px-2.5 py-1.5">
+                Accent → secondary gradient, used on banners, share cards and the dashboard header.
+              </p>
+            </div>
+
             {/* Honour category colours */}
             <div className="mt-6">
               <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1">Honour categories</label>
@@ -292,28 +300,62 @@ export default function AdminSettings() {
               </div>
             </div>
 
-            {/* Per-theme surfaces */}
-            {['light', 'dark'].map(mode => (
-              <div key={mode} className="mt-5">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{mode} theme — background & text</label>
-                  <button type="button"
-                    onClick={() => setTheme(t => ({ ...t, [mode]: { ...BRAND[mode] } }))}
-                    className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">Reset</button>
+            {/* Light theme surfaces — bg / cards / text picked individually */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-2">
+                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">light theme — background &amp; text</label>
+                <button type="button"
+                  onClick={() => setTheme(t => ({ ...t, light: { ...BRAND.light } }))}
+                  className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">Reset</button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {PALETTE_FIELDS.map(f => (
+                  <div key={f.key} className="flex flex-col gap-1">
+                    <input type="color"
+                      value={HEX_RE.test(theme.light[f.key]) ? theme.light[f.key] : BRAND.light[f.key]}
+                      onChange={e => setPalette('light', f.key, e.target.value)}
+                      className="w-full h-9 rounded border pb-hairline bg-pb-surface2 cursor-pointer" />
+                    <span className="font-mono text-[9px] text-pb-faintest leading-tight">{f.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Dark theme — pick one base colour; cards/panels/borders derive from it */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-2">
+                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">dark theme — background</label>
+                <button type="button"
+                  onClick={() => setTheme(t => ({ ...t, dark: { ...BRAND.dark } }))}
+                  className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">Reset</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <input type="color"
+                    value={HEX_RE.test(theme.dark.bg) ? theme.dark.bg : BRAND.dark.bg}
+                    onChange={e => setTheme(t => ({ ...t, dark: deriveDarkPalette(e.target.value, t.dark) }))}
+                    className="w-full h-9 rounded border pb-hairline bg-pb-surface2 cursor-pointer" />
+                  <span className="font-mono text-[9px] text-pb-faintest leading-tight">Base background</span>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  {PALETTE_FIELDS.map(f => (
-                    <div key={f.key} className="flex flex-col gap-1">
-                      <input type="color"
-                        value={HEX_RE.test(theme[mode][f.key]) ? theme[mode][f.key] : BRAND[mode][f.key]}
-                        onChange={e => setPalette(mode, f.key, e.target.value)}
-                        className="w-full h-9 rounded border pb-hairline bg-pb-surface2 cursor-pointer" />
-                      <span className="font-mono text-[9px] text-pb-faintest leading-tight">{f.label}</span>
-                    </div>
-                  ))}
+                <div className="flex flex-col gap-1">
+                  <input type="color"
+                    value={HEX_RE.test(theme.dark.text) ? theme.dark.text : BRAND.dark.text}
+                    onChange={e => setPalette('dark', 'text', e.target.value)}
+                    className="w-full h-9 rounded border pb-hairline bg-pb-surface2 cursor-pointer" />
+                  <span className="font-mono text-[9px] text-pb-faintest leading-tight">Text</span>
                 </div>
               </div>
-            ))}
+              {/* Derived ramp: base → cards → borders, so the operator sees the cohesion */}
+              <div className="flex items-center gap-1.5 mt-2">
+                {['bg', 'surface', 'surface2', 'hairline', 'hairline2'].map(k => (
+                  <span key={k} title={k} className="h-5 flex-1 rounded border pb-hairline"
+                    style={{ background: theme.dark[k] }} />
+                ))}
+              </div>
+              <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+                Cards, panels and borders are derived from the base so a custom dark colour (navy, maroon…) stays cohesive.
+              </p>
+            </div>
           </div>
 
           {/* --- Player name format --- */}

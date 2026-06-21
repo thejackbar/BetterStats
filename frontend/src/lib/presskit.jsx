@@ -231,20 +231,30 @@ export function Skeleton({ className = "", w, h }) {
 }
 
 // ── Page header ────────────────────────────────────────────────────────
-export function PageHeader({ eyebrow, title, meta, actions }) {
+export function PageHeader({ eyebrow, title, meta, actions, gradient }) {
+  const content = (
+    <div>
+      {eyebrow && <Label>{eyebrow}</Label>}
+      <h1 className="font-display text-[40px] sm:text-[56px] font-bold tracking-tight leading-[0.95] mt-1.5 text-pb-text">
+        {title}
+      </h1>
+      {meta && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-pb-dim font-mono text-[13px] mt-1.5">
+          {meta}
+        </div>
+      )}
+    </div>
+  );
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-5">
-      <div>
-        {eyebrow && <Label>{eyebrow}</Label>}
-        <h1 className="font-display text-[40px] sm:text-[56px] font-bold tracking-tight leading-[0.95] mt-1.5 text-pb-text">
-          {title}
-        </h1>
-        {meta && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-pb-dim font-mono text-[13px] mt-1.5">
-            {meta}
-          </div>
-        )}
-      </div>
+      {gradient ? (
+        // A thin primary→secondary bar puts both club colours on the page without
+        // a contrast trap (nothing readable sits on the gradient).
+        <div className="flex items-stretch gap-3.5">
+          <span className="w-1 rounded-full shrink-0" style={{ background: "var(--pb-gradient)" }} />
+          {content}
+        </div>
+      ) : content}
       {actions && <div className="flex gap-2 flex-wrap">{actions}</div>}
     </div>
   );

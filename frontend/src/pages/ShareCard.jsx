@@ -393,7 +393,7 @@ export default function ShareCard() {
         <div className="flex justify-center pb-4">
           <div
             className="magic-glow-wrapper w-full max-w-[610px]"
-            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.accent_color || '#16c784'} 0%, ${org?.theme_config?.dark?.surface2 || '#0d2a4e'} 100%)` }}
+            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.accent_color || '#16c784'} 0%, ${org?.theme_config?.accent2 || org?.theme_config?.dark?.surface2 || '#0d2a4e'} 100%)` }}
           >
             <ShareCardVisual
               player={player}

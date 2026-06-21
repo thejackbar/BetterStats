@@ -8,10 +8,16 @@
  *
  * Accent / indicator / chart colours are shared across light and dark.
  * Only the surface + text tokens differ per theme.
+ *
+ * Most clubs play in two colours, so the palette carries a primary `accent`
+ * and a `accent2` secondary. The secondary drives the primary→secondary
+ * gradient (`--pb-gradient`) and the default second chart series (wickets),
+ * the two places a second colour reads well without a contrast trap.
  */
 
 export const BRAND = {
   accent: '#16c784',
+  accent2: '#3b82f6',
   positive: '#16c784',
   negative: '#ef5b5b',
   chart_runs: '#16c784',
@@ -38,6 +44,7 @@ export const BRAND = {
 /** Brand + chart colour fields shown in the admin form. */
 export const COLOR_FIELDS = [
   { key: 'accent', label: 'Accent', hint: 'Primary brand colour — buttons, links, highlights' },
+  { key: 'accent2', label: 'Secondary accent', hint: 'Your second club colour, used in gradients and the wickets chart line' },
   { key: 'positive', label: 'Top indicator', hint: 'Good / leading values' },
   { key: 'negative', label: 'Bottom indicator', hint: 'Poor / trailing values' },
   { key: 'chart_runs', label: 'Chart — runs', hint: 'Runs series in graphs' },
@@ -60,15 +67,60 @@ export const PALETTE_FIELDS = [
   { key: 'text', label: 'Text' },
 ]
 
+/** Expand #abc → #aabbcc and lowercase; returns null if not a 3/6-digit hex. */
+function normHex(hex) {
+  const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec((hex || '').trim())
+  if (!m) return null
+  let h = m[1]
+  if (h.length === 3) h = h.split('').map(ch => ch + ch).join('')
+  return '#' + h.toLowerCase()
+}
+
+/** Lighten a hex toward white by fraction f (0..1). Falls back to the input. */
+function mixWhite(hex, f) {
+  const h = normHex(hex)
+  if (!h) return hex
+  const n = parseInt(h.slice(1), 16)
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+    .map(c => Math.round(c + (255 - c) * f).toString(16).padStart(2, '0'))
+  return '#' + ch.join('')
+}
+
+/**
+ * Derive the full dark surface ramp from a single base background colour, so a
+ * club can pick one dark base (navy, maroon…) and get cohesive cards + borders
+ * instead of the base sitting under default near-black surfaces. Text levels are
+ * kept from the supplied base palette — light greys read on any dark base.
+ */
+export function deriveDarkPalette(bg, base = BRAND.dark) {
+  if (!normHex(bg)) return { ...base }
+  return {
+    ...base,
+    bg,
+    surface: mixWhite(bg, 0.05),
+    surface2: mixWhite(bg, 0.10),
+    hairline: mixWhite(bg, 0.14),
+    hairline2: mixWhite(bg, 0.20),
+  }
+}
+
+/** Inline CSS for the primary→secondary brand gradient. */
+export const gradientCss = (accent, accent2) =>
+  `linear-gradient(135deg, ${accent} 0%, ${accent2} 100%)`
+
 /** Merge a club's stored theme_config over the brand defaults. */
 export function resolveTheme(config) {
   const c = config || {}
   return {
     accent: c.accent || BRAND.accent,
+    accent2: c.accent2 || BRAND.accent2,
     positive: c.positive || BRAND.positive,
     negative: c.negative || BRAND.negative,
     chart_runs: c.chart_runs || BRAND.chart_runs,
-    chart_wickets: c.chart_wickets || BRAND.chart_wickets,
+    // The wickets series follows the secondary accent by default, so a club that
+    // sets two colours gets an on-brand runs/wickets pairing for free. An
+    // explicit chart_wickets still wins.
+    chart_wickets: c.chart_wickets || c.accent2 || BRAND.chart_wickets,
     chart_milestone: c.chart_milestone || BRAND.chart_milestone,
     chart_series: (Array.isArray(c.chart_series) && c.chart_series.length)
       ? c.chart_series
@@ -87,6 +139,8 @@ export function buildThemeCss(config) {
   const t = resolveTheme(config)
   const shared = [
     `--pb-accent:${t.accent}`,
+    `--pb-accent-2:${t.accent2}`,
+    `--pb-gradient:${gradientCss(t.accent, t.accent2)}`,
     `--pb-positive:${t.positive}`,
     `--pb-negative:${t.negative}`,
     `--pb-red:${t.negative}`,
