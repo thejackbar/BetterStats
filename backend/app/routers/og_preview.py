@@ -379,6 +379,13 @@ def _blocks_to_html(blocks: list[dict]) -> str:
             out.append(f"<ul>{lis}</ul>")
         elif t == "callout":
             out.append(f'<p>{_esc(b.get("text",""))} <a href="/contact">Learn more</a></p>')
+        elif t == "table":
+            head = "".join(f"<th>{_esc(h)}</th>" for h in b.get("headers", []))
+            rows = "".join(
+                "<tr>" + "".join(f"<td>{_esc(c)}</td>" for c in r) + "</tr>"
+                for r in b.get("rows", [])
+            )
+            out.append(f"<table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>")
         elif t == "links":
             parts = []
             for it in b.get("items", []):

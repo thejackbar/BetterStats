@@ -58,6 +58,29 @@ function ContentBlock({ block }) {
           </Link>
         </div>
       )
+    case 'table':
+      return (
+        <div className="my-6 overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr>
+                {block.headers.map((h, i) => (
+                  <th key={i} className="text-left font-semibold text-pb-text border-b pb-hairline py-2 pr-4 align-bottom">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className={`border-b pb-hairline py-2 pr-4 align-top ${ci === 0 ? 'text-pb-text font-medium' : 'text-pb-dim'}`}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
     case 'links':
       return (
         <div className="my-6">
