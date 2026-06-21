@@ -58,6 +58,49 @@ function ContentBlock({ block }) {
           </Link>
         </div>
       )
+    case 'table':
+      return (
+        <div className="my-6 overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr>
+                {block.headers.map((h, i) => (
+                  <th key={i} className="text-left font-semibold text-pb-text border-b pb-hairline py-2 pr-4 align-bottom">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className={`border-b pb-hairline py-2 pr-4 align-top ${ci === 0 ? 'text-pb-text font-medium' : 'text-pb-dim'}`}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    case 'links':
+      return (
+        <div className="my-6">
+          {block.heading && (
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">{block.heading}</p>
+          )}
+          <ul className="space-y-1.5">
+            {block.items.map((it, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <span className="mt-0.5 shrink-0" style={{ color: 'var(--pb-accent)' }}>→</span>
+                {it.external ? (
+                  <a href={it.href} rel="noopener" className="text-pb-dim hover:text-pb-text underline transition-colors">{it.label}</a>
+                ) : (
+                  <Link to={it.href} className="text-pb-dim hover:text-pb-text underline transition-colors">{it.label}</Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )
     default:
       return null
   }
@@ -100,6 +143,15 @@ export default function BlogPost() {
         { '@type': 'ListItem', position: 3, name: post.title, item: postUrl },
       ],
     },
+    ...(post.faq?.length ? [{
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: post.faq.map(({ q, a }) => ({
+        '@type': 'Question',
+        name: q,
+        acceptedAnswer: { '@type': 'Answer', text: a },
+      })),
+    }] : []),
   ] : undefined
 
   usePageMeta(post ? {
@@ -149,6 +201,21 @@ export default function BlogPost() {
             <ContentBlock key={i} block={block} />
           ))}
         </div>
+
+        {/* FAQ */}
+        {post.faq?.length > 0 && (
+          <div className="mt-12 pb-hairline-t pt-10">
+            <h2 className="font-display font-bold text-[22px] text-pb-text mb-5 leading-tight">Frequently asked questions</h2>
+            <div className="space-y-6">
+              {post.faq.map((f, i) => (
+                <div key={i}>
+                  <h3 className="font-semibold text-pb-text mb-1.5">{f.q}</h3>
+                  <p className="text-pb-dim leading-relaxed text-sm">{f.a}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* CTA */}
         <div className="mt-16 pb-hairline-t pt-10">
