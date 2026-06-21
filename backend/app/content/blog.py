@@ -27,6 +27,95 @@ IMAGE_HEIGHT = 1080
 # article and FAQ schema, not just the card. Card-only posts omit them.
 BLOG_POSTS: list[dict] = [
     {
+        "slug": "bettercricket-vs-teamapp",
+        "title": "BetterCricket vs TeamApp: Comms App or Club Platform?",
+        "date": "2026-06-21",
+        "image": "/marketing/blog/merge-duplicate-players.jpg",
+        "description": (
+            "TeamApp keeps your members talking; BetterCricket runs the cricket. "
+            "How a comms app and a club platform compare, and why clubs use both."
+        ),
+        "body": [
+            {"type": "p", "text": "TeamApp (Stack Team App) and BetterCricket both turn up when a club is getting organised online, but they do different things. TeamApp is about talking to your members. BetterCricket is about running the cricket."},
+            {"type": "h2", "text": "What each one is"},
+            {"type": "p", "text": "TeamApp is a free communications and membership app. It gives any club or social group a quick smartphone app and a website, with news, events, push notifications, chat, and the option to sell tickets and memberships. BetterCricket is a cricket club platform: automatic stats and history, a public club site, and modules for selection, social posts, fees and opposition analysis."},
+            {"type": "h2", "text": "Side by side"},
+            {"type": "table", "headers": ["", "TeamApp", "BetterCricket"], "rows": [
+                ["Main job", "Club communication", "Running the club"],
+                ["App and website", "Free app and website", "Public website, runs in the browser"],
+                ["News, chat, push notifications", "Yes", "Member email with BetterAdmin"],
+                ["Cricket stats and history", "No", "Full career stats, decades imported"],
+                ["Leaderboards, records, yearbooks", "No", "Yes"],
+                ["Team selection", "Rosters and attendance", "Availability plus smart selection"],
+                ["Opposition analysis", "No", "Yes, with BetterIQ"],
+                ["Pricing", "Free, with ads (paid to remove)", "Flat annual rate per club"],
+            ]},
+            {"type": "h2", "text": "Where TeamApp is strong"},
+            {"type": "p", "text": "If you want a free, quick way to get an app in front of your members and keep everyone in the loop, TeamApp is hard to beat. It sets up in minutes and works for any club, not just cricket."},
+            {"type": "h2", "text": "Where BetterCricket is strong"},
+            {"type": "p", "text": "TeamApp does not handle cricket stats, history or analysis. If you want your full history online, leaderboards and records, season yearbooks, smart selection and opposition scouting, that is what BetterCricket is built for. Plenty of clubs run a comms app for chat and BetterCricket for the cricket."},
+            {"type": "links", "heading": "Related", "items": [
+                {"label": "BetterCricket features", "href": "/features"},
+                {"label": "Pricing", "href": "/pricing"},
+                {"label": "The modules", "href": "/modules"},
+                {"label": "TeamApp", "href": "https://www.teamapp.com", "external": True},
+                {"label": "PlayHQ", "href": "https://www.playhq.com", "external": True},
+            ]},
+            {"type": "callout", "text": "BetterCricket handles the cricket: stats, history, the website, selection and analysis. Bring your club online and we handle the first full historical sync."},
+        ],
+        "faq": [
+            {"q": "Is TeamApp a cricket stats platform?", "a": "No. TeamApp is a free communications and membership app for any club. It handles news, chat, events and notifications, not cricket stats, history or analysis."},
+            {"q": "Can I use TeamApp and BetterCricket together?", "a": "Yes. Many clubs use a comms app for chat and BetterCricket for stats, the website and the cricket-specific jobs."},
+            {"q": "Is BetterCricket free like TeamApp?", "a": "TeamApp is free with ads. BetterCricket is a flat annual rate per club, from $399 for the Core, and the stats site is ad free."},
+            {"q": "What does BetterCricket do that TeamApp does not?", "a": "Full cricket stats and history, leaderboards and records, season yearbooks, smart team selection, and opposition analysis."},
+        ],
+    },
+    {
+        "slug": "bettercricket-vs-play-cricket",
+        "title": "BetterCricket vs Play-Cricket: How They Fit Together",
+        "date": "2026-06-21",
+        "image": "/marketing/blog/playhq-migration.jpg",
+        "description": (
+            "Play-Cricket runs UK league cricket; BetterCricket adds the club "
+            "layer on top. How the two fit together for an English club."
+        ),
+        "body": [
+            {"type": "p", "text": "Play-Cricket is to UK club cricket what PlayHQ is to Australia: the official platform clubs run on. BetterCricket is the club layer on top, and the two work together rather than against each other."},
+            {"type": "h2", "text": "What each one is"},
+            {"type": "p", "text": "Play-Cricket is the ECB's official platform for UK club cricket. Fixtures, results, league tables, scorecards and a free basic club site run through it. BetterCricket is a cricket club platform that connects to Play-Cricket through its official API and adds a richer public website, your full history and stats, selection, social posts and analytics. It started in Australia and is bringing the same approach to UK clubs."},
+            {"type": "h2", "text": "Side by side"},
+            {"type": "table", "headers": ["", "Play-Cricket", "BetterCricket"], "rows": [
+                ["Main job", "Official UK competition admin", "Running the club"],
+                ["Fixtures, results, league tables", "Yes", "Reads from Play-Cricket"],
+                ["Scorecards", "Yes", "Reads finished scorecards"],
+                ["Club website", "Free basic site", "Full branded club site"],
+                ["Full history and career stats", "Recent seasons", "Decades, brought across on setup"],
+                ["Team selection and availability", "No", "Yes, with BetterSelect"],
+                ["Match-day social graphics", "No", "Yes, with BetterSocials"],
+                ["Opposition analysis", "No", "Yes, with BetterIQ"],
+                ["Pricing", "Free, funded by the ECB", "Flat annual rate per club"],
+            ]},
+            {"type": "h2", "text": "How they work together"},
+            {"type": "p", "text": "You keep running fixtures and results in Play-Cricket. BetterCricket reads that data through the official API with your club's token, so your stats and website stay current and you enter the data once."},
+            {"type": "h2", "text": "Where each one is strong"},
+            {"type": "p", "text": "Play-Cricket is the official platform, it is free, and every UK club is already on it for league cricket. BetterCricket adds the parts it does not cover: a proper club website, your full history online, leaderboards and records, season yearbooks, smart selection and opposition scouting, all from the same data."},
+            {"type": "links", "heading": "Related", "items": [
+                {"label": "BetterCricket features", "href": "/features"},
+                {"label": "Pricing", "href": "/pricing"},
+                {"label": "The modules", "href": "/modules"},
+                {"label": "Play-Cricket", "href": "https://www.play-cricket.com", "external": True},
+                {"label": "England and Wales Cricket Board", "href": "https://www.ecb.co.uk", "external": True},
+            ]},
+            {"type": "callout", "text": "BetterCricket reads your Play-Cricket data through the official API and turns it into a club website, a full history and analytics. Get in touch to talk about bringing it to your club."},
+        ],
+        "faq": [
+            {"q": "Is BetterCricket a replacement for Play-Cricket?", "a": "No. Play-Cricket is the ECB's official platform for fixtures, results and league tables. BetterCricket sits on top and adds a richer website, full history, stats and analytics."},
+            {"q": "How does BetterCricket get my Play-Cricket data?", "a": "Through the official Play-Cricket API, using your club's own API token, so you do not enter anything twice."},
+            {"q": "Is Play-Cricket free?", "a": "Yes. Play-Cricket is funded by the ECB and free for clubs. BetterCricket is a flat annual rate per club for the extra website, stats and analytics layer."},
+            {"q": "Is BetterCricket available in the UK?", "a": "BetterCricket started in Australia and is bringing its platform to UK clubs through the Play-Cricket API. Get in touch to talk about your club."},
+        ],
+    },
+    {
         "slug": "bettercricket-vs-playhq",
         "title": "BetterCricket vs PlayHQ: How They Fit Together",
         "date": "2026-06-21",
