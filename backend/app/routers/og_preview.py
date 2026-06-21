@@ -362,6 +362,41 @@ def _marketing_html(path: str, base: str) -> str:
     )
 
 
+def _blocks_to_html(blocks: list[dict]) -> str:
+    """Render the blog content blocks (mirrored from frontend blog.js) into the
+    crawler HTML so an AI engine that doesn't run JS gets the full article body,
+    not just the card. Block types match BlogPost.jsx: p / h2 / ul / callout /
+    links."""
+    out: list[str] = []
+    for b in blocks or []:
+        t = b.get("type")
+        if t == "h2":
+            out.append(f"<h2>{_esc(b.get('text',''))}</h2>")
+        elif t == "p":
+            out.append(f"<p>{_esc(b.get('text',''))}</p>")
+        elif t == "ul":
+            lis = "".join(f"<li>{_esc(i)}</li>" for i in b.get("items", []))
+            out.append(f"<ul>{lis}</ul>")
+        elif t == "callout":
+            out.append(f'<p>{_esc(b.get("text",""))} <a href="/contact">Learn more</a></p>')
+        elif t == "links":
+            parts = []
+            for it in b.get("items", []):
+                rel = ' rel="noopener"' if it.get("external") else ""
+                parts.append(f'<a href="{_esc(it.get("href",""))}"{rel}>{_esc(it.get("label",""))}</a>')
+            out.append("<p>" + " · ".join(parts) + "</p>")
+    return "".join(out)
+
+
+def _faq_section_html(faq: list[dict]) -> str:
+    if not faq:
+        return ""
+    items = "".join(
+        f"<h3>{_esc(f.get('q',''))}</h3><p>{_esc(f.get('a',''))}</p>" for f in faq
+    )
+    return f"<h2>Frequently asked questions</h2>{items}"
+
+
 def _blog_html(slug: str, page_url: str, base: str) -> str | None:
     post = blog_content.get_post(slug)
     if not post:
@@ -404,6 +439,22 @@ def _blog_html(slug: str, page_url: str, base: str) -> str | None:
         },
     ]
 
+    # Posts that carry a body/faq (the JTBD/comparison posts) get the full
+    # article rendered into the crawler HTML plus FAQ schema; the older
+    # card-only posts fall back to the title + description card unchanged.
+    faq = post.get("faq") or []
+    body_extra = _blocks_to_html(post.get("body") or []) + _faq_section_html(faq)
+    if faq:
+        jsonld.append({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": [
+                {"@type": "Question", "name": f["q"],
+                 "acceptedAnswer": {"@type": "Answer", "text": f["a"]}}
+                for f in faq
+            ],
+        })
+
     return _html(
         title,
         post["description"],
@@ -414,6 +465,7 @@ def _blog_html(slug: str, page_url: str, base: str) -> str | None:
         image_h=blog_content.IMAGE_HEIGHT,
         image_alt=post["title"],
         og_type="article",
+        body_extra=body_extra,
     )
 
 
