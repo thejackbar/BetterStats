@@ -218,6 +218,76 @@ def _esc(s: str) -> str:
     )
 
 
+# Shared answerable body for the marketing server-render. Mirrors the
+# pre-render block in frontend/index.html and /llms.txt so an AI crawler that
+# does not run JavaScript gets real content: a descriptive heading, 300+ words,
+# question headings, in-body internal links and external citations. Keep the
+# copy in step with index.html and the FAQ.jsx source.
+MARKETING_FAQ: list[tuple[str, str]] = [
+    ("What is BetterCricket?",
+     "BetterCricket is a modular platform for Australian club cricket, made by "
+     "BetterSports. Every club starts with BetterStats, which brings in every "
+     "batting, bowling and fielding stat and turns it into a public club "
+     "website with player profiles, leaderboards, all-time records, "
+     "partnerships, awards, season yearbooks and shareable stat cards. From "
+     "there you can add BetterSelect, BetterSocials, BetterAdmin and BetterIQ."),
+    ("How much does BetterCricket cost?",
+     "BetterStats is $399 a year and includes your public stats site. You add "
+     "only the modules you want: BetterSelect, BetterSocials and BetterAdmin are "
+     "$149 a year each, and BetterIQ is $249. Bundle two or more and a set "
+     "discount applies, which brings BetterStats plus every module to $949 a "
+     "year. Every price is a flat rate per club, the same for one team or fifty."),
+    ("How far back does the historical data go?",
+     "As far back as the records exist. For many clubs that means decades of "
+     "match history, confirmed back to 1975 in some cases. BetterCricket brings "
+     "across whatever is available on first sync, and you can layer manually "
+     "imported records on top."),
+    ("Who is BetterCricket for?",
+     "Australian cricket clubs of any size, from premier grade to country and "
+     "association clubs, plus the stats volunteers, captains, coaches, "
+     "committees, players, parents and sponsors who care about the club."),
+    ("Does each player get their own profile?",
+     "Yes. Every player gets a public profile with career stats, a "
+     "season-by-season breakdown, career progression charts, dismissal and "
+     "batting-position analysis, partnership history, milestone badges and a "
+     "one-tap shareable stat card."),
+    ("How do I get BetterCricket for my club?",
+     "Fill in the request-access form on the homepage or email "
+     "betteratcricket@gmail.com. The BetterCricket team handles the setup, "
+     "including the first full historical sync."),
+]
+
+
+def _faq_jsonld() -> dict:
+    return {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {"@type": "Question", "name": q,
+             "acceptedAnswer": {"@type": "Answer", "text": a}}
+            for q, a in MARKETING_FAQ
+        ],
+    }
+
+
+def _marketing_body() -> str:
+    intro = (
+        "<p>BetterCricket is the platform Australian cricket clubs run on. It "
+        "imports your club's full match history, going back decades, and turns "
+        "it into an automatic public website with player profiles, leaderboards, "
+        "all-time records and season yearbooks. It adds modules for team "
+        "selection, social posts, club admin and opposition analytics.</p>"
+        "<p>BetterCricket reads the match data your club already records through "
+        '<a href="https://www.playhq.com" rel="noopener">PlayHQ</a> and '
+        '<a href="https://www.cricket.com.au" rel="noopener">Cricket Australia</a>, '
+        "so the figures match your official competition results. See the full "
+        '<a href="/features">feature list</a> and <a href="/pricing">pricing</a>, '
+        'or <a href="/contact">request access for your club</a>.</p>'
+    )
+    faq = "".join(f"<h2>{_esc(q)}</h2><p>{_esc(a)}</p>" for q, a in MARKETING_FAQ)
+    return intro + faq
+
+
 def _html(
     title: str,
     description: str,
@@ -228,6 +298,7 @@ def _html(
     image_h: int | None = None,
     image_alt: str | None = None,
     og_type: str = "website",
+    body_extra: str = "",
 ) -> str:
     if image:
         img_tags = f"""
@@ -275,7 +346,7 @@ def _html(
 </head>
 <body>
   <h1>{_esc(title)}</h1>
-  <p>{_esc(description)}</p>
+  <p>{_esc(description)}</p>{body_extra}
 </body>
 </html>"""
 
@@ -288,9 +359,11 @@ def _marketing_html(path: str, base: str) -> str:
         description,
         _abs_url(OG_COVER, base),
         f"{base}{path}",
+        jsonld=_faq_jsonld(),
         image_w=COVER_W,
         image_h=COVER_H,
         image_alt=COVER_ALT,
+        body_extra=_marketing_body(),
     )
 
 

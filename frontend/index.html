@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta name="google-site-verification" content="JaTqUSOcpWh1Y1fBdgsPaBoxgUMr3MF2EralyhDFRi8" />
     <title>BetterCricket — The platform Australian cricket clubs run on</title>
-    <meta name="description" content="BetterCricket turns your club's match history into a beautiful, automated website — player profiles, leaderboards, records and season yearbooks — then adds selection, socials, club admin and analytics. No spreadsheets, no data entry." />
+    <meta name="description" content="Turn your cricket club's match history into an automatic website with player profiles, leaderboards, records and season yearbooks. Built for Australian clubs." />
     <meta name="author" content="BetterSports" />
     <meta name="keywords" content="cricket stats, club cricket, cricket statistics, cricket club platform, cricket club website, Australian cricket, cricket leaderboards, cricket records, cricket yearbook, cricket player profiles, team selection, cricket analytics" />
     <link rel="canonical" href="https://betterat.cricket/" />
@@ -144,6 +144,47 @@
     }
     </script>
 
+    <!-- FAQ structured data, mirrored in the pre-render body below so crawlers
+         that don't run JavaScript still get answerable Q&A. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is BetterCricket?",
+          "acceptedAnswer": { "@type": "Answer", "text": "BetterCricket is a modular platform for Australian club cricket, made by BetterSports. Every club starts with BetterStats, which brings in every batting, bowling and fielding stat and turns it into a public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. From there you can add BetterSelect, BetterSocials, BetterAdmin and BetterIQ." }
+        },
+        {
+          "@type": "Question",
+          "name": "How much does BetterCricket cost?",
+          "acceptedAnswer": { "@type": "Answer", "text": "BetterStats is $399 a year and includes your public stats site. You add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $149 a year each, and BetterIQ is $249. Bundle two or more and a set discount applies, which brings BetterStats plus every module to $949 a year. Every price is a flat rate per club, the same for one team or fifty." }
+        },
+        {
+          "@type": "Question",
+          "name": "How far back does the historical data go?",
+          "acceptedAnswer": { "@type": "Answer", "text": "As far back as the records exist. For many clubs that means decades of match history, confirmed back to 1975 in some cases. BetterCricket brings across whatever is available on first sync, and you can layer manually imported records on top." }
+        },
+        {
+          "@type": "Question",
+          "name": "Who is BetterCricket for?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Australian cricket clubs of any size, from premier grade to country and association clubs, plus the stats volunteers, captains, coaches, committees, players, parents and sponsors who care about the club." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does each player get their own profile?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Every player gets a public profile with career stats, a season-by-season breakdown, career progression charts, dismissal and batting-position analysis, partnership history, milestone badges and a one-tap shareable stat card." }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I get BetterCricket for my club?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Fill in the request-access form on the homepage or email betteratcricket@gmail.com. The BetterCricket team handles the setup, including the first full historical sync." }
+        }
+      ]
+    }
+    </script>
+
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T44P68BC88"></script>
     <script>
@@ -161,7 +202,60 @@
     />
   </head>
   <body class="bg-navy-950 text-white">
-    <div id="root"></div>
+    <!--
+      Pre-render content. BetterCricket is a client-rendered SPA, so the raw
+      HTML that AI crawlers and AEO checkers fetch (they don't run JavaScript)
+      used to be an empty #root — no body text, no headings, no links. This
+      block gives them real, answerable content. React (createRoot in main.jsx)
+      replaces #root's children the moment it mounts, so live visitors never
+      see it. Keep the copy in step with /llms.txt and the FAQ schema above.
+    -->
+    <div id="root">
+      <main style="min-height:100vh;background:#0b1220;color:#e6eaf2;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;">
+        <div style="max-width:860px;margin:0 auto;padding:56px 22px;">
+          <h1 style="font-size:2rem;font-weight:800;letter-spacing:-0.01em;margin:0 0 18px;color:#fff;">Automated stats, websites and analytics for Australian cricket clubs</h1>
+          <p style="font-size:1.08rem;margin:0 0 18px;">BetterCricket is the platform Australian cricket clubs run on. It imports your club's full match history, going back decades, and turns it into an automatic public website with player profiles, leaderboards, all-time records and season yearbooks. Add modules for team selection, social posts, club admin and opposition analytics, and your stats update automatically after every game.</p>
+          <p style="margin:0 0 28px;">BetterCricket reads the match data your club already records through <a href="https://www.playhq.com" rel="noopener" style="color:#34d399;">PlayHQ</a> and <a href="https://www.cricket.com.au" rel="noopener" style="color:#34d399;">Cricket Australia</a>, so there is no double entry and the figures match your official competition results. See the full <a href="/features" style="color:#34d399;">feature list</a> and <a href="/pricing" style="color:#34d399;">pricing</a>, or <a href="/contact" style="color:#34d399;">request access for your club</a>.</p>
+
+          <h2 style="font-size:1.25rem;font-weight:700;margin:28px 0 8px;color:#fff;">What is BetterCricket?</h2>
+          <p style="margin:0 0 18px;">BetterCricket is a modular platform for Australian club cricket, made by BetterSports. Every club starts with BetterStats, which brings in every batting, bowling and fielding stat and turns it into a public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. From there you can add <a href="/modules" style="color:#34d399;">BetterSelect, BetterSocials, BetterAdmin and BetterIQ</a>.</p>
+
+          <h2 style="font-size:1.25rem;font-weight:700;margin:28px 0 8px;color:#fff;">How much does BetterCricket cost?</h2>
+          <p style="margin:0 0 14px;">BetterStats is $399 a year and includes your public stats site. You add only the modules you want, and bundling two or more brings BetterStats plus every module to $949 a year. Every price is a flat rate per club, the same for one team or fifty.</p>
+          <table style="width:100%;border-collapse:collapse;margin:0 0 22px;font-size:0.95rem;">
+            <caption style="text-align:left;color:#9aa6b8;padding-bottom:8px;">BetterCricket modules and annual pricing</caption>
+            <thead>
+              <tr>
+                <th style="text-align:left;border-bottom:1px solid #28324a;padding:8px 10px;">Module</th>
+                <th style="text-align:left;border-bottom:1px solid #28324a;padding:8px 10px;">What it does</th>
+                <th style="text-align:right;border-bottom:1px solid #28324a;padding:8px 10px;">Price (per year)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">BetterStats (Core)</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">Stats and public club website</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;text-align:right;">$399</td></tr>
+              <tr><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">BetterSelect</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">Availability and team selection</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;text-align:right;">$149</td></tr>
+              <tr><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">BetterSocials</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">Website and match-day posts</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;text-align:right;">$149</td></tr>
+              <tr><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">BetterAdmin</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;">Fees, comms and merch</td><td style="padding:8px 10px;border-bottom:1px solid #1b2333;text-align:right;">$149</td></tr>
+              <tr><td style="padding:8px 10px;">BetterIQ</td><td style="padding:8px 10px;">Analytics and opposition scouting</td><td style="padding:8px 10px;text-align:right;">$249</td></tr>
+            </tbody>
+          </table>
+
+          <h2 style="font-size:1.25rem;font-weight:700;margin:28px 0 8px;color:#fff;">How far back does the historical data go?</h2>
+          <p style="margin:0 0 18px;">As far back as the records exist. For many clubs that means decades of match history, confirmed back to 1975 in some cases. BetterCricket brings across whatever is available on first sync, and you can layer manually imported records on top.</p>
+
+          <h2 style="font-size:1.25rem;font-weight:700;margin:28px 0 8px;color:#fff;">Who is BetterCricket for?</h2>
+          <p style="margin:0 0 18px;">Australian cricket clubs of any size, from premier grade to country and association clubs, plus the stats volunteers, captains, coaches, committees, players, parents and sponsors who care about the club.</p>
+
+          <h2 style="font-size:1.25rem;font-weight:700;margin:28px 0 8px;color:#fff;">Does each player get their own profile?</h2>
+          <p style="margin:0 0 18px;">Yes. Every player gets a public profile with career stats, a season-by-season breakdown, career progression charts, dismissal and batting-position analysis, partnership history, milestone badges and a one-tap shareable stat card.</p>
+
+          <h2 style="font-size:1.25rem;font-weight:700;margin:28px 0 8px;color:#fff;">How do I get BetterCricket for my club?</h2>
+          <p style="margin:0 0 22px;">Fill in the request-access form on the homepage or email <a href="mailto:betteratcricket@gmail.com" style="color:#34d399;">betteratcricket@gmail.com</a>. The BetterCricket team handles the setup, including the first full historical sync. You can read the <a href="/faq" style="color:#34d399;">full FAQ</a> or the <a href="/about" style="color:#34d399;">story behind BetterCricket</a> first.</p>
+
+          <p style="color:#9aa6b8;font-size:0.9rem;border-top:1px solid #1b2333;padding-top:16px;margin-top:8px;">Last updated June 2026. A full platform overview for AI assistants is published at <a href="/llms.txt" style="color:#34d399;">/llms.txt</a>.</p>
+        </div>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
