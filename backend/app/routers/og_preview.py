@@ -48,8 +48,7 @@ COVER_ALT = "BetterCricket, making your cricket club better"
 HOME_TITLE = "Making your cricket club better"
 HOME_DESC = (
     "Turn your cricket club's match history into an automatic website with "
-    "player profiles, leaderboards, records and season yearbooks. Built for "
-    "Australian clubs."
+    "player profiles, leaderboards and records. For Australian cricket clubs."
 )
 
 # Marketing routes -> (title, description). Keyed by the clean single-segment
@@ -250,6 +249,19 @@ MARKETING_FAQ: list[tuple[str, str]] = [
      "Fill in the request-access form on the homepage or email "
      "betteratcricket@gmail.com. The BetterCricket team handles the setup, "
      "including the first full historical sync."),
+    ("Do we own our club's data?",
+     "Always. The data belongs to your club, and you can export all of it to "
+     "CSV at any time."),
+    ("How long does setup take?",
+     "A simple setup is live in under an hour. The BetterCricket team runs the "
+     "first sync to bring your history in, then helps you tidy it before the "
+     "site goes public."),
+    ("Can we customise how the club site looks?",
+     "Yes. You control your club's colours, crest, sponsor placement and hero "
+     "imagery, so the site looks like your club."),
+    ("Do we have to change how our club scores?",
+     "No. BetterCricket sits on top of how you already run match day. Keep "
+     "scoring as you do now, and the stats turn up on your site automatically."),
 ]
 
 
