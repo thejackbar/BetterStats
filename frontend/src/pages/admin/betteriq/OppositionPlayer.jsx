@@ -36,6 +36,11 @@ export default function OppositionPlayer() {
   const [pSearch, setPSearch] = useState('')    // player-first search query
   const [pResults, setPResults] = useState([])
   const [pOpen, setPOpen] = useState(false)
+  // Squad list is collapsible — once you've picked a player it's just eating the
+  // width the profile wants, so let it minimise (persisted). When collapsed the
+  // top-bar search becomes a combobox so you can still switch players.
+  const [squadOpen, setSquadOpen] = useState(() => { try { return localStorage.getItem('iq.oppPlayer.squad') !== 'closed' } catch { return true } })
+  const [playerComboOpen, setPlayerComboOpen] = useState(false)
   const pollRef = useRef(null)
   const seededRef = useRef(false)
   const pendingNameRef = useRef(null)           // player name to select once a dossier is ready
@@ -181,6 +186,40 @@ export default function OppositionPlayer() {
   const playerMatches = pq ? everyone.filter(p => p.name.toLowerCase().includes(pq)) : everyone
   const clubRef = useRef(null)
   const playerRef = useRef(null)
+  const playerComboRef = useRef(null)
+
+  const toggleSquad = () => setSquadOpen(o => {
+    const next = !o
+    try { localStorage.setItem('iq.oppPlayer.squad', next ? 'open' : 'closed') } catch { /* ignore */ }
+    return next
+  })
+  const playerRightText = (p) => p.careerOnly
+    ? `${p.career?.runs ? runsPhrase(p.career.runs) : ''}${p.career?.wickets ? `${p.career?.runs ? ' · ' : ''}${wktsPhrase(p.career.wickets)}` : ''}`
+    : `${p.bat?.runs ? runsPhrase(p.bat.runs) : ''}${p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}`
+  // Squad rows — shared by the sidebar list and (when collapsed) the search
+  // combobox dropdown, so both read identically. `compact` adds the mousedown
+  // guard the dropdown needs to fire its click before the blur closes it.
+  const playerRows = (list, { compact = false } = {}) => list.map((p, i) => {
+    const on = p.id === sel
+    const danger = tags[p.id]?.is_danger || enriched.get(p.id)?.alert?.level === 'danger'
+    const firstCareer = p.careerOnly && (i === 0 || !list[i - 1].careerOnly)
+    return (
+      <Fragment key={p.id}>
+        {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Earlier years</div>}
+        <button type="button" onMouseDown={compact ? (e => e.preventDefault()) : undefined}
+          onClick={() => { pickPlayer(p.id); if (compact) setPlayerComboOpen(false) }}
+          className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition hover:bg-pb-surface2"
+          style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
+          <span className="font-medium text-[13.5px] truncate flex items-center gap-1.5" style={{ color: on ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+            {p.name}
+            {p.bat?.form === 'hot' && <Icon name="flame" size={12} style={{ color: 'var(--pb-red)' }} />}
+            {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
+          </span>
+          <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>{playerRightText(p)}</span>
+        </button>
+      </Fragment>
+    )
+  })
 
   return (
     <IQLayout
@@ -299,48 +338,49 @@ export default function OppositionPlayer() {
           <div className="flex flex-wrap items-center gap-3 mb-5">
             <span className="iq-eyebrow">Club</span>
             <span className="px-3 py-1.5 iq-display font-semibold text-[13px]" style={{ borderRadius: 99, background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>{club.name}</span>
-            <div className="flex-1 min-w-[220px] max-w-xs"><Search value={playerQ} onChange={setPlayerQ} placeholder={`Search ${club.name} players…`} className="w-full" /></div>
+            <Btn variant="soft" sm icon="teams" onClick={toggleSquad} title={squadOpen ? 'Hide the squad list' : 'Show the squad list'}>
+              {squadOpen ? 'Hide list' : `Squad (${all.length})`}
+            </Btn>
+            <div ref={playerComboRef} className="relative flex-1 min-w-[220px] max-w-xs"
+              onFocusCapture={() => { if (!squadOpen) setPlayerComboOpen(true) }}
+              onBlur={() => setTimeout(() => setPlayerComboOpen(false), 150)}>
+              <Search value={playerQ} onChange={(v) => { setPlayerQ(v); if (!squadOpen) setPlayerComboOpen(true) }} placeholder={`Search ${club.name} players…`} className="w-full" />
+              {!squadOpen && (
+                <Dropdown anchorRef={playerComboRef} open={playerComboOpen} onClose={() => setPlayerComboOpen(false)} maxHeight={360}
+                  className="iq-card p-1 iq-scroll shadow-lg" style={{ background: 'var(--pb-surface)' }}>
+                  {playerMatches.length === 0
+                    ? <div className="px-2.5 py-2 text-pb-faint text-sm">{everyone.length === 0 ? 'No players found.' : 'No match.'}</div>
+                    : playerRows(playerMatches.slice(0, 60), { compact: true })}
+                </Dropdown>
+              )}
+            </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[260px_1fr] items-start">
+          <div className={`grid gap-6 items-start ${squadOpen ? 'lg:grid-cols-[260px_1fr]' : 'grid-cols-1'}`}>
             {/* Squad list — current-season squad first, then everyone else CA's
-                aggregates have seen at this club in the last five years. */}
-            <div className="iq-card p-2 lg:sticky lg:top-20">
-              <div className="iq-eyebrow px-2 py-2">Squad ({all.length})</div>
-              <div className="max-h-[64vh] overflow-y-auto iq-scroll">
-                {playerMatches.length === 0
-                  ? <Empty className="px-2.5 py-2">{everyone.length === 0
-                      ? (clubPlayers?.status === 'building' ? 'Pulling their player history…' : 'No players found.')
-                      : 'No match.'}</Empty>
-                  : playerMatches.map((p, i) => {
-                    const on = p.id === sel
-                    const danger = tags[p.id]?.is_danger || enriched.get(p.id)?.alert?.level === 'danger'
-                    const firstCareer = p.careerOnly && (i === 0 || !playerMatches[i - 1].careerOnly)
-                    return (
-                      <Fragment key={p.id}>
-                        {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Earlier years</div>}
-                        <button onClick={() => pickPlayer(p.id)}
-                          className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition"
-                          style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
-                          <span className="font-medium text-[13.5px] truncate flex items-center gap-1.5" style={{ color: on ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
-                            {p.name}
-                            {p.bat?.form === 'hot' && <Icon name="flame" size={12} style={{ color: 'var(--pb-red)' }} />}
-                            {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
-                          </span>
-                          <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>
-                            {p.careerOnly
-                              ? `${p.career?.runs ? runsPhrase(p.career.runs) : ''}${p.career?.wickets ? `${p.career?.runs ? ' · ' : ''}${wktsPhrase(p.career.wickets)}` : ''}`
-                              : `${p.bat?.runs ? runsPhrase(p.bat.runs) : ''}${p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}`}
-                          </span>
-                        </button>
-                      </Fragment>
-                    )
-                  })}
-                {clubPlayers?.status === 'building' && everyone.length > 0 && (
-                  <div className="iq-eyebrow px-2 pt-3 pb-2 animate-pulse">Pulling their player history…</div>
-                )}
+                aggregates have seen at this club in the last five years. Collapsible
+                so the profile can take the full width once you've picked someone. */}
+            {squadOpen && (
+              <div className="iq-card p-2 lg:sticky lg:top-20">
+                <div className="flex items-center justify-between px-2 py-2">
+                  <span className="iq-eyebrow">Squad ({all.length})</span>
+                  <button type="button" onClick={toggleSquad} title="Hide list"
+                    className="text-pb-faint hover:text-pb-text transition" style={{ lineHeight: 0 }}>
+                    <Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)' }} />
+                  </button>
+                </div>
+                <div className="max-h-[64vh] overflow-y-auto iq-scroll">
+                  {playerMatches.length === 0
+                    ? <Empty className="px-2.5 py-2">{everyone.length === 0
+                        ? (clubPlayers?.status === 'building' ? 'Pulling their player history…' : 'No players found.')
+                        : 'No match.'}</Empty>
+                    : playerRows(playerMatches)}
+                  {clubPlayers?.status === 'building' && everyone.length > 0 && (
+                    <div className="iq-eyebrow px-2 pt-3 pb-2 animate-pulse">Pulling their player history…</div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Profile */}
             <div>

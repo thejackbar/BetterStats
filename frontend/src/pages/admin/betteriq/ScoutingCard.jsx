@@ -175,10 +175,13 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
   )
 }
 
-export default function ScoutingCard({ keyId, batting, bowling, stats, onSave, defaultSide = 'bat' }) {
-  const sides = defaultSide === 'bowl' ? ['bowl', 'bat'] : ['bat', 'bowl']
+export default function ScoutingCard({ keyId, batting, bowling, stats, onSave, defaultSide = 'bat', only = null }) {
+  // `only` renders a single side full-width (the tabbed Opposition-player profile
+  // shows the batting card under its Batting tab and the bowling card under
+  // Bowling); without it both cards sit side-by-side (the original layout).
+  const sides = only ? [only] : defaultSide === 'bowl' ? ['bowl', 'bat'] : ['bat', 'bowl']
   return (
-    <div className="grid gap-5 lg:grid-cols-2 items-start">
+    <div className={only ? '' : 'grid gap-5 lg:grid-cols-2 items-start'}>
       {sides.map(side => (
         <IntelSide key={side} side={side} keyId={keyId}
           intel={side === 'bat' ? batting : bowling} stats={stats} onSave={onSave} />
