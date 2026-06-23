@@ -600,6 +600,60 @@ More scorecard-reachable brief items, no schema change:
 - **Opponent ladder standing** — `iq.opponent_ladder` (`GET /iq/opposition/ladder`): fetches the live grade ladder (`grassroots_scores_client.get_grade_ladder` + an inline `_ladder_rows` parser of the documented fixturesladders shape) for the **fixture's grade** (via `resolve_opponent`), flags our row with `club_match_keys`, and matches the opponent row by club-name tokens (stop-words stripped). Returns `our_row` + `opponent_row` (rank/P/W/L/pts). **Current** standings only — historical "vs top-4" splits would need ladder snapshots we don't keep.
 - **Match preview** (brief §17.4) — new page `MatchPreview.jsx` at `/admin/betteriq/preview` (sidebar "Match preview"). Frontend composition (no new aggregator endpoint): picks an upcoming fixture from `list_opponents`'s `upcoming`, then fetches `opposition_report` (instant — no dossier build) + `opponent_ladder` + `team_overview` (par/record) in parallel and renders a lean (synthesised client-side), ladder, head-to-head, last meeting, their danger players, our edge, and links to the full scout + cheat sheet. Uses the instant report (fast), not the live dossier.
 
+## BetterIQ — Manual scouting cards: batting & bowling intel (v8.26.0, Jun 2026)
+
+The ball-level read CA does **not** record (no shot direction, no delivery
+length/line, no bowler-type-faced) entered by the scout, the same posture as the
+existing scout-entered scoring-zones wagon wheel. A **per-player** card (not a
+per-dismissal log — deliberately lighter than the competitor app that prompted
+it), for **both opposition players and our own**, blended on read with the
+dismissal mix we *do* hold into a short "DNA" read.
+
+- **Storage** (**migration 094** + idempotent `main.py` lifespan mirror): two JSONB
+  blobs `batting_intel` / `bowling_intel`. For opponents they're new columns on
+  the existing `opponent_player_tags` (keyed by CA participant GUID, merged onto
+  the dossier on the frontend like the other tags). For our own players, a new
+  `player_scouting_cards` table (`organisation_id`, `player_id`, the two blobs,
+  `updated_by`; unique `(org, player)`). Blob shape — batting: `vuln_bowling[]`,
+  `zones[20]` (4 lengths × 5 lines, intensity 0–3), `shots[]`, `strengths`,
+  `weaknesses`, `plan`; bowling: `stock`, `variations[]`, `zones[20]`, `danger[]`,
+  `strengths`, `weaknesses`, `plan`.
+- **Validation** — `services/scouting_intel.py` (`clean_batting_intel` /
+  `clean_bowling_intel` + the controlled vocab: `BOWLING_KINDS`, `BAT_SHOTS`,
+  `BOWL_VARIATIONS`, `BOWL_DANGER`, `ZONE_LENGTHS`/`ZONE_LINES`). Shared by the
+  opponent upsert (`iq.upsert_opponent_tag`) and the own-player upsert
+  (`iq_trends.upsert_player_scouting`). An empty blob normalises to NULL.
+- **Present-aware partial save** — `upsert_opponent_tag` now only overwrites a
+  field when its **key is present** in the body (per-field `CASE WHEN :x_present`),
+  so the four distinct editors (basic tags / scoring zones / batting card / bowling
+  card) don't clobber each other. This also **fixed a latent bug**: saving the
+  scoring-zones editor used to NULL the role/danger flags it doesn't send. The
+  upsert re-selects and returns the full stored row (not an echo of the partial
+  body). Same present-aware pattern in `player_scouting_cards`.
+- **Routes** — own players: `GET`/`PUT /iq/trends/player/{id}/scouting`
+  (`iq_trends.get_player_scouting` / `upsert_player_scouting`, org-scoped via the
+  same `players WHERE id AND organisation_id` gate as `player_deep_dive`).
+  Opponents reuse `PUT /iq/opposition/player-tags/{id}` (the body just carries
+  `batting_intel`/`bowling_intel` too). api.js: `iqPlayerScouting` /
+  `iqSavePlayerScouting`.
+- **Frontend** — shared `ScoutingCard.jsx` (Batting + Bowling cards, each a
+  display + inline editor) + `scoutDna.js` (vocab labels mirroring the backend +
+  `buildBattingDna`/`buildBowlingDna`, which blend manual intel with the held
+  dismissal breakdown into bullet insights and a headline "plan"). New
+  `viz.ZoneGrid` (editable length×line heatmap, click cycles 0→3). Wired into
+  `OppPlayerProfile.jsx` (opponent tag save) and the shared `PlayerDeepDive.jsx`
+  `DeepDiveTab` (optional `scouting`/`onSaveScouting` props) used by both
+  `PlayerTrends.jsx` and `PlayerHub.jsx`.
+- **Bowler-fairness fixes** (the original ask — the opponent profile was
+  batting-first): the radar is now a Bat/Bowl toggle (`OppRadarCard`, defaults to
+  the player's stronger side; a bowler no longer gets forced into a batting radar);
+  the Bowling stat card adds strike rate + a recent-wickets sparkline; the
+  scoring-zones wagon wheel (a *batting* feature) is hidden for a pure bowler; and
+  the opponent **deep scan** (`iq_scout._scan_player_deep`, `DEEP_VERSION`→2) now
+  derives **"how he takes wickets"** + wicket quality (set/started/new from the
+  dismissed batter's runs) by parsing the opposition cards in the innings he
+  bowled — reusing sync's `_parse_bowler_and_fielder` / `_BOWLER_CREDIT_DT`.
+
 **Two data layers** (`backend/app/services/`):
 - `iq.py` — *instant* report from data we already hold: head-to-head vs an opponent (W/L/D, home/away split, recent meetings) + our players' record vs them (selection intel). Opponent identity = `COALESCE(opp_org_id, opp_club_name)` (`opp_key`), org-scoped via grades→seasons over the `v_effective_*` views — same pattern as `aggregations.get_player_by_opposition`.
 - `iq_opponent.py` — *live* opponent dossier. Opponents aren't synced, but they play in grades we already track and the Grassroots `/scores/*` scorecards carry BOTH teams (sync discards the opponent half: `if pid not in our_team_pids: continue`). So we fetch the fixture's grade matches, keep the opponent (the `teams[]` entry whose `owningOrganisation.id` ≠ ours, or matched by club name), and aggregate their current-season batting/bowling/fielding per `participantId` — the mirror of sync's `our_team_pids` gate. Plus deep head-to-head: re-fetch our stored games vs them (capped) and parse the opponent cards → each opponent player annotated with their record vs us. A never-played-but-fixtured opponent is still scoutable (key the dossier on the name + fixture grade).

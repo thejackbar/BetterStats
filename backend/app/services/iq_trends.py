@@ -13,12 +13,14 @@ the numbers match the rest of the app exactly. Org-scoping for the club-wide
 """
 from __future__ import annotations
 
+import json
 import math
 import statistics
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import scouting_intel
 from app.services.aggregations import (
     get_bowling_by_batter_position,
     get_bowling_dismissal_breakdown,
@@ -523,6 +525,86 @@ async def _similar_players(session: AsyncSession, org_id: str, player_id: str) -
         })
     out.sort(key=lambda x: x["similarity"], reverse=True)
     return out[:5]
+
+
+# ─── Scouting card (manual batting/bowling intel) ────────────────────────────
+# The ball-level read CA can't give us — vulnerable-to bowler types, a length×line
+# weakness grid, favoured shots, stock ball + variations. Stored per OWN player in
+# ``player_scouting_cards`` (org-scoped), the mirror of opponents' ``opponent_player_tags``.
+
+async def _player_in_org(session: AsyncSession, org_id: str, player_id: str) -> str | None:
+    row = await session.execute(
+        text(
+            "SELECT COALESCE(display_name_override, name) AS name FROM players"
+            " WHERE id = CAST(:pid AS UUID) AND organisation_id = CAST(:org AS UUID)"
+        ),
+        {"pid": player_id, "org": org_id},
+    )
+    r = row.mappings().first()
+    return r["name"] if r else None
+
+
+async def get_player_scouting(session: AsyncSession, org_id: str, player_id: str) -> dict | None:
+    """One own player's scouting card. ``None`` if the player isn't in this org."""
+    name = await _player_in_org(session, org_id, player_id)
+    if name is None:
+        return None
+    try:
+        res = await session.execute(
+            text(
+                "SELECT batting_intel, bowling_intel FROM player_scouting_cards"
+                " WHERE organisation_id = CAST(:org AS UUID) AND player_id = CAST(:pid AS UUID)"
+            ),
+            {"org": org_id, "pid": player_id},
+        )
+        row = res.mappings().first()
+    except Exception:
+        await session.rollback()
+        row = None
+    return {
+        "player_id": player_id,
+        "name": name,
+        "batting_intel": (row or {}).get("batting_intel"),
+        "bowling_intel": (row or {}).get("bowling_intel"),
+    }
+
+
+async def upsert_player_scouting(
+    session: AsyncSession, org_id: str, player_id: str, fields: dict, user_id: str | None = None
+) -> dict | None:
+    """Create/update an own player's scouting card. Validates the intel blobs
+    (``scouting_intel``); a "present" flag lets a cleared side write NULL while an
+    untouched side is preserved. ``None`` if the player isn't in this org."""
+    name = await _player_in_org(session, org_id, player_id)
+    if name is None:
+        return None
+    bat_present = "batting_intel" in fields
+    bowl_present = "bowling_intel" in fields
+    bat_intel = scouting_intel.clean_batting_intel(fields.get("batting_intel")) if bat_present else None
+    bowl_intel = scouting_intel.clean_bowling_intel(fields.get("bowling_intel")) if bowl_present else None
+    await session.execute(
+        text(
+            """
+            INSERT INTO player_scouting_cards
+                (organisation_id, player_id, batting_intel, bowling_intel, updated_by)
+            VALUES (CAST(:org AS UUID), CAST(:pid AS UUID), CAST(:batting_intel AS JSONB),
+                    CAST(:bowling_intel AS JSONB), CAST(:uid AS UUID))
+            ON CONFLICT (organisation_id, player_id) DO UPDATE SET
+                batting_intel = CASE WHEN :bat_present THEN EXCLUDED.batting_intel ELSE player_scouting_cards.batting_intel END,
+                bowling_intel = CASE WHEN :bowl_present THEN EXCLUDED.bowling_intel ELSE player_scouting_cards.bowling_intel END,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()
+            """
+        ),
+        {
+            "org": org_id, "pid": player_id, "uid": user_id,
+            "batting_intel": json.dumps(bat_intel) if bat_intel else None,
+            "bowling_intel": json.dumps(bowl_intel) if bowl_intel else None,
+            "bat_present": bat_present, "bowl_present": bowl_present,
+        },
+    )
+    await session.commit()
+    return await get_player_scouting(session, org_id, player_id)
 
 
 async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -> dict | None:

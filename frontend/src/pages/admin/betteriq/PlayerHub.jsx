@@ -356,12 +356,13 @@ function OurPlayerProfile({ pid, ourPlayers }) {
   const [bdeep, setBdeep] = useState(null)
   const [radar, setRadar] = useState(null)
   const [radarLoading, setRadarLoading] = useState(false)
+  const [scouting, setScouting] = useState(null)
   const deepFetched = useRef(false)
 
   useEffect(() => {
     let alive = true
     setDetail(null); setOppRows(null)
-    deepFetched.current = false; setDeep(null); setBdeep(null); setRadar(null)
+    deepFetched.current = false; setDeep(null); setBdeep(null); setRadar(null); setScouting(null)
     api.iqTrendsPlayer(pid).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
     api.getPlayerByOpposition(pid).then(d => { if (alive) setOppRows(Array.isArray(d) ? d : []) }).catch(() => { if (alive) setOppRows([]) })
     return () => { alive = false }
@@ -375,8 +376,15 @@ function OurPlayerProfile({ pid, ourPlayers }) {
     api.iqPlayerDeepDive(pid).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
     api.iqBowlerDeepDive(pid).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
     api.iqPlayerRadar(pid).then(d => { if (alive) setRadar(d) }).catch(() => { if (alive) setRadar(null) }).finally(() => { if (alive) setRadarLoading(false) })
+    api.iqPlayerScouting(pid).then(d => { if (alive) setScouting(d) }).catch(() => { if (alive) setScouting(null) })
     return () => { alive = false }
   }, [view, pid])
+
+  const saveScouting = async (body) => {
+    const saved = await api.iqSavePlayerScouting(pid, body)
+    setScouting(saved)
+    return saved
+  }
 
   if (detail === null) return <LoadingCard label="Loading player…" expectedMs={4000} />
   if (detail?.error) return <Card><Empty>Couldn't load this player.</Empty></Card>
@@ -407,7 +415,7 @@ function OurPlayerProfile({ pid, ourPlayers }) {
       {view === 'career' && <CareerView detail={detail} />}
       {view === 'deep' && (deep === null && !deepFetched.current
         ? <LoadingCard label="Loading deep dive…" expectedMs={5000} />
-        : <DeepDiveTab detail={detail} deep={deep} bdeep={bdeep} radar={radar} radarLoading={radarLoading} />)}
+        : <DeepDiveTab detail={detail} deep={deep} bdeep={bdeep} radar={radar} radarLoading={radarLoading} scouting={scouting} onSaveScouting={saveScouting} />)}
       {view === 'vs' && (oppRows === null
         ? <LoadingCard label="Loading head-to-head…" expectedMs={4000} />
         : <VsClubView rows={oppRows} />)}

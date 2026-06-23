@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation
 from app.services import grassroots_scores_client
+from app.services import scouting_intel
 from app.services.club_match import club_match_keys
 from app.services.iq_filters import grade_base
 
@@ -281,7 +282,8 @@ async def get_opponent_tags(session: AsyncSession, org_id: str) -> dict[str, dic
             text(
                 """
                 SELECT participant_id, player_name, batting_hand, bowling_action, bowling_type,
-                       player_role, is_wicket_keeper, is_danger, notes, scoring_zones
+                       player_role, is_wicket_keeper, is_danger, notes, scoring_zones,
+                       batting_intel, bowling_intel
                 FROM opponent_player_tags WHERE organisation_id = CAST(:org AS UUID)
                 """
             ),
@@ -332,35 +334,65 @@ async def upsert_opponent_tag(session: AsyncSession, org_id: str, participant_id
         "notes": (fields.get("notes") or "").strip() or None,
     }
     zones = _zones(fields.get("scoring_zones"))
+    # Present-aware partial update. The tag is edited by several distinct editors
+    # (basic tags / scoring zones / batting card / bowling card) that each send
+    # only their own keys, so a field is only overwritten when its key is actually
+    # present in the body — otherwise the stored value is preserved. (Without this,
+    # saving the zones editor would wipe the role/danger flags it doesn't send.)
+    bat_present = "batting_intel" in fields
+    bowl_present = "bowling_intel" in fields
+    bat_intel = scouting_intel.clean_batting_intel(fields.get("batting_intel")) if bat_present else None
+    bowl_intel = scouting_intel.clean_bowling_intel(fields.get("bowling_intel")) if bowl_present else None
+    bat_json = json.dumps(bat_intel) if bat_intel else None
+    bowl_json = json.dumps(bowl_intel) if bowl_intel else None
+    _basic = ("batting_hand", "bowling_action", "bowling_type", "player_role", "is_wicket_keeper", "is_danger", "notes")
+    present = {f"{k}_present": (k in fields) for k in _basic}
+    set_basic = ",\n                ".join(
+        f"{k} = CASE WHEN :{k}_present THEN EXCLUDED.{k} ELSE opponent_player_tags.{k} END" for k in _basic
+    )
     await session.execute(
         text(
-            """
+            f"""
             INSERT INTO opponent_player_tags
                 (organisation_id, participant_id, player_name, batting_hand, bowling_action,
-                 bowling_type, player_role, is_wicket_keeper, is_danger, notes, scoring_zones, updated_by)
+                 bowling_type, player_role, is_wicket_keeper, is_danger, notes, scoring_zones,
+                 batting_intel, bowling_intel, updated_by)
             VALUES (CAST(:org AS UUID), :pid, :player_name, :batting_hand, :bowling_action,
                     :bowling_type, :player_role, :is_wicket_keeper, :is_danger, :notes,
-                    CAST(:scoring_zones AS JSONB), CAST(:uid AS UUID))
+                    CAST(:scoring_zones AS JSONB), CAST(:batting_intel AS JSONB),
+                    CAST(:bowling_intel AS JSONB), CAST(:uid AS UUID))
             ON CONFLICT (organisation_id, participant_id) DO UPDATE SET
                 player_name = COALESCE(EXCLUDED.player_name, opponent_player_tags.player_name),
-                batting_hand = EXCLUDED.batting_hand,
-                bowling_action = EXCLUDED.bowling_action,
-                bowling_type = EXCLUDED.bowling_type,
-                player_role = EXCLUDED.player_role,
-                is_wicket_keeper = EXCLUDED.is_wicket_keeper,
-                is_danger = EXCLUDED.is_danger,
-                notes = EXCLUDED.notes,
+                {set_basic},
                 scoring_zones = COALESCE(EXCLUDED.scoring_zones, opponent_player_tags.scoring_zones),
+                batting_intel = CASE WHEN :bat_present THEN EXCLUDED.batting_intel ELSE opponent_player_tags.batting_intel END,
+                bowling_intel = CASE WHEN :bowl_present THEN EXCLUDED.bowling_intel ELSE opponent_player_tags.bowling_intel END,
                 updated_by = EXCLUDED.updated_by,
                 updated_at = NOW()
             """
         ),
-        {"org": org_id, "pid": pid, "uid": user_id, "scoring_zones": zones, **payload},
+        {"org": org_id, "pid": pid, "uid": user_id, "scoring_zones": zones,
+         "batting_intel": bat_json, "bowling_intel": bowl_json,
+         "bat_present": bat_present, "bowl_present": bowl_present, **present, **payload},
     )
     await session.commit()
-    out = {"participant_id": pid, **payload}
-    out["scoring_zones"] = json.loads(zones) if zones else None
-    return out
+    # Return the actual stored row (not an echo of the partial body), so a
+    # single-side save still reports every preserved field correctly. JSONB columns
+    # come back already decoded by the driver.
+    res = await session.execute(
+        text(
+            """
+            SELECT participant_id, player_name, batting_hand, bowling_action, bowling_type,
+                   player_role, is_wicket_keeper, is_danger, notes, scoring_zones,
+                   batting_intel, bowling_intel
+            FROM opponent_player_tags
+            WHERE organisation_id = CAST(:org AS UUID) AND participant_id = :pid
+            """
+        ),
+        {"org": org_id, "pid": pid},
+    )
+    row = res.mappings().first()
+    return dict(row) if row else {"participant_id": pid}
 
 
 async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str | None, fixture_id: str | None) -> tuple[str | None, str | None]:

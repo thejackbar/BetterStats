@@ -11,6 +11,7 @@ import {
   a2, LoadingBar, fmtCount, fmtOvers, fmtPct, runsPhrase,
 } from './ui'
 import { Radar } from './viz'
+import ScoutingCard from './ScoutingCard'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
 const pct = (v) => fmtPct(v)
@@ -309,11 +310,38 @@ export function BowlingDeepDive({ deep, bdeep }) {
   )
 }
 
-export function DeepDiveTab({ detail, deep, bdeep, radar, radarLoading }) {
+/* The scouting card section — manual batting/bowling intel for OUR player, the
+   mirror of the opposition scout. Optional: only rendered when a saver is wired. */
+function ScoutSection({ detail, deep, bdeep, scouting, onSaveScouting }) {
+  if (!onSaveScouting) return null
+  const hasBowling = (deep && deep.bowling_profile) || (bdeep && bdeep.wickets > 0)
+  const hasBat = deep && deep.innings_count > 0
+  const wicketMethods = (deep?.bowling_dismissals || []).map(d => ({ type: d.dismissal_type, count: d.count }))
+  return (
+    <>
+      <div className="flex items-center gap-3 mt-2 mb-1">
+        <h3 className="iq-display font-bold text-[15px]" style={{ letterSpacing: '-0.01em' }}>Scouting card</h3>
+        <span className="flex-1 h-px" style={{ background: 'var(--pb-hairline)' }} />
+      </div>
+      <ScoutingCard keyId={detail?.player?.player_id}
+        batting={scouting?.batting_intel} bowling={scouting?.bowling_intel}
+        stats={{ dismissals: deep?.dismissals, wicketMethods }}
+        defaultSide={hasBowling && !hasBat ? 'bowl' : 'bat'}
+        onSave={onSaveScouting} />
+    </>
+  )
+}
+
+export function DeepDiveTab({ detail, deep, bdeep, radar, radarLoading, scouting = null, onSaveScouting = null }) {
   const hasDeep = deep && deep.innings_count > 0
   const hasBowling = (deep && deep.bowling_profile) || (bdeep && bdeep.wickets > 0)
+  const scout = <ScoutSection detail={detail} deep={deep} bdeep={bdeep} scouting={scouting} onSaveScouting={onSaveScouting} />
   if (!hasDeep && !hasBowling && !radar?.bat && !radar?.bowl) {
-    return <Empty>Not enough per-innings data for a deep dive yet.</Empty>
+    // No per-innings data — still let the scout record manual intel (the whole
+    // point of the card is the read CA can't give us).
+    return onSaveScouting
+      ? <div className="space-y-5">{scout}<Note>Not enough per-innings data for the rest of the deep dive yet.</Note></div>
+      : <Empty>Not enough per-innings data for a deep dive yet.</Empty>
   }
   return (
     <div className="space-y-5">
@@ -335,6 +363,8 @@ export function DeepDiveTab({ detail, deep, bdeep, radar, radarLoading }) {
       {hasDeep && <OppositionVenueCard deep={deep} />}
 
       <BowlingDeepDive deep={deep} bdeep={bdeep} />
+
+      {scout}
     </div>
   )
 }

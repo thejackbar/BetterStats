@@ -59,13 +59,19 @@ from app.services.iq_opponent import (
     _team_roster,
     _upsert,
 )
-from app.services.sync import _caught_by_keeper, _innings_keeper_names
+from app.services.sync import (
+    _BOWLER_CREDIT_DT,
+    _caught_by_keeper,
+    _innings_keeper_names,
+    _norm_name,
+    _parse_bowler_and_fielder,
+)
 
 logger = logging.getLogger(__name__)
 
 # Payload schema versions — bump on shape changes so stale caches rebuild.
 CAREER_VERSION = 2     # bumped: career window widened 5 → 10 years
-DEEP_VERSION = 1
+DEEP_VERSION = 2       # bumped: added "how he takes wickets" + wicket quality (bowling)
 
 # How far back the external "full career, all clubs" view reaches. The aggregate
 # calls are light (~3 per season row, cached 7 days), so we pull a decade of
@@ -555,6 +561,7 @@ async def _scan_player_deep(
     # player's rows. Caps keep the proxy load and first-build latency sane.
     bat_inns: list[dict] = []
     bowl_spells: list[dict] = []
+    wkt_log: list[dict] = []   # how he takes wickets (method + dismissed batter's runs)
     field_tot = {"catches": 0, "catches_wk": 0, "run_outs": 0, "stumpings": 0}
     scanned = 0
     played = 0
@@ -593,8 +600,44 @@ async def _scan_player_deep(
                 dates.append(when)
             when_s = when.isoformat() if when else None
             vs = _other_team_name(sc, team)
+            # participantId → scorecard short-name (both teams) — needed to match a
+            # dismissalText's named bowler back to this player.
+            pid_to_short = {}
+            for t in sc.get("teams") or []:
+                for plr in ((t.get("players") or []) + (t.get("nonPlayingMembers") or [])):
+                    ppid = plr.get("participantId") or plr.get("id")
+                    nm = plr.get("playerShortName") or plr.get("displayName") or plr.get("name")
+                    if ppid and nm:
+                        pid_to_short[ppid] = nm
             for inn in sc.get("innings") or []:
                 keeper_names = _innings_keeper_names(inn.get("fielding") or [])
+                # How he takes wickets — when the player bowled this innings, the
+                # batting rows are the opposition's and their dismissalText credits
+                # the bowler. Resolve the credited bowler back to this player (via
+                # the innings' short-name → pid map) to derive his wicket methods +
+                # the calibre of batter he removed (their runs at dismissal).
+                if any((br.get("participantId") or "").lower() == pid_l for br in (inn.get("bowling") or [])):
+                    bowl_name_to_pid: dict[str, str] = {}
+                    for br in inn.get("bowling") or []:
+                        bpid = br.get("participantId")
+                        nm = br.get("playerShortName") or pid_to_short.get(bpid)
+                        if bpid and nm:
+                            bowl_name_to_pid.setdefault(_norm_name(nm), bpid)
+                    for r in inn.get("batting") or []:
+                        dt_long = r.get("dismissalType") or ""
+                        if dt_long not in _BOWLER_CREDIT_DT:
+                            continue
+                        d_text = r.get("dismissalText") or ""
+                        bowler_name, _fielder, method = _parse_bowler_and_fielder(d_text, dt_long)
+                        if not bowler_name:
+                            continue
+                        if (bowl_name_to_pid.get(_norm_name(bowler_name)) or "").lower() != pid_l:
+                            continue
+                        m = method or dt_long.lower()
+                        if m == "caught" and _caught_by_keeper(d_text, keeper_names):
+                            m = "caught behind"
+                        br_runs = r.get("runsScored")
+                        wkt_log.append({"method": m, "batter_runs": int(br_runs) if br_runs is not None else None})
                 for r in inn.get("batting") or []:
                     if (r.get("participantId") or "").lower() != pid_l:
                         continue
@@ -638,13 +681,13 @@ async def _scan_player_deep(
 
     return _assemble_deep(
         org_guid, club_name, pid, player_name, located,
-        bat_inns, bowl_spells, field_tot, scanned, played, dates,
+        bat_inns, bowl_spells, field_tot, scanned, played, dates, wkt_log,
     )
 
 
 def _assemble_deep(
     org_guid, club_name, pid, player_name, located,
-    bat_inns, bowl_spells, field_tot, scanned, played, dates,
+    bat_inns, bowl_spells, field_tot, scanned, played, dates, wkt_log=None,
 ) -> dict:
     bat_inns.sort(key=lambda i: i["date"] or "", reverse=True)
     bowl_spells.sort(key=lambda s: s["date"] or "", reverse=True)
@@ -743,6 +786,28 @@ def _assemble_deep(
         bowl_years.setdefault(s["year"], []).append(s)
     bowl_by_year = [{"year": y, **_bowl_year(items)} for y, items in sorted(bowl_years.items(), reverse=True)]
 
+    # How he takes wickets + the calibre of batter he removes (parsed from the
+    # opposition cards in the innings he bowled). Scorecard-derived, no ball-by-ball.
+    wkt_log = wkt_log or []
+    wkt_methods = Counter(w["method"] for w in wkt_log if w.get("method"))
+    total_w = sum(wkt_methods.values())
+    bowling_dismissals = [
+        {"type": k, "count": v, "pct": round(100 * v / total_w)} for k, v in wkt_methods.most_common()
+    ] if total_w else []
+    runs_at = [w["batter_runs"] for w in wkt_log if w.get("batter_runs") is not None]
+    wicket_quality = None
+    if runs_at:
+        nq = len(runs_at)
+        new_w = sum(1 for x in runs_at if x < 10)
+        started_w = sum(1 for x in runs_at if 10 <= x < 30)
+        set_w = sum(1 for x in runs_at if x >= 30)
+        wicket_quality = {
+            "new": new_w, "started": started_w, "set": set_w,
+            "new_pct": round(100 * new_w / nq), "set_pct": round(100 * set_w / nq),
+            "scalp_value": round(sum(runs_at) / nq, 1),
+            "ducks": sum(1 for x in runs_at if x == 0),
+        }
+
     bowling = {
         "spells": len(bowl_spells),
         "wickets": wkts,
@@ -753,6 +818,8 @@ def _assemble_deep(
         "best": f"{best['wickets']}/{best['runs']}" if best and best["wickets"] else None,
         "by_year": bowl_by_year,
         "recent": [{**s, "overs": _balls_to_overs(s["balls"])} for s in bowl_spells[:12]],
+        "dismissals": bowling_dismissals,
+        "quality": wicket_quality,
     } if bowl_spells else None
 
     # ── rule-based read ──
@@ -775,6 +842,12 @@ def _assemble_deep(
     if bowling and wkts:
         bavg = f"{bowling['average']:.2f}" if bowling["average"] is not None else "n/a"
         bits.append(f"{wkts} wickets @ {bavg} with the ball in the same window.")
+        if bowling.get("dismissals") and total_w >= 4:
+            top_m = bowling["dismissals"][0]
+            if top_m["pct"] >= 40:
+                bits.append(f"Most of his wickets are {top_m['type']} ({top_m['pct']}%).")
+        if wicket_quality and wicket_quality.get("set_pct", 0) >= 40 and len(runs_at) >= 4:
+            bits.append("Strikes against set batters — a genuine wicket-taker, not just a mop-up bowler.")
 
     notes = [
         f"Scanned {scanned} scorecards across {len(located)} of their team-seasons; he appeared in {played} of those games.",

@@ -1353,6 +1353,11 @@ export const api = {
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
   iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
+  // Manual scouting card for one of OUR players (batting/bowling intel — the
+  // ball-level read CA can't give us). Mirror of the opponent player tags.
+  iqPlayerScouting: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`),
+  iqSavePlayerScouting: (playerId, body) =>
+    request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`, { method: 'PUT', body: JSON.stringify(body) }),
 
   // ─── BetterIQ: Team self-analysis ───────────────────────
   iqTeamSeasons: () => request('/iq/team/seasons'),
