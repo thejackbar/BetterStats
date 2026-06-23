@@ -117,7 +117,7 @@ export default function KlubproSponsors({ clubMapping }) {
                 <input type="checkbox" checked={isImported || isSel} disabled={isImported}
                   onChange={() => toggle(s.klubpro_sponsor_id)}
                   className="w-4 h-4 accent-[var(--pb-accent)] shrink-0" />
-                <div className="w-16 h-10 bg-white/5 border border-pb-hairline2 rounded flex items-center justify-center shrink-0 overflow-hidden">
+                <div className="w-16 h-10 bg-pb-surface2 border border-pb-hairline2 rounded flex items-center justify-center shrink-0 overflow-hidden">
                   {s.logo_found
                     ? <img src={api.kpSponsorImageUrl(s.klubpro_sponsor_id)} alt={s.sponsor_name} className="max-w-full max-h-full object-contain" />
                     : <span className="text-pb-faintest text-[10px]">no logo</span>}

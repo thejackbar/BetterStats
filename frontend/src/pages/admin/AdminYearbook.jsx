@@ -73,8 +73,8 @@ export default function AdminYearbook() {
     <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-white">Yearbooks</h1>
-          <p className="text-sm text-white/40 mt-0.5">Manage season yearbooks — publish to make them publicly accessible.</p>
+          <h1 className="text-xl font-semibold text-pb-text">Yearbooks</h1>
+          <p className="text-sm text-pb-faint mt-0.5">Manage season yearbooks — publish to make them publicly accessible.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <BookmarkButton pageLabel="Yearbooks" />
@@ -85,36 +85,36 @@ export default function AdminYearbook() {
       </div>
 
       {msg && (
-        <div className="mb-4 px-4 py-3 rounded-lg border border-white/15 bg-white/5 text-sm text-white/70 flex items-center justify-between">
+        <div className="mb-4 px-4 py-3 rounded-lg border border-pb-hairline2 bg-pb-surface2 text-sm text-pb-dim flex items-center justify-between">
           <span>{msg}</span>
-          <button onClick={() => setMsg(null)} className="text-white/30 hover:text-white/60 text-lg leading-none ml-3">×</button>
+          <button onClick={() => setMsg(null)} className="text-pb-faintest hover:text-pb-dim text-lg leading-none ml-3">×</button>
         </div>
       )}
 
       {loading ? <PbSpinner /> : (
         <div className="space-y-2">
           {yearbooks?.length === 0 && (
-            <p className="text-white/30 text-sm italic text-center py-8">
+            <p className="text-pb-faintest text-sm italic text-center py-8">
               No yearbooks yet. Click "Generate Missing Stubs" to create drafts for all synced seasons.
             </p>
           )}
           {yearbooks?.map(yb => (
             <div
               key={yb.season_id}
-              className="flex items-center gap-4 rounded-xl border border-white/8 bg-white/3 px-5 py-4"
+              className="flex items-center gap-4 rounded-xl border border-pb-hairline bg-pb-surface px-5 py-4"
             >
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-white/90 text-[14px]">{formatSeason(yb.season_name)}</div>
+                <div className="font-medium text-pb-text text-[14px]">{formatSeason(yb.season_name)}</div>
                 <div className="flex items-center gap-3 mt-1">
                   <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border ${
                     yb.status === 'published'
                       ? 'border-green-500/30 text-green-400 bg-green-500/10'
-                      : 'border-white/15 text-white/40'
+                      : 'border-pb-hairline2 text-pb-faint'
                   }`}>
                     {yb.status === 'published' ? 'PUBLISHED' : 'DRAFT'}
                   </span>
                   {yb.published_at && (
-                    <span className="text-[11px] text-white/30 font-mono">
+                    <span className="text-[11px] text-pb-faintest font-mono">
                       {new Date(yb.published_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </span>
                   )}
@@ -124,14 +124,14 @@ export default function AdminYearbook() {
               <div className="flex items-center gap-2 shrink-0">
                 <Link
                   to={`/admin/yearbook/${yb.season_id}`}
-                  className="px-3 py-1.5 rounded border border-white/15 text-[12px] font-mono text-white/50 hover:text-white/70 hover:border-white/25 transition-colors"
+                  className="px-3 py-1.5 rounded border border-pb-hairline2 text-[12px] font-mono text-pb-faint hover:text-pb-dim hover:border-pb-hairline2 transition-colors"
                 >
                   Manage
                 </Link>
                 <Link
                   to={`/${org.slug}/yearbook/${_seasonSlug(yb.season_name)}`}
                   target="_blank"
-                  className="px-3 py-1.5 rounded border border-white/15 text-[12px] font-mono text-white/50 hover:text-white/70 hover:border-white/25 transition-colors"
+                  className="px-3 py-1.5 rounded border border-pb-hairline2 text-[12px] font-mono text-pb-faint hover:text-pb-dim hover:border-pb-hairline2 transition-colors"
                 >
                   Preview
                 </Link>
@@ -140,7 +140,7 @@ export default function AdminYearbook() {
                   disabled={publishing === yb.season_id}
                   className={`px-3 py-1.5 rounded border text-[12px] font-mono transition-colors ${
                     yb.status === 'published'
-                      ? 'border-white/20 text-white/50 hover:border-red-400/30 hover:text-red-400'
+                      ? 'border-pb-hairline2 text-pb-faint hover:border-red-400/30 hover:text-red-400'
                       : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
                   } disabled:opacity-40`}
                 >

@@ -1245,8 +1245,8 @@ function PhotosTab({ galleryImages }) {
   return (
     <div>
       <div className="mb-6">
-        <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">Photo Gallery</p>
-        <p className="text-[12px] text-white/50">{galleryImages.length} {galleryImages.length === 1 ? 'photo' : 'photos'} from the season.</p>
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Photo Gallery</p>
+        <p className="text-[12px] text-pb-faint">{galleryImages.length} {galleryImages.length === 1 ? 'photo' : 'photos'} from the season.</p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -1254,7 +1254,7 @@ function PhotosTab({ galleryImages }) {
           <button
             key={img.id}
             onClick={() => setLightbox(img)}
-            className="aspect-square block overflow-hidden rounded border border-white/8 hover:border-white/20 transition-colors group"
+            className="aspect-square block overflow-hidden rounded border border-pb-hairline hover:border-pb-hairline2 transition-colors group"
           >
             <img
               src={imageSrc(img.file_path)}
@@ -1586,7 +1586,7 @@ export default function Yearbook() {
               <div className="font-mono text-[10px] sm:text-[11px] tracking-wide3 text-pb-faint uppercase mb-2">
                 {club.name} · Season Yearbook
               </div>
-              <h1 className="text-2xl sm:text-4xl font-bold text-white leading-tight mb-2">
+              <h1 className={`text-2xl sm:text-4xl font-bold leading-tight mb-2 ${yearbook.hero_image_path ? 'text-white' : 'text-pb-text'}`}>
                 {season?.name || seasonSlug}
               </h1>
               <div className="flex items-center gap-2 flex-wrap">
