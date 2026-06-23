@@ -2,7 +2,7 @@
    Radar (player profile), WagonWheel (scoring zones), AreaChart (trajectory),
    PhaseStrip (innings phases), DonutStat. All draw-in animated, theme-aware.
    Ported from the v2 design handoff to real ES modules. */
-import { useState, useEffect, useMemo } from 'react'
+import { Fragment, useState, useEffect, useMemo } from 'react'
 import { CountUp, fmtOvers, fmtCount } from './ui'
 
 function useMounted(delay = 60) {
@@ -137,6 +137,62 @@ export function WagonWheel({ sectors, hand = 'RH', size = 230, color = 'var(--pb
         })}
       </svg>
       <div className="iq-eyebrow mt-1">{hand} · % of runs by area</div>
+    </div>
+  )
+}
+
+/* ── ZoneGrid — length × line heatmap (scout-entered) ─────────────────────────
+   The "delivery zone" grid: rows = length, cols = line, each cell an intensity
+   0–3 (where a batter is vulnerable / where a bowler attacks). CA has no
+   ball-by-ball line/length, so this is scout intel. Editable when `onChange` is
+   passed (click cycles 0→1→2→3→0); otherwise a read-only heatmap. `cells` is a
+   flat row-major array of LENGTHS×LINES values. */
+export const ZONE_LENGTHS = ['Full toss', 'Full', 'Good', 'Short']
+export const ZONE_LINES = ['Wide off', 'Off stump', 'Stumps', 'Leg stump', 'Down leg']
+export const ZONE_MAX = 3
+const _zoneFill = (lvl, color) => (lvl <= 0
+  ? 'var(--pb-surface2)'
+  : `color-mix(in srgb, ${color} ${[0, 34, 62, 90][lvl]}%, transparent)`)
+
+export function ZoneGrid({ cells = [], onChange, color = 'var(--pb-red)', size = 'md' }) {
+  const rows = ZONE_LENGTHS.length, cols = ZONE_LINES.length
+  const grid = Array.from({ length: rows * cols }, (_, i) => Number(cells[i]) || 0)
+  const editable = typeof onChange === 'function'
+  const cell = size === 'sm' ? 30 : 40
+  const bump = (i) => { if (!editable) return; const next = grid.slice(); next[i] = (grid[i] + 1) % (ZONE_MAX + 1); onChange(next) }
+  const Cell = editable ? 'button' : 'div'
+  return (
+    <div className="inline-block">
+      <div className="grid gap-1" style={{ gridTemplateColumns: `auto repeat(${cols}, ${cell}px)` }}>
+        <div />
+        {ZONE_LINES.map(l => (
+          <div key={l} className="iq-mono text-pb-faint text-center self-end pb-1" style={{ fontSize: 8.5, lineHeight: 1.15 }}>{l}</div>
+        ))}
+        {ZONE_LENGTHS.map((len, r) => (
+          <Fragment key={len}>
+            <div className="iq-mono text-pb-faint pr-2 flex items-center justify-end" style={{ fontSize: 9 }}>{len}</div>
+            {ZONE_LINES.map((_, c) => {
+              const i = r * cols + c
+              const lvl = grid[i]
+              return (
+                <Cell key={c} type={editable ? 'button' : undefined}
+                  onClick={editable ? () => bump(i) : undefined}
+                  title={editable ? `${ZONE_LENGTHS[r]} · ${ZONE_LINES[c]}` : undefined}
+                  className={`flex items-center justify-center iq-num ${editable ? 'cursor-pointer transition' : ''}`}
+                  style={{ width: cell, height: cell, borderRadius: 7, fontSize: 12,
+                    background: _zoneFill(lvl, color),
+                    border: `1px solid ${lvl > 0 ? 'transparent' : 'var(--pb-hairline)'}`,
+                    color: lvl >= 2 ? '#fff' : 'var(--pb-faint)' }}>
+                  {lvl > 0 ? lvl : ''}
+                </Cell>
+              )
+            })}
+          </Fragment>
+        ))}
+      </div>
+      <div className="iq-mono text-pb-faintest mt-2" style={{ fontSize: 9 }}>
+        {editable ? 'Tap a cell to mark vulnerability · tap again to intensify' : 'Darker = more vulnerable'} · batter’s view
+      </div>
     </div>
   )
 }

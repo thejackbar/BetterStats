@@ -19,10 +19,11 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../../lib/api'
 import {
-  Sparkline, Card, Stat, Note, Tag, Btn, Initials, StackedBar, Bar, a2,
+  Sparkline, Card, Stat, Note, Tag, Btn, Segmented, Initials, StackedBar, Bar, a2,
   LoadingBar, fmtCount, fmtOvers, fmtPct, oversToBalls,
 } from './ui'
 import { Radar, WagonWheel, ZONE_LABELS, buildRadar } from './viz'
+import ScoutingCard from './ScoutingCard'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
 
@@ -69,31 +70,50 @@ function TagBadges({ tag }) {
   return <>{badges.map(([tone, b], i) => <Tag key={i} tone={tone}>{b}</Tag>)}</>
 }
 
-/* ── Radar (built from the dossier squad — opponents have no /radar endpoint) ─ */
-function radarForEntry(entry, batPeers, bowlPeers) {
-  const bat = entry.bat, bowl = entry.bowl
-  // Prefer a batting radar for anyone who's batted; otherwise a bowling radar.
-  if (bat && bat.innings > 0 && (batPeers || []).length >= 2) {
-    return buildRadar(batPeers, [
-      { label: 'Volume', value: p => p.runs },
-      { label: 'Average', value: p => p.average },
-      { label: 'Strike rate', value: p => p.strike_rate },
-      { label: 'Conversion', value: p => ((p.fifties || 0) + (p.hundreds || 0)) / Math.max(p.innings || 1, 1) },
-      { label: 'Big score', value: p => p.high_score },
-      { label: 'vs us', value: p => p.vs_us?.runs || 0 },
-    ], bat)
-  }
-  if (bowl && bowl.wickets > 0 && (bowlPeers || []).length >= 2) {
-    return buildRadar(bowlPeers, [
-      { label: 'Wickets', value: p => p.wickets },
-      { label: 'Economy', value: p => p.economy, lower: true },
-      { label: 'Average', value: p => p.average, lower: true },
-      { label: 'Strike rate', value: p => (p.overs ? oversToBalls(p.overs) / Math.max(p.wickets || 1, 1) : 0), lower: true },
-      { label: 'Overs', value: p => p.overs },
-      { label: 'vs us', value: p => p.vs_us?.wickets || 0 },
-    ], bowl)
-  }
-  return null
+/* ── Radar (built from the dossier squad — opponents have no /radar endpoint) ─
+   Batting + bowling radars are built independently so a bowler isn't forced into
+   a batting radar just because he's batted once down the order. The card shows a
+   Bat/Bowl toggle when both exist, defaulting to the player's stronger side. */
+function batRadarFor(bat, batPeers) {
+  if (!(bat && bat.innings > 0 && (batPeers || []).length >= 2)) return null
+  return buildRadar(batPeers, [
+    { label: 'Volume', value: p => p.runs },
+    { label: 'Average', value: p => p.average },
+    { label: 'Strike rate', value: p => p.strike_rate },
+    { label: 'Conversion', value: p => ((p.fifties || 0) + (p.hundreds || 0)) / Math.max(p.innings || 1, 1) },
+    { label: 'Big score', value: p => p.high_score },
+    { label: 'vs us', value: p => p.vs_us?.runs || 0 },
+  ], bat)
+}
+function bowlRadarFor(bowl, bowlPeers) {
+  if (!(bowl && bowl.wickets > 0 && (bowlPeers || []).length >= 2)) return null
+  return buildRadar(bowlPeers, [
+    { label: 'Wickets', value: p => p.wickets },
+    { label: 'Economy', value: p => p.economy, lower: true },
+    { label: 'Average', value: p => p.average, lower: true },
+    { label: 'Strike rate', value: p => (p.overs ? oversToBalls(p.overs) / Math.max(p.wickets || 1, 1) : 0), lower: true },
+    { label: 'Overs', value: p => p.overs },
+    { label: 'vs us', value: p => p.vs_us?.wickets || 0 },
+  ], bowl)
+}
+
+function OppRadarCard({ entry, batPeers, bowlPeers, prefer }) {
+  const bat = useMemo(() => batRadarFor(entry.bat, batPeers), [entry, batPeers])
+  const bowl = useMemo(() => bowlRadarFor(entry.bowl, bowlPeers), [entry, bowlPeers])
+  const [side, setSide] = useState(prefer === 'bowl' && bowl ? 'bowl' : bat ? 'bat' : 'bowl')
+  useEffect(() => { setSide(prefer === 'bowl' && bowl ? 'bowl' : bat ? 'bat' : 'bowl') }, [entry])  // eslint-disable-line react-hooks/exhaustive-deps
+  if (!bat && !bowl) return null
+  const r = side === 'bowl' && bowl ? bowl : bat || bowl
+  const showBowl = side === 'bowl' && bowl
+  return (
+    <Card eyebrow="profile vs their squad" title="Player radar"
+      right={bat && bowl ? <Segmented sm value={side} onChange={setSide} options={[{ value: 'bat', label: 'Bat' }, { value: 'bowl', label: 'Bowl' }]} /> : null}>
+      <div className="flex justify-center">
+        <Radar key={side} axes={r.axes} values={r.values} baseline={r.baseline} size={248} color={showBowl ? 'var(--pb-accent)' : 'var(--pb-red)'} />
+      </div>
+      <Note>Each axis normalised 0–100 against this club's squad ({showBowl ? 'bowlers' : 'batters'}; dashed ring = squad average). Bowling axes are inverted so the outer edge is always stronger.</Note>
+    </Card>
+  )
 }
 
 /* ── Scoring-zones wagon wheel + scout editor ────────────────────────────── */
@@ -458,6 +478,23 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
               </table>
             </div>
             {bw.best && <div className="text-pb-faint text-[12px] mt-3 iq-num">Best in window: {bw.best}</div>}
+            {bw.dismissals?.length > 0 && (
+              <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                <div className="iq-eyebrow mb-2">How he takes wickets</div>
+                <div className="flex flex-wrap gap-2">
+                  {bw.dismissals.map((d, i) => (
+                    <span key={i} className="text-[12px] px-2.5 py-1 capitalize" style={{ background: 'var(--pb-surface2)', borderRadius: 99 }}>
+                      {d.type} <span className="iq-num text-pb-faint">{d.count}{d.pct != null ? ` · ${d.pct}%` : ''}</span>
+                    </span>
+                  ))}
+                </div>
+                {bw.quality && (
+                  <div className="text-pb-faint text-[12px] mt-3 iq-num">
+                    Removes set batters {bw.quality.set_pct}% of the time · avg scalp {a2(bw.quality.scalp_value)} runs{bw.quality.ducks ? ` · ${bw.quality.ducks} duck${bw.quality.ducks === 1 ? '' : 's'}` : ''}
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
         )}
       </div>
@@ -502,8 +539,16 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
   const dism = bat?.dismissals && Object.entries(bat.dismissals).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
   const dismTotal = dism ? dism.reduce((s, [, v]) => s + v, 0) : 0
   const spark = sparkVals(bat?.recent_scores)
-  const radar = useMemo(() => radarForEntry(entry, dossierBatting, dossierBowling), [entry, dossierBatting, dossierBowling])
-  const showZones = !!(playerId && onSaveTag)
+  const bowlSpark = (bowl?.recent_wickets || []).map(v => Number(v) || 0)
+  const isBowler = role === 'Bowler'
+  const showCard = !!(playerId && onSaveTag)
+  // Scoring zones (where he scores) is a batting feature — show only for players
+  // who've batted (or who already have zones plotted); a pure bowler skips it.
+  const batted = !!(bat && bat.innings > 0)
+  const hasScoringZones = Array.isArray(tag?.scoring_zones) && tag.scoring_zones.some(v => Number(v) > 0)
+  const showZones = showCard && (batted || hasScoringZones)
+  // Held dismissal mix → blended into the batting "DNA" read on the scouting card.
+  const scoutStats = { dismissals: (dism || []).map(([type, count]) => ({ type, count })) }
 
   return (
     <div className="iq-fade space-y-5">
@@ -532,16 +577,9 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
         </Card>
       )}
 
-      {/* Signature viz: radar + scout-entered scoring zones */}
+      {/* Signature viz: radar (bat/bowl) + scout-entered scoring zones */}
       <div className="grid gap-5 lg:grid-cols-2 items-start">
-        {radar && (
-          <Card eyebrow="profile vs their squad" title="Player radar">
-            <div className="flex justify-center">
-              <Radar axes={radar.axes} values={radar.values} baseline={radar.baseline} size={248} color="var(--pb-red)" />
-            </div>
-            <Note>Each axis normalised 0–100 against this club's squad (dashed ring = squad average).</Note>
-          </Card>
-        )}
+        <OppRadarCard entry={entry} batPeers={dossierBatting} bowlPeers={dossierBowling} prefer={isBowler ? 'bowl' : 'bat'} />
         {showZones && <ZonesEditor playerId={playerId} name={entry.name} tag={tag} battingHand={battingHand} onSave={onSaveTag} />}
       </div>
 
@@ -575,13 +613,22 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
               <Stat label="Wickets" value={bowl.wickets} />
               <Stat label="Average" value={a2(bowl.average)} count={false} />
               <Stat label="Economy" value={a2(bowl.economy)} count={false} />
+              <Stat label="Strike rate" value={a2(bowl.strike_rate)} count={false} />
               <Stat label="Best" value={num(bowl.best)} count={false} />
               <Stat label="Overs" value={fmtOvers(bowl.overs)} count={false} />
-              {bowl.five_fors
-                ? <Stat label="5wi" value={bowl.five_fors} />
-                : <Stat label="Recent wickets" value={(bowl.recent_wickets || []).reduce((a, b) => a + (Number(b) || 0), 0)} />}
             </div>
-            {bowl.recent_wickets?.length > 0 && <div className="text-pb-faint text-[12px] mt-3 iq-num">Recent: {bowl.recent_wickets.join(' · ')}</div>}
+            <div className="text-pb-faint text-[12px] mt-3 iq-num">
+              {bowl.five_fors ? `${bowl.five_fors}× 5wi · ` : ''}{fmtCount(bowl.matches)} match{bowl.matches === 1 ? '' : 'es'}{bowl.maidens ? ` · ${bowl.maidens} maidens` : ''}
+            </div>
+            {bowlSpark.length >= 2 && (
+              <div className="mt-4 px-3 pt-3 pb-2" style={{ background: 'var(--pb-surface2)', borderRadius: 12 }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="iq-eyebrow" style={{ fontSize: 9 }}>Wickets · last {bowlSpark.length}</span>
+                  <span className="iq-mono text-pb-faint" style={{ fontSize: 10.5 }}>{(bowl.recent_wickets || []).join(' · ')}</span>
+                </div>
+                <Sparkline key={`bw-${playerId || entry.name}`} values={bowlSpark} h={46} stroke="var(--pb-accent)" dots />
+              </div>
+            )}
           </Card>
         )}
         {dism?.length > 0 && (
@@ -625,6 +672,16 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
         <Note>{orgGuid
           ? 'Not seen in the current-season matches we scanned — their season history below is the read.'
           : 'No current-season scorecard data for this player yet — only their scouting tags below apply.'}</Note>
+      )}
+
+      {/* Scouting card — the ball-level read CA can't give us: how to get him out
+          (batting) and how to play him (bowling), scout-entered, blended with the
+          dismissal mix we do hold. */}
+      {showCard && (
+        <ScoutingCard keyId={playerId}
+          batting={tag?.batting_intel} bowling={tag?.bowling_intel}
+          stats={scoutStats} defaultSide={isBowler ? 'bowl' : 'bat'}
+          onSave={(body) => onSaveTag(playerId, { ...body, player_name: entry.name })} />
       )}
 
       {/* 5-year history — career aggregates first (near-instant), then the

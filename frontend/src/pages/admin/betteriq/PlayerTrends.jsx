@@ -368,6 +368,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
   const [bdeep, setBdeep] = useState(null)
   const [radar, setRadar] = useState(null)
   const [radarLoading, setRadarLoading] = useState(false)
+  const [scouting, setScouting] = useState(null)
   const [tab, setTab] = useState('trajectory')
 
   // Career radar (career = omit season) unless a single season is active.
@@ -376,12 +377,19 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
   useEffect(() => {
     if (!playerId) return
     let alive = true
-    setDetail(null); setDeep(null); setBdeep(null)
+    setDetail(null); setDeep(null); setBdeep(null); setScouting(null)
     api.iqTrendsPlayer(playerId).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
     api.iqPlayerDeepDive(playerId).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
     api.iqBowlerDeepDive(playerId).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
+    api.iqPlayerScouting(playerId).then(d => { if (alive) setScouting(d) }).catch(() => { if (alive) setScouting(null) })
     return () => { alive = false }
   }, [playerId])
+
+  const saveScouting = async (body) => {
+    const saved = await api.iqSavePlayerScouting(playerId, body)
+    setScouting(saved)
+    return saved
+  }
 
   useEffect(() => {
     if (!playerId) return
@@ -408,7 +416,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
       ]} />
 
       {tab === 'trajectory' && <TrajectoryTab detail={detail} ctx={ctx} seasons={seasons} />}
-      {tab === 'deep' && <DeepDiveTab detail={detail} deep={deep} bdeep={bdeep} radar={radar} radarLoading={radarLoading} />}
+      {tab === 'deep' && <DeepDiveTab detail={detail} deep={deep} bdeep={bdeep} radar={radar} radarLoading={radarLoading} scouting={scouting} onSaveScouting={saveScouting} />}
       {tab === 'compare' && <CompareTab aId={playerId} players={players} detailA={detail} />}
     </div>
   )

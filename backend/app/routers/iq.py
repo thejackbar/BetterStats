@@ -364,6 +364,35 @@ async def trends_player_bowling_deep(
     return result
 
 
+@router.get("/trends/player/{player_id}/scouting")
+async def trends_player_scouting(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """One own player's manual scouting card (batting/bowling intel — the
+    ball-level read CA can't give us)."""
+    result = await iq_trends.get_player_scouting(db, str(club.id), player_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
+
+
+@router.put("/trends/player/{player_id}/scouting")
+async def save_trends_player_scouting(
+    player_id: str,
+    body: dict = Body(..., description="batting_intel and/or bowling_intel blobs"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(get_current_user),
+):
+    """Add/update an own player's scouting card."""
+    result = await iq_trends.upsert_player_scouting(db, str(club.id), player_id, body, user_id=str(user.id))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
+
+
 @router.get("/trends/player/{player_id}/radar")
 async def trends_player_radar(
     player_id: str,

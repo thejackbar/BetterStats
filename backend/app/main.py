@@ -108,6 +108,31 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE bowler_wickets ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
         ))
+        # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
+        # the ball-level read CA can't give us (vulnerable-to bowler types, a
+        # length×line weakness grid, favoured shots, stock ball + variations).
+        # Two JSONB blobs on the existing opponent tag row + a parallel table for
+        # our own players. Defensive idempotent adds/creates so the API boots even
+        # if alembic lags.
+        await conn.execute(text(
+            "ALTER TABLE opponent_player_tags ADD COLUMN IF NOT EXISTS batting_intel JSONB"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE opponent_player_tags ADD COLUMN IF NOT EXISTS bowling_intel JSONB"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS player_scouting_cards (
+                id SERIAL PRIMARY KEY,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                batting_intel JSONB,
+                bowling_intel JSONB,
+                updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_player_scouting_org_player UNIQUE (organisation_id, player_id)
+            )
+        """))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
