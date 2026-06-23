@@ -1072,6 +1072,15 @@ async def get_player_team_breakdown(
     }
 
 
+# No player plays anywhere near this many games in one real season. Cricket
+# Australia bundles a club's whole pre-migration history into its earliest season
+# as cumulative career-to-date totals, so that one "season" shows 100+ matches for
+# a player (Keith London: 256, David Cohen: 119). A season row above this cap is a
+# historical bundle, not a season — it's folded into "Prior Seasons & Adjustments"
+# rather than shown as a dated season.
+_HISTORICAL_BUNDLE_MATCH_CAP = 60
+
+
 async def get_season_by_season(session: AsyncSession, player_id: str, include_prior: bool = False) -> list[dict]:
     # Merge-aware: if Summer 25/26 + Winter 25/26 are aliased into one canonical
     # season, sum their stats into a single row keyed on the canonical season.
@@ -1131,15 +1140,35 @@ async def get_season_by_season(session: AsyncSession, player_id: str, include_pr
     )
     rows = [dict(r) for r in result.mappings()]
 
+    # Pull out CA's pre-migration "bundle" seasons (cumulative career totals dumped
+    # on the earliest season — see _HISTORICAL_BUNDLE_MATCH_CAP). They aren't real
+    # seasons, so they're dropped from the per-season list (and the charts, which
+    # key on season_id) and folded into the "Prior Seasons & Adjustments" lump
+    # below, keeping the career header reconciled.
+    bundle_ids = [str(r["season_id"]) for r in rows
+                  if (r.get("matches") or 0) > _HISTORICAL_BUNDLE_MATCH_CAP]
+    if bundle_ids:
+        _bundle_set = set(bundle_ids)
+        rows = [r for r in rows if str(r["season_id"]) not in _bundle_set]
+
     # Career-level (NULL-season) import / manual-career rows can't be attached to
     # a season, so the JOIN above drops them. On the player profile (include_prior)
-    # surface them as a single "Prior Seasons & Adjustments" row at the bottom, so
-    # the per-season rows + this row reconcile to the career totals in the header.
-    # Off by default so season-trajectory consumers (BetterIQ) get real seasons only.
+    # surface them — with any historical bundle folded in — as a single "Prior
+    # Seasons & Adjustments" row at the bottom, so the per-season rows + this row
+    # reconcile to the career totals in the header. Off by default so
+    # season-trajectory consumers (BetterIQ) get real seasons only.
     if not include_prior:
         return rows
+
+    prior_where = "player_id = :pid AND season_id IS NULL"
+    prior_params: dict = {"pid": player_id}
+    if bundle_ids:
+        prior_where = ("player_id = :pid AND (season_id IS NULL "
+                       "OR season_id::text = ANY(:bundle_ids))")
+        prior_params["bundle_ids"] = bundle_ids
+
     prior_res = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 SUM(matches) AS matches,
                 SUM(batting_innings) AS batting_innings,
@@ -1171,9 +1200,9 @@ async def get_season_by_season(session: AsyncSession, player_id: str, include_pr
                 SUM(run_outs) AS total_run_outs,
                 SUM(stumpings) AS total_stumpings
             FROM v_effective_player_season_stats
-            WHERE player_id = :pid AND season_id IS NULL
+            WHERE {prior_where}
         """),
-        {"pid": player_id}
+        prior_params
     )
     prior = dict(prior_res.mappings().first() or {})
     if (prior.get("matches") or prior.get("total_runs") or prior.get("total_wickets")
