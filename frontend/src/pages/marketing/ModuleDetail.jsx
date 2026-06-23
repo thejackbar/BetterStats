@@ -7,7 +7,7 @@ import ZoomableImage from '../../components/marketing/ZoomableImage'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
 import { COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
 import { moduleBySlug, MODULES_MARKETING, CORE_MARKETING } from '../../data/modules-marketing'
-import { CORE, PRICED_MODULES } from '../../data/pricing'
+import { CORE, PRICED_MODULES, FANTASY } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -49,6 +49,7 @@ function ModuleMock({ m }) {
 
 function modulePrice(m) {
   if (m.isCore) return `$${CORE.price} a year.`
+  if (m.key === FANTASY.key) return `$${FANTASY.price} a year.`
   const p = PRICED_MODULES.find((x) => x.key === m.key)
   return p ? `$${p.price} a year.` : null
 }
@@ -57,7 +58,11 @@ export default function ModuleDetail() {
   const { slug } = useParams()
   const m = moduleBySlug(slug)
 
-  const priced = m ? (PRICED_MODULES.find((x) => x.key === m.key) || (m.slug === 'betterstats' ? CORE : null)) : null
+  const priced = m
+    ? (PRICED_MODULES.find((x) => x.key === m.key)
+        || (m.slug === 'betterstats' ? CORE : null)
+        || (m.key === FANTASY.key ? FANTASY : null))
+    : null
   // Breadcrumb + product structured data so each module page is read as a
   // priced product sitting under Modules, not an orphan page.
   const jsonLd = m ? [
@@ -198,6 +203,38 @@ export default function ModuleDetail() {
           </div>
         </section>
 
+        {/* Fundraiser — the club-fundraiser angle, for modules that have one */}
+        {m.fundraiser && (
+          <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline bg-accent/[0.04]">
+            <div className="max-w-[1000px] mx-auto">
+              <Reveal>
+                <div className="text-center mb-10">
+                  <p className="pill-neutral inline-flex mb-5">{m.fundraiser.eyebrow}</p>
+                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight mb-5">{m.fundraiser.headline}</h2>
+                  <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed">{m.fundraiser.body}</p>
+                </div>
+              </Reveal>
+              <Reveal>
+                <div className="surface p-8 lg:p-10 border-accent/30">
+                  <ul className="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-5">
+                    {m.fundraiser.points.map((p) => (
+                      <li key={p} className="flex items-start gap-3">
+                        <span className="tick mt-0.5">✓</span>
+                        <p className="text-sm text-pb-dim leading-relaxed">{p}</p>
+                      </li>
+                    ))}
+                  </ul>
+                  {m.fundraiser.note && (
+                    <p className="text-xs text-pb-faint mt-8 pt-6 border-t pb-hairline text-center max-w-2xl mx-auto leading-relaxed">
+                      {m.fundraiser.note}
+                    </p>
+                  )}
+                </div>
+              </Reveal>
+            </div>
+          </section>
+        )}
+
         {/* Deep dives — the module's best four screens, each with real copy */}
         {m.showcase && m.showcase.length > 0 && (
           <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
@@ -266,7 +303,9 @@ export default function ModuleDetail() {
             <p className="text-pb-dim max-w-xl mx-auto mb-7">
               {m.isCore
                 ? 'BetterStats is included in every BetterCricket plan. Add the modules that fit how your club runs, and bundle two or more to save, up to $146 off the full set.'
-                : <>Every plan includes BetterStats. Add {m.name} on its own, or bundle two or more modules and save, up to $146 off the full set. The calculator on the pricing page works out your total.</>}
+                : m.key === FANTASY.key
+                  ? <>That’s the standalone licence for the whole club, on its own and separate from the module bundle. It stays free for your members to play. Every plan still starts with BetterStats, the Core every club runs on.</>
+                  : <>Every plan includes BetterStats. Add {m.name} on its own, or bundle two or more modules and save, up to $146 off the full set. The calculator on the pricing page works out your total.</>}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/pricing" className="cta-primary">See pricing & calculator →</Link>

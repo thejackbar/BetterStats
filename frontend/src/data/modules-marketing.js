@@ -7,7 +7,9 @@
 //
 // The bolt-ons mirror the in-app umbrella tiles: BetterSelect, BetterSocials
 // (the post designer + the club website), BetterAdmin (the back office — fees,
-// comms and merch) and BetterIQ.
+// comms and merch) and BetterIQ. BetterFantasyCricket is a standalone add-on too
+// (a club fantasy game scored off your real games), priced on its own in
+// pricing.js rather than in the module bundle.
 
 import { MODULE } from '../lib/modules'
 import { MODULE_BRAND as BRAND } from '../lib/moduleBrand'
@@ -440,6 +442,96 @@ export const MODULES_MARKETING = [
       { src: '/marketing/modules/betteriq-selection-assistant.jpg', caption: 'Selection assistant' },
       { src: '/marketing/modules/betteriq-selection-squad.jpg', caption: 'Squad assistant' },
       { src: '/marketing/modules/betteriq-team-analysis.jpg', caption: 'Team analysis' },
+    ],
+  },
+  {
+    slug: 'betterfantasy',
+    key: MODULE.FANTASY,
+    name: 'BetterFantasyCricket',
+    icon: '★',
+    accent: BRAND.fantasy.accent,
+    logo: BRAND.fantasy.logo,
+    audience: 'For the whole club & supporters',
+    tagline: 'A fantasy cricket comp for your club, scored off your own games.',
+    summary:
+      'BetterFantasyCricket is your club’s own fantasy game, played by members and supporters over the season and scored off the real scorecards you already sync. Everyone picks a squad from your actual playing list across every grade, captains a star and climbs the club ladder week to week. Run a salary-cap game, a draft, or both. It’s a fun way to keep the whole club switched on all summer, and an easy pre-season fundraiser if you want one.',
+    highlights: [
+      'Your own players, scored off your real games',
+      'Salary cap and draft formats, your call',
+      'Members join from one link with a PIN',
+      'An easy pre-season club fundraiser',
+    ],
+    features: [
+      { title: 'Played off your real scorecards', desc: 'Points come straight from the games you already sync: batting, bowling, fielding and dismissals across every grade. There’s nothing extra to score and no separate feed to wait on.' },
+      { title: 'Pick from your own list', desc: 'The whole club is the player pool. Members build a 12 from your actual players, name a captain for double points, and the best 11 each round count on their own.' },
+      { title: 'Salary cap or draft', desc: 'Run a FPL-style salary-cap game where everyone can pick the same stars, a snake or auction draft where each player is owned by one team, or both at once.' },
+      { title: 'Transfers, chips and form', desc: 'Prices move on form and ownership through the season. Managers get a free transfer each round, can take a hit for more, and have chips like the wildcard and triple captain up their sleeve.' },
+      { title: 'A club ladder and mini-leagues', desc: 'One ladder for the whole club, plus private mini-leagues members set up with a join code, for the grade group or a family rivalry.' },
+      { title: 'No app, no account for members', desc: 'Members play from one club link and a PIN they set, shared by QR code or in the group chat. They need nothing beyond the link and their phone.' },
+      { title: 'In your club’s colours', desc: 'The whole member experience is white-labelled to your club, with your crest and colours and a light or dark finish.' },
+      { title: 'It runs itself', desc: 'Set the season up once and rounds generate from your fixtures, points settle after each weekend’s sync, and the ladder keeps itself current for the rest of the summer.' },
+    ],
+    fundraiser: {
+      eyebrow: 'A pre-season earner',
+      headline: 'Turn the comp into a club fundraiser.',
+      body: 'Plenty of clubs ask everyone to chip in a small entry fee, say $20 a head, and put a prize up for whoever tops the ladder come season’s end. You raise a few hundred dollars before a ball is bowled, the playing group is talking all summer, and the competition looks after itself off the scores you already sync.',
+      points: [
+        'Set an entry fee and collect it the way you already take club money. The app never touches the cash, so you stay clear of payment handling.',
+        'Put up a prize that suits your club, like a free season, credit on the club card or some club merch.',
+        'Members play from one link, the ladder updates after each weekend, and you don’t have to lift a finger once it’s running.',
+      ],
+      note: 'Entry fees and prizes are run by your club, not through the app. Worth a quick check of the competition and trade-promotion rules in your state or country before you charge to enter.',
+    },
+    note: 'BetterFantasyCricket runs off the same player database and synced scorecards as your stats, so the player pool and the scoring stay current on their own.',
+    screenshot: '/marketing/modules/betterfantasy-my-team.jpg',
+    showcase: [
+      {
+        src: '/marketing/modules/betterfantasy-login.jpg',
+        headline: 'No app. No account. Just a link.',
+        body: 'Members join from one club link, pick a display name and set a PIN, and they’re playing. It’s the same self-serve pattern as BetterSelect, so supporters who never log into anything else can still get a team in.',
+        points: [
+          'One club link, shared by QR or group chat',
+          'A PIN they set, no app to download',
+          'Open to members and supporters, not just players',
+          'White-labelled to your club',
+        ],
+      },
+      {
+        src: '/marketing/modules/betterfantasy-pick-squad.jpg',
+        headline: 'Build your 12 under a salary cap.',
+        body: 'Each manager picks a keeper, four batters, three all-rounders and four bowlers inside a fixed budget, then captains one for double points. The best 11 score each round, so a player who misses a week drops out on his own.',
+        points: [
+          'A 12-player squad inside one budget',
+          'Role quotas keep every side balanced',
+          'Captain for double points',
+          'Prices set from real BetterStats history',
+        ],
+      },
+      {
+        src: '/marketing/modules/betterfantasy-transfers.jpg',
+        headline: 'Trade your way up the ladder.',
+        body: 'Prices drift on form and ownership as the season runs. Managers get a free transfer each round, can take a points hit for more, and bank a transfer to spend later, the FPL rhythm club cricketers already know.',
+        points: [
+          'A free transfer every round',
+          'Prices move on form and ownership',
+          'Take a hit for extra moves, or bank one',
+          'Chips like the wildcard and triple captain',
+        ],
+      },
+      {
+        src: '/marketing/modules/betterfantasy-player-profile.jpg',
+        headline: 'Every price backed by real club numbers.',
+        body: 'Tap any player and you get their fantasy price, form and ownership next to their real season and career record, the same reconciled stats that run the rest of BetterStats. Managers pick on the numbers, not a hunch.',
+        points: [
+          'Fantasy price, form and ownership',
+          'This-season and career batting and bowling',
+          'The same reconciled stats as the club site',
+          'One tap to transfer the player in',
+        ],
+      },
+    ],
+    gallery: [
+      { src: '/marketing/modules/betterfantasy-chips.jpg', caption: 'Chips: the wildcard, triple captain and more' },
     ],
   },
 ]

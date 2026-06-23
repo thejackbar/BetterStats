@@ -109,6 +109,12 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "best-available XI, player trends and deep team analysis for captains "
         "and coaches.",
     ),
+    "/modules/betterfantasy": (
+        "BetterFantasyCricket — a club fantasy game | BetterCricket",
+        "BetterFantasyCricket runs your club's own fantasy comp, scored off your "
+        "real games, with salary-cap and draft formats. A fun way to engage the "
+        "club all season and an easy pre-season fundraiser.",
+    ),
     "/compare": (
         "Compare — BetterCricket vs the tools clubs already use",
         "An honest side-by-side of how BetterCricket compares with the "
