@@ -64,23 +64,23 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+    <div className="rounded-xl border border-pb-hairline bg-pb-surface px-5 py-5 mb-4">
       <button
         onClick={() => setCollapsed(c => !c)}
         className="w-full flex items-center justify-between mb-1 group"
       >
-        <h2 className="text-[13px] font-semibold text-white/90">Hero Image</h2>
-        <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+        <h2 className="text-[13px] font-semibold text-pb-text">Hero Image</h2>
+        <span className="text-pb-faintest group-hover:text-pb-dim transition"><Chevron open={!collapsed} /></span>
       </button>
       {!collapsed && (
         <>
-          <p className="text-[11px] text-white/40 mb-4">Shown as the yearbook cover background. Landscape photos work best.</p>
+          <p className="text-[11px] text-pb-faint mb-4">Shown as the yearbook cover background. Landscape photos work best.</p>
           {heroPath ? (
             <div className="mb-3">
               <img
                 src={imageSrc(heroPath)}
                 alt="Hero"
-                className="w-full max-h-48 object-cover rounded-lg border border-white/10"
+                className="w-full max-h-48 object-cover rounded-lg border border-pb-hairline"
               />
               <div className="flex gap-2 mt-2">
                 <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
@@ -101,10 +101,10 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
             <button
               onClick={() => inputRef.current?.click()}
               disabled={uploading}
-              className="w-full border-2 border-dashed border-white/15 rounded-lg py-8 text-center hover:border-white/25 transition-colors disabled:opacity-40"
+              className="w-full border-2 border-dashed border-pb-hairline2 rounded-lg py-8 text-center hover:border-pb-hairline2 transition-colors disabled:opacity-40"
             >
-              <div className="text-white/40 text-[13px]">{uploading ? 'Uploading…' : '+ Upload Hero Image'}</div>
-              <div className="text-white/25 text-[11px] font-mono mt-1">JPG, PNG, WEBP up to 20MB</div>
+              <div className="text-pb-faint text-[13px]">{uploading ? 'Uploading…' : '+ Upload Hero Image'}</div>
+              <div className="text-pb-faintest text-[11px] font-mono mt-1">JPG, PNG, WEBP up to 20MB</div>
             </button>
           )}
           <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
@@ -173,11 +173,11 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+    <div className="rounded-xl border border-pb-hairline bg-pb-surface px-5 py-5 mb-4">
       <div className="flex items-center justify-between mb-1">
         <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
-          <h2 className="text-[13px] font-semibold text-white/90">Photo Gallery</h2>
-          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+          <h2 className="text-[13px] font-semibold text-pb-text">Photo Gallery</h2>
+          <span className="text-pb-faintest group-hover:text-pb-dim transition"><Chevron open={!collapsed} /></span>
         </button>
         {!collapsed && (
           <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
@@ -187,7 +187,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
       </div>
       {!collapsed && (
         <>
-          <p className="text-[11px] text-white/40 mt-0.5 mb-3">Team photos, match shots, presentations — shown on the public yearbook.</p>
+          <p className="text-[11px] text-pb-faint mt-0.5 mb-3">Team photos, match shots, presentations — shown on the public yearbook.</p>
           {galleryImages.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">
               {galleryImages.map(img => (
@@ -195,7 +195,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
                   <img
                     src={imageSrc(img.file_path)}
                     alt=""
-                    className="w-full h-full object-cover rounded-lg border border-white/8"
+                    className="w-full h-full object-cover rounded-lg border border-pb-hairline"
                   />
                   <button
                     onClick={() => handleDelete(img)}
@@ -208,7 +208,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
               ))}
             </div>
           ) : (
-            <p className="text-[12px] text-white/25 italic mb-2">No photos yet.</p>
+            <p className="text-[12px] text-pb-faintest italic mb-2">No photos yet.</p>
           )}
           <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
           {err && <p className="text-[11px] text-red-400/80 mt-1">{err}</p>}
@@ -298,19 +298,19 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
   const totalCount = awards.length + pulled.length
 
   return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+    <div className="rounded-xl border border-pb-hairline bg-pb-surface px-5 py-5 mb-4">
       <div className="flex items-center justify-between mb-1">
         <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
-          <h2 className="text-[13px] font-semibold text-white/90">Club Awards</h2>
-          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+          <h2 className="text-[13px] font-semibold text-pb-text">Club Awards</h2>
+          <span className="text-pb-faintest group-hover:text-pb-dim transition"><Chevron open={!collapsed} /></span>
         </button>
         {!collapsed && !adding && <Btn onClick={() => { setAdding(true); setErr(null) }}>+ Add Award</Btn>}
       </div>
       {!collapsed && (
-        <p className="text-[11px] text-white/40 mt-0.5 mb-4">
+        <p className="text-[11px] text-pb-faint mt-0.5 mb-4">
           {totalCount === 0 ? 'Season award winners — shown on the Awards tab.' : `${totalCount} award${totalCount !== 1 ? 's' : ''} for this season`}
           {pulled.length > 0 && (
-            <span className="ml-1 text-white/30">
+            <span className="ml-1 text-pb-faintest">
               · {pulled.length} from <Link to="/admin/awards" className="text-pb-accent/70 hover:text-pb-accent underline-offset-2 hover:underline">Awards admin</Link>
             </span>
           )}
@@ -319,16 +319,16 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
 
       {!collapsed && pulled.length > 0 && (
         <>
-          <p className="text-[10px] font-mono text-white/25 uppercase tracking-wide mb-1.5">
+          <p className="text-[10px] font-mono text-pb-faintest uppercase tracking-wide mb-1.5">
             Toggle awards to display them in the yearbook overview
           </p>
           {err && <p className="text-[11px] text-red-400/80 mb-2">{err}</p>}
-          <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
+          <div className="mb-4 divide-y divide-pb-hairline rounded-lg border border-pb-hairline overflow-hidden">
             {pulled.map(a => {
               const isFeatured = featuredSet.has(String(a.id))
               const isToggling = toggling === a.id
               return (
-                <div key={`pulled-${a.id}`} className={`flex items-center gap-3 px-4 py-3 transition-colors ${isFeatured ? 'bg-pb-accent/5' : 'bg-white/[0.015]'}`}>
+                <div key={`pulled-${a.id}`} className={`flex items-center gap-3 px-4 py-3 transition-colors ${isFeatured ? 'bg-pb-accent/5' : 'bg-pb-surface'}`}>
                   {/* Toggle switch */}
                   <button
                     onClick={() => handleToggleFeatured(a)}
@@ -338,7 +338,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
                     aria-label={isFeatured ? 'Hide from overview' : 'Show in overview'}
                   >
                     <span className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors duration-200 ${
-                      isFeatured ? 'bg-pb-accent border-pb-accent' : 'bg-white/10 border-white/15'
+                      isFeatured ? 'bg-pb-accent border-pb-accent' : 'bg-pb-surface2 border-pb-hairline2'
                     }`}>
                       <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200 ${
                         isToggling ? 'opacity-50' : ''
@@ -347,22 +347,22 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
                   </button>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-[10px] text-white/40 uppercase tracking-wide">
+                      <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide">
                         {a.achievement}
                       </span>
                       {a.subcategory && (
-                        <span className="font-mono text-[10px] text-white/25">· {a.subcategory}</span>
+                        <span className="font-mono text-[10px] text-pb-faintest">· {a.subcategory}</span>
                       )}
                       <span className="font-mono text-[9px] text-pb-accent/60 border border-pb-accent/25 rounded px-1.5 py-px tracking-wide">
                         {a.category?.toUpperCase()}
                       </span>
                     </div>
-                    <div className="text-[13px] text-white/80 mt-0.5">{a.player_name || '—'}</div>
-                    {a.detail && <div className="text-[11px] text-white/35 mt-0.5 italic">{a.detail}</div>}
+                    <div className="text-[13px] text-pb-text mt-0.5">{a.player_name || '—'}</div>
+                    {a.detail && <div className="text-[11px] text-pb-faint mt-0.5 italic">{a.detail}</div>}
                   </div>
                   <Link
                     to="/admin/awards"
-                    className="shrink-0 text-white/25 hover:text-white/60 transition text-[11px] font-mono"
+                    className="shrink-0 text-pb-faintest hover:text-pb-dim transition text-[11px] font-mono"
                     title="Manage in Awards admin"
                   >
                     Edit →
@@ -375,18 +375,18 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
       )}
 
       {!collapsed && awards.length > 0 && (
-        <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
+        <div className="mb-4 divide-y divide-pb-hairline rounded-lg border border-pb-hairline overflow-hidden">
           {awards.map(a => (
             <div key={a.id} className="flex items-start gap-4 px-4 py-3">
               <div className="flex-1 min-w-0">
-                <span className="font-mono text-[10px] text-white/40 uppercase tracking-wide">{a.award_name}</span>
-                <div className="text-[13px] text-white/80 mt-0.5">{a.player_name || a.name_override || '—'}</div>
-                {a.notes && <div className="text-[11px] text-white/35 mt-0.5 italic">{a.notes}</div>}
+                <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide">{a.award_name}</span>
+                <div className="text-[13px] text-pb-text mt-0.5">{a.player_name || a.name_override || '—'}</div>
+                {a.notes && <div className="text-[11px] text-pb-faint mt-0.5 italic">{a.notes}</div>}
               </div>
               <button
                 onClick={() => handleDelete(a)}
                 disabled={deleting === a.id}
-                className="shrink-0 text-white/20 hover:text-red-400/70 transition text-[12px] font-mono disabled:opacity-40 pt-0.5"
+                className="shrink-0 text-pb-faintest hover:text-red-400/70 transition text-[12px] font-mono disabled:opacity-40 pt-0.5"
               >
                 {deleting === a.id ? '…' : 'Delete'}
               </button>
@@ -396,14 +396,14 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
       )}
 
       {!collapsed && adding && (
-        <div className="rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
+        <div className="rounded-lg border border-pb-hairline bg-pb-surface p-4 space-y-3">
           {/* Award name presets */}
           <div>
-            <label className="block text-[11px] font-mono text-white/40 mb-1.5">AWARD</label>
+            <label className="block text-[11px] font-mono text-pb-faint mb-1.5">AWARD</label>
             <div className="flex flex-wrap gap-1.5 mb-2">
               {AWARD_PRESETS.map(p => (
                 <button key={p} onClick={() => setAwardName(p)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${awardName === p ? 'border-pb-accent/50 text-pb-accent bg-pb-accent/10' : 'border-white/10 text-white/30 hover:border-white/20 hover:text-white/50'}`}>
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${awardName === p ? 'border-pb-accent/50 text-pb-accent bg-pb-accent/10' : 'border-pb-hairline text-pb-faintest hover:border-pb-hairline2 hover:text-pb-dim'}`}>
                   {p}
                 </button>
               ))}
@@ -411,7 +411,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
             {awardName === 'Custom' && (
               <input type="text" value={customName} onChange={e => setCustomName(e.target.value)}
                 placeholder="Award name…"
-                className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+                className="w-full rounded bg-pb-surface2 border border-pb-hairline text-pb-text text-[13px] px-3 py-2 focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest" />
             )}
           </div>
 
@@ -419,7 +419,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
           <div className="flex items-center gap-2">
             {[['Select Player', true], ['Free Text', false]].map(([label, val]) => (
               <button key={label} onClick={() => setUsePlayer(val)}
-                className={`text-[11px] font-mono px-2.5 py-1 rounded border transition-colors ${usePlayer === val ? 'border-pb-accent/40 text-pb-accent bg-pb-accent/10' : 'border-white/10 text-white/30 hover:text-white/50'}`}>
+                className={`text-[11px] font-mono px-2.5 py-1 rounded border transition-colors ${usePlayer === val ? 'border-pb-accent/40 text-pb-accent bg-pb-accent/10' : 'border-pb-hairline text-pb-faintest hover:text-pb-dim'}`}>
                 {label}
               </button>
             ))}
@@ -429,11 +429,11 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
             <div>
               <input type="text" value={playerSearch} onChange={e => setPlayerSearch(e.target.value)}
                 placeholder="Search players…"
-                className="w-full rounded-t bg-white/5 border border-white/10 border-b-0 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
-              <div className="max-h-36 overflow-y-auto rounded-b bg-white/5 border border-white/10">
+                className="w-full rounded-t bg-pb-surface2 border border-pb-hairline border-b-0 text-pb-text text-[13px] px-3 py-2 focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest" />
+              <div className="max-h-36 overflow-y-auto rounded-b bg-pb-surface2 border border-pb-hairline">
                 {filteredPlayers.slice(0, 25).map(p => (
                   <button key={p.id} onClick={() => { setPlayerId(p.id); setPlayerSearch(p.display_name || p.name) }}
-                    className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${playerId === p.id ? 'bg-pb-accent/15 text-white/90' : 'text-white/70 hover:bg-white/5'}`}>
+                    className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${playerId === p.id ? 'bg-pb-accent/15 text-pb-text' : 'text-pb-dim hover:bg-pb-surface2'}`}>
                     {p.display_name || p.name}
                   </button>
                 ))}
@@ -442,18 +442,18 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
           ) : (
             <input type="text" value={nameOverride} onChange={e => setNameOverride(e.target.value)}
               placeholder="Recipient name…"
-              className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+              className="w-full rounded bg-pb-surface2 border border-pb-hairline text-pb-text text-[13px] px-3 py-2 focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest" />
           )}
 
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             placeholder="Optional note (e.g. season highlights)…"
-            className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+            className="w-full rounded bg-pb-surface2 border border-pb-hairline text-pb-text text-[13px] px-3 py-2 focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest" />
 
           {err && <p className="text-[11px] text-red-400/80">{err}</p>}
           <div className="flex items-center gap-2">
             <Btn onClick={handleAdd} disabled={saving}>{saving ? 'Adding…' : 'Add Award'}</Btn>
             <button onClick={() => { setAdding(false); setErr(null); setAwardName(''); setCustomName('') }}
-              className="px-3 py-1.5 text-[12px] font-mono text-white/30 hover:text-white/50 transition">Cancel</button>
+              className="px-3 py-1.5 text-[12px] font-mono text-pb-faintest hover:text-pb-dim transition">Cancel</button>
           </div>
         </div>
       )}
@@ -567,11 +567,11 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+    <div className="rounded-xl border border-pb-hairline bg-pb-surface px-5 py-5 mb-4">
       <div className="flex items-center justify-between mb-1">
         <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
-          <h2 className="text-[13px] font-semibold text-white/90">Editorial Sections</h2>
-          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+          <h2 className="text-[13px] font-semibold text-pb-text">Editorial Sections</h2>
+          <span className="text-pb-faintest group-hover:text-pb-dim transition"><Chevron open={!collapsed} /></span>
         </button>
         {!collapsed && !adding && (
           <Btn onClick={() => setAdding(true)}>+ Add Section</Btn>
@@ -579,28 +579,28 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
       </div>
 
       {!collapsed && (
-        <p className="text-[11px] text-white/40 mt-0.5 mb-4">
+        <p className="text-[11px] text-pb-faint mt-0.5 mb-4">
           Optional club reports shown on the public yearbook — toggle each one on/off.
         </p>
       )}
 
       {/* Existing sections */}
       {!collapsed && sections.length === 0 && !adding && (
-        <p className="text-[12px] text-white/25 italic mb-3">No sections yet. Add a President's Report, Sponsor's Message, or any custom section.</p>
+        <p className="text-[12px] text-pb-faintest italic mb-3">No sections yet. Add a President's Report, Sponsor's Message, or any custom section.</p>
       )}
 
       {!collapsed && <div className="space-y-4">
         {sections.map(s => {
           const ed = getEditor(s)
           return (
-            <div key={s.id} className="rounded-lg border border-white/8 bg-white/2 p-4">
+            <div key={s.id} className="rounded-lg border border-pb-hairline bg-pb-surface p-4">
               {/* Section header */}
               <div className="flex items-center gap-3 mb-3">
                 <input
                   type="text"
                   value={ed.title}
                   onChange={e => setEditor(s.id, { title: e.target.value, dirty: true })}
-                  className="flex-1 bg-transparent border-b border-white/10 focus:border-white/25 text-[13px] font-semibold text-white/80 py-0.5 focus:outline-none"
+                  className="flex-1 bg-transparent border-b border-pb-hairline focus:border-pb-hairline2 text-[13px] font-semibold text-pb-text py-0.5 focus:outline-none"
                 />
                 {/* Toggle */}
                 <button
@@ -609,14 +609,14 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
                   className={`shrink-0 px-2.5 py-1 rounded border text-[10px] font-mono transition-colors ${
                     s.is_enabled
                       ? 'border-green-500/30 text-green-400 bg-green-500/10'
-                      : 'border-white/15 text-white/30 hover:border-white/25'
+                      : 'border-pb-hairline2 text-pb-faintest hover:border-pb-hairline2'
                   }`}
                 >
                   {s.is_enabled ? 'ON' : 'OFF'}
                 </button>
                 <button
                   onClick={() => handleDelete(s)}
-                  className="shrink-0 text-white/20 hover:text-red-400/70 transition text-[12px] font-mono"
+                  className="shrink-0 text-pb-faintest hover:text-red-400/70 transition text-[12px] font-mono"
                   title="Delete section"
                 >
                   Delete
@@ -629,11 +629,11 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
                 onChange={e => setEditor(s.id, { content: e.target.value, dirty: true })}
                 rows={7}
                 placeholder="Write your content here…"
-                className="w-full rounded bg-white/5 border border-white/10 text-white/75 text-sm px-3 py-2.5 resize-y font-sans leading-relaxed focus:outline-none focus:border-white/25 placeholder:text-white/20"
+                className="w-full rounded bg-pb-surface2 border border-pb-hairline text-pb-dim text-sm px-3 py-2.5 resize-y font-sans leading-relaxed focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest"
               />
 
               <div className="flex items-center justify-between mt-2.5">
-                <span className="text-[10px] font-mono text-white/20">
+                <span className="text-[10px] font-mono text-pb-faintest">
                   {ed.content.length} chars
                   {ed.dirty && <span className="ml-2 text-amber-400/60">· unsaved</span>}
                 </span>
@@ -648,8 +648,8 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
 
       {/* Add section form */}
       {!collapsed && adding && (
-        <div className="mt-4 rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
-          <p className="text-[12px] font-semibold text-white/70">Choose section type</p>
+        <div className="mt-4 rounded-lg border border-pb-hairline bg-pb-surface p-4 space-y-3">
+          <p className="text-[12px] font-semibold text-pb-dim">Choose section type</p>
           <div className="flex flex-wrap gap-2">
             {SECTION_PRESETS.map(p => (
               <button
@@ -658,7 +658,7 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
                 className={`px-3 py-1.5 rounded border text-[12px] font-mono transition-colors ${
                   newType === p.type
                     ? 'border-pb-accent/50 text-pb-accent bg-pb-accent/10'
-                    : 'border-white/15 text-white/40 hover:border-white/25 hover:text-white/60'
+                    : 'border-pb-hairline2 text-pb-faint hover:border-pb-hairline2 hover:text-pb-dim'
                 }`}
               >
                 {p.label}
@@ -671,7 +671,7 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               placeholder="Section title…"
-              className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20"
+              className="w-full rounded bg-pb-surface2 border border-pb-hairline text-pb-text text-[13px] px-3 py-2 focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest"
             />
           )}
           <div className="flex items-center gap-2">
@@ -680,7 +680,7 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
             </Btn>
             <button
               onClick={() => { setAdding(false); setNewType(''); setNewTitle('') }}
-              className="px-3 py-1.5 text-[12px] font-mono text-white/30 hover:text-white/50 transition"
+              className="px-3 py-1.5 text-[12px] font-mono text-pb-faintest hover:text-pb-dim transition"
             >
               Cancel
             </button>
@@ -800,7 +800,7 @@ export default function AdminYearbookDetail() {
   }
 
   if (!org || loading) return <PbSpinner />
-  if (!yearbook) return <div className="max-w-3xl mx-auto px-4 py-8 text-white/50">Yearbook not found.</div>
+  if (!yearbook) return <div className="max-w-3xl mx-auto px-4 py-8 text-pb-faint">Yearbook not found.</div>
 
   const seasonName = formatSeason(yearbook.season) || seasonId
   const isPublished = yearbook.status === 'published'
@@ -813,20 +813,20 @@ export default function AdminYearbookDetail() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <Link to="/admin/yearbook" className="text-[11px] font-mono text-white/30 hover:text-white/50 transition mb-2 inline-block">
+          <Link to="/admin/yearbook" className="text-[11px] font-mono text-pb-faintest hover:text-pb-dim transition mb-2 inline-block">
             ← All Yearbooks
           </Link>
-          <h1 className="text-xl font-semibold text-white">{seasonName}</h1>
+          <h1 className="text-xl font-semibold text-pb-text">{seasonName}</h1>
           <div className="flex items-center gap-3 mt-1.5">
             <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border ${
               isPublished
                 ? 'border-green-500/30 text-green-400 bg-green-500/10'
-                : 'border-white/15 text-white/40'
+                : 'border-pb-hairline2 text-pb-faint'
             }`}>
               {isPublished ? 'PUBLISHED' : 'DRAFT'}
             </span>
             {yearbook.published_at && (
-              <span className="text-[11px] text-white/30 font-mono">
+              <span className="text-[11px] text-pb-faintest font-mono">
                 Published {new Date(yearbook.published_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
               </span>
             )}
@@ -837,7 +837,7 @@ export default function AdminYearbookDetail() {
           <Link
             to={`/${org.slug}/yearbook`}
             target="_blank"
-            className="px-3 py-1.5 rounded border border-white/15 text-[12px] font-mono text-white/50 hover:text-white/70 hover:border-white/25 transition-colors"
+            className="px-3 py-1.5 rounded border border-pb-hairline2 text-[12px] font-mono text-pb-faint hover:text-pb-dim hover:border-pb-hairline2 transition-colors"
           >
             Preview
           </Link>
@@ -846,7 +846,7 @@ export default function AdminYearbookDetail() {
             disabled={publishing}
             className={`px-3 py-1.5 rounded border text-[12px] font-mono transition-colors disabled:opacity-40 ${
               isPublished
-                ? 'border-white/20 text-white/50 hover:border-red-400/30 hover:text-red-400'
+                ? 'border-pb-hairline2 text-pb-faint hover:border-red-400/30 hover:text-red-400'
                 : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
             }`}
           >
@@ -856,18 +856,18 @@ export default function AdminYearbookDetail() {
       </div>
 
       {msg && (
-        <div className="mb-5 px-4 py-3 rounded-lg border border-white/15 bg-white/5 text-sm text-white/70 flex items-center justify-between">
+        <div className="mb-5 px-4 py-3 rounded-lg border border-pb-hairline2 bg-pb-surface2 text-sm text-pb-dim flex items-center justify-between">
           <span>{msg}</span>
-          <button onClick={() => setMsg(null)} className="text-white/30 hover:text-white/60 text-lg leading-none ml-3">×</button>
+          <button onClick={() => setMsg(null)} className="text-pb-faintest hover:text-pb-dim text-lg leading-none ml-3">×</button>
         </div>
       )}
 
       {/* Narrative Section */}
-      <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+      <div className="rounded-xl border border-pb-hairline bg-pb-surface px-5 py-5 mb-4">
         <div className="flex items-center justify-between mb-1">
           <button onClick={() => setNarrativeCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
-            <h2 className="text-[13px] font-semibold text-white/90">Season Narrative</h2>
-            <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!narrativeCollapsed} /></span>
+            <h2 className="text-[13px] font-semibold text-pb-text">Season Narrative</h2>
+            <span className="text-pb-faintest group-hover:text-pb-dim transition"><Chevron open={!narrativeCollapsed} /></span>
           </button>
           {!narrativeCollapsed && (
             <Btn onClick={generateNarrative} disabled={generating} className="shrink-0">
@@ -877,7 +877,7 @@ export default function AdminYearbookDetail() {
         </div>
         {!narrativeCollapsed && (
           <>
-            <p className="text-[11px] text-white/40 mt-0.5 mb-3">
+            <p className="text-[11px] text-pb-faint mt-0.5 mb-3">
               {hasSaved ? 'Saved — shown publicly when yearbook is published.'
                 : hasAiDraft ? 'AI draft ready — edit and save to publish.'
                 : 'Generate an AI draft then edit before saving.'}
@@ -887,10 +887,10 @@ export default function AdminYearbookDetail() {
               onChange={e => { setNarrativeText(e.target.value); setNarrativeDirty(true) }}
               rows={10}
               placeholder="Click 'Generate AI Draft' to auto-generate a season narrative, or type your own…"
-              className="w-full rounded-lg bg-white/5 border border-white/10 text-white/80 text-sm px-4 py-3 resize-y font-sans leading-relaxed focus:outline-none focus:border-white/25 placeholder:text-white/20"
+              className="w-full rounded-lg bg-pb-surface2 border border-pb-hairline text-pb-text text-sm px-4 py-3 resize-y font-sans leading-relaxed focus:outline-none focus:border-pb-hairline2 placeholder:text-pb-faintest"
             />
             <div className="flex items-center justify-between mt-3">
-              <span className="text-[11px] text-white/25 font-mono">
+              <span className="text-[11px] text-pb-faintest font-mono">
                 {narrativeText.length} chars
                 {narrativeDirty && <span className="ml-2 text-amber-400/60">· unsaved changes</span>}
               </span>
