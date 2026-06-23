@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import statistics
 from collections import Counter
 from datetime import date, datetime, timezone
 
@@ -71,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 # Payload schema versions — bump on shape changes so stale caches rebuild.
 CAREER_VERSION = 2     # bumped: career window widened 5 → 10 years
-DEEP_VERSION = 2       # bumped: added "how he takes wickets" + wicket quality (bowling)
+DEEP_VERSION = 3       # bumped: added batting reliability + style (floor/ceiling, boundary profile)
 
 # How far back the external "full career, all clubs" view reaches. The aggregate
 # calls are light (~3 per season row, cached 7 days), so we pull a decade of
@@ -456,6 +457,14 @@ def _pos_bucket(pos) -> str | None:
 
 _BANDS = [("0-9", 0, 9), ("10-24", 10, 24), ("25-49", 25, 49), ("50-99", 50, 99), ("100+", 100, 10 ** 9)]
 
+
+def _pct(sorted_vals: list[int], q: float):
+    """Nearest-rank percentile of a sorted list — mirrors iq_trends._percentile."""
+    if not sorted_vals:
+        return None
+    idx = min(len(sorted_vals) - 1, max(0, int(round(q * (len(sorted_vals) - 1)))))
+    return sorted_vals[idx]
+
 _DEEP_DISMISSAL_NOTE = {
     "bowled": "gets bowled more than most, so attack the stumps",
     "lbw": "falls lbw regularly, so bowl straight and appeal hard",
@@ -750,6 +759,51 @@ def _assemble_deep(
         bat_years.setdefault(i["year"], []).append(i)
     bat_by_year = [{"year": y, **_bat_year(items)} for y, items in sorted(bat_years.items(), reverse=True)]
 
+    # Reliability (brief §6.1) — floor/median/ceiling, failure rate and a
+    # boom-or-bust read straight off the runs distribution. Mirrors the own-player
+    # deep-dive (iq_trends) so an opponent reads the same way as one of ours.
+    reliability = None
+    if inns >= 5:
+        runs_list = [i["runs"] for i in bat_inns]
+        runs_sorted = sorted(runs_list)
+        mean_runs = statistics.mean(runs_list)
+        cv = (statistics.pstdev(runs_list) / mean_runs) if mean_runs > 0 else None
+        failures = sum(1 for i in bat_inns if not i["not_out"] and i["runs"] < 10)
+        reliability = {
+            "floor": _pct(runs_sorted, 0.25),
+            "median": _pct(runs_sorted, 0.5),
+            "ceiling": _pct(runs_sorted, 0.9),
+            "best": runs_sorted[-1],
+            "failure_rate": round(100 * failures / outs) if outs else None,
+            "contribution_rate": round(100 * sum(1 for i in bat_inns if i["runs"] >= 20) / inns),
+            "variability": round(cv, 2) if cv is not None else None,
+            "profile": (
+                "Boom or bust" if (cv is not None and cv > 1.1)
+                else "Steady" if (cv is not None and cv < 0.7)
+                else "Balanced"
+            ),
+        }
+
+    # Style (brief §1.1) — accumulator vs boundary-hitter from the boundary share
+    # of runs and balls-per-boundary (only when we have balls faced).
+    style = None
+    if balls > 0:
+        tfours = sum(i["fours"] for i in bat_inns)
+        tsixes = sum(i["sixes"] for i in bat_inns)
+        tboundaries = tfours + tsixes
+        bpct = round(100 * boundary_runs / runs) if runs else None
+        style = {
+            "balls": balls,
+            "strike_rate": round(100 * runs / balls, 1),
+            "boundary_pct": bpct,
+            "balls_per_boundary": round(balls / tboundaries, 1) if tboundaries else None,
+            "fours": tfours, "sixes": tsixes,
+            "profile": (
+                ("Boundary hitter" if bpct >= 60 else "Accumulator" if bpct <= 35 else "Balanced")
+                if bpct is not None else None
+            ),
+        }
+
     batting = {
         "innings_count": inns,
         "runs": runs,
@@ -762,6 +816,8 @@ def _assemble_deep(
         "conversion": conversion,
         "by_position": by_position,
         "by_year": bat_by_year,
+        "reliability": reliability,
+        "style": style,
         "recent": bat_inns[:12],
     } if inns else None
 
