@@ -125,7 +125,9 @@ export default function SuperMarketing() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState('')
-  const [filters, setFilters] = useState({ q: '', state: '', with_email: false })
+  const [filters, setFilters] = useState({
+    q: '', state: '', association: '', postcode_from: '', postcode_to: '', contact: '',
+  })
   const [expanded, setExpanded] = useState(null)
 
   const loadStats = useCallback(() => {
@@ -163,7 +165,7 @@ export default function SuperMarketing() {
   const exportComms = async () => {
     setBusy('export'); setMsg('')
     try {
-      const r = await api.mktExportComms({ states: filters.state ? [filters.state] : null })
+      const r = await api.mktExportComms({ ...filters })
       setMsg(`Exported to ${r.org}: ${r.added} added, ${r.already_present} already there, ${r.already_suppressed} suppressed.`)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
@@ -200,8 +202,8 @@ export default function SuperMarketing() {
             BetterCricket outreach. Each club stores its whole published committee
             (names, roles, emails, mobiles) plus the association(s) it plays in. Click
             a club to see everything collected and tick which contacts to email —
-            office bearers are pre-ticked. "Export to BetterComms" pushes only the
-            ticked contacts into the comms send pipeline.
+            office bearers are pre-ticked. "Export to BetterAdmin Comms" pushes only
+            the ticked contacts (within the current filter) into the comms send pipeline.
           </p>
         </div>
 
@@ -225,34 +227,63 @@ export default function SuperMarketing() {
             {busy === 'crawl' ? 'Starting...' : 'Run crawl batch'}
           </button>
           <button className={BTN} onClick={() => { loadStats(); loadClubs() }}>Refresh</button>
-          <a className={BTN} href={api.mktExportCsvUrl(filters.state)} target="_blank" rel="noreferrer">
-            Download CSV
+          <a className={BTN} href={api.mktExportCsvUrl(filters)} target="_blank" rel="noreferrer">
+            Download CSV (filtered)
           </a>
           <button className={BTN} disabled={busy === 'export'} onClick={exportComms}>
-            {busy === 'export' ? 'Exporting...' : 'Export to BetterComms'}
+            {busy === 'export' ? 'Exporting...' : 'Export to BetterAdmin Comms (filtered)'}
           </button>
           <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
             {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-1">
           <input
-            className={SELECT_CLS + ' min-w-[200px]'}
+            className={SELECT_CLS + ' min-w-[180px]'}
             placeholder="Search club or association..."
             value={filters.q}
             onChange={(e) => setFilters(f => ({ ...f, q: e.target.value }))}
+          />
+          <input
+            className={SELECT_CLS + ' min-w-[160px]'}
+            placeholder="Association contains..."
+            value={filters.association}
+            onChange={(e) => setFilters(f => ({ ...f, association: e.target.value }))}
           />
           <select className={SELECT_CLS} value={filters.state}
                   onChange={(e) => setFilters(f => ({ ...f, state: e.target.value }))}>
             <option value="">All states</option>
             {STATES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-            <input type="checkbox" checked={filters.with_email}
-                   onChange={(e) => setFilters(f => ({ ...f, with_email: e.target.checked }))} />
-            Has email only
-          </label>
+          <div className="flex items-center gap-1 text-xs text-pb-dim">
+            <span>Postcode</span>
+            <input className={SELECT_CLS + ' w-20'} placeholder="from" inputMode="numeric"
+                   value={filters.postcode_from}
+                   onChange={(e) => setFilters(f => ({ ...f, postcode_from: e.target.value }))} />
+            <span>–</span>
+            <input className={SELECT_CLS + ' w-20'} placeholder="to" inputMode="numeric"
+                   value={filters.postcode_to}
+                   onChange={(e) => setFilters(f => ({ ...f, postcode_to: e.target.value }))} />
+          </div>
+          <select className={SELECT_CLS} value={filters.contact}
+                  onChange={(e) => setFilters(f => ({ ...f, contact: e.target.value }))}>
+            <option value="">Any contacts</option>
+            <option value="any_email">Has an email (any)</option>
+            <option value="named_email">Has a named email</option>
+            <option value="pst">Has Pres + Sec + Treas (named, emailed)</option>
+          </select>
+          {(filters.q || filters.association || filters.state || filters.postcode_from
+            || filters.postcode_to || filters.contact) && (
+            <button className="text-[11px] text-pb-faint hover:text-pb-accent"
+                    onClick={() => setFilters({ q: '', state: '', association: '',
+                                                postcode_from: '', postcode_to: '', contact: '' })}>
+              clear
+            </button>
+          )}
+        </div>
+        <div className="text-[11px] text-pb-faint mb-3">
+          Download CSV and Export to BetterAdmin Comms act on this filtered list.
         </div>
 
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}

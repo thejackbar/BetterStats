@@ -33,13 +33,25 @@ async def status(db: AsyncSession = Depends(get_db), _=Depends(require_super_adm
     return await cd.crawl_status(db)
 
 
+def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact):
+    """Normalise the directory filter query-params into club_filters kwargs."""
+    return {
+        "q": q, "state": state, "association": association, "status": status,
+        "postcode_from": postcode_from, "postcode_to": postcode_to,
+        "contact_filter": contact if contact in cd.CONTACT_FILTERS else None,
+    }
+
+
 @router.get("/clubs")
 async def list_clubs(
     q: Optional[str] = None,
     state: Optional[str] = None,
+    association: Optional[str] = None,
     status: Optional[str] = None,
+    postcode_from: Optional[str] = None,
+    postcode_to: Optional[str] = None,
+    contact: Optional[str] = None,   # '' | any_email | named_email | pst
     kind: Optional[str] = "club",
-    with_email: bool = False,
     limit: int = Query(100, le=500),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -48,16 +60,9 @@ async def list_clubs(
     stmt = select(MarketingClub).where(MarketingClub.detail_fetched_at.isnot(None))
     if kind:
         stmt = stmt.where(MarketingClub.kind == kind)
-    if state:
-        stmt = stmt.where(MarketingClub.state == state)
-    if status:
-        stmt = stmt.where(MarketingClub.status == status)
-    if q:
-        like = f"%{q.lower()}%"
-        stmt = stmt.where(or_(func.lower(MarketingClub.name).like(like),
-                              func.lower(MarketingClub.association_name).like(like)))
-    if with_email:
-        stmt = stmt.where(MarketingClub.contact_email.isnot(None))
+    for cond in cd.club_filters(**_filter_kwargs(
+            q, state, association, status, postcode_from, postcode_to, contact)):
+        stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     stmt = stmt.order_by(MarketingClub.name.asc()).limit(limit).offset(offset)
     clubs = (await db.execute(stmt)).scalars().all()
@@ -109,8 +114,15 @@ async def trigger_crawl(
 
 class ExportBody(BaseModel):
     organisation_id: Optional[str] = None
-    states: Optional[list[str]] = None
-    include_associations: bool = False
+    # The same directory filters the page shows (so the export acts on the
+    # currently-filtered list).
+    q: Optional[str] = None
+    state: Optional[str] = None
+    association: Optional[str] = None
+    status: Optional[str] = None
+    postcode_from: Optional[str] = None
+    postcode_to: Optional[str] = None
+    contact: Optional[str] = None
     # Default True: only push contacts a super admin ticked for outreach. Set
     # False to export every subscribed, emailable contact regardless of selection.
     selected_only: bool = True
@@ -119,12 +131,13 @@ class ExportBody(BaseModel):
 @router.post("/export-comms")
 async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
                        _=Depends(require_super_admin)):
-    """Push the selected contacts into comms_contacts under the outreach org, so
-    a BetterComms campaign can send to them with full unsubscribe/suppression."""
+    """Push the selected, currently-filtered contacts into comms_contacts under
+    the outreach org, so a BetterAdmin Comms campaign can send to them with full
+    unsubscribe/suppression."""
     return await cd.export_to_comms(
-        db, organisation_id=body.organisation_id, states=body.states,
-        include_associations=body.include_associations,
-        selected_only=body.selected_only)
+        db, organisation_id=body.organisation_id, selected_only=body.selected_only,
+        filters=_filter_kwargs(body.q, body.state, body.association, body.status,
+                               body.postcode_from, body.postcode_to, body.contact))
 
 
 class ContactSelectBody(BaseModel):
@@ -155,15 +168,22 @@ async def sync_suppressions(organisation_id: Optional[str] = None,
 
 @router.get("/export.csv")
 async def export_csv(
+    q: Optional[str] = None,
     state: Optional[str] = None,
-    include_associations: bool = False,
+    association: Optional[str] = None,
+    status: Optional[str] = None,
+    postcode_from: Optional[str] = None,
+    postcode_to: Optional[str] = None,
+    contact: Optional[str] = None,
     only_with_email: bool = True,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_super_admin),
 ):
+    """CSV of the currently-filtered directory (one row per club+contact)."""
     csv_text = await cd.clubs_to_csv(
-        db, states=[state] if state else None,
-        only_with_email=only_with_email, include_associations=include_associations)
+        db, only_with_email=only_with_email,
+        filters=_filter_kwargs(q, state, association, status,
+                               postcode_from, postcode_to, contact))
     return Response(
         content=csv_text, media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=marketing_clubs.csv"})

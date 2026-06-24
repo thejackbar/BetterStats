@@ -49,7 +49,7 @@ try:
 except ImportError:  # pragma: no cover — Python < 3.9
     ZoneInfo = None  # type: ignore
 
-from sqlalchemy import select, func, cast, update, Text, and_
+from sqlalchemy import select, func, cast, update, Text, and_, or_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
@@ -533,18 +533,72 @@ def _assoc_names(club: MarketingClub) -> list[str]:
     return [a.get("name") for a in (club.associations or []) if a.get("name")]
 
 
+# Contact-presence filters offered on the directory page.
+#   any_email   — ≥1 contact with an email (named or not)
+#   named_email — ≥1 contact that has BOTH a name and an email
+#   pst         — a named+emailed President AND Secretary AND Treasurer
+CONTACT_FILTERS = ("any_email", "named_email", "pst")
+_PST_ROLES = ("President", "Secretary", "Treasurer")
+
+
+def _named_email_cond():
+    C = MarketingClubContact
+    return and_(C.email.isnot(None), C.full_name.isnot(None),
+                func.length(func.trim(C.full_name)) > 0)
+
+
+def club_filters(q: Optional[str] = None, state: Optional[str] = None,
+                 association: Optional[str] = None, status: Optional[str] = None,
+                 postcode_from: Optional[str] = None, postcode_to: Optional[str] = None,
+                 contact_filter: Optional[str] = None) -> list:
+    """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
+    the CSV export and the BetterComms export, so all three honour the same
+    filters. Contact-presence filters use correlated EXISTS over the contacts."""
+    C = MarketingClubContact
+    conds = []
+    if state:
+        conds.append(MarketingClub.state == state)
+    if status:
+        conds.append(MarketingClub.status == status)
+    if q:
+        like = f"%{q.lower()}%"
+        conds.append(or_(func.lower(MarketingClub.name).like(like),
+                         func.lower(MarketingClub.association_name).like(like)))
+    if association:
+        a = f"%{association.lower()}%"
+        # primary association OR any in the associations JSONB list
+        conds.append(or_(func.lower(MarketingClub.association_name).like(a),
+                         func.lower(cast(MarketingClub.associations, Text)).like(a)))
+    # AU postcodes are 4-digit; lexical compare of 4-char numeric strings == numeric,
+    # and the regex guard keeps non-4-digit values out (no CAST, so never errors).
+    pc_ok = MarketingClub.postcode.op("~")("^[0-9]{4}$")
+    if postcode_from:
+        conds.append(and_(pc_ok, MarketingClub.postcode >= str(postcode_from).zfill(4)))
+    if postcode_to:
+        conds.append(and_(pc_ok, MarketingClub.postcode <= str(postcode_to).zfill(4)))
+    if contact_filter == "any_email":
+        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
+                                    C.email.isnot(None)))
+    elif contact_filter == "named_email":
+        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
+                                    _named_email_cond()))
+    elif contact_filter == "pst":
+        for role in _PST_ROLES:
+            conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
+                                        _named_email_cond(), C.role == role))
+    return conds
+
+
 async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] = None,
-                          states: Optional[list[str]] = None,
-                          include_associations: bool = False,
-                          only_with_email: bool = True,
-                          selected_only: bool = True) -> dict:
+                          only_with_email: bool = True, selected_only: bool = True,
+                          filters: Optional[dict] = None) -> dict:
     """Materialise the marketing contacts into ``comms_contacts`` under the
     platform outreach org, so BetterComms does the actual sending (unsubscribe,
-    suppression, audit all reused). Only the contacts a super admin ticked for
-    outreach (``outreach_selected``) are exported unless ``selected_only`` is
-    False. Skips clubs that are already customers and any address suppressed here.
-    Existing comms suppressions are left untouched. (``include_associations`` is
-    accepted for API compatibility; the directory only holds clubs now.)"""
+    suppression, audit all reused). Honours the same directory ``filters`` the
+    page shows (state / association / postcode / contact-presence), and only the
+    contacts a super admin ticked (``outreach_selected``) unless ``selected_only``
+    is False. Skips clubs that are already customers and any suppressed address;
+    existing comms suppressions are left untouched."""
     org = await _resolve_outreach_org(session, organisation_id)
 
     q = (
@@ -553,12 +607,12 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         .where(MarketingClubContact.subscribed.is_(True),
                MarketingClub.existing_org_id.is_(None))
     )
+    for cond in club_filters(**(filters or {})):
+        q = q.where(cond)
     if selected_only:
         q = q.where(MarketingClubContact.outreach_selected.is_(True))
     if only_with_email:
         q = q.where(MarketingClubContact.email.isnot(None))
-    if states:
-        q = q.where(MarketingClub.state.in_(states))
 
     rows = (await session.execute(q)).all()
     added = skipped = suppressed = 0
@@ -618,12 +672,13 @@ def _slug(name: str) -> str:
     return re.sub(r"-+", "-", s).strip("-")
 
 
-async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None,
-                       only_with_email: bool = True, include_associations: bool = False,
-                       subscribed_only: bool = True) -> str:
-    """Export the directory as CSV — one row per (club, contact). Header carries
-    'Club' + 'UTM' + 'Name' so it drops straight into the outreach send tooling,
-    plus the association(s) and full metadata for filtering elsewhere."""
+async def clubs_to_csv(session: AsyncSession, only_with_email: bool = True,
+                       subscribed_only: bool = True,
+                       filters: Optional[dict] = None) -> str:
+    """Export the directory as CSV — one row per (club, contact), honouring the
+    same directory ``filters`` the page shows. Header carries 'Club' + 'UTM' +
+    'Name' so it drops straight into the outreach send tooling, plus the
+    association(s) and full metadata for filtering elsewhere."""
     join_cond = MarketingClubContact.marketing_club_id == MarketingClub.id
     if subscribed_only:
         join_cond = and_(join_cond, MarketingClubContact.subscribed.is_(True))
@@ -633,8 +688,8 @@ async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None
         .where(MarketingClub.detail_fetched_at.isnot(None))
         .order_by(MarketingClub.name.asc(), MarketingClubContact.role_rank.asc())
     )
-    if states:
-        q = q.where(MarketingClub.state.in_(states))
+    for cond in club_filters(**(filters or {})):
+        q = q.where(cond)
 
     rows = (await session.execute(q)).all()
     buf = io.StringIO()

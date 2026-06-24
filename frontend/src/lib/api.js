@@ -427,8 +427,11 @@ export const api = {
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktSyncSuppressions: (orgId) =>
     request(`/club-admin/marketing/sync-suppressions${orgId ? `?organisation_id=${orgId}` : ''}`, { method: 'POST' }),
-  mktExportCsvUrl: (state) =>
-    `${BASE}/club-admin/marketing/export.csv${state ? `?state=${encodeURIComponent(state)}` : ''}`,
+  mktExportCsvUrl: (filters = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(filters).filter(([, v]) => v !== '' && v != null)).toString()
+    return `${BASE}/club-admin/marketing/export.csv${qs ? `?${qs}` : ''}`
+  },
   // Image URLs (used directly in <img src>; cookie auth travels with the request)
   kpPlayerImageUrl: (klubproPlayerId, thumb = false) =>
     `${BASE}/club-admin/klubpro/images/player/${klubproPlayerId}${thumb ? '?thumb=1' : ''}`,
