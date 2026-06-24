@@ -1,343 +1,274 @@
-"""Marketing club directory — crawl the CA/grassroots org graph for BetterCricket
-outreach, and bridge the result into the existing BetterComms send pipeline.
+"""Marketing club directory — enumerate every Australian cricket club from the
+PlayHQ public directory for BetterCricket outreach, and bridge the result into
+the existing BetterComms send pipeline.
 
-What the grassroots API gives us (and what it doesn't)
------------------------------------------------------
-``GET /orgsproducts/organisation/{organisationGuid}`` (unauthenticated) returns,
-per club: name, ``playHQId``, ``myCricketId``, address (incl. ``postCode``),
-``affiliations`` (the association: name + GUID), ``websiteURL`` and a single
-``contact {phone, email}`` (usually a role mailbox like ``secretary@``). It does
-NOT expose per-person office bearers, so Phase 1 stores that one contact; the
-contact table is many-per-club so President/Secretary/Treasurer can be added by
-manual enrichment later (and ``role_rank`` sequences them to the top).
+Data source (see ``playhq_directory_client``)
+---------------------------------------------
+Two unauthenticated PlayHQ GraphQL endpoints, read the same way playhq.com does:
 
-Discovery is a breadth-first walk of the affiliation graph: a club lists its
-association, an association lists its member clubs, so from a handful of seeds the
-whole connected universe unfolds. The crawl is resumable through the table itself
-— a row with ``detail_fetched_at IS NULL`` is a frontier node (discovered via an
-affiliation, not yet detailed). Each batch details a capped number and enqueues
-their affiliations as new frontier rows, so a restart/deploy never loses progress.
+* **Search** enumerates every cricket club in one paged pass (empty query,
+  ``sports:[CRICKET]``, ``types:[CLUB]``), filtered to Australia by
+  ``tenant.name == "Cricket Australia"``. Each result carries the club's name,
+  ``routingCode``, website, address AND its full committee ``contacts[]`` (name +
+  position + email + phone) — so contacts come free at discovery, no per-club
+  fetch.
+* **Main graph** ``discoverCompetitions(routingCode)`` maps a club to the
+  association(s) it plays in (a club commonly plays across several). This is the
+  one per-club call, run as a separate, slower enrichment pass.
 
-Politeness is deliberate (settings ``marketing_crawl_*``): concurrency 1, a
-jittered delay between requests, a nightly cap, run off-peak. We stay a quiet API
-citizen; nothing here tries to evade anything.
+So the crawl is two phases:
+
+1. **Discovery** (``discover_clubs``) — page the search to completion, upsert
+   every AU club with its committee + address. Cheap (~70 calls), idempotent.
+2. **Association enrichment** (``enrich_associations``) — for each club whose
+   ``associations`` is still NULL (the frontier), call ``discoverCompetitions``
+   and store the association list. Resumable through the table itself, so a
+   restart/deploy never loses progress.
+
+We store **office-bearers + coordinators** (President / Vice-President /
+Secretary / Treasurer + junior/female/cricket coordinators), not the whole
+committee — the high-signal outreach contacts, with less personal data held.
+
+Politeness is deliberate (``marketing_crawl_*``): one request at a time, a
+jittered delay, a nightly cap, run off-peak. We stay a quiet API citizen.
 """
 from __future__ import annotations
 
-import asyncio
 import csv
 import io
 import logging
-import random
 import re
 from typing import Optional
 
-import httpx
-from sqlalchemy import select, text, func, cast, update, Text, and_
+from sqlalchemy import select, func, cast, update, Text, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
 from app.models.db import (
     MarketingClub, MarketingClubContact, Organisation, CommsContact,
 )
+from app.services import playhq_directory_client as phq
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = settings.playhq_base_url
-_JSCONFIG = "eccn:true"
-_TIMEOUT = 30.0
-# A normal browser UA — we read the same public endpoints the play.cricket.com.au
-# site does. Identify as a normal client; do not pretend to be something we aren't.
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    ),
-    "Accept": "application/json",
+AU_TENANT = "Cricket Australia"
+
+# PlayHQ committee positions we keep, mapped to a tidy label + a priority rank.
+# Office bearers rank to the top; coordinators (junior/female/cricket) follow.
+# Everything else (general committee, coaches, scorers, …) is skipped — too much
+# personal data for too little outreach signal.
+_OFFICE_BEARERS = {
+    "PRESIDENT": ("President", 1),
+    "VICE_PRESIDENT": ("Vice President", 2),
+    "SECRETARY": ("Secretary", 3),
+    "TREASURER": ("Treasurer", 4),
 }
-
-# One request at a time for a background marketing crawl (the live sync uses 6; we
-# go lower on purpose — this is a slow, polite walk, not a user-facing fetch).
-_SEMAPHORE = asyncio.Semaphore(1)
-
-# Priority roles float to the top of any per-club contact list.
-_ROLE_RANK = {"president": 1, "secretary": 2, "treasurer": 3}
-# Map a role-mailbox local-part (or an enriched role string) to a tidy label.
-_ROLE_FROM_LOCALPART = [
-    ("president", "President"),
-    ("secretary", "Secretary"),
-    ("treasurer", "Treasurer"),
-    ("registrar", "Registrar"),
-    ("chair", "Chairperson"),
-    ("admin", "Administration"),
-    ("info", "Club contact"),
-    ("contact", "Club contact"),
-]
-_ASSOC_KEYWORDS = re.compile(r"\b(assoc|association|league|competition|federation|union)\b", re.I)
+# CA stores some roles with a typo ("COODINATOR" — the R is dropped); match the
+# correct spelling and that typo.
+_COORDINATOR_RE = re.compile(r"COOR?DINATOR")
+_COORDINATOR_RANK = 10
 
 
-# ── polite HTTP ───────────────────────────────────────────────────────────────
-
-async def _get(path: str, params: dict | None = None) -> Optional[httpx.Response]:
-    """One GET against the grassroots proxy, behind the concurrency gate, with a
-    jittered courtesy delay and a single 429 backoff-and-retry."""
-    p = {"jsconfig": _JSCONFIG}
-    if params:
-        p.update(params)
-    async with _SEMAPHORE:
-        # Courtesy delay BEFORE the request so concurrent callers can't burst.
-        await asyncio.sleep(random.uniform(
-            settings.marketing_crawl_min_delay, settings.marketing_crawl_max_delay))
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
-            try:
-                r = await client.get(f"{BASE_URL}{path}", params=p)
-            except httpx.HTTPError as exc:
-                logger.warning("club_directory GET %s failed: %s", path, exc)
-                return None
-            if r.status_code == 429:
-                await asyncio.sleep(8.0)
-                try:
-                    r = await client.get(f"{BASE_URL}{path}", params=p)
-                except httpx.HTTPError as exc:
-                    logger.warning("club_directory retry %s failed: %s", path, exc)
-                    return None
-            return r
-
-
-async def search_orgs(query: str) -> list[dict]:
-    """Search organisations by name (≤20 chars enforced by the proxy)."""
-    q = (query or "").strip()[:20].strip()
-    if not q:
-        return []
-    r = await _get("/orgsproducts/organisation/search", {"searchString": q})
-    if not r or r.status_code >= 400:
-        return []
-    data = r.json()
-    return data.get("organisations", data if isinstance(data, list) else [])
-
-
-async def fetch_org_detail(guid: str) -> Optional[dict]:
-    """Full org-detail payload (name, address, affiliations, contact)."""
-    r = await _get(f"/orgsproducts/organisation/{guid}")
-    if not r or r.status_code >= 400:
-        if r is not None and r.status_code not in (404,):
-            logger.info("org-detail %s → HTTP %s", guid, r.status_code)
+def _role_for_position(position: Optional[str]) -> Optional[tuple[str, int]]:
+    """Return (label, rank) for a kept committee position, or None to skip it."""
+    pos = (position or "").strip().upper()
+    if not pos:
         return None
-    try:
-        return r.json()
-    except ValueError:
-        return None
+    if pos in _OFFICE_BEARERS:
+        return _OFFICE_BEARERS[pos]
+    if _COORDINATOR_RE.search(pos):
+        # JUNIOR_CRICKET_COODINATOR → "Junior Cricket Coordinator"
+        label = pos.replace("COODINATOR", "COORDINATOR").replace("_", " ").title()
+        return label, _COORDINATOR_RANK
+    return None
 
 
-# ── parsing ─────────────────────────────────────────────────────────────────
-
-def _kind(name: str, affiliations: list) -> str:
-    """Heuristic club-vs-association split so the export can skip associations.
-    An association either reads like one in its name or fans out to many clubs."""
-    if _ASSOC_KEYWORDS.search(name or ""):
-        return "association"
-    if len(affiliations or []) >= 5:
-        return "association"
-    return "club"
+def _full_name(contact: dict) -> Optional[str]:
+    name = " ".join(filter(None, [
+        (contact.get("firstName") or "").strip(),
+        (contact.get("lastName") or "").strip()])).strip()
+    return name or None
 
 
-def _role_for(email: Optional[str], explicit: Optional[str] = None) -> tuple[Optional[str], int]:
-    """Return (role_label, role_rank). Derives a role from a role-mailbox local
-    part when no explicit role is given (the API never labels the contact)."""
-    label = (explicit or "").strip() or None
-    if not label and email and "@" in email:
-        local = email.split("@", 1)[0].lower()
-        for needle, tidy in _ROLE_FROM_LOCALPART:
-            if needle in local:
-                label = tidy
-                break
-    rank = 99
-    if label:
-        rank = _ROLE_RANK.get(label.lower(), 99)
-    return label, rank
+# ── club upsert (discovery) ─────────────────────────────────────────────────────
 
-
-def parse_org_detail(data: dict) -> dict:
-    """Map an org-detail payload onto MarketingClub columns."""
-    addr = data.get("address") or {}
-    contact = data.get("contact") or {}
-    affs = data.get("affiliations") or []
-    name = data.get("name") or ""
-    assoc = affs[0] if (affs and _kind(name, affs) == "club") else None
-    return {
-        "grassroots_guid": data.get("organisationGuid"),
-        "playhq_id": data.get("playHQId"),
-        "mycricket_id": data.get("myCricketId"),
-        "name": name,
-        "short_name": data.get("shortName"),
-        "kind": _kind(name, affs),
-        "association_name": (assoc or {}).get("name"),
-        "association_guid": (assoc or {}).get("organisationGuid"),
-        "website_url": data.get("websiteURL"),
-        "contact_email": (contact.get("email") or "").strip() or None,
-        "contact_phone": (contact.get("phone") or "").strip() or None,
-        "address_line1": addr.get("line1") or None,
-        "address_line2": addr.get("line2") or None,
-        "suburb": addr.get("suburb") or None,
-        "state": addr.get("stateName") or None,
-        "postcode": addr.get("postCode") or None,
-        "country": addr.get("country") or None,
-        "latitude": addr.get("latitude"),
-        "longitude": addr.get("longitude"),
-        "logo_url": data.get("logoURL"),
-        "description": data.get("description"),
-        "is_playhq": data.get("isPlayHQ"),
-        "raw_json": data,
-        "affiliations": affs,  # consumed by the crawl, not stored as a column
-    }
-
-
-# ── crawl ─────────────────────────────────────────────────────────────────────
-
-# Seed searches to bootstrap the very first frontier. The affiliation BFS does the
-# heavy lifting from here; these just need to land us on a few orgs in each state.
-SEED_QUERIES = [
-    "Cricket Club", "Cricket Association", "District Cricket", "Junior Cricket",
-    "Premier Cricket", "Metropolitan", "Suburban", "Country Cricket",
-    "City Cricket", "United Cricket", "Districts Cricket", "Cricket Inc",
-]
-
-
-async def _ensure_frontier_row(session: AsyncSession, guid: str, name: str = "") -> bool:
-    """Insert a minimal frontier row (detail not yet fetched) if the GUID is new.
-    Returns True when a row was added."""
-    if not guid:
-        return False
-    exists = await session.scalar(
-        select(MarketingClub.id).where(MarketingClub.grassroots_guid == guid))
-    if exists:
-        return False
-    session.add(MarketingClub(grassroots_guid=guid, name=name or "(pending)"))
-    # Flush so a later dedupe-select in the same uncommitted batch sees this GUID
-    # (two clubs in one batch can list the same association).
-    await session.flush()
-    return True
-
-
-async def bootstrap_frontier(session: AsyncSession, queries: Optional[list[str]] = None) -> int:
-    """Seed the frontier from a set of name searches. Idempotent — only adds GUIDs
-    not already present."""
-    added = 0
-    for q in (queries or SEED_QUERIES):
-        for org in await search_orgs(q):
-            guid = org.get("organisationGuid") or org.get("id")
-            if await _ensure_frontier_row(session, guid, org.get("name", "")):
-                added += 1
-        await session.commit()
-    logger.info("bootstrap_frontier: %d new frontier rows", added)
-    return added
+async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str],
+                         role: str, role_rank: int, email: Optional[str],
+                         phone: Optional[str]) -> None:
+    """Upsert one committee contact, deduped on lower(email) per club. A re-crawl
+    refreshes name/phone and fills a better role. Contacts with no email are kept
+    (phone-only), deduped on (club, full_name) so a re-crawl doesn't pile up."""
+    email = (email or "").strip().lower() or None
+    phone = (phone or "").strip() or None
+    if email:
+        existing = await session.scalar(select(MarketingClubContact).where(
+            MarketingClubContact.marketing_club_id == club_id,
+            func.lower(MarketingClubContact.email) == email))
+    elif full_name:
+        existing = await session.scalar(select(MarketingClubContact).where(
+            MarketingClubContact.marketing_club_id == club_id,
+            MarketingClubContact.email.is_(None),
+            func.lower(MarketingClubContact.full_name) == full_name.lower()))
+    else:
+        return
+    if existing:
+        existing.mobile = phone or existing.mobile
+        existing.full_name = full_name or existing.full_name
+        if role_rank < (existing.role_rank or 99):
+            existing.role, existing.role_rank = role, role_rank
+        existing.updated_at = func.now()
+        return
+    session.add(MarketingClubContact(
+        marketing_club_id=club_id, full_name=full_name, role=role,
+        role_rank=role_rank, email=email, mobile=phone, source="api"))
 
 
 async def _link_existing_org(session: AsyncSession, club: MarketingClub) -> None:
     """Best-effort link to a club we already have as a BetterStats customer so
-    outreach can skip it (match on grassroots id, then playhq_id, then name)."""
-    org_id = await session.scalar(
-        select(Organisation.id).where(
-            func.lower(cast(Organisation.id, Text)) == (club.grassroots_guid or "").lower()))
-    if not org_id and club.playhq_id:
+    outreach can skip it (match on PlayHQ routingCode, then name)."""
+    org_id = None
+    if club.playhq_id:
         org_id = await session.scalar(
             select(Organisation.id).where(Organisation.playhq_id == club.playhq_id))
+    if not org_id and club.grassroots_guid:
+        org_id = await session.scalar(select(Organisation.id).where(
+            func.lower(cast(Organisation.id, Text)) == club.grassroots_guid.lower()))
     if not org_id and club.name:
-        org_id = await session.scalar(
-            select(Organisation.id).where(func.lower(Organisation.name) == club.name.lower()))
+        org_id = await session.scalar(select(Organisation.id).where(
+            func.lower(Organisation.name) == club.name.lower()))
     club.existing_org_id = org_id
 
 
-async def _store_contact(session: AsyncSession, club: MarketingClub,
-                         email: Optional[str], phone: Optional[str],
-                         full_name: Optional[str] = None, role: Optional[str] = None,
-                         source: str = "api") -> None:
-    """Upsert one contact for a club, deduped on lower(email). A contact with no
-    email is still recorded (phone only) but can't dedupe, so we keep just one
-    phone-only 'Club contact' row per club."""
-    label, rank = _role_for(email, role)
-    if email:
-        existing = await session.scalar(
-            select(MarketingClubContact).where(
-                MarketingClubContact.marketing_club_id == club.id,
-                func.lower(MarketingClubContact.email) == email.lower()))
-        if existing:
-            existing.mobile = phone or existing.mobile
-            existing.full_name = full_name or existing.full_name
-            if label and existing.role_rank == 99:
-                existing.role, existing.role_rank = label, rank
-            return
-    elif phone:
-        # phone-only: avoid piling up duplicate anonymous rows on re-crawl
-        existing = await session.scalar(
-            select(MarketingClubContact).where(
-                MarketingClubContact.marketing_club_id == club.id,
-                MarketingClubContact.email.is_(None)))
-        if existing:
-            existing.mobile = phone
-            return
-    else:
-        return
-    session.add(MarketingClubContact(
-        marketing_club_id=club.id, full_name=full_name, role=label,
-        role_rank=rank, email=(email.lower() if email else None),
-        mobile=phone, source=source))
+async def _upsert_club(session: AsyncSession, org: dict) -> bool:
+    """Insert or refresh one club from a search result. Returns True if newly
+    inserted. Leaves ``associations`` untouched (NULL stays the enrichment
+    frontier); never clobbers ``status``/``existing_org_id`` on an existing row."""
+    guid = org.get("id")
+    if not guid:
+        return False
+    addr = org.get("address") or {}
+    club = await session.scalar(
+        select(MarketingClub).where(MarketingClub.grassroots_guid == guid))
+    is_new = club is None
+    if is_new:
+        club = MarketingClub(grassroots_guid=guid)
+        session.add(club)
+    club.playhq_id = org.get("routingCode") or club.playhq_id
+    club.name = org.get("name") or club.name or "(unknown)"
+    club.kind = "club"
+    club.source = "playhq_directory"
+    club.website_url = org.get("websiteUrl") or club.website_url
+    club.address_line1 = addr.get("line1") or club.address_line1
+    club.suburb = addr.get("suburb") or club.suburb
+    club.state = addr.get("state") or club.state
+    club.postcode = addr.get("postcode") or club.postcode
+    club.country = addr.get("country") or club.country
+    club.latitude = addr.get("latitude") or club.latitude
+    club.longitude = addr.get("longitude") or club.longitude
+    club.raw_json = org
+    club.detail_fetched_at = func.now()   # core data (contacts/address) is present
+    club.last_crawled_at = func.now()
+    if club.status in (None, "new"):
+        club.status = "enriched"
+    await session.flush()  # need club.id for contacts + dedupe within the batch
+
+    # Office-bearers + coordinators only.
+    top_email = top_phone = None
+    top_rank = 999
+    for c in (org.get("contacts") or []):
+        if c.get("visible") is False:
+            continue
+        role = _role_for_position(c.get("position"))
+        if not role:
+            continue
+        label, rank = role
+        email = (c.get("email") or "").strip() or None
+        phone = (c.get("phone") or "").strip() or None
+        await _store_contact(session, club.id, _full_name(c), label, rank, email, phone)
+        if rank < top_rank and (email or phone):
+            top_rank, top_email, top_phone = rank, email, phone
+    # Mirror the top contact onto the club for the list filter + CSV fallback.
+    club.contact_email = top_email or club.contact_email
+    club.contact_phone = top_phone or club.contact_phone
+
+    await _link_existing_org(session, club)
+    return is_new
 
 
-async def crawl_batch(session: AsyncSession, limit: Optional[int] = None,
-                      seeds: Optional[list[str]] = None) -> dict:
-    """Detail up to ``limit`` frontier clubs, store their contact + metadata, and
-    enqueue their affiliations. Bootstraps the frontier on first run. Returns a
-    small stats dict. Safe to call repeatedly — it just walks the next slice."""
+async def discover_clubs(session: AsyncSession, max_pages: int = 200) -> dict:
+    """Page the PlayHQ search to completion, upserting every Australian cricket
+    club (with its committee). Idempotent — safe to re-run to pick up new clubs."""
+    page, seen, new, skipped = 1, 0, 0, 0
+    total_au = 0
+    while page <= max_pages:
+        results, _ = await phq.search_organisations("CLUB", "", page=page, limit=100)
+        if not results:
+            break
+        for org in results:
+            if (org.get("tenant") or {}).get("name") != AU_TENANT:
+                skipped += 1
+                continue
+            total_au += 1
+            if await _upsert_club(session, org):
+                new += 1
+            seen += 1
+        await session.commit()
+        page += 1
+    stats = {"pages": page - 1, "au_seen": seen, "new": new, "non_au_skipped": skipped}
+    logger.info("discover_clubs: %s", stats)
+    return stats
+
+
+# ── association enrichment ──────────────────────────────────────────────────────
+
+async def enrich_associations(session: AsyncSession, limit: Optional[int] = None) -> dict:
+    """For up to ``limit`` clubs whose associations haven't been fetched, call the
+    main graph and store the association(s) they play in. Resumable: a fetch
+    failure leaves ``associations`` NULL so the club is retried next batch."""
     limit = limit or settings.marketing_crawl_nightly_limit
-    total = await session.scalar(select(func.count(MarketingClub.id)))
-    if not total:
-        await bootstrap_frontier(session, seeds)
-
     frontier = (await session.execute(
         select(MarketingClub)
-        .where(MarketingClub.detail_fetched_at.is_(None))
+        .where(MarketingClub.associations.is_(None), MarketingClub.kind == "club")
         .order_by(MarketingClub.first_seen_at.asc())
         .limit(limit)
     )).scalars().all()
 
-    stats = {"detailed": 0, "with_email": 0, "discovered": 0, "errors": 0}
+    stats = {"enriched": 0, "with_association": 0, "errors": 0}
     for club in frontier:
-        data = await fetch_org_detail(club.grassroots_guid)
-        if not data:
-            # Mark as attempted so a dead GUID doesn't jam the queue forever.
-            club.last_crawled_at = func.now()
-            club.detail_fetched_at = func.now()
-            club.status = "enriched"
+        assocs = await phq.discover_associations(club.playhq_id)
+        club.last_crawled_at = func.now()
+        if assocs is None:
             stats["errors"] += 1
             await session.commit()
             continue
-        parsed = parse_org_detail(data)
-        affs = parsed.pop("affiliations", [])
-        for field, value in parsed.items():
-            setattr(club, field, value)
-        club.detail_fetched_at = func.now()
-        club.last_crawled_at = func.now()
-        club.status = "enriched"
-        await _link_existing_org(session, club)
-        if parsed.get("contact_email") or parsed.get("contact_phone"):
-            await _store_contact(session, club,
-                                 parsed.get("contact_email"), parsed.get("contact_phone"))
-            if parsed.get("contact_email"):
-                stats["with_email"] += 1
-        # Enqueue affiliations (both directions: a club → its association, an
-        # association → its member clubs) as frontier rows.
-        for aff in affs:
-            if await _ensure_frontier_row(session, aff.get("organisationGuid"), aff.get("name", "")):
-                stats["discovered"] += 1
-        stats["detailed"] += 1
+        club.associations = assocs
+        if assocs:
+            club.association_name = assocs[0]["name"]
+            club.association_guid = assocs[0]["id"]
+            stats["with_association"] += 1
+        stats["enriched"] += 1
         await session.commit()
 
-    remaining = await session.scalar(
-        select(func.count(MarketingClub.id)).where(MarketingClub.detail_fetched_at.is_(None)))
+    remaining = await session.scalar(select(func.count(MarketingClub.id)).where(
+        MarketingClub.associations.is_(None), MarketingClub.kind == "club"))
     stats["frontier_remaining"] = remaining or 0
-    logger.info("crawl_batch: %s", stats)
+    logger.info("enrich_associations: %s", stats)
     return stats
+
+
+async def crawl_batch(session: AsyncSession, limit: Optional[int] = None,
+                      rediscover: bool = False) -> dict:
+    """One crawl batch: discover all clubs on first run (or when ``rediscover``),
+    then association-enrich the next ``limit`` of the frontier. Safe to call
+    repeatedly — it just walks the next slice."""
+    total = await session.scalar(select(func.count(MarketingClub.id))) or 0
+    discovery = {}
+    if total == 0 or rediscover:
+        discovery = await discover_clubs(session)
+    enrichment = await enrich_associations(session, limit)
+    result = {"discovery": discovery, "enrichment": enrichment}
+    logger.info("crawl_batch: %s", result)
+    return result
 
 
 # ── BetterComms export bridge ──────────────────────────────────────────────────
@@ -357,6 +288,10 @@ async def _resolve_outreach_org(session: AsyncSession, organisation_id: Optional
         "to a platform org that owns the BetterComms campaigns.")
 
 
+def _assoc_names(club: MarketingClub) -> list[str]:
+    return [a.get("name") for a in (club.associations or []) if a.get("name")]
+
+
 async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] = None,
                           states: Optional[list[str]] = None,
                           include_associations: bool = False,
@@ -364,7 +299,9 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
     """Materialise the marketing contacts into ``comms_contacts`` under the
     platform outreach org, so BetterComms does the actual sending (unsubscribe,
     suppression, audit all reused). Skips clubs that are already customers and any
-    address suppressed here. Existing comms suppressions are left untouched."""
+    address suppressed here. Existing comms suppressions are left untouched.
+    (``include_associations`` is accepted for API compatibility; the directory
+    only holds clubs now.)"""
     org = await _resolve_outreach_org(session, organisation_id)
 
     q = (
@@ -375,8 +312,6 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
     )
     if only_with_email:
         q = q.where(MarketingClubContact.email.isnot(None))
-    if not include_associations:
-        q = q.where(MarketingClub.kind == "club")
     if states:
         q = q.where(MarketingClub.state.in_(states))
 
@@ -399,7 +334,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         session.add(CommsContact(
             organisation_id=org.id, email=email,
             name=contact.full_name or club.name, source="import",
-            tags=[club.name] + ([club.association_name] if club.association_name else []),
+            tags=[club.name] + _assoc_names(club),
         ))
         added += 1
     await session.commit()
@@ -441,9 +376,9 @@ def _slug(name: str) -> str:
 async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None,
                        only_with_email: bool = True, include_associations: bool = False,
                        subscribed_only: bool = True) -> str:
-    """Export the directory as CSV. Header carries 'Club' + 'UTM' + 'Name' so it
-    drops straight into docs/email-outreach/make_sends.py, plus the full metadata
-    for filtering elsewhere."""
+    """Export the directory as CSV — one row per (club, contact). Header carries
+    'Club' + 'UTM' + 'Name' so it drops straight into the outreach send tooling,
+    plus the association(s) and full metadata for filtering elsewhere."""
     join_cond = MarketingClubContact.marketing_club_id == MarketingClub.id
     if subscribed_only:
         join_cond = and_(join_cond, MarketingClubContact.subscribed.is_(True))
@@ -453,8 +388,6 @@ async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None
         .where(MarketingClub.detail_fetched_at.isnot(None))
         .order_by(MarketingClub.name.asc(), MarketingClubContact.role_rank.asc())
     )
-    if not include_associations:
-        q = q.where(MarketingClub.kind == "club")
     if states:
         q = q.where(MarketingClub.state.in_(states))
 
@@ -462,21 +395,22 @@ async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "Club", "UTM", "Name", "Role", "Email", "Phone", "Association",
+        "Club", "UTM", "Name", "Role", "Email", "Phone",
+        "Association", "All Associations",
         "Address", "Suburb", "State", "Postcode", "Website",
-        "PlayHQ ID", "Grassroots GUID", "Status",
+        "PlayHQ Code", "PlayHQ GUID", "Status",
     ])
     for club, contact in rows:
         if only_with_email and not (contact and contact.email):
             continue
-        addr = " ".join(filter(None, [club.address_line1, club.address_line2]))
         w.writerow([
             club.name, _slug(club.name),
             (contact.full_name if contact else "") or "",
             (contact.role if contact else "") or "",
             (contact.email if contact else "") or "",
             (contact.mobile if contact else "") or club.contact_phone or "",
-            club.association_name or "", addr, club.suburb or "", club.state or "",
+            club.association_name or "", "; ".join(_assoc_names(club)),
+            club.address_line1 or "", club.suburb or "", club.state or "",
             club.postcode or "", club.website_url or "", club.playhq_id or "",
             club.grassroots_guid or "", club.status or "",
         ])
@@ -485,18 +419,29 @@ async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None
 
 async def directory_stats(session: AsyncSession) -> dict:
     """Counts for the admin dashboard / CLI summary."""
-    total = await session.scalar(select(func.count(MarketingClub.id))) or 0
-    detailed = await session.scalar(
-        select(func.count(MarketingClub.id)).where(MarketingClub.detail_fetched_at.isnot(None))) or 0
-    clubs = await session.scalar(
-        select(func.count(MarketingClub.id)).where(MarketingClub.kind == "club")) or 0
+    clubs = await session.scalar(select(func.count(MarketingClub.id))) or 0
+    assoc_fetched = await session.scalar(select(func.count(MarketingClub.id)).where(
+        MarketingClub.associations.isnot(None))) or 0
+    assoc_pending = await session.scalar(select(func.count(MarketingClub.id)).where(
+        MarketingClub.associations.is_(None))) or 0
     with_email = await session.scalar(
         select(func.count(func.distinct(MarketingClubContact.marketing_club_id)))
         .where(MarketingClubContact.email.isnot(None))) or 0
+    contacts = await session.scalar(select(func.count(MarketingClubContact.id))) or 0
     customers = await session.scalar(
         select(func.count(MarketingClub.id)).where(MarketingClub.existing_org_id.isnot(None))) or 0
+    distinct_assoc = await session.scalar(
+        select(func.count(func.distinct(MarketingClub.association_guid)))
+        .where(MarketingClub.association_guid.isnot(None))) or 0
     return {
-        "total": total, "detailed": detailed, "frontier_remaining": total - detailed,
-        "clubs": clubs, "associations": total - clubs, "clubs_with_email": with_email,
+        "clubs": clubs,
+        "contacts": contacts,
+        "clubs_with_email": with_email,
+        "associations_fetched": assoc_fetched,
+        "associations_pending": assoc_pending,
+        "distinct_associations": distinct_assoc,
         "already_customers": customers,
+        # Back-compat keys the dashboard/CLI may still read.
+        "total": clubs,
+        "frontier_remaining": assoc_pending,
     }

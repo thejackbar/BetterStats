@@ -1944,10 +1944,13 @@ class CommsRecipient(Base):
 # discovered via an affiliation but not yet detailed.
 
 class MarketingClub(Base):
-    """One Australian cricket club (or association) discovered via the grassroots
-    org graph. ``existing_org_id`` links a row that is already a BetterStats
-    customer so outreach can skip it. ``raw_json`` keeps the full org-detail
-    payload so re-crawls are cheap and new fields need no re-fetch."""
+    """One Australian cricket club discovered via the PlayHQ public directory
+    (search enumerates clubs + committees; the main graph maps each to the
+    association[s] it plays in). ``grassroots_guid`` holds the PlayHQ search GUID
+    (dedup key), ``playhq_id`` the short ``routingCode`` the main graph keys on.
+    ``existing_org_id`` links a row that is already a BetterStats customer so
+    outreach can skip it. ``raw_json`` keeps the full search payload so re-crawls
+    are cheap and new fields need no re-fetch."""
     __tablename__ = "marketing_clubs"
     __table_args__ = (
         UniqueConstraint("grassroots_guid", name="uq_marketing_club_guid"),
@@ -1960,8 +1963,11 @@ class MarketingClub(Base):
     name = Column(Text, nullable=False)
     short_name = Column(Text, nullable=True)
     kind = Column(Text, nullable=False, server_default="club")  # club | association
-    association_name = Column(Text, nullable=True)
+    association_name = Column(Text, nullable=True)   # primary (first) association
     association_guid = Column(Text, nullable=True)
+    # All association(s) the club plays in: [{"id","name","competition"}, …].
+    # NULL = not yet fetched (enrichment frontier); [] = fetched, none.
+    associations = Column(JSONB, nullable=True)
     website_url = Column(Text, nullable=True)
     contact_email = Column(Text, nullable=True)
     contact_phone = Column(Text, nullable=True)

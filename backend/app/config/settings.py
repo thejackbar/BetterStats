@@ -74,9 +74,15 @@ class Settings(BaseSettings):
     # when marketing_crawl_enabled is true (flip it in the server .env once the
     # tables exist and you want collection to begin).
     marketing_crawl_enabled: bool = False
-    marketing_crawl_nightly_limit: int = 300  # max clubs detailed per nightly batch
+    marketing_crawl_nightly_limit: int = 300  # max clubs association-enriched per nightly batch
     marketing_crawl_min_delay: float = 2.0    # min seconds between requests
     marketing_crawl_max_delay: float = 4.0    # max seconds between requests (jitter)
+    # PlayHQ public discovery endpoints (no API key — read the same as playhq.com).
+    # Search enumerates every cricket club + its committee; the main graph maps a
+    # club to the association(s) it plays in (needs the tenant header below).
+    playhq_search_url: str = "https://search.playhq.com/graphql"
+    playhq_graph_url: str = "https://api.playhq.com/graphql"
+    playhq_tenant: str = "cricket-australia"
     # Org that owns the outreach campaigns in BetterComms (export target). Set to
     # the platform marketing org's slug; blank = the export endpoint requires an
     # explicit organisation_id. Lets BetterCricket reuse the per-club comms

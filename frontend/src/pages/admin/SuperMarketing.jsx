@@ -84,12 +84,12 @@ export default function SuperMarketing() {
 
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-5">
-            <Stat label="Total" value={stats.total} />
-            <Stat label="Detailed" value={stats.detailed} />
-            <Stat label="Frontier left" value={stats.frontier_remaining} />
             <Stat label="Clubs" value={stats.clubs} />
-            <Stat label="Associations" value={stats.associations} />
+            <Stat label="Contacts" value={stats.contacts} />
             <Stat label="With email" value={stats.clubs_with_email} />
+            <Stat label="Assoc. linked" value={stats.associations_fetched} />
+            <Stat label="Assoc. pending" value={stats.associations_pending} />
+            <Stat label="Associations" value={stats.distinct_associations} />
             <Stat label="Already ours" value={stats.already_customers} />
           </div>
         )}
@@ -174,7 +174,12 @@ export default function SuperMarketing() {
                           </div>
                         ) : <span className="text-pb-faint">-</span>}
                       </td>
-                      <td className="px-3 py-2 text-pb-dim">{c.association_name || '-'}</td>
+                      <td className="px-3 py-2 text-pb-dim">
+                        {c.association_name || (c.associations === null ? <span className="text-pb-faint">pending</span> : '-')}
+                        {Array.isArray(c.associations) && c.associations.length > 1 && (
+                          <span className="text-pb-faint"> +{c.associations.length - 1}</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-pb-dim">
                         {[c.suburb, c.state].filter(Boolean).join(', ')}
                         {c.postcode ? ` ${c.postcode}` : ''}

@@ -65,7 +65,8 @@ async def list_clubs(
         out.append({
             "id": str(c.id), "name": c.name, "playhq_id": c.playhq_id,
             "grassroots_guid": c.grassroots_guid, "association_name": c.association_name,
-            "association_guid": c.association_guid, "suburb": c.suburb, "state": c.state,
+            "association_guid": c.association_guid, "associations": c.associations,
+            "suburb": c.suburb, "state": c.state,
             "postcode": c.postcode, "address_line1": c.address_line1,
             "website_url": c.website_url, "status": c.status,
             "is_customer": c.existing_org_id is not None,
@@ -77,22 +78,25 @@ async def list_clubs(
     return {"total": total or 0, "limit": limit, "offset": offset, "clubs": out}
 
 
-async def _crawl_bg(limit: Optional[int]):
+async def _crawl_bg(limit: Optional[int], rediscover: bool):
     async with async_session_maker() as session:
-        await cd.crawl_batch(session, limit=limit)
+        await cd.crawl_batch(session, limit=limit, rediscover=rediscover)
 
 
 @router.post("/crawl")
 async def trigger_crawl(
     background: BackgroundTasks,
     limit: Optional[int] = None,
+    rediscover: bool = False,
     _=Depends(require_super_admin),
 ):
     """Kick off one crawl batch in the background. Returns immediately; poll
-    /stats to watch frontier_remaining shrink. The crawl is rate-limited, so a
-    large batch takes a while — leave it running."""
-    background.add_task(_crawl_bg, limit)
-    return {"started": True, "limit": limit or "configured nightly limit"}
+    /stats to watch associations_pending shrink. The crawl is rate-limited, so it
+    takes a while — leave it running. First run (empty directory) discovers every
+    club; pass rediscover=true to re-page the club list and pick up new clubs."""
+    background.add_task(_crawl_bg, limit, rediscover)
+    return {"started": True, "limit": limit or "configured nightly limit",
+            "rediscover": rediscover}
 
 
 class ExportBody(BaseModel):

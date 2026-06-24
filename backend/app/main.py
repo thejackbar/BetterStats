@@ -150,6 +150,7 @@ async def lifespan(app: FastAPI):
                 kind TEXT NOT NULL DEFAULT 'club',
                 association_name TEXT,
                 association_guid TEXT,
+                associations JSONB,
                 website_url TEXT,
                 contact_email TEXT,
                 contact_phone TEXT,
@@ -183,6 +184,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_state_status "
             "ON marketing_clubs(state, status)"
+        ))
+        # Migration 096: associations list + its enrichment-frontier index (idempotent
+        # so the API boots even if alembic lags / the table predates the column).
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS associations JSONB"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_assoc_pending "
+            "ON marketing_clubs(associations) WHERE associations IS NULL"
         ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS marketing_club_contacts (
