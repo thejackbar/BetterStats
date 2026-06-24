@@ -33,12 +33,15 @@ async def status(db: AsyncSession = Depends(get_db), _=Depends(require_super_adm
     return await cd.crawl_status(db)
 
 
-def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact):
+def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
+                   person=None, exclude_junior=False, exclude_emailed=False):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
         "postcode_from": postcode_from, "postcode_to": postcode_to,
         "contact_filter": contact if contact in cd.CONTACT_FILTERS else None,
+        "person": person, "exclude_junior": bool(exclude_junior),
+        "exclude_emailed": bool(exclude_emailed),
     }
 
 
@@ -51,6 +54,9 @@ async def list_clubs(
     postcode_from: Optional[str] = None,
     postcode_to: Optional[str] = None,
     contact: Optional[str] = None,   # '' | any_email | named_email | pst
+    person: Optional[str] = None,
+    exclude_junior: bool = False,
+    exclude_emailed: bool = False,
     kind: Optional[str] = "club",
     limit: int = Query(100, le=500),
     offset: int = 0,
@@ -61,7 +67,8 @@ async def list_clubs(
     if kind:
         stmt = stmt.where(MarketingClub.kind == kind)
     for cond in cd.club_filters(**_filter_kwargs(
-            q, state, association, status, postcode_from, postcode_to, contact)):
+            q, state, association, status, postcode_from, postcode_to, contact,
+            person, exclude_junior, exclude_emailed)):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     stmt = stmt.order_by(MarketingClub.name.asc()).limit(limit).offset(offset)
@@ -82,6 +89,8 @@ async def list_clubs(
             "postcode": c.postcode, "address_line1": c.address_line1,
             "website_url": c.website_url, "status": c.status,
             "is_customer": c.existing_org_id is not None,
+            "emailed_at": c.emailed_at.isoformat() if c.emailed_at else None,
+            "emailed_via": c.emailed_via, "emailed_note": c.emailed_note,
             "contacts": [{
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
@@ -123,6 +132,9 @@ class ExportBody(BaseModel):
     postcode_from: Optional[str] = None
     postcode_to: Optional[str] = None
     contact: Optional[str] = None
+    person: Optional[str] = None
+    exclude_junior: bool = False
+    exclude_emailed: bool = False
     # Default True: only push contacts a super admin ticked for outreach. Set
     # False to export every subscribed, emailable contact regardless of selection.
     selected_only: bool = True
@@ -133,11 +145,29 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
                        _=Depends(require_super_admin)):
     """Push the selected, currently-filtered contacts into comms_contacts under
     the outreach org, so a BetterAdmin Comms campaign can send to them with full
-    unsubscribe/suppression."""
+    unsubscribe/suppression. Clubs already marked emailed are always skipped."""
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
         filters=_filter_kwargs(body.q, body.state, body.association, body.status,
-                               body.postcode_from, body.postcode_to, body.contact))
+                               body.postcode_from, body.postcode_to, body.contact,
+                               body.person, body.exclude_junior, body.exclude_emailed))
+
+
+class EmailedBody(BaseModel):
+    emailed: bool
+    note: Optional[str] = None
+
+
+@router.patch("/clubs/{club_id}/emailed")
+async def set_club_emailed(club_id: str, body: EmailedBody,
+                           db: AsyncSession = Depends(get_db),
+                           _=Depends(require_super_admin)):
+    """Manually mark / unmark a club as already emailed (e.g. via an external
+    mailing tool) so it's excluded from future exports/sends."""
+    res = await cd.mark_emailed(db, club_id, body.emailed, via="manual", note=body.note)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return res
 
 
 class ContactSelectBody(BaseModel):
@@ -175,6 +205,9 @@ async def export_csv(
     postcode_from: Optional[str] = None,
     postcode_to: Optional[str] = None,
     contact: Optional[str] = None,
+    person: Optional[str] = None,
+    exclude_junior: bool = False,
+    exclude_emailed: bool = False,
     only_with_email: bool = True,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_super_admin),
@@ -182,8 +215,8 @@ async def export_csv(
     """CSV of the currently-filtered directory (one row per club+contact)."""
     csv_text = await cd.clubs_to_csv(
         db, only_with_email=only_with_email,
-        filters=_filter_kwargs(q, state, association, status,
-                               postcode_from, postcode_to, contact))
+        filters=_filter_kwargs(q, state, association, status, postcode_from,
+                               postcode_to, contact, person, exclude_junior, exclude_emailed))
     return Response(
         content=csv_text, media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=marketing_clubs.csv"})

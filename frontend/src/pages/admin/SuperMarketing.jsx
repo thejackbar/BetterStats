@@ -2,11 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
-// Australian states/territories as the grassroots API returns them (stateName).
-const STATES = [
-  'New South Wales', 'Victoria', 'Queensland', 'Western Australia',
-  'South Australia', 'Tasmania', 'Australian Capital Territory', 'Northern Territory',
-]
+// PlayHQ stores the abbreviated state on the club (e.g. "WA", "NSW"), so the
+// filter value must be the abbreviation, not the full name.
+const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
 
 const SELECT_CLS = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent'
 const BTN = 'px-3 py-1.5 rounded text-xs font-semibold border pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-accent disabled:opacity-50'
@@ -49,7 +47,7 @@ function Stat({ label, value }) {
 
 // Everything collected for one club — all stored contacts, every association it
 // plays in, address and ids. Driven entirely by the /clubs payload (no extra fetch).
-function ClubDetail({ club, onToggleContact }) {
+function ClubDetail({ club, onToggleContact, onToggleEmailed }) {
   const contacts = club.contacts || []
   const assocs = club.associations
   return (
@@ -110,6 +108,17 @@ function ClubDetail({ club, onToggleContact }) {
             <span className="text-pb-faint"> · GUID: </span><span className="font-mono text-[10px]">{club.grassroots_guid || '-'}</span></div>
           <div><span className="text-pb-faint">Status: </span>{club.status || '-'}
             {club.is_customer && <span className="text-emerald-300"> · already a customer</span>}</div>
+          <div className="pt-1">
+            <span className="text-pb-faint">Emailed: </span>
+            {club.emailed_at
+              ? <span className="text-amber-300">yes ({club.emailed_via || 'manual'})</span>
+              : <span className="text-pb-faint">no</span>}
+            <button
+              className="ml-2 px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent"
+              onClick={() => onToggleEmailed(club.id, !club.emailed_at)}>
+              {club.emailed_at ? 'Unmark emailed' : 'Mark as emailed'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -127,6 +136,7 @@ export default function SuperMarketing() {
   const [busy, setBusy] = useState('')
   const [filters, setFilters] = useState({
     q: '', state: '', association: '', postcode_from: '', postcode_to: '', contact: '',
+    person: '', exclude_junior: false, exclude_emailed: false,
   })
   const [expanded, setExpanded] = useState(null)
 
@@ -184,6 +194,20 @@ export default function SuperMarketing() {
     }
   }
 
+  const toggleEmailed = async (clubId, emailed) => {
+    setClubs(cs => cs.map(c => c.id !== clubId ? c : {
+      ...c, emailed_at: emailed ? new Date().toISOString() : null,
+      emailed_via: emailed ? 'manual' : null,
+    }))
+    try {
+      await api.mktSetClubEmailed(clubId, emailed)
+      loadStats()
+    } catch (e) {
+      setError(e.message || 'Could not update.')
+      loadClubs()
+    }
+  }
+
   const syncSuppressions = async () => {
     setBusy('supp'); setMsg('')
     try {
@@ -208,11 +232,12 @@ export default function SuperMarketing() {
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2 mb-5">
             <Stat label="Clubs" value={stats.clubs} />
             <Stat label="Contacts" value={stats.contacts} />
             <Stat label="To email" value={stats.selected_contacts} />
             <Stat label="With email" value={stats.clubs_with_email} />
+            <Stat label="Emailed" value={stats.emailed} />
             <Stat label="Assoc. linked" value={stats.associations_fetched} />
             <Stat label="Assoc. pending" value={stats.associations_pending} />
             <Stat label="Associations" value={stats.distinct_associations} />
@@ -273,11 +298,29 @@ export default function SuperMarketing() {
             <option value="named_email">Has a named email</option>
             <option value="pst">Has Pres + Sec + Treas (named, emailed)</option>
           </select>
+          <input
+            className={SELECT_CLS + ' min-w-[150px]'}
+            placeholder="Person name contains..."
+            value={filters.person}
+            onChange={(e) => setFilters(f => ({ ...f, person: e.target.value }))}
+          />
+          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+            <input type="checkbox" checked={filters.exclude_junior}
+                   onChange={(e) => setFilters(f => ({ ...f, exclude_junior: e.target.checked }))} />
+            Exclude juniors
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+            <input type="checkbox" checked={filters.exclude_emailed}
+                   onChange={(e) => setFilters(f => ({ ...f, exclude_emailed: e.target.checked }))} />
+            Hide already-emailed
+          </label>
           {(filters.q || filters.association || filters.state || filters.postcode_from
-            || filters.postcode_to || filters.contact) && (
+            || filters.postcode_to || filters.contact || filters.person
+            || filters.exclude_junior || filters.exclude_emailed) && (
             <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                     onClick={() => setFilters({ q: '', state: '', association: '',
-                                                postcode_from: '', postcode_to: '', contact: '' })}>
+                                                postcode_from: '', postcode_to: '', contact: '',
+                                                person: '', exclude_junior: false, exclude_emailed: false })}>
               clear
             </button>
           )}
@@ -319,6 +362,12 @@ export default function SuperMarketing() {
                           <span className="text-pb-faint">{isOpen ? '▾' : '▸'}</span>
                           {c.name}
                           {c.is_customer && <span className="text-[10px] text-emerald-300 border border-emerald-500/40 rounded px-1">customer</span>}
+                          {c.emailed_at && (
+                            <span className="text-[10px] text-amber-300 border border-amber-500/40 rounded px-1"
+                                  title={`Emailed via ${c.emailed_via || 'manual'}`}>
+                              emailed{c.emailed_via === 'campaign' ? ' (campaign)' : ''}
+                            </span>
+                          )}
                         </button>
                         {c.website_url && (
                           <a href={c.website_url} target="_blank" rel="noreferrer" className="text-[11px] text-pb-dim hover:text-pb-accent block">
@@ -357,7 +406,8 @@ export default function SuperMarketing() {
                     isOpen && (
                       <tr key={c.id + '-d'} className="bg-pb-surface2/40">
                         <td colSpan={5} className="px-4 py-3">
-                          <ClubDetail club={c} onToggleContact={toggleContact} />
+                          <ClubDetail club={c} onToggleContact={toggleContact}
+                                      onToggleEmailed={toggleEmailed} />
                         </td>
                       </tr>
                     ),

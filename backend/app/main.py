@@ -222,6 +222,19 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS "
             "outreach_selected BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        # Migration 098: emailed tracking + comms link.
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS emailed_at TIMESTAMPTZ"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS emailed_via TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS emailed_note TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS marketing_club_id UUID "
+            "REFERENCES marketing_clubs(id) ON DELETE SET NULL"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_comms_contacts_marketing_club "
+            "ON comms_contacts(marketing_club_id)"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of

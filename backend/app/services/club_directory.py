@@ -550,7 +550,8 @@ def _named_email_cond():
 def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  association: Optional[str] = None, status: Optional[str] = None,
                  postcode_from: Optional[str] = None, postcode_to: Optional[str] = None,
-                 contact_filter: Optional[str] = None) -> list:
+                 contact_filter: Optional[str] = None, person: Optional[str] = None,
+                 exclude_junior: bool = False, exclude_emailed: bool = False) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
     filters. Contact-presence filters use correlated EXISTS over the contacts."""
@@ -558,6 +559,14 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
     conds = []
     if state:
         conds.append(MarketingClub.state == state)
+    if exclude_junior:
+        conds.append(~func.lower(MarketingClub.name).like("%junior%"))
+    if exclude_emailed:
+        conds.append(MarketingClub.emailed_at.is_(None))
+    if person:
+        p = f"%{person.lower()}%"
+        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
+                                    func.lower(C.full_name).like(p)))
     if status:
         conds.append(MarketingClub.status == status)
     if q:
@@ -609,6 +618,9 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
     )
     for cond in club_filters(**(filters or {})):
         q = q.where(cond)
+    # Never export a club already marked emailed (manual external send or a prior
+    # campaign) — that's the whole point of the flag.
+    q = q.where(MarketingClub.emailed_at.is_(None))
     if selected_only:
         q = q.where(MarketingClubContact.outreach_selected.is_(True))
     if only_with_email:
@@ -633,6 +645,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         session.add(CommsContact(
             organisation_id=org.id, email=email,
             name=contact.full_name or club.name, source="import",
+            marketing_club_id=club.id,   # link back so a campaign send flags the club
             tags=[club.name] + _assoc_names(club),
         ))
         added += 1
@@ -698,7 +711,7 @@ async def clubs_to_csv(session: AsyncSession, only_with_email: bool = True,
         "Club", "UTM", "Name", "Role", "Email", "Phone", "Email?",
         "Association", "All Associations",
         "Address", "Suburb", "State", "Postcode", "Website",
-        "PlayHQ Code", "PlayHQ GUID", "Status",
+        "PlayHQ Code", "PlayHQ GUID", "Status", "Emailed",
     ])
     for club, contact in rows:
         if only_with_email and not (contact and contact.email):
@@ -714,8 +727,32 @@ async def clubs_to_csv(session: AsyncSession, only_with_email: bool = True,
             club.address_line1 or "", club.suburb or "", club.state or "",
             club.postcode or "", club.website_url or "", club.playhq_id or "",
             club.grassroots_guid or "", club.status or "",
+            club.emailed_via if club.emailed_at else "",
         ])
     return buf.getvalue()
+
+
+async def mark_emailed(session: AsyncSession, club_id: str, emailed: bool,
+                       via: str = "manual", note: Optional[str] = None) -> Optional[dict]:
+    """Manually mark / unmark a club as already emailed (so it isn't emailed
+    again). Returns the new state, or None if the club isn't found."""
+    club = await session.get(MarketingClub, club_id)
+    if club is None:
+        return None
+    if emailed:
+        club.emailed_at = func.now()
+        club.emailed_via = via if via in ("manual", "campaign") else "manual"
+        club.emailed_note = (note or None)
+    else:
+        club.emailed_at = None
+        club.emailed_via = None
+        club.emailed_note = None
+    club.updated_at = func.now()
+    await session.commit()
+    await session.refresh(club)
+    return {"id": str(club.id), "emailed": club.emailed_at is not None,
+            "emailed_via": club.emailed_via, "emailed_note": club.emailed_note,
+            "emailed_at": club.emailed_at.isoformat() if club.emailed_at else None}
 
 
 async def directory_stats(session: AsyncSession) -> dict:
@@ -734,6 +771,8 @@ async def directory_stats(session: AsyncSession) -> dict:
                MarketingClubContact.email.isnot(None))) or 0
     customers = await session.scalar(
         select(func.count(MarketingClub.id)).where(MarketingClub.existing_org_id.isnot(None))) or 0
+    emailed = await session.scalar(
+        select(func.count(MarketingClub.id)).where(MarketingClub.emailed_at.isnot(None))) or 0
     distinct_assoc = await session.scalar(
         select(func.count(func.distinct(MarketingClub.association_guid)))
         .where(MarketingClub.association_guid.isnot(None))) or 0
@@ -746,6 +785,7 @@ async def directory_stats(session: AsyncSession) -> dict:
         "associations_pending": assoc_pending,
         "distinct_associations": distinct_assoc,
         "already_customers": customers,
+        "emailed": emailed,
         # Back-compat keys the dashboard/CLI may still read.
         "total": clubs,
         "frontier_remaining": assoc_pending,
