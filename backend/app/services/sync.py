@@ -920,6 +920,23 @@ async def sync_organisation(
             logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
+
+        # Refresh Postgres planner statistics. Every sync delete+reinserts this
+        # org's player_season_stats (and the GR pass rewrites the per-game
+        # tables), which leaves the statistics stale until autovacuum catches
+        # up. player_season_stats is a GLOBAL table (all clubs), so a stale plan
+        # makes the all-seasons leaderboard / club summary scan every club's
+        # rows and time out (35s → nginx 504) — the dashboard/leaderboard hang
+        # on a freshly-synced club while a player search (a light query) works.
+        # ANALYZE is seconds against a multi-minute sync and makes the heavy
+        # aggregate reads return in ~1s. Best-effort: never fail a sync over it.
+        try:
+            async with async_session_maker() as analyze_session:
+                await analyze_session.execute(text("ANALYZE"))
+                await analyze_session.commit()
+        except Exception as e:
+            logger.warning(f"Post-sync ANALYZE failed for {org_id_str}: {e}")
+
         if run_id and owns_run:
             await finish_sync_run(run_id, stats)
         elif run_id:
