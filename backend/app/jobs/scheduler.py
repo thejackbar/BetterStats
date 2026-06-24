@@ -8,6 +8,7 @@ from app.models.db import Organisation, async_session_maker
 from app.services.sync import sync_organisation
 from app.services.fees import recompute_fee_match_days
 from app.services.square_sync import sync_all_square
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,23 @@ async def resolve_all_drafts():
                 logger.error(f"Draft auto-resolve failed for draft {d.id}: {e}")
 
 
+async def crawl_marketing_clubs():
+    """Detail the next slice of the marketing club directory frontier. Off-peak,
+    small nightly cap, opt-in (marketing_crawl_enabled). Resumable through the
+    table, so this just walks the next batch each night until the universe is
+    covered, then keeps it fresh as new clubs appear."""
+    if not settings.marketing_crawl_enabled:
+        return
+    from app.services import club_directory
+    logger.info("Starting nightly marketing club crawl")
+    async with async_session_maker() as session:
+        try:
+            stats = await club_directory.crawl_batch(session)
+            logger.info(f"Marketing club crawl batch done: {stats}")
+        except Exception as e:
+            logger.error(f"Marketing club crawl failed: {e}")
+
+
 def start_scheduler():
     # Weekly sync every Sunday at 3am
     scheduler.add_job(
@@ -130,8 +148,19 @@ def start_scheduler():
         id="fantasy_draft_tick",
         replace_existing=True,
     )
+    # BetterCricket outreach — crawl the national club directory in small nightly
+    # batches (opt-in via marketing_crawl_enabled). 02:00, off-peak and ahead of
+    # the weekly sync, so the polite slow walk has the box to itself.
+    scheduler.add_job(
+        crawl_marketing_clubs,
+        trigger="cron",
+        hour=2,
+        minute=0,
+        id="nightly_marketing_crawl",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started — weekly sync Sun 03:00, Square 04:00, fantasy settle 05:00, draft tick /15min")
+    logger.info("Scheduler started — marketing crawl 02:00, weekly sync Sun 03:00, Square 04:00, fantasy settle 05:00, draft tick /15min")
 
 
 def stop_scheduler():

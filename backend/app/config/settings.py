@@ -66,6 +66,23 @@ class Settings(BaseSettings):
     square_environment: str = "production"  # 'sandbox' | 'production'
     square_api_version: str = ""
 
+    # ─── Marketing club directory crawl (BetterCricket outreach, super-admin) ──
+    # Walks the CA/grassroots org graph to build the national club list for our
+    # own outreach. Politeness is deliberate: low concurrency + a jittered delay
+    # between requests + a nightly cap, run off-peak, so we stay a quiet API
+    # citizen. Disabled by default — the scheduler only runs the nightly batch
+    # when marketing_crawl_enabled is true (flip it in the server .env once the
+    # tables exist and you want collection to begin).
+    marketing_crawl_enabled: bool = False
+    marketing_crawl_nightly_limit: int = 300  # max clubs detailed per nightly batch
+    marketing_crawl_min_delay: float = 2.0    # min seconds between requests
+    marketing_crawl_max_delay: float = 4.0    # max seconds between requests (jitter)
+    # Org that owns the outreach campaigns in BetterComms (export target). Set to
+    # the platform marketing org's slug; blank = the export endpoint requires an
+    # explicit organisation_id. Lets BetterCricket reuse the per-club comms
+    # pipeline (and a separate SES-verified sending domain) for its own sends.
+    marketing_outreach_org_slug: str = ""
+
     @property
     def square_api_base(self) -> str:
         return (
