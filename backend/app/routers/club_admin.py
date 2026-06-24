@@ -2064,10 +2064,64 @@ async def hard_refresh_org(
     async def _run():
         _logger.info(f"HardRefresh: starting for org {org_id_str} (run_id={run_id})")
         try:
-            await update_sync_run(run_id, {"progress_phase": "Clearing stored games", "progress_pct": 0})
-            # Wipe phase — games with batting rows whose seasons belong to this org.
             from app.models.db import async_session_maker
             from sqlalchemy import text as _t
+
+            # Pre-flight probe — DON'T wipe until we've confirmed the Cricket
+            # Australia scores API is actually serving match data right now.
+            # The wipe below is committed before the re-pull, so if the scores
+            # API is down during the re-pull the games are gone and nothing
+            # restores them (the run still reports "success" because the
+            # aggregate pass uses a different, healthy endpoint). That exact
+            # failure wiped a club's entire game-level history once
+            # (gr_matches_seen: 0 on a rebuild that had pulled 2400 games an
+            # hour earlier). Probing first turns a destructive outage into a
+            # harmless "try again later".
+            await update_sync_run(run_id, {"progress_phase": "Checking data source", "progress_pct": 0})
+            from app.services import grassroots_scores_client as _gsc
+            async with async_session_maker() as s:
+                probe_rows = (
+                    await s.execute(
+                        _t(
+                            """
+                            SELECT COALESCE(gr.grassroots_id, gr.id::text) AS gid
+                            FROM grades gr
+                            JOIN seasons se ON se.id = gr.season_id
+                            WHERE se.organisation_id = :oid
+                            ORDER BY se.year DESC NULLS LAST
+                            LIMIT 15
+                            """
+                        ),
+                        {"oid": org_id_str},
+                    )
+                ).all()
+            probe_grade_ids = [row.gid for row in probe_rows if row.gid]
+            if probe_grade_ids:
+                source_alive = False
+                for gid in probe_grade_ids:
+                    try:
+                        if await _gsc.get_grade_matches(gid, force=True):
+                            source_alive = True
+                            break
+                    except Exception:
+                        continue
+                if not source_alive:
+                    _logger.error(
+                        f"HardRefresh: ABORTED for org {org_id_str} — scores API returned no "
+                        f"matches for any of {len(probe_grade_ids)} probed grades; refusing to "
+                        f"wipe game-level data while the upstream looks unavailable."
+                    )
+                    await finish_sync_run(
+                        run_id,
+                        {"games_wiped_pre_sync": 0},
+                        "Aborted before wiping: the Cricket Australia scores API returned no "
+                        "match data for any grade, so a rebuild would have left the club with "
+                        "no games. Existing data was left untouched — try again later.",
+                    )
+                    return
+
+            await update_sync_run(run_id, {"progress_phase": "Clearing stored games", "progress_pct": 0})
+            # Wipe phase — games with batting rows whose seasons belong to this org.
             async with async_session_maker() as s:
                 r = await s.execute(
                     _t(
@@ -2091,7 +2145,27 @@ async def hard_refresh_org(
             stats = await sync_organisation(org_id_str, run_id=run_id, kind="org_hard_refresh")
             stats = dict(stats or {})
             stats["games_wiped_pre_sync"] = wiped
-            await finish_sync_run(run_id, stats)
+
+            # Backstop — if we wiped games but the re-pull discovered no matches
+            # at all, the scores API went down mid-run (the probe passed, then
+            # the upstream failed). Report it as an error so it's visible and
+            # retried, rather than a silent "success" masking total data loss.
+            matches_seen = int(stats.get("gr_matches_seen") or 0)
+            new_games = int(stats.get("gr_games_new") or 0)
+            if wiped > 0 and matches_seen == 0 and new_games == 0:
+                _logger.error(
+                    f"HardRefresh: org {org_id_str} wiped {wiped} games but the re-pull saw 0 "
+                    f"matches — scores API likely failed mid-run. Re-run when it recovers."
+                )
+                await finish_sync_run(
+                    run_id,
+                    stats,
+                    f"Wiped {wiped} games but the game-level re-pull returned 0 matches — the "
+                    f"Cricket Australia scores API failed mid-rebuild. Re-run Full Rebuild to "
+                    f"restore the scorecards once it recovers.",
+                )
+            else:
+                await finish_sync_run(run_id, stats)
         except Exception as e:
             _logger.error(f"HardRefresh: failed for {org_id_str}: {e}", exc_info=True)
             await finish_sync_run(run_id, {}, f"Unexpected error: {e}")
