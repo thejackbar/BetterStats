@@ -566,3 +566,29 @@ async def force_import_achievements(
         created += 1
     await db.commit()
     return {"status": "imported", "created": created}
+
+
+# ─── Parse an honour-board PDF (no API tokens) ─────────────────────────────────
+#
+# Reads the PDF's text layer into a column grid the admin then maps to categories and
+# imports through the normal flow. Runs locally — no model, no per-upload cost. Scanned
+# / photographed boards have no text layer, so this reports that cleanly rather than
+# guessing.
+
+@router.post("/parse-pdf")
+async def parse_pdf(
+    org_id: str = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Upload a PDF file (.pdf).")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="The PDF is empty.")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF must be 10 MB or smaller.")
+
+    from app.services.awards_pdf import extract_awards_grid
+    return extract_awards_grid(content)
