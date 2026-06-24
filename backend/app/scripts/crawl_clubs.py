@@ -11,6 +11,7 @@ Usage (from the backend container):
   python -m app.scripts.crawl_clubs              # one batch (discovers on first run)
   python -m app.scripts.crawl_clubs 1000         # enrich up to 1000 frontier clubs
   python -m app.scripts.crawl_clubs --rediscover # re-page the club list, then enrich
+  python -m app.scripts.crawl_clubs --continuous # long-lived windowed runner (Ctrl-C to stop)
   python -m app.scripts.crawl_clubs --stats      # print directory counts, crawl nothing
   python -m app.scripts.crawl_clubs --csv > clubs.csv   # export the directory as CSV
 
@@ -24,7 +25,12 @@ from app.models.db import async_session_maker
 from app.services import club_directory as cd
 
 
-async def _run(limit, stats_only, csv_out, rediscover):
+async def _run(limit, stats_only, csv_out, rediscover, continuous):
+    if continuous:
+        # The windowed background runner (same one the scheduler launches). Walks
+        # the whole backfill at the configured pace; Ctrl-C to stop.
+        await cd.run_continuous(async_session_maker)
+        return
     async with async_session_maker() as session:
         if stats_only:
             print(await cd.directory_stats(session))
@@ -44,10 +50,11 @@ def main(argv):
     stats_only = "--stats" in argv
     csv_out = "--csv" in argv
     rediscover = "--rediscover" in argv
+    continuous = "--continuous" in argv
     for a in argv:
         if a.isdigit():
             limit = int(a)
-    asyncio.run(_run(limit, stats_only, csv_out, rediscover))
+    asyncio.run(_run(limit, stats_only, csv_out, rediscover, continuous))
     return 0
 
 

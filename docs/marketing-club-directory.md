@@ -88,11 +88,29 @@ calls); enrichment is one call per club across ~6,900 clubs, so it is a handful 
 quiet nights at the nightly cap. `raw_json` + the frontier model mean re-runs
 never refetch an enriched club.
 
-### Running it
+### Two run modes
 
-The nightly scheduler job (`crawl_marketing_clubs`, 02:00) is **opt-in**: it only
-runs when `marketing_crawl_enabled=true` in the server `.env`. Off by default so
-nothing crawls on deploy without a deliberate switch.
+Both are **opt-in** via `marketing_crawl_enabled=true` in the server `.env` (off
+by default, so nothing crawls on deploy without a deliberate switch):
+
+- **Nightly batch** (default) — `crawl_marketing_clubs` at 02:00 walks one capped
+  slice (`marketing_crawl_nightly_limit`) per night. Lowest profile; the full
+  backfill takes a couple of weeks of off-peak nights.
+- **Continuous** (`marketing_crawl_continuous=true`) — a long-lived background
+  runner (launched as an asyncio task at startup; the nightly cron is skipped)
+  that walks the **whole backfill as fast as the pacing allows, inside a daily
+  active window**. This is the "finish ASAP but look organic" mode.
+
+**Continuous pacing** (all `marketing_crawl_*` settings): active window
+`04:30`–`23:30` `Australia/Perth`; a jittered **15–40 s gap before every call**
+(mean ~27.5 s); a **2–3 min break every 30–60 clubs** to mimic a person stepping
+away; outside the window it sleeps. So the whole job — ~75 discovery calls plus
+one call per club (~4,000–5,000) — is **about two 04:30–23:30 windows (~2 days)**,
+at roughly 2,500 requests/day. A club whose association fetch keeps failing
+(unresolvable routingCode / persistent 5xx) is retried a few times, dropped to the
+back of the queue, then given up (`associations=[]`) so completion is always
+reachable. When the frontier empties the runner re-discovers each day to pick up
+newly-registered clubs (`marketing_crawl_refresh_daemon`, on by default).
 
 By hand, from the backend container:
 
@@ -100,6 +118,7 @@ By hand, from the backend container:
 python -m app.scripts.crawl_clubs              # one batch (discovers on first run)
 python -m app.scripts.crawl_clubs 1000         # enrich up to 1000 frontier clubs
 python -m app.scripts.crawl_clubs --rediscover # re-page the club list, then enrich
+python -m app.scripts.crawl_clubs --continuous # the windowed background runner (Ctrl-C to stop)
 python -m app.scripts.crawl_clubs --stats      # counts only, crawl nothing
 python -m app.scripts.crawl_clubs --csv > clubs.csv   # export the directory
 ```

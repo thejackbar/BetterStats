@@ -110,6 +110,25 @@ async def crawl_marketing_clubs():
             logger.error(f"Marketing club crawl failed: {e}")
 
 
+# Hold a reference to the continuous-crawl task so it isn't garbage-collected.
+_marketing_continuous_task: "asyncio.Task | None" = None
+
+
+async def _run_marketing_continuous():
+    """Supervisor for the continuous crawl: restart it on an unexpected crash
+    (after a cool-off) so a transient blow-up doesn't silently end the backfill."""
+    from app.services import club_directory
+    while True:
+        try:
+            await club_directory.run_continuous(async_session_maker)
+            return  # clean completion (refresh daemon off, frontier empty)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Marketing continuous crawl crashed, retrying in 10min: {e}")
+            await asyncio.sleep(600)
+
+
 def start_scheduler():
     # Weekly sync every Sunday at 3am
     scheduler.add_job(
@@ -148,20 +167,32 @@ def start_scheduler():
         id="fantasy_draft_tick",
         replace_existing=True,
     )
-    # BetterCricket outreach — crawl the national club directory in small nightly
-    # batches (opt-in via marketing_crawl_enabled). 02:00, off-peak and ahead of
-    # the weekly sync, so the polite slow walk has the box to itself.
-    scheduler.add_job(
-        crawl_marketing_clubs,
-        trigger="cron",
-        hour=2,
-        minute=0,
-        id="nightly_marketing_crawl",
-        replace_existing=True,
-    )
+    # BetterCricket outreach — crawl the national club directory. Two modes, both
+    # opt-in via marketing_crawl_enabled:
+    #  • continuous (marketing_crawl_continuous): a long-lived background runner
+    #    that walks the whole backfill within the daily active window with
+    #    organic-looking pacing. Launched as an asyncio task; nightly cron skipped.
+    #  • nightly batch (default): one small capped batch at 02:00, off-peak.
+    global _marketing_continuous_task
+    if settings.marketing_crawl_enabled and settings.marketing_crawl_continuous:
+        _marketing_continuous_task = asyncio.create_task(_run_marketing_continuous())
+        marketing_mode = "continuous (windowed background runner)"
+    else:
+        scheduler.add_job(
+            crawl_marketing_clubs,
+            trigger="cron",
+            hour=2,
+            minute=0,
+            id="nightly_marketing_crawl",
+            replace_existing=True,
+        )
+        marketing_mode = "nightly batch 02:00"
     scheduler.start()
-    logger.info("Scheduler started — marketing crawl 02:00, weekly sync Sun 03:00, Square 04:00, fantasy settle 05:00, draft tick /15min")
+    logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
+                "Square 04:00, fantasy settle 05:00, draft tick /15min", marketing_mode)
 
 
 def stop_scheduler():
+    if _marketing_continuous_task is not None:
+        _marketing_continuous_task.cancel()
     scheduler.shutdown(wait=False)

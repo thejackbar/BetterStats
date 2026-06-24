@@ -34,11 +34,20 @@ jittered delay, a nightly cap, run off-peak. We stay a quiet API citizen.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
+import datetime as dt
 import io
 import logging
+import random
 import re
+import uuid
 from typing import Optional
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover — Python < 3.9
+    ZoneInfo = None  # type: ignore
 
 from sqlalchemy import select, func, cast, update, Text, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -229,16 +238,21 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
     frontier = (await session.execute(
         select(MarketingClub)
         .where(MarketingClub.associations.is_(None), MarketingClub.kind == "club")
-        .order_by(MarketingClub.first_seen_at.asc())
+        # last_crawled_at ASC (nulls first) so a club whose fetch just failed —
+        # which bumps last_crawled_at to now — drops to the back of the queue
+        # instead of head-of-line blocking the same failing row every iteration.
+        .order_by(MarketingClub.last_crawled_at.asc().nullsfirst(),
+                  MarketingClub.first_seen_at.asc())
         .limit(limit)
     )).scalars().all()
 
-    stats = {"enriched": 0, "with_association": 0, "errors": 0}
+    stats = {"enriched": 0, "with_association": 0, "errors": 0, "processed": []}
     for club in frontier:
         assocs = await phq.discover_associations(club.playhq_id)
         club.last_crawled_at = func.now()
         if assocs is None:
             stats["errors"] += 1
+            stats["processed"].append({"id": str(club.id), "ok": False})
             await session.commit()
             continue
         club.associations = assocs
@@ -247,6 +261,7 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
             club.association_guid = assocs[0]["id"]
             stats["with_association"] += 1
         stats["enriched"] += 1
+        stats["processed"].append({"id": str(club.id), "ok": True})
         await session.commit()
 
     remaining = await session.scalar(select(func.count(MarketingClub.id)).where(
@@ -269,6 +284,151 @@ async def crawl_batch(session: AsyncSession, limit: Optional[int] = None,
     result = {"discovery": discovery, "enrichment": enrichment}
     logger.info("crawl_batch: %s", result)
     return result
+
+
+# ── continuous background runner ────────────────────────────────────────────────
+# A long-lived task that walks the whole backfill inside a daily active window,
+# one club at a time, leaning on the client's per-request 15-40s gap and adding
+# occasional 2-3min breaks — so the traffic reads as organic, waking-hours
+# browsing rather than a scraper. Resumable (it just consults the table), and it
+# self-throttles around the window and PlayHQ hiccups.
+
+def _now_tz() -> dt.datetime:
+    tz = ZoneInfo(settings.marketing_crawl_tz) if ZoneInfo else None
+    return dt.datetime.now(tz)
+
+
+def _window_bounds(now: dt.datetime) -> tuple[dt.datetime, dt.datetime]:
+    sh, sm = (int(x) for x in settings.marketing_crawl_window_start.split(":"))
+    eh, em = (int(x) for x in settings.marketing_crawl_window_end.split(":"))
+    start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+    end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+    return start, end
+
+
+def _in_window(now: dt.datetime) -> bool:
+    start, end = _window_bounds(now)
+    return start <= now <= end
+
+
+def _seconds_until_next_start(now: dt.datetime) -> float:
+    """Seconds to the next window start strictly in the future (tomorrow's start
+    when we're already past today's). Assumes start < end (same-day window)."""
+    start, _ = _window_bounds(now)
+    nxt = start if now < start else start + dt.timedelta(days=1)
+    return max(1.0, (nxt - now).total_seconds())
+
+
+async def _give_up_club(session: AsyncSession, club_id: str) -> None:
+    """Stop retrying a club whose associations can't be fetched (unresolvable
+    routingCode, persistent 5xx). Record an empty list so it leaves the frontier
+    and the backfill can actually reach 'complete'."""
+    try:
+        pk = uuid.UUID(club_id)
+    except (ValueError, TypeError):
+        return
+    club = await session.get(MarketingClub, pk)
+    if club is not None and club.associations is None:
+        club.associations = []
+        logger.info("marketing crawl: giving up association fetch for %s (%s)",
+                    club.name, club_id)
+        await session.commit()
+
+
+# How many times to retry one club's association fetch before giving up on it.
+_MAX_CLUB_RETRIES = 5
+
+
+async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> None:
+    """Walk the full directory backfill within the daily active window. Discovers
+    on first run, then enriches one club per loop (the 15-40s gap lives in the
+    client), pausing for a longer break every 30-60 clubs and sleeping outside the
+    window. When the frontier empties it either exits or, if the refresh daemon is
+    on, re-discovers each day to pick up newly-registered clubs."""
+    logger.info(
+        "marketing crawl (continuous): window %s-%s %s, gap %.0f-%.0fs, break "
+        "%.0f-%.0fs every %d-%d clubs",
+        settings.marketing_crawl_window_start, settings.marketing_crawl_window_end,
+        settings.marketing_crawl_tz, settings.marketing_crawl_min_delay,
+        settings.marketing_crawl_max_delay, settings.marketing_crawl_break_min,
+        settings.marketing_crawl_break_max, settings.marketing_crawl_break_after_min,
+        settings.marketing_crawl_break_after_max)
+
+    # Discover the club universe once (when empty), inside the window.
+    async with session_maker() as s:
+        total = await s.scalar(select(func.count(MarketingClub.id))) or 0
+    if total == 0:
+        await _sleep_until_window()
+        async with session_maker() as s:
+            await discover_clubs(s)
+
+    since_break = 0
+    next_break_at = random.randint(settings.marketing_crawl_break_after_min,
+                                   settings.marketing_crawl_break_after_max)
+    consecutive_failures = 0
+    club_fails: dict[str, int] = {}
+    while True:
+        now = _now_tz()
+        if not _in_window(now):
+            wait = min(_seconds_until_next_start(now), 1800.0)  # re-check ≥ every 30 min
+            await asyncio.sleep(wait)
+            continue
+
+        async with session_maker() as s:
+            r = await enrich_associations(s, limit=1)
+            # Track per-club failures; give up on a club after a few attempts so a
+            # permanently-unresolvable routingCode can't stall completion forever.
+            for p in r.get("processed", []):
+                if p["ok"]:
+                    club_fails.pop(p["id"], None)
+                else:
+                    club_fails[p["id"]] = club_fails.get(p["id"], 0) + 1
+                    if club_fails[p["id"]] >= _MAX_CLUB_RETRIES:
+                        await _give_up_club(s, p["id"])
+                        club_fails.pop(p["id"], None)
+
+        if r["enriched"] > 0:
+            consecutive_failures = 0
+            since_break += 1
+            if since_break >= next_break_at:
+                brk = random.uniform(settings.marketing_crawl_break_min,
+                                     settings.marketing_crawl_break_max)
+                logger.info("marketing crawl: break for %.0fs after %d clubs", brk, since_break)
+                await asyncio.sleep(brk)
+                since_break = 0
+                next_break_at = random.randint(settings.marketing_crawl_break_after_min,
+                                               settings.marketing_crawl_break_after_max)
+            continue
+
+        if r["frontier_remaining"] > 0:
+            # Every remaining club failed to fetch (PlayHQ wobble / unresolved
+            # routingCodes). They've dropped to the back of the queue; back off
+            # hard after a long streak so we never hot-loop on a bad patch.
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                logger.warning("marketing crawl: %d consecutive fetch failures — "
+                               "pausing 1h", consecutive_failures)
+                await asyncio.sleep(3600)
+                consecutive_failures = 0
+            continue
+
+        # Frontier empty → backfill complete.
+        if not settings.marketing_crawl_refresh_daemon:
+            logger.info("marketing crawl: backfill complete — runner exiting")
+            return
+        logger.info("marketing crawl: backfill complete — sleeping until next "
+                    "window to re-discover new clubs")
+        await asyncio.sleep(_seconds_until_next_start(_now_tz()))
+        async with session_maker() as s:
+            await discover_clubs(s)  # picks up clubs registered since last pass
+
+
+async def _sleep_until_window() -> None:
+    now = _now_tz()
+    if not _in_window(now):
+        wait = _seconds_until_next_start(now)
+        logger.info("marketing crawl: outside window, sleeping %.0fs", wait)
+        await asyncio.sleep(wait)
 
 
 # ── BetterComms export bridge ──────────────────────────────────────────────────
