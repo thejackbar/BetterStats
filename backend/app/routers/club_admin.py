@@ -2166,6 +2166,22 @@ async def hard_refresh_org(
                 )
             else:
                 await finish_sync_run(run_id, stats)
+
+            # Refresh planner statistics. A hard refresh delete+reinserts the
+            # org's whole game-level dataset and rewrites player_season_stats,
+            # which leaves Postgres' statistics stale until autovacuum catches
+            # up. player_season_stats is a global table (every club), so a stale
+            # plan makes the all-seasons leaderboard / summary scan every club's
+            # rows and time out (35s → nginx 504) even though the data is fine.
+            # ANALYZE is cheap next to the multi-minute rebuild and makes the
+            # heavy aggregate reads snap back to ~1s immediately.
+            try:
+                async with async_session_maker() as s:
+                    await s.execute(_t("ANALYZE"))
+                    await s.commit()
+                _logger.info(f"HardRefresh: ANALYZE complete for org {org_id_str}")
+            except Exception as ae:
+                _logger.warning(f"HardRefresh: post-sync ANALYZE failed for {org_id_str}: {ae}")
         except Exception as e:
             _logger.error(f"HardRefresh: failed for {org_id_str}: {e}", exc_info=True)
             await finish_sync_run(run_id, {}, f"Unexpected error: {e}")
