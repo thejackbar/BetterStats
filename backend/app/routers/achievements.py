@@ -568,12 +568,15 @@ async def force_import_achievements(
     return {"status": "imported", "created": created}
 
 
-# ─── Parse an honour-board PDF (no API tokens) ─────────────────────────────────
+# ─── Parse an honour board from a PDF or photo (no API tokens) ─────────────────
 #
-# Reads the PDF's text layer into a column grid the admin then maps to categories and
-# imports through the normal flow. Runs locally — no model, no per-upload cost. Scanned
-# / photographed boards have no text layer, so this reports that cleanly rather than
-# guessing.
+# Reads the board into a column grid the admin then maps to categories and imports
+# through the normal flow. Runs locally with no per-upload cost: a PDF text layer is
+# read directly, and a scanned PDF or a photo is read by local OCR (Tesseract) when
+# it's installed. Falls back to a clear message otherwise.
+
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp")
+
 
 @router.post("/parse-pdf")
 async def parse_pdf(
@@ -582,13 +585,15 @@ async def parse_pdf(
     db: AsyncSession = Depends(get_db),
 ):
     filename = (file.filename or "").lower()
-    if not filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Upload a PDF file (.pdf).")
+    is_pdf = filename.endswith(".pdf")
+    is_image = filename.endswith(_IMAGE_EXTS)
+    if not (is_pdf or is_image):
+        raise HTTPException(status_code=400, detail="Upload a PDF or a photo of the board.")
     content = await file.read()
     if not content:
-        raise HTTPException(status_code=400, detail="The PDF is empty.")
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="PDF must be 10 MB or smaller.")
+        raise HTTPException(status_code=400, detail="The file is empty.")
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File must be 15 MB or smaller.")
 
-    from app.services.awards_pdf import extract_awards_grid
-    return extract_awards_grid(content)
+    from app.services.awards_pdf import extract_awards_grid, extract_awards_image
+    return extract_awards_grid(content) if is_pdf else extract_awards_image(content)

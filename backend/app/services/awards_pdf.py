@@ -159,12 +159,133 @@ def _parse_page(layout: str) -> dict | None:
     return {"labels": keep_labels, "season_idx": season_idx, "rows": rows}
 
 
-def extract_awards_grid(pdf_bytes: bytes) -> dict:
-    """Read an honour-board PDF's text layer into draft award rows.
+def _grid_from_layouts(layouts: list[str], source: str) -> dict | None:
+    """Run the column parser over one-or-more page layouts and aggregate the rows.
 
-    Returns one of:
-      {available: True, columns: [labels], rows: [{season, label, player_name}], ...}
-      {available: False, message: "..."}  when the PDF has no text layer / isn't a grid.
+    source is 'text' (read from a PDF text layer) or 'ocr' (rebuilt from OCR word
+    boxes); the latter carries an accuracy warning. Returns None when no rows came out.
+    """
+    columns: list[str] = []
+    out_rows: list[dict] = []
+    for layout in layouts:
+        parsed = _parse_page(layout)
+        if not parsed:
+            continue
+        for idx, label in parsed["labels"].items():
+            if label and label not in columns:
+                columns.append(label)
+        for row in parsed["rows"]:
+            for idx, text in row["cells"].items():
+                label = parsed["labels"].get(idx, "")
+                name = _clean(text)
+                if name and label:
+                    out_rows.append({"season": row["season"], "label": label, "player_name": name})
+    if not out_rows:
+        return None
+    warnings: list[str] = []
+    if source == "ocr":
+        warnings.append(
+            "Read by OCR from a scanned or photographed board, so check the names and "
+            "spellings carefully before importing."
+        )
+    return {
+        "available": True,
+        "columns": columns,
+        "rows": out_rows,
+        "row_count": len(out_rows),
+        "source": source,
+        "warnings": warnings,
+    }
+
+
+# ── Local OCR (Tesseract) for scanned/photographed boards — still no API tokens ──
+
+def _ocr_available() -> bool:
+    try:
+        import pytesseract
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
+def _layout_from_words(words: list[dict]) -> str:
+    """Rebuild a monospace layout string from OCR word boxes.
+
+    Scales each word's x position by a page-wide pixels-per-character estimate, so a
+    normal word gap stays a single space and a column gap grows to the 2+ spaces
+    `_cells` needs to split columns. That lets OCR output reuse the same parser as the
+    PDF text layer.
+    """
+    import statistics
+    boxes = [w for w in words if (w.get("text") or "").strip()]
+    if not boxes:
+        return ""
+    widths = [w["width"] / max(len(w["text"].strip()), 1) for w in boxes if w.get("width", 0) > 0]
+    ppc = max(statistics.median(widths) if widths else 8.0, 1.0)
+
+    lines: dict = {}
+    for w in boxes:
+        lines.setdefault(w["line"], []).append(w)
+    ordered = sorted(lines.values(), key=lambda ws: min(x["top"] for x in ws))
+
+    out_lines = []
+    for ws in ordered:
+        buf = ""
+        for w in sorted(ws, key=lambda x: x["left"]):
+            col = int(round(w["left"] / ppc))
+            if col > len(buf):
+                buf += " " * (col - len(buf))
+            elif buf and not buf.endswith(" "):
+                buf += " "
+            buf += w["text"].strip()
+        out_lines.append(buf)
+    return "\n".join(out_lines)
+
+
+def _ocr_image_to_layout(image) -> str:
+    import pytesseract
+    from pytesseract import Output
+    data = pytesseract.image_to_data(image, output_type=Output.DICT)
+    words = []
+    for i in range(len(data["text"])):
+        text = (data["text"][i] or "").strip()
+        try:
+            conf = float(data["conf"][i])
+        except (TypeError, ValueError):
+            conf = -1
+        if not text or conf < 0:
+            continue
+        words.append({
+            "text": text,
+            "left": data["left"][i],
+            "top": data["top"][i],
+            "width": data["width"][i],
+            "line": (data["block_num"][i], data["par_num"][i], data["line_num"][i]),
+        })
+    return _layout_from_words(words)
+
+
+def _pdf_to_images(pdf_bytes: bytes) -> list:
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(pdf_bytes)
+    images = []
+    try:
+        for i in range(len(pdf)):
+            page = pdf[i]
+            images.append(page.render(scale=3).to_pil())  # ~216 DPI, good for OCR
+    finally:
+        pass
+    return images
+
+
+def extract_awards_grid(pdf_bytes: bytes) -> dict:
+    """Read an honour-board PDF into draft award rows.
+
+    Reads the text layer first (free, no model). If the PDF is scanned (no text layer)
+    and local OCR is installed, falls back to OCR. Returns one of:
+      {available: True, columns, rows, source, ...}
+      {available: False, message}  when there is no grid to read.
     """
     try:
         from pypdf import PdfReader
@@ -178,57 +299,74 @@ def extract_awards_grid(pdf_bytes: bytes) -> dict:
         logger.exception("awards_pdf: could not open PDF")
         return {"available": False, "message": "That file couldn't be opened as a PDF."}
 
-    columns: list[str] = []
-    out_rows: list[dict] = []
-    warnings: list[str] = []
+    layouts: list[str] = []
     text_seen = False
-
-    for page_no, page in enumerate(reader.pages, 1):
+    for page in reader.pages:
         try:
             layout = page.extract_text(extraction_mode="layout") or ""
         except Exception:
-            # Older pypdf without layout mode — fall back to plain text (no columns).
-            layout = page.extract_text() or ""
+            layout = page.extract_text() or ""  # older pypdf without layout mode
         if layout.strip():
             text_seen = True
-        parsed = _parse_page(layout)
-        if not parsed:
-            continue
-        # Column labels are shared across pages; keep first-seen order.
-        for idx, label in parsed["labels"].items():
-            if label and label not in columns:
-                columns.append(label)
-        for row in parsed["rows"]:
-            season = row["season"]
-            for idx, text in row["cells"].items():
-                label = parsed["labels"].get(idx, "")
-                name = _clean(text)
-                if not name or not label:
-                    continue
-                out_rows.append({"season": season, "label": label, "player_name": name})
+        layouts.append(layout)
+
+    if text_seen:
+        grid = _grid_from_layouts(layouts, "text")
+        if grid:
+            grid["page_count"] = len(reader.pages)
+            return grid
+
+    # No usable text layer (a scanned PDF): try local OCR if it's installed.
+    if _ocr_available():
+        try:
+            images = _pdf_to_images(pdf_bytes)
+            ocr_layouts = [_ocr_image_to_layout(im) for im in images]
+        except Exception:
+            logger.exception("awards_pdf: OCR rasterise/read failed")
+            ocr_layouts = []
+        grid = _grid_from_layouts(ocr_layouts, "ocr")
+        if grid:
+            grid["page_count"] = len(reader.pages)
+            return grid
 
     if not text_seen:
-        return {
-            "available": False,
-            "message": (
-                "This PDF has no readable text — it looks scanned or photographed. "
-                "Re-export it from the spreadsheet/document as a PDF, or use the CSV template."
-            ),
-        }
-    if not out_rows:
-        return {
-            "available": False,
-            "message": (
-                "Couldn't find an honour-board table in this PDF. It works best on a grid "
-                "with the season down the rows and an award per column. Try the CSV template."
-            ),
-        }
+        if not _ocr_available():
+            return {"available": False, "message": (
+                "This PDF has no readable text, so it looks scanned or photographed, and OCR "
+                "isn't enabled on this server. Re-export it from the document, or use the CSV template."
+            )}
+        return {"available": False, "message": (
+            "This looks scanned and the OCR couldn't find an honour-board table in it. "
+            "Try a sharper, straight-on scan, or use the CSV template."
+        )}
+    return {"available": False, "message": (
+        "Couldn't find an honour-board table in this PDF. It works best on a grid with the "
+        "season down the rows and an award per column. Try the CSV template."
+    )}
 
-    return {
-        "available": True,
-        "columns": columns,
-        "rows": out_rows,
-        "row_count": len(out_rows),
-        "page_count": len(reader.pages),
-        "warnings": warnings,
-    }
+
+def extract_awards_image(image_bytes: bytes) -> dict:
+    """Read a photographed/scanned honour-board image into draft award rows via OCR."""
+    if not _ocr_available():
+        return {"available": False, "message": (
+            "Reading photos isn't enabled on this server. Upload a PDF exported from the "
+            "document, or use the CSV template."
+        )}
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(image_bytes))
+        layout = _ocr_image_to_layout(img)
+    except Exception:
+        logger.exception("awards_pdf: image OCR failed")
+        return {"available": False, "message": (
+            "That image couldn't be read. Try a sharper, straight-on photo, or use the CSV template."
+        )}
+    grid = _grid_from_layouts([layout], "ocr")
+    if grid:
+        grid["page_count"] = 1
+        return grid
+    return {"available": False, "message": (
+        "Couldn't find an honour-board table in that photo. It works best on a clear, "
+        "straight-on shot of a grid with the season down the rows and an award per column."
+    )}

@@ -155,8 +155,9 @@ function ImportPanel({ orgId, onImported }) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (!(file.name || '').toLowerCase().endsWith('.pdf')) {
-      setError('Upload a PDF file (.pdf).')
+    const name = (file.name || '').toLowerCase()
+    if (!/\.(pdf|png|jpe?g|webp|tiff?|bmp)$/.test(name)) {
+      setError('Upload a PDF or a photo of the board.')
       return
     }
     setPdfParsing(true); setError(null); setPdfResult(null); setPdfDone(null)
@@ -259,20 +260,20 @@ function ImportPanel({ orgId, onImported }) {
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </label>
         <label className={`px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text transition-colors cursor-pointer flex items-center gap-2 ${pdfParsing ? 'opacity-50 pointer-events-none' : ''}`}>
-          📄 {pdfParsing ? 'Reading…' : 'Read honour-board PDF'}
-          <input type="file" accept=".pdf" className="hidden" onChange={handleParsePdf} />
+          📄 {pdfParsing ? 'Reading…' : 'Read honour board (PDF or photo)'}
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" className="hidden" onChange={handleParsePdf} />
         </label>
       </div>
       <p className="text-pb-faintest text-xs mt-2 leading-relaxed">
-        The PDF reader works on a board exported from Word/Excel/Sheets (a table with the
-        season down the rows and an award per column). It reads the file on the server with
-        no AI, so scanned or photographed boards won't read. Re-export those from the document,
-        or use the CSV template.
+        Best on a board that's a table with the season down the rows and an award per column.
+        A PDF exported from Word/Excel/Sheets reads exactly. A scan or a straight-on photo is
+        read by OCR, which is rougher, so check the names before importing. It all runs on the
+        server with no AI cost.
       </p>
 
       {pdfDone && (
         <div className="mt-4 p-4 bg-pb-surface2 rounded border pb-hairline text-sm">
-          <p className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>✓ Imported {pdfDone.created} achievements from the PDF</p>
+          <p className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>✓ Imported {pdfDone.created} achievements from the honour board</p>
         </div>
       )}
 
@@ -290,6 +291,9 @@ function ImportPanel({ orgId, onImported }) {
             category for each column, untick any you don't want, then import. Names are matched to
             players automatically; unmatched ones still save and can be linked later.
           </p>
+          {pdfResult.warnings?.length > 0 && (
+            <p className="font-mono text-[10px] text-pb-amber mb-3">⚠ {pdfResult.warnings.join(' ')}</p>
+          )}
           <div className="space-y-1 max-h-96 overflow-y-auto pb-scroll">
             {pdfResult.columns.map(label => {
               const m = colMap[label] || {}
