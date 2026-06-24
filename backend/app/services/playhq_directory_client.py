@@ -111,9 +111,12 @@ async def _post(url: str, payload: dict, extra_headers: dict | None = None) -> O
 
 
 async def search_organisations(org_type: str, query: str = "", page: int = 1,
-                               limit: int = 100) -> tuple[list[dict], int]:
+                               limit: int = 100) -> tuple[Optional[list[dict]], int]:
     """One page of the org search. Returns (results, total_records). ``org_type``
-    is an ``OrganisationType`` enum value (e.g. ``CLUB`` / ``ASSOCIATION``)."""
+    is an ``OrganisationType`` enum value (e.g. ``CLUB`` / ``ASSOCIATION``).
+    ``results`` is **None on a fetch failure** (so the caller can retry rather than
+    mistake a transient error for the end of the list), and an empty list only when
+    the page genuinely has no results."""
     payload = {
         "query": _SEARCH_QUERY,
         "variables": {"filter": {
@@ -122,8 +125,8 @@ async def search_organisations(org_type: str, query: str = "", page: int = 1,
         }},
     }
     data = await _post(settings.playhq_search_url, payload)
-    if not data or not data.get("search"):
-        return [], 0
+    if data is None or data.get("search") is None:
+        return None, 0
     search = data["search"]
     results = [r for r in (search.get("results") or []) if r]
     total = (search.get("meta") or {}).get("totalRecords") or 0
