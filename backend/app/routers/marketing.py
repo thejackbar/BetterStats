@@ -26,6 +26,13 @@ async def stats(db: AsyncSession = Depends(get_db), _=Depends(require_super_admi
     return await cd.directory_stats(db)
 
 
+@router.get("/status")
+async def status(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """Live crawl status (running / waiting / paused / idle / complete) derived
+    from the table + window settings — survives page refresh and worker restarts."""
+    return await cd.crawl_status(db)
+
+
 @router.get("/clubs")
 async def list_clubs(
     q: Optional[str] = None,

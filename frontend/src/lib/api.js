@@ -413,6 +413,7 @@ export const api = {
     request(`/club-admin/klubpro/batches/${batchId}/rollback`, { method: 'POST' }),
   // Marketing club directory (super-admin only) — crawl + outreach.
   mktStats: () => request('/club-admin/marketing/stats'),
+  mktStatus: () => request('/club-admin/marketing/status'),
   mktClubs: (params = {}) => {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()

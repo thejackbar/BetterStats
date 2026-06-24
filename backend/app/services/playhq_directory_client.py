@@ -66,6 +66,13 @@ _COMPETITIONS_QUERY = (
     "query Comps($id: ID!){ discoverCompetitions(organisationID:$id){ "
     "id name organisation{ id name type } } }"
 )
+# Some clubs publish a single org-level email/phone (a generic club mailbox) but
+# no individual committee contacts — the search ``contacts[]`` is then empty, but
+# the main graph's ``discoverOrganisation`` still carries ``email``/``contactNumber``.
+_ORG_QUERY = (
+    "query Org($c: String!){ discoverOrganisation(code:$c){ "
+    "id email contactNumber } }"
+)
 
 
 async def _post(url: str, payload: dict, extra_headers: dict | None = None) -> Optional[dict]:
@@ -148,3 +155,23 @@ async def discover_associations(routing_code: str) -> Optional[list[dict]]:
                 "competition": (comp or {}).get("name") or "",
             }
     return list(seen.values())
+
+
+async def discover_org_contact(routing_code: str) -> Optional[dict]:
+    """The club's own org-level email/phone (the generic club mailbox PlayHQ shows
+    on the org page) via the main graph. Returns ``{"email", "phone"}`` (either may
+    be ""), or None on fetch failure. Separate from the committee ``contacts[]``,
+    which the search endpoint already gives us."""
+    if not routing_code:
+        return None
+    data = await _post(
+        settings.playhq_graph_url,
+        {"query": _ORG_QUERY, "variables": {"c": routing_code}},
+        extra_headers={"tenant": settings.playhq_tenant})
+    if data is None:
+        return None
+    org = data.get("discoverOrganisation")
+    if not org:
+        return None
+    return {"email": (org.get("email") or "").strip(),
+            "phone": (org.get("contactNumber") or "").strip()}

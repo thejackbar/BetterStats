@@ -25,9 +25,9 @@ So the crawl is two phases:
    and store the association list. Resumable through the table itself, so a
    restart/deploy never loses progress.
 
-We store **office-bearers + coordinators** (President / Vice-President /
-Secretary / Treasurer + junior/female/cricket coordinators), not the whole
-committee — the high-signal outreach contacts, with less personal data held.
+We store the **whole published committee** plus the org-level club mailbox, and a
+super admin ticks which contacts (``outreach_selected``) actually receive an
+email. Office bearers and the generic club mailbox are pre-ticked.
 
 Politeness is deliberate (``marketing_crawl_*``): one request at a time, a
 jittered delay, a nightly cap, run off-peak. We stay a quiet API citizen.
@@ -76,6 +76,7 @@ _OFFICE_BEARERS = {
 # correct spelling and that typo.
 _COORDINATOR_RE = re.compile(r"COOR?DINATOR")
 _COORDINATOR_RANK = 10
+_CLUB_CONTACT_RANK = 5    # the org-level generic club mailbox (just below office bearers)
 _OTHER_RANK = 50          # any other named committee position
 _UNLABELLED_RANK = 60     # a contact with no position at all
 # Contacts at or above this rank are pre-selected for outreach by default; the
@@ -110,7 +111,7 @@ def _full_name(contact: dict) -> Optional[str]:
 
 async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str],
                          role: str, role_rank: int, email: Optional[str],
-                         phone: Optional[str]) -> None:
+                         phone: Optional[str], selected: Optional[bool] = None) -> None:
     """Upsert one committee contact, deduped on lower(email) per club. A re-crawl
     refreshes name/phone and fills a better role but never overrides the manual
     ``outreach_selected`` choice on an existing row. Contacts with no email are
@@ -136,10 +137,11 @@ async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str
             existing.role, existing.role_rank = role, role_rank
         existing.updated_at = func.now()
         return
+    sel = selected if selected is not None else (role_rank <= _DEFAULT_SELECTED_MAX_RANK)
     session.add(MarketingClubContact(
         marketing_club_id=club_id, full_name=full_name, role=role,
         role_rank=role_rank, email=email, mobile=phone, source="api",
-        outreach_selected=(role_rank <= _DEFAULT_SELECTED_MAX_RANK)))
+        outreach_selected=sel))
 
 
 async def _link_existing_org(session: AsyncSession, club: MarketingClub) -> None:
@@ -254,7 +256,8 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
         .limit(limit)
     )).scalars().all()
 
-    stats = {"enriched": 0, "with_association": 0, "errors": 0, "processed": []}
+    stats = {"enriched": 0, "with_association": 0, "with_org_contact": 0,
+             "errors": 0, "processed": []}
     for club in frontier:
         assocs = await phq.discover_associations(club.playhq_id)
         club.last_crawled_at = func.now()
@@ -268,6 +271,18 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
             club.association_name = assocs[0]["name"]
             club.association_guid = assocs[0]["id"]
             stats["with_association"] += 1
+        # Also capture the org-level club mailbox (shown on the PlayHQ org page but
+        # absent from the search committee list — common for schools / small clubs
+        # that publish one generic address and no named office bearers).
+        org_contact = await phq.discover_org_contact(club.playhq_id)
+        if org_contact and (org_contact.get("email") or org_contact.get("phone")):
+            await _store_contact(
+                session, club.id, None, "Club contact", _CLUB_CONTACT_RANK,
+                org_contact.get("email"), org_contact.get("phone"), selected=True)
+            if org_contact.get("email"):
+                stats["with_org_contact"] += 1
+                if not club.contact_email:
+                    club.contact_email = org_contact["email"].lower()
         stats["enriched"] += 1
         stats["processed"].append({"id": str(club.id), "ok": True})
         await session.commit()
@@ -437,6 +452,64 @@ async def _sleep_until_window() -> None:
         wait = _seconds_until_next_start(now)
         logger.info("marketing crawl: outside window, sleeping %.0fs", wait)
         await asyncio.sleep(wait)
+
+
+# Treat the crawl as "running" if something was fetched within this many seconds.
+# Longer than the continuous runner's max break (so a break doesn't read as idle).
+_ACTIVE_WITHIN_SECONDS = 300
+
+
+async def crawl_status(session: AsyncSession) -> dict:
+    """Live, stateless crawl status derived from the table + window settings, so
+    the page can show running / waiting / idle / complete after any refresh
+    (there's no in-memory run state to lose). 'Activity' = the most recent
+    ``last_crawled_at`` across all clubs, which both discovery and enrichment bump
+    per row."""
+    clubs = await session.scalar(select(func.count(MarketingClub.id))) or 0
+    pending = await session.scalar(select(func.count(MarketingClub.id)).where(
+        MarketingClub.associations.is_(None), MarketingClub.kind == "club")) or 0
+    last = await session.scalar(select(func.max(MarketingClub.last_crawled_at)))
+
+    since = None
+    if last is not None:
+        now = dt.datetime.now(last.tzinfo or dt.timezone.utc)
+        since = max(0.0, (now - last).total_seconds())
+    recent = since is not None and since < _ACTIVE_WITHIN_SECONDS
+
+    continuous = bool(settings.marketing_crawl_enabled and settings.marketing_crawl_continuous)
+    in_win = _in_window(_now_tz())
+    window = {"start": settings.marketing_crawl_window_start,
+              "end": settings.marketing_crawl_window_end,
+              "tz": settings.marketing_crawl_tz}
+
+    if clubs == 0:
+        state, detail = "idle", "No clubs collected yet. Click Run crawl batch to start."
+    elif recent:
+        state, detail = "running", f"Active — last fetch {int(since)}s ago."
+    elif pending == 0:
+        state, detail = "complete", f"Backfill complete — {clubs} clubs, all enriched."
+    elif continuous and not in_win:
+        state = "waiting"
+        detail = (f"Outside the active window — resumes at {window['start']} "
+                  f"{window['tz']}. {pending} clubs left to enrich.")
+    elif continuous and in_win:
+        state = "paused"
+        detail = (f"In window, no fetch in {int(since)}s — likely on a break, or "
+                  f"the runner stalled. {pending} clubs left.")
+    else:
+        state = "idle"
+        detail = (f"Idle — {pending} clubs await association enrichment. Run a batch, "
+                  f"or enable the continuous runner.")
+
+    return {
+        "state": state, "detail": detail,
+        "clubs": clubs, "associations_pending": pending,
+        "last_activity_at": last.isoformat() if last else None,
+        "seconds_since_activity": int(since) if since is not None else None,
+        "continuous_enabled": continuous,
+        "crawl_enabled": bool(settings.marketing_crawl_enabled),
+        "in_window": in_win, "window": window,
+    }
 
 
 # ── BetterComms export bridge ──────────────────────────────────────────────────
