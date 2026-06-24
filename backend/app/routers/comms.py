@@ -30,7 +30,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import require_cap, MANAGE_COMMS
@@ -688,6 +688,19 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                 if failed and not sent:
                     camp.status = "error"
                     camp.error = "All sends failed — check the email provider configuration."
+            # Reflect a marketing-outreach send back onto the directory: any club
+            # whose exported contact was just sent to is flagged emailed_via=
+            # 'campaign' so it isn't re-exported. No-op for ordinary club sends
+            # (those contacts have no marketing_club_id).
+            await s.execute(text("""
+                UPDATE marketing_clubs SET emailed_at = :now, emailed_via = 'campaign',
+                       updated_at = NOW()
+                WHERE emailed_at IS NULL AND id IN (
+                    SELECT cc.marketing_club_id FROM comms_recipients r
+                    JOIN comms_contacts cc ON cc.id = r.contact_id
+                    WHERE r.campaign_id = :cid AND r.status = 'sent'
+                      AND cc.marketing_club_id IS NOT NULL)
+            """), {"now": now, "cid": uuid.UUID(campaign_id)})
             await s.commit()
         logger.info("BetterComms: campaign %s sent=%d failed=%d", campaign_id, sent, failed)
     except Exception as e:  # never let the task die silently

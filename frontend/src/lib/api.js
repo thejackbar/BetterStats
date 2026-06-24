@@ -416,7 +416,7 @@ export const api = {
   mktStatus: () => request('/club-admin/marketing/status'),
   mktClubs: (params = {}) => {
     const qs = new URLSearchParams(
-      Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()
+      Object.entries(params).filter(([, v]) => v !== '' && v != null && v !== false)).toString()
     return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
   },
   mktCrawl: (limit) =>
@@ -429,9 +429,12 @@ export const api = {
     request(`/club-admin/marketing/sync-suppressions${orgId ? `?organisation_id=${orgId}` : ''}`, { method: 'POST' }),
   mktExportCsvUrl: (filters = {}) => {
     const qs = new URLSearchParams(
-      Object.entries(filters).filter(([, v]) => v !== '' && v != null)).toString()
+      Object.entries(filters).filter(([, v]) => v !== '' && v != null && v !== false)).toString()
     return `${BASE}/club-admin/marketing/export.csv${qs ? `?${qs}` : ''}`
   },
+  mktSetClubEmailed: (clubId, emailed, note) =>
+    request(`/club-admin/marketing/clubs/${clubId}/emailed`,
+      { method: 'PATCH', body: JSON.stringify({ emailed, note: note || null }) }),
   // Image URLs (used directly in <img src>; cookie auth travels with the request)
   kpPlayerImageUrl: (klubproPlayerId, thumb = false) =>
     `${BASE}/club-admin/klubpro/images/player/${klubproPlayerId}${thumb ? '?thumb=1' : ''}`,

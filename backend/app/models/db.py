@@ -1880,6 +1880,9 @@ class CommsContact(Base):
     source = Column(Text, nullable=False, server_default="manual")  # player | member | import | manual
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
     member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    # Set when this contact was exported from the marketing directory, so a
+    # campaign send can flag the source club emailed.
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
     subscribed = Column(Boolean, nullable=False, server_default="true", default=True)
     unsubscribed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     bounced = Column(Boolean, nullable=False, server_default="false", default=False)
@@ -1986,6 +1989,11 @@ class MarketingClub(Base):
     source = Column(Text, nullable=False, server_default="grassroots_api")
     raw_json = Column(JSONB, nullable=True)
     existing_org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="SET NULL"), nullable=True)
+    # Marked emailed (so it isn't emailed again): manually (external campaign) or
+    # automatically when a BetterAdmin Comms campaign sends to it.
+    emailed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    emailed_via = Column(Text, nullable=True)   # manual | campaign
+    emailed_note = Column(Text, nullable=True)
     detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)
