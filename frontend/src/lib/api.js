@@ -411,6 +411,21 @@ export const api = {
   kpBatches: (orgId) => request(`/club-admin/klubpro/batches${orgId ? `?org_id=${orgId}` : ''}`),
   kpRollback: (batchId) =>
     request(`/club-admin/klubpro/batches/${batchId}/rollback`, { method: 'POST' }),
+  // Marketing club directory (super-admin only) — crawl + outreach.
+  mktStats: () => request('/club-admin/marketing/stats'),
+  mktClubs: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()
+    return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
+  },
+  mktCrawl: (limit) =>
+    request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
+  mktExportComms: (payload) =>
+    request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
+  mktSyncSuppressions: (orgId) =>
+    request(`/club-admin/marketing/sync-suppressions${orgId ? `?organisation_id=${orgId}` : ''}`, { method: 'POST' }),
+  mktExportCsvUrl: (state) =>
+    `${BASE}/club-admin/marketing/export.csv${state ? `?state=${encodeURIComponent(state)}` : ''}`,
   // Image URLs (used directly in <img src>; cookie auth travels with the request)
   kpPlayerImageUrl: (klubproPlayerId, thumb = false) =>
     `${BASE}/club-admin/klubpro/images/player/${klubproPlayerId}${thumb ? '?thumb=1' : ''}`,

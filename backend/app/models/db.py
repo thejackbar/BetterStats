@@ -1937,6 +1937,93 @@ class CommsRecipient(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+# ─── Marketing club directory — BetterCricket outreach (migration 095) ────────
+# The crawled CA/grassroots club universe. Prospects, not customers, so decoupled
+# from Organisation (same precedent as ClubOnboardingRequest). The crawl is
+# resumable through this table: detail_fetched_at IS NULL = a frontier node
+# discovered via an affiliation but not yet detailed.
+
+class MarketingClub(Base):
+    """One Australian cricket club discovered via the PlayHQ public directory
+    (search enumerates clubs + committees; the main graph maps each to the
+    association[s] it plays in). ``grassroots_guid`` holds the PlayHQ search GUID
+    (dedup key), ``playhq_id`` the short ``routingCode`` the main graph keys on.
+    ``existing_org_id`` links a row that is already a BetterStats customer so
+    outreach can skip it. ``raw_json`` keeps the full search payload so re-crawls
+    are cheap and new fields need no re-fetch."""
+    __tablename__ = "marketing_clubs"
+    __table_args__ = (
+        UniqueConstraint("grassroots_guid", name="uq_marketing_club_guid"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    grassroots_guid = Column(Text, nullable=False)
+    playhq_id = Column(Text, nullable=True)
+    mycricket_id = Column(Integer, nullable=True)
+    name = Column(Text, nullable=False)
+    short_name = Column(Text, nullable=True)
+    kind = Column(Text, nullable=False, server_default="club")  # club | association
+    association_name = Column(Text, nullable=True)   # primary (first) association
+    association_guid = Column(Text, nullable=True)
+    # All association(s) the club plays in: [{"id","name","competition"}, …].
+    # NULL = not yet fetched (enrichment frontier); [] = fetched, none.
+    associations = Column(JSONB, nullable=True)
+    website_url = Column(Text, nullable=True)
+    contact_email = Column(Text, nullable=True)
+    contact_phone = Column(Text, nullable=True)
+    address_line1 = Column(Text, nullable=True)
+    address_line2 = Column(Text, nullable=True)
+    suburb = Column(Text, nullable=True)
+    state = Column(Text, nullable=True)
+    postcode = Column(Text, nullable=True)
+    country = Column(Text, nullable=True)
+    latitude = Column(Numeric(10, 6), nullable=True)
+    longitude = Column(Numeric(10, 6), nullable=True)
+    logo_url = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    is_playhq = Column(Boolean, nullable=True)
+    status = Column(Text, nullable=False, server_default="new")  # new|enriched|contacted|onboarded|suppressed
+    source = Column(Text, nullable=False, server_default="grassroots_api")
+    raw_json = Column(JSONB, nullable=True)
+    existing_org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="SET NULL"), nullable=True)
+    detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    contacts = relationship("MarketingClubContact", back_populates="club",
+                            cascade="all, delete-orphan")
+
+
+class MarketingClubContact(Base):
+    """An emailable contact for a marketing club. Many-per-club so President /
+    Secretary / Treasurer (manual enrichment) can be added later; Phase 1 holds
+    the single club contact the grassroots org-detail endpoint exposes (usually a
+    role mailbox). ``role_rank`` sequences the priority roles to the top.
+    ``subscribed`` is the global suppression gate, synced from BetterComms
+    unsubscribes/bounces so an opt-out is never re-contacted across campaigns."""
+    __tablename__ = "marketing_club_contacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="CASCADE"), nullable=False)
+    full_name = Column(Text, nullable=True)
+    role = Column(Text, nullable=True)
+    role_rank = Column(Integer, nullable=False, server_default="99")
+    email = Column(Text, nullable=True)
+    mobile = Column(Text, nullable=True)
+    source = Column(Text, nullable=False, server_default="api")  # api | website | manual
+    subscribed = Column(Boolean, nullable=False, server_default="true", default=True)
+    unsubscribed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    bounced = Column(Boolean, nullable=False, server_default="false", default=False)
+    bounced_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    club = relationship("MarketingClub", back_populates="contacts")
+
+
 # ─── KlubPro → BetterStats migration audit + rollback (migration 072) ─────────
 # These live in BetterStats (not KlubPro) so the before-images and the audit
 # survive even if the KlubPro database is later decommissioned, and a rollback

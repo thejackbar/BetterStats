@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -133,6 +133,90 @@ async def lifespan(app: FastAPI):
                 CONSTRAINT uq_player_scouting_org_player UNIQUE (organisation_id, player_id)
             )
         """))
+        # Marketing club directory (migration 095): the crawled CA/grassroots club
+        # universe for BetterCricket's own outreach. Prospects, not customers, so
+        # decoupled from organisations (existing_org_id links rows that ARE customers
+        # so outreach can skip them). Resumable through the table: detail_fetched_at
+        # IS NULL marks a frontier node discovered via an affiliation but not yet
+        # detailed. Idempotent creates so the API boots even if alembic lags.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS marketing_clubs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                grassroots_guid TEXT NOT NULL,
+                playhq_id TEXT,
+                mycricket_id INTEGER,
+                name TEXT NOT NULL,
+                short_name TEXT,
+                kind TEXT NOT NULL DEFAULT 'club',
+                association_name TEXT,
+                association_guid TEXT,
+                associations JSONB,
+                website_url TEXT,
+                contact_email TEXT,
+                contact_phone TEXT,
+                address_line1 TEXT,
+                address_line2 TEXT,
+                suburb TEXT,
+                state TEXT,
+                postcode TEXT,
+                country TEXT,
+                latitude NUMERIC(10,6),
+                longitude NUMERIC(10,6),
+                logo_url TEXT,
+                description TEXT,
+                is_playhq BOOLEAN,
+                status TEXT NOT NULL DEFAULT 'new',
+                source TEXT NOT NULL DEFAULT 'grassroots_api',
+                raw_json JSONB,
+                existing_org_id UUID REFERENCES organisations(id) ON DELETE SET NULL,
+                detail_fetched_at TIMESTAMPTZ,
+                first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_crawled_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_marketing_club_guid UNIQUE (grassroots_guid)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_frontier "
+            "ON marketing_clubs(detail_fetched_at, first_seen_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_state_status "
+            "ON marketing_clubs(state, status)"
+        ))
+        # Migration 096: associations list + its enrichment-frontier index (idempotent
+        # so the API boots even if alembic lags / the table predates the column).
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS associations JSONB"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_assoc_pending "
+            "ON marketing_clubs(associations) WHERE associations IS NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS marketing_club_contacts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                marketing_club_id UUID NOT NULL REFERENCES marketing_clubs(id) ON DELETE CASCADE,
+                full_name TEXT,
+                role TEXT,
+                role_rank INTEGER NOT NULL DEFAULT 99,
+                email TEXT,
+                mobile TEXT,
+                source TEXT NOT NULL DEFAULT 'api',
+                subscribed BOOLEAN NOT NULL DEFAULT TRUE,
+                unsubscribed_at TIMESTAMPTZ,
+                bounced BOOLEAN NOT NULL DEFAULT FALSE,
+                bounced_at TIMESTAMPTZ,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_marketing_contact_club_email "
+            "ON marketing_club_contacts(marketing_club_id, lower(email)) WHERE email IS NOT NULL"
+        ))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
@@ -1669,6 +1753,7 @@ app.include_router(families.router)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
 app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
+app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)
 app.include_router(usage.router)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402

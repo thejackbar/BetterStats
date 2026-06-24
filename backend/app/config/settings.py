@@ -66,6 +66,43 @@ class Settings(BaseSettings):
     square_environment: str = "production"  # 'sandbox' | 'production'
     square_api_version: str = ""
 
+    # ─── Marketing club directory crawl (BetterCricket outreach, super-admin) ──
+    # Walks the CA/grassroots org graph to build the national club list for our
+    # own outreach. Politeness is deliberate: low concurrency + a jittered delay
+    # between requests + a nightly cap, run off-peak, so we stay a quiet API
+    # citizen. Disabled by default — the scheduler only runs the nightly batch
+    # when marketing_crawl_enabled is true (flip it in the server .env once the
+    # tables exist and you want collection to begin).
+    marketing_crawl_enabled: bool = False
+    marketing_crawl_nightly_limit: int = 300  # max clubs association-enriched per nightly batch
+    # Per-request gap (jittered, applied before every PlayHQ call). 15-40s reads as
+    # organic browsing rather than a scraper; see docs/marketing-club-directory.md.
+    marketing_crawl_min_delay: float = 15.0   # min seconds between requests
+    marketing_crawl_max_delay: float = 40.0   # max seconds between requests (jitter)
+    # Continuous mode: a long-lived background runner that walks the whole backfill
+    # within a daily active window, with occasional longer breaks, instead of one
+    # capped nightly batch. Opt-in; when on, the nightly cron is skipped.
+    marketing_crawl_continuous: bool = False
+    marketing_crawl_tz: str = "Australia/Perth"      # window timezone
+    marketing_crawl_window_start: str = "04:30"      # active window start (HH:MM)
+    marketing_crawl_window_end: str = "23:30"        # active window end (HH:MM, same day)
+    marketing_crawl_break_after_min: int = 30        # take a long break after this many clubs…
+    marketing_crawl_break_after_max: int = 60        # …to this many (random)
+    marketing_crawl_break_min: float = 120.0         # long break length, min seconds (2 min)
+    marketing_crawl_break_max: float = 180.0         # long break length, max seconds (3 min)
+    marketing_crawl_refresh_daemon: bool = True      # after backfill, re-discover daily for new clubs
+    # PlayHQ public discovery endpoints (no API key — read the same as playhq.com).
+    # Search enumerates every cricket club + its committee; the main graph maps a
+    # club to the association(s) it plays in (needs the tenant header below).
+    playhq_search_url: str = "https://search.playhq.com/graphql"
+    playhq_graph_url: str = "https://api.playhq.com/graphql"
+    playhq_tenant: str = "cricket-australia"
+    # Org that owns the outreach campaigns in BetterComms (export target). Set to
+    # the platform marketing org's slug; blank = the export endpoint requires an
+    # explicit organisation_id. Lets BetterCricket reuse the per-club comms
+    # pipeline (and a separate SES-verified sending domain) for its own sends.
+    marketing_outreach_org_slug: str = ""
+
     @property
     def square_api_base(self) -> str:
         return (
