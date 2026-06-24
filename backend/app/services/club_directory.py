@@ -216,24 +216,43 @@ async def _upsert_club(session: AsyncSession, org: dict) -> bool:
 
 async def discover_clubs(session: AsyncSession, max_pages: int = 200) -> dict:
     """Page the PlayHQ search to completion, upserting every Australian cricket
-    club (with its committee). Idempotent — safe to re-run to pick up new clubs."""
+    club (with its committee). Idempotent — safe to re-run to pick up new clubs.
+
+    Resilient to transient fetch failures: a failed page is retried (not treated
+    as the end of the list, which previously truncated discovery on a single
+    network blip), and paging stops only on a genuinely empty page or once the
+    reported ``totalRecords`` has been covered."""
     page, seen, new, skipped = 1, 0, 0, 0
-    total_au = 0
+    total_reported = None
     while page <= max_pages:
-        results, _ = await phq.search_organisations("CLUB", "", page=page, limit=100)
-        if not results:
+        results, tot = None, 0
+        for attempt in range(5):
+            results, tot = await phq.search_organisations("CLUB", "", page=page, limit=100)
+            if results is not None:
+                break
+            logger.warning("discover_clubs: page %d fetch failed (attempt %d/5), retrying",
+                           page, attempt + 1)
+        if results is None:
+            logger.error("discover_clubs: page %d kept failing — stopping early at %d AU "
+                         "clubs (will resume on the next discovery pass)", page, seen)
             break
+        if not results:
+            break  # confirmed empty page = real end of the list
+        if tot:
+            total_reported = tot
         for org in results:
             if (org.get("tenant") or {}).get("name") != AU_TENANT:
                 skipped += 1
                 continue
-            total_au += 1
             if await _upsert_club(session, org):
                 new += 1
             seen += 1
         await session.commit()
         page += 1
-    stats = {"pages": page - 1, "au_seen": seen, "new": new, "non_au_skipped": skipped}
+        if total_reported and (page - 1) * 100 >= total_reported:
+            break  # paged through everything the search reports
+    stats = {"pages": page - 1, "au_seen": seen, "new": new,
+             "non_au_skipped": skipped, "total_reported": total_reported}
     logger.info("discover_clubs: %s", stats)
     return stats
 
@@ -363,11 +382,12 @@ _MAX_CLUB_RETRIES = 5
 
 
 async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> None:
-    """Walk the full directory backfill within the daily active window. Discovers
-    on first run, then enriches one club per loop (the 15-40s gap lives in the
-    client), pausing for a longer break every 30-60 clubs and sleeping outside the
-    window. When the frontier empties it either exits or, if the refresh daemon is
-    on, re-discovers each day to pick up newly-registered clubs."""
+    """Walk the full directory backfill within the daily active window. Runs a
+    (resilient) discovery pass once per day inside the window — so the club list
+    is rebuilt completely even if an earlier pass was truncated, and newly
+    registered clubs are picked up — then enriches one club per loop (the 15-40s
+    gap lives in the client), pausing for a longer break every 30-60 clubs and
+    sleeping outside the window."""
     logger.info(
         "marketing crawl (continuous): window %s-%s %s, gap %.0f-%.0fs, break "
         "%.0f-%.0fs every %d-%d clubs",
@@ -377,14 +397,7 @@ async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> 
         settings.marketing_crawl_break_max, settings.marketing_crawl_break_after_min,
         settings.marketing_crawl_break_after_max)
 
-    # Discover the club universe once (when empty), inside the window.
-    async with session_maker() as s:
-        total = await s.scalar(select(func.count(MarketingClub.id))) or 0
-    if total == 0:
-        await _sleep_until_window()
-        async with session_maker() as s:
-            await discover_clubs(s)
-
+    last_discover_day = None
     since_break = 0
     next_break_at = random.randint(settings.marketing_crawl_break_after_min,
                                    settings.marketing_crawl_break_after_max)
@@ -395,6 +408,16 @@ async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> 
         if not _in_window(now):
             wait = min(_seconds_until_next_start(now), 1800.0)  # re-check ≥ every 30 min
             await asyncio.sleep(wait)
+            continue
+
+        # Once per day, inside the window, (re)discover the whole club universe.
+        # discover_clubs is idempotent + resilient, so this rebuilds a previously
+        # truncated list and adds newly-registered clubs without disturbing the
+        # already-enriched rows.
+        if last_discover_day != now.date():
+            async with session_maker() as s:
+                await discover_clubs(s)
+            last_discover_day = now.date()
             continue
 
         async with session_maker() as s:
@@ -435,15 +458,14 @@ async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> 
                 consecutive_failures = 0
             continue
 
-        # Frontier empty → backfill complete.
+        # Frontier empty → backfill complete for now.
         if not settings.marketing_crawl_refresh_daemon:
             logger.info("marketing crawl: backfill complete — runner exiting")
             return
-        logger.info("marketing crawl: backfill complete — sleeping until next "
-                    "window to re-discover new clubs")
+        # Sleep to the next window; the once-a-day discovery at the top of the loop
+        # then picks up any newly-registered clubs.
+        logger.info("marketing crawl: backfill complete — sleeping until next window")
         await asyncio.sleep(_seconds_until_next_start(_now_tz()))
-        async with session_maker() as s:
-            await discover_clubs(s)  # picks up clubs registered since last pass
 
 
 async def _sleep_until_window() -> None:
