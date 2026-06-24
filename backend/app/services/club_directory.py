@@ -62,10 +62,10 @@ logger = logging.getLogger(__name__)
 
 AU_TENANT = "Cricket Australia"
 
-# PlayHQ committee positions we keep, mapped to a tidy label + a priority rank.
-# Office bearers rank to the top; coordinators (junior/female/cricket) follow.
-# Everything else (general committee, coaches, scorers, …) is skipped — too much
-# personal data for too little outreach signal.
+# We store the WHOLE committee, with a tidy label + a priority rank so the key
+# people sort to the top of each club's contact list. Office bearers rank highest,
+# then coordinators, then everyone else. Rank ≤ 4 (office bearers) is also the
+# default "email this person" selection (see _DEFAULT_SELECTED_MAX_RANK).
 _OFFICE_BEARERS = {
     "PRESIDENT": ("President", 1),
     "VICE_PRESIDENT": ("Vice President", 2),
@@ -76,20 +76,27 @@ _OFFICE_BEARERS = {
 # correct spelling and that typo.
 _COORDINATOR_RE = re.compile(r"COOR?DINATOR")
 _COORDINATOR_RANK = 10
+_OTHER_RANK = 50          # any other named committee position
+_UNLABELLED_RANK = 60     # a contact with no position at all
+# Contacts at or above this rank are pre-selected for outreach by default; the
+# rest are stored but unticked, and a super admin chooses per club.
+_DEFAULT_SELECTED_MAX_RANK = 4
 
 
-def _role_for_position(position: Optional[str]) -> Optional[tuple[str, int]]:
-    """Return (label, rank) for a kept committee position, or None to skip it."""
+def _role_for_position(position: Optional[str]) -> tuple[Optional[str], int]:
+    """Return (label, rank) for ANY committee position. Office bearers and
+    coordinators get a fixed rank; every other role is kept too (rank 50), and a
+    contact with no position is kept as 'Committee' (rank 60)."""
     pos = (position or "").strip().upper()
     if not pos:
-        return None
+        return "Committee", _UNLABELLED_RANK
     if pos in _OFFICE_BEARERS:
         return _OFFICE_BEARERS[pos]
+    # JUNIOR_CRICKET_COODINATOR → "Junior Cricket Coordinator"; SCORER → "Scorer".
+    label = pos.replace("COODINATOR", "COORDINATOR").replace("_", " ").title()
     if _COORDINATOR_RE.search(pos):
-        # JUNIOR_CRICKET_COODINATOR → "Junior Cricket Coordinator"
-        label = pos.replace("COODINATOR", "COORDINATOR").replace("_", " ").title()
         return label, _COORDINATOR_RANK
-    return None
+    return label, _OTHER_RANK
 
 
 def _full_name(contact: dict) -> Optional[str]:
@@ -105,8 +112,10 @@ async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str
                          role: str, role_rank: int, email: Optional[str],
                          phone: Optional[str]) -> None:
     """Upsert one committee contact, deduped on lower(email) per club. A re-crawl
-    refreshes name/phone and fills a better role. Contacts with no email are kept
-    (phone-only), deduped on (club, full_name) so a re-crawl doesn't pile up."""
+    refreshes name/phone and fills a better role but never overrides the manual
+    ``outreach_selected`` choice on an existing row. Contacts with no email are
+    kept (phone-only), deduped on (club, full_name) so a re-crawl doesn't pile up.
+    New rows are pre-selected for outreach when they're office bearers."""
     email = (email or "").strip().lower() or None
     phone = (phone or "").strip() or None
     if email:
@@ -129,7 +138,8 @@ async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str
         return
     session.add(MarketingClubContact(
         marketing_club_id=club_id, full_name=full_name, role=role,
-        role_rank=role_rank, email=email, mobile=phone, source="api"))
+        role_rank=role_rank, email=email, mobile=phone, source="api",
+        outreach_selected=(role_rank <= _DEFAULT_SELECTED_MAX_RANK)))
 
 
 async def _link_existing_org(session: AsyncSession, club: MarketingClub) -> None:
@@ -181,16 +191,14 @@ async def _upsert_club(session: AsyncSession, org: dict) -> bool:
         club.status = "enriched"
     await session.flush()  # need club.id for contacts + dedupe within the batch
 
-    # Office-bearers + coordinators only.
+    # Store the whole committee (every contact the club publishes). visible=False
+    # contacts are the club's deliberate non-publish, so we still skip those.
     top_email = top_phone = None
     top_rank = 999
     for c in (org.get("contacts") or []):
         if c.get("visible") is False:
             continue
-        role = _role_for_position(c.get("position"))
-        if not role:
-            continue
-        label, rank = role
+        label, rank = _role_for_position(c.get("position"))
         email = (c.get("email") or "").strip() or None
         phone = (c.get("phone") or "").strip() or None
         await _store_contact(session, club.id, _full_name(c), label, rank, email, phone)
@@ -455,13 +463,15 @@ def _assoc_names(club: MarketingClub) -> list[str]:
 async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] = None,
                           states: Optional[list[str]] = None,
                           include_associations: bool = False,
-                          only_with_email: bool = True) -> dict:
+                          only_with_email: bool = True,
+                          selected_only: bool = True) -> dict:
     """Materialise the marketing contacts into ``comms_contacts`` under the
     platform outreach org, so BetterComms does the actual sending (unsubscribe,
-    suppression, audit all reused). Skips clubs that are already customers and any
-    address suppressed here. Existing comms suppressions are left untouched.
-    (``include_associations`` is accepted for API compatibility; the directory
-    only holds clubs now.)"""
+    suppression, audit all reused). Only the contacts a super admin ticked for
+    outreach (``outreach_selected``) are exported unless ``selected_only`` is
+    False. Skips clubs that are already customers and any address suppressed here.
+    Existing comms suppressions are left untouched. (``include_associations`` is
+    accepted for API compatibility; the directory only holds clubs now.)"""
     org = await _resolve_outreach_org(session, organisation_id)
 
     q = (
@@ -470,6 +480,8 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         .where(MarketingClubContact.subscribed.is_(True),
                MarketingClub.existing_org_id.is_(None))
     )
+    if selected_only:
+        q = q.where(MarketingClubContact.outreach_selected.is_(True))
     if only_with_email:
         q = q.where(MarketingClubContact.email.isnot(None))
     if states:
@@ -555,7 +567,7 @@ async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "Club", "UTM", "Name", "Role", "Email", "Phone",
+        "Club", "UTM", "Name", "Role", "Email", "Phone", "Email?",
         "Association", "All Associations",
         "Address", "Suburb", "State", "Postcode", "Website",
         "PlayHQ Code", "PlayHQ GUID", "Status",
@@ -569,6 +581,7 @@ async def clubs_to_csv(session: AsyncSession, states: Optional[list[str]] = None
             (contact.role if contact else "") or "",
             (contact.email if contact else "") or "",
             (contact.mobile if contact else "") or club.contact_phone or "",
+            "yes" if (contact and contact.outreach_selected) else "no",
             club.association_name or "", "; ".join(_assoc_names(club)),
             club.address_line1 or "", club.suburb or "", club.state or "",
             club.postcode or "", club.website_url or "", club.playhq_id or "",
@@ -588,6 +601,9 @@ async def directory_stats(session: AsyncSession) -> dict:
         select(func.count(func.distinct(MarketingClubContact.marketing_club_id)))
         .where(MarketingClubContact.email.isnot(None))) or 0
     contacts = await session.scalar(select(func.count(MarketingClubContact.id))) or 0
+    selected = await session.scalar(select(func.count(MarketingClubContact.id))
+        .where(MarketingClubContact.outreach_selected.is_(True),
+               MarketingClubContact.email.isnot(None))) or 0
     customers = await session.scalar(
         select(func.count(MarketingClub.id)).where(MarketingClub.existing_org_id.isnot(None))) or 0
     distinct_assoc = await session.scalar(
@@ -596,6 +612,7 @@ async def directory_stats(session: AsyncSession) -> dict:
     return {
         "clubs": clubs,
         "contacts": contacts,
+        "selected_contacts": selected,
         "clubs_with_email": with_email,
         "associations_fetched": assoc_fetched,
         "associations_pending": assoc_pending,

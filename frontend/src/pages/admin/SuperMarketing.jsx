@@ -23,31 +23,39 @@ function Stat({ label, value }) {
 
 // Everything collected for one club — all stored contacts, every association it
 // plays in, address and ids. Driven entirely by the /clubs payload (no extra fetch).
-function ClubDetail({ club }) {
+function ClubDetail({ club, onToggleContact }) {
   const contacts = club.contacts || []
   const assocs = club.associations
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
         <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1">
-          Contacts ({contacts.length})
+          Contacts ({contacts.length}) · tick who to email
         </div>
         {contacts.length ? (
           <table className="w-full text-xs">
             <tbody>
-              {contacts.map((ct, i) => (
-                <tr key={i} className="align-top">
-                  <td className="py-0.5 pr-2 text-pb-faint whitespace-nowrap">{ct.role || '-'}</td>
-                  <td className="py-0.5 pr-2 text-pb-text">{ct.full_name || '-'}</td>
-                  <td className="py-0.5 pr-2">
-                    {ct.email
-                      ? <a href={`mailto:${ct.email}`} className="text-pb-accent">{ct.email}</a>
-                      : <span className="text-pb-faint">-</span>}
-                    {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300">unsub</span>}
-                  </td>
-                  <td className="py-0.5 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
-                </tr>
-              ))}
+              {contacts.map((ct) => {
+                const canEmail = !!ct.email && ct.subscribed
+                return (
+                  <tr key={ct.id} className="align-top">
+                    <td className="py-0.5 pr-2">
+                      <input type="checkbox" checked={!!ct.selected} disabled={!canEmail}
+                             title={canEmail ? 'Include in outreach' : 'No emailable address'}
+                             onChange={(e) => onToggleContact(club.id, ct.id, e.target.checked)} />
+                    </td>
+                    <td className="py-0.5 pr-2 text-pb-faint whitespace-nowrap">{ct.role || '-'}</td>
+                    <td className="py-0.5 pr-2 text-pb-text">{ct.full_name || '-'}</td>
+                    <td className="py-0.5 pr-2">
+                      {ct.email
+                        ? <a href={`mailto:${ct.email}`} className="text-pb-accent">{ct.email}</a>
+                        : <span className="text-pb-faint">-</span>}
+                      {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300">unsub</span>}
+                    </td>
+                    <td className="py-0.5 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         ) : <div className="text-pb-faint text-xs">No contacts stored.</div>}
@@ -124,6 +132,20 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const toggleContact = async (clubId, contactId, selected) => {
+    // optimistic — update the contact in place, refresh the stat tile after
+    setClubs(cs => cs.map(c => c.id !== clubId ? c : {
+      ...c, contacts: c.contacts.map(ct => ct.id === contactId ? { ...ct, selected } : ct),
+    }))
+    try {
+      await api.mktSetContactSelected(contactId, selected)
+      loadStats()
+    } catch (e) {
+      setError(e.message || 'Could not update the selection.')
+      loadClubs()  // revert to server truth
+    }
+  }
+
   const syncSuppressions = async () => {
     setBusy('supp'); setMsg('')
     try {
@@ -139,17 +161,19 @@ export default function SuperMarketing() {
           <h1 className="text-xl font-semibold text-pb-text">Club directory</h1>
           <p className="text-sm text-pb-dim mt-1">
             Every Australian cricket club from the PlayHQ public directory, for
-            BetterCricket outreach. Each club stores its office bearers + coordinators
-            (President / Vice-President / Secretary / Treasurer + cricket coordinators)
-            with their names, emails and mobiles, plus the association(s) it plays in.
-            Click a club to see everything collected.
+            BetterCricket outreach. Each club stores its whole published committee
+            (names, roles, emails, mobiles) plus the association(s) it plays in. Click
+            a club to see everything collected and tick which contacts to email —
+            office bearers are pre-ticked. "Export to BetterComms" pushes only the
+            ticked contacts into the comms send pipeline.
           </p>
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-5">
             <Stat label="Clubs" value={stats.clubs} />
             <Stat label="Contacts" value={stats.contacts} />
+            <Stat label="To email" value={stats.selected_contacts} />
             <Stat label="With email" value={stats.clubs_with_email} />
             <Stat label="Assoc. linked" value={stats.associations_fetched} />
             <Stat label="Assoc. pending" value={stats.associations_pending} />
@@ -264,7 +288,7 @@ export default function SuperMarketing() {
                     isOpen && (
                       <tr key={c.id + '-d'} className="bg-pb-surface2/40">
                         <td colSpan={5} className="px-4 py-3">
-                          <ClubDetail club={c} />
+                          <ClubDetail club={c} onToggleContact={toggleContact} />
                         </td>
                       </tr>
                     ),

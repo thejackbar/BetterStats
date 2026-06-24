@@ -2013,6 +2013,9 @@ class MarketingClubContact(Base):
     email = Column(Text, nullable=True)
     mobile = Column(Text, nullable=True)
     source = Column(Text, nullable=False, server_default="api")  # api | website | manual
+    # Whether this contact is ticked to receive outreach (drives export_to_comms).
+    # Office bearers are pre-selected on insert; a super admin adjusts per club.
+    outreach_selected = Column(Boolean, nullable=False, server_default="false", default=False)
     subscribed = Column(Boolean, nullable=False, server_default="true", default=True)
     unsubscribed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     bounced = Column(Boolean, nullable=False, server_default="false", default=False)

@@ -422,6 +422,8 @@ export const api = {
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
   mktExportComms: (payload) =>
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
+  mktSetContactSelected: (contactId, selected) =>
+    request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktSyncSuppressions: (orgId) =>
     request(`/club-admin/marketing/sync-suppressions${orgId ? `?organisation_id=${orgId}` : ''}`, { method: 'POST' }),
   mktExportCsvUrl: (state) =>
