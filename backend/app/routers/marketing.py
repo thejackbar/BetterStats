@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,8 +71,9 @@ async def list_clubs(
             "website_url": c.website_url, "status": c.status,
             "is_customer": c.existing_org_id is not None,
             "contacts": [{
-                "full_name": ct.full_name, "role": ct.role, "email": ct.email,
-                "mobile": ct.mobile, "source": ct.source, "subscribed": ct.subscribed,
+                "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
+                "email": ct.email, "mobile": ct.mobile, "source": ct.source,
+                "subscribed": ct.subscribed, "selected": ct.outreach_selected,
             } for ct in contacts],
         })
     return {"total": total or 0, "limit": limit, "offset": offset, "clubs": out}
@@ -103,16 +104,38 @@ class ExportBody(BaseModel):
     organisation_id: Optional[str] = None
     states: Optional[list[str]] = None
     include_associations: bool = False
+    # Default True: only push contacts a super admin ticked for outreach. Set
+    # False to export every subscribed, emailable contact regardless of selection.
+    selected_only: bool = True
 
 
 @router.post("/export-comms")
 async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
                        _=Depends(require_super_admin)):
-    """Push the filtered selection into comms_contacts under the outreach org, so
+    """Push the selected contacts into comms_contacts under the outreach org, so
     a BetterComms campaign can send to them with full unsubscribe/suppression."""
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, states=body.states,
-        include_associations=body.include_associations)
+        include_associations=body.include_associations,
+        selected_only=body.selected_only)
+
+
+class ContactSelectBody(BaseModel):
+    selected: bool
+
+
+@router.patch("/contacts/{contact_id}")
+async def set_contact_selected(contact_id: str, body: ContactSelectBody,
+                               db: AsyncSession = Depends(get_db),
+                               _=Depends(require_super_admin)):
+    """Tick / untick one contact for outreach. This is how a super admin decides
+    which of a club's committee receive the BetterComms email."""
+    contact = await db.get(MarketingClubContact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    contact.outreach_selected = body.selected
+    await db.commit()
+    return {"id": contact_id, "selected": contact.outreach_selected}
 
 
 @router.post("/sync-suppressions")

@@ -217,6 +217,11 @@ async def lifespan(app: FastAPI):
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_marketing_contact_club_email "
             "ON marketing_club_contacts(marketing_club_id, lower(email)) WHERE email IS NOT NULL"
         ))
+        # Migration 097: per-contact outreach selection (which contacts get emailed).
+        await conn.execute(text(
+            "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS "
+            "outreach_selected BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
