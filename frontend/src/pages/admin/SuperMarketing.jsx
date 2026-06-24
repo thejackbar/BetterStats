@@ -12,6 +12,32 @@ const SELECT_CLS = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-p
 const BTN = 'px-3 py-1.5 rounded text-xs font-semibold border pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-accent disabled:opacity-50'
 const BTN_ACCENT = 'px-3 py-1.5 rounded text-xs font-semibold bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25 disabled:opacity-50'
 
+const STATE_STYLE = {
+  running:  { dot: 'bg-emerald-400 animate-pulse', text: 'text-emerald-300', label: 'Running' },
+  waiting:  { dot: 'bg-sky-400',                    text: 'text-sky-300',     label: 'Waiting' },
+  paused:   { dot: 'bg-amber-400',                  text: 'text-amber-300',   label: 'Paused' },
+  idle:     { dot: 'bg-pb-faint',                   text: 'text-pb-dim',      label: 'Idle' },
+  complete: { dot: 'bg-emerald-400',                text: 'text-emerald-300', label: 'Complete' },
+}
+
+function CrawlStatus({ status }) {
+  if (!status) return null
+  const s = STATE_STYLE[status.state] || STATE_STYLE.idle
+  return (
+    <div className="flex items-center gap-2 rounded-lg border pb-hairline bg-pb-surface2 px-3 py-2 mb-4">
+      <span className={`inline-block w-2.5 h-2.5 rounded-full ${s.dot}`} />
+      <span className={`text-xs font-semibold ${s.text}`}>{s.label}</span>
+      <span className="text-xs text-pb-dim">{status.detail}</span>
+      {status.continuous_enabled && (
+        <span className="text-[11px] text-pb-faint ml-auto">
+          continuous · {status.window.start}–{status.window.end} {status.window.tz}
+          {status.in_window ? ' · in window' : ' · outside window'}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function Stat({ label, value }) {
   return (
     <div className="rounded-lg border pb-hairline bg-pb-surface2 px-3 py-2">
@@ -92,6 +118,7 @@ function ClubDetail({ club, onToggleContact }) {
 
 export default function SuperMarketing() {
   const [stats, setStats] = useState(null)
+  const [status, setStatus] = useState(null)
   const [clubs, setClubs] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -103,6 +130,14 @@ export default function SuperMarketing() {
 
   const loadStats = useCallback(() => {
     api.mktStats().then(setStats).catch(() => {})
+    api.mktStatus().then(setStatus).catch(() => {})
+  }, [])
+
+  // Poll the crawl status every 12s so the page reflects running / waiting /
+  // paused / complete without a manual refresh.
+  useEffect(() => {
+    const id = setInterval(() => { api.mktStatus().then(setStatus).catch(() => {}) }, 12000)
+    return () => clearInterval(id)
   }, [])
 
   const loadClubs = useCallback(() => {
@@ -120,7 +155,8 @@ export default function SuperMarketing() {
     setBusy('crawl'); setMsg('')
     try {
       await api.mktCrawl()
-      setMsg('Crawl batch started in the background. It is rate-limited, so give it a while, then refresh stats.')
+      setMsg('Crawl batch started in the background. Watch the status above — it is rate-limited, so progress is slow.')
+      setTimeout(loadStats, 2000)  // let the first fetch land, then refresh the status pill
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -181,6 +217,8 @@ export default function SuperMarketing() {
             <Stat label="Already ours" value={stats.already_customers} />
           </div>
         )}
+
+        <CrawlStatus status={status} />
 
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <button className={BTN_ACCENT} disabled={busy === 'crawl'} onClick={runCrawl}>
