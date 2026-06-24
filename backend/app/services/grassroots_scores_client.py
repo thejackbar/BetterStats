@@ -54,21 +54,31 @@ async def _get(url: str, params: dict | None = None) -> httpx.Response:
             return r
 
 
-async def get_grade_matches(grade_id: str) -> list[dict]:
+async def get_grade_matches(grade_id: str, *, force: bool = False) -> list[dict]:
     """Return all matches in a grade.
 
     Uses /scores/grades/{grade_id}/matches — unauthenticated, works for all
     seasons including pre-2000 data. Preferred over team-based discovery
     because it doesn't require fixturesladders (which has no records for
     old seasons).
+
+    `force=True` bypasses the in-process cache (used by the hard-refresh
+    pre-flight probe so a previously-poisoned empty entry can't hide a
+    recovered upstream).
+
+    Only a genuine 200-with-no-matches is cached as empty. A non-200 or an
+    exception is a *transient* failure — we return [] but DON'T cache it, so a
+    later call (or a retry) actually re-fetches instead of being stuck on a
+    poisoned empty for the life of the process. This matters because the whole
+    game-level sync reads "no matches" as "this grade has no games", so a
+    cached upstream blip would silently look like a club with no history.
     """
-    if grade_id in _grade_matches_cache:
+    if not force and grade_id in _grade_matches_cache:
         return _grade_matches_cache[grade_id]
     try:
         r = await _get(f"{BASE_URL}/scores/grades/{grade_id}/matches")
         if r.status_code != 200:
             logger.debug(f"GR scores: /grades/{grade_id}/matches → {r.status_code}")
-            _grade_matches_cache[grade_id] = []
             return []
         data = r.json()
         matches = data.get("matches") or []
