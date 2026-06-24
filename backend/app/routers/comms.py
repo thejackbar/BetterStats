@@ -173,6 +173,9 @@ def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Opt
         "name": (name or "").strip() or _first_name(name, email),
         "club_name": org.name or "",
         "email": email,
+        # Lets a template invite unsubscribe inline in the body/subject as well as
+        # the automatic footer, e.g. "…or [unsubscribe]({{unsubscribe_url}})".
+        "unsubscribe_url": unsub_url,
     }
     subject = _merge(campaign.subject or "", ctx)
     inner = _merge(_body_to_html(campaign.body_html or ""), ctx)

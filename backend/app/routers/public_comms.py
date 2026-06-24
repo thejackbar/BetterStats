@@ -20,8 +20,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import func, update
+
 from app.config.settings import settings
-from app.models.db import CommsContact, Organisation, get_db
+from app.models.db import CommsContact, MarketingClubContact, Organisation, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +70,23 @@ async def _unsubscribe(token: str, db: AsyncSession) -> tuple[str, str, str]:
     except (ValueError, TypeError):
         contact = None
     if contact and (not org or contact.organisation_id == org.id):
+        now = datetime.now(timezone.utc)
         if contact.subscribed:
             contact.subscribed = False
-            contact.unsubscribed_at = datetime.now(timezone.utc)
-            await db.commit()
+            contact.unsubscribed_at = now
+        # If this is a BetterCricket marketing-outreach send, propagate the opt-out
+        # straight back to the marketing directory (by email) so the person is
+        # never re-exported or re-emailed — no manual "Sync suppressions" needed.
+        # Scoped to the outreach org so a club member opting out of THEIR club's
+        # emails doesn't touch the separate marketing list, and vice versa.
+        outreach_slug = (settings.marketing_outreach_org_slug or "").strip()
+        if contact.email and org and outreach_slug and org.slug == outreach_slug:
+            await db.execute(
+                update(MarketingClubContact)
+                .where(func.lower(MarketingClubContact.email) == contact.email.lower(),
+                       MarketingClubContact.subscribed.is_(True))
+                .values(subscribed=False, unsubscribed_at=now, updated_at=func.now()))
+        await db.commit()
         return ("You're unsubscribed",
                 f"You won't receive any more emails from {club_name}. Changed your mind? Just let them know.",
                 accent)
