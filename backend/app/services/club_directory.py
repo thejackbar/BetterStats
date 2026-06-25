@@ -975,6 +975,18 @@ async def resolve_association_clubs(session: AsyncSession, assoc_id: str,
                 club.association_guid = assoc_id
             club.updated_at = func.now()
             linked += 1
+        # Linking via the sweep takes a club off the per-club enrichment queue, so
+        # a contactless club (e.g. a school with only a generic mailbox) would
+        # otherwise never get its org-level email. Fetch it here for any matched
+        # club that still has no contact.
+        if not club.contact_email:
+            oc = await phq.discover_org_contact(rc, delay=delay)
+            if oc and (oc.get("email") or oc.get("phone")):
+                await _store_contact(session, club.id, None, "Club contact",
+                                     _CLUB_CONTACT_RANK, oc.get("email"), oc.get("phone"),
+                                     selected=True)
+                if oc.get("email"):
+                    club.contact_email = oc["email"].lower()
     # Stamp the registry so the sweep moves on (and refreshes only weekly).
     await session.execute(text(
         "UPDATE marketing_associations SET last_resolved_at = NOW(), club_count = :n, "

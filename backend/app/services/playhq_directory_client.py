@@ -163,17 +163,18 @@ async def discover_associations(routing_code: str) -> Optional[list[dict]]:
     return list(seen.values())
 
 
-async def discover_org_contact(routing_code: str) -> Optional[dict]:
+async def discover_org_contact(routing_code: str, delay: tuple | None = None) -> Optional[dict]:
     """The club's own org-level email/phone (the generic club mailbox PlayHQ shows
     on the org page) via the main graph. Returns ``{"email", "phone"}`` (either may
     be ""), or None on fetch failure. Separate from the committee ``contacts[]``,
     which the search endpoint already gives us."""
     if not routing_code:
         return None
+    lo, hi = (delay or (settings.marketing_crawl_min_delay, settings.marketing_crawl_max_delay))
     data = await _post(
         settings.playhq_graph_url,
         {"query": _ORG_QUERY, "variables": {"c": routing_code}},
-        extra_headers={"tenant": settings.playhq_tenant})
+        extra_headers={"tenant": settings.playhq_tenant}, min_delay=lo, max_delay=hi)
     if data is None:
         return None
     org = data.get("discoverOrganisation")
