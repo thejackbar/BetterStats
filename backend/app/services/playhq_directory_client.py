@@ -207,15 +207,16 @@ _GRADE_CLUBS_QUERY = (
 )
 
 
-async def _post_graph(payload: dict) -> Optional[dict]:
+async def _post_graph(payload: dict, delay: tuple | None = None) -> Optional[dict]:
+    lo, hi = delay or _INTERACTIVE_DELAY
     return await _post(settings.playhq_graph_url, payload, extra_headers=_GRAPH_TENANT(),
-                       min_delay=_INTERACTIVE_DELAY[0], max_delay=_INTERACTIVE_DELAY[1])
+                       min_delay=lo, max_delay=hi)
 
 
-async def association_seasons(assoc_routing_code: str) -> list[dict]:
+async def association_seasons(assoc_routing_code: str, delay: tuple | None = None) -> list[dict]:
     """The association's competitions' seasons, newest-first as returned:
     ``[{"id","name","status"}]``."""
-    data = await _post_graph({"query": _ASSOC_COMPS_QUERY, "variables": {"id": assoc_routing_code}})
+    data = await _post_graph({"query": _ASSOC_COMPS_QUERY, "variables": {"id": assoc_routing_code}}, delay)
     comps = (data or {}).get("discoverCompetitions") or []
     out = []
     for comp in comps:
@@ -225,16 +226,16 @@ async def association_seasons(assoc_routing_code: str) -> list[dict]:
     return out
 
 
-async def season_grade_ids(season_id: str) -> list[str]:
-    data = await _post_graph({"query": _SEASON_GRADES_QUERY, "variables": {"id": season_id}})
+async def season_grade_ids(season_id: str, delay: tuple | None = None) -> list[str]:
+    data = await _post_graph({"query": _SEASON_GRADES_QUERY, "variables": {"id": season_id}}, delay)
     season = (data or {}).get("discoverSeason") or {}
     return [g["id"] for g in (season.get("grades") or []) if g.get("id")]
 
 
-async def grade_club_orgs(grade_id: str) -> list[dict]:
+async def grade_club_orgs(grade_id: str, delay: tuple | None = None) -> list[dict]:
     """Distinct member clubs of a grade (from the ladder standings):
     ``[{"id" (routingCode), "name"}]``."""
-    data = await _post_graph({"query": _GRADE_CLUBS_QUERY, "variables": {"id": grade_id}})
+    data = await _post_graph({"query": _GRADE_CLUBS_QUERY, "variables": {"id": grade_id}}, delay)
     grade = (data or {}).get("discoverGrade") or {}
     seen: dict[str, str] = {}
     for pool in (grade.get("ladder") or []):

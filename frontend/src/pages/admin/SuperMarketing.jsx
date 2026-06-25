@@ -380,7 +380,7 @@ export default function SuperMarketing() {
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2 mb-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-2 mb-5">
             <Stat label="Clubs" value={stats.clubs} />
             <Stat label="Contacts" value={stats.contacts} />
             <Stat label="To email" value={stats.selected_contacts} />
@@ -389,6 +389,9 @@ export default function SuperMarketing() {
             <Stat label="Assoc. linked" value={stats.associations_fetched} />
             <Stat label="Assoc. pending" value={stats.associations_pending} />
             <Stat label="Associations" value={stats.distinct_associations} />
+            <Stat label="Assoc. swept"
+                  value={stats.associations_registry != null
+                    ? `${stats.associations_resolved ?? 0}/${stats.associations_registry}` : '-'} />
             <Stat label="Already ours" value={stats.already_customers} />
           </div>
         )}
