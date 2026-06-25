@@ -9,7 +9,7 @@ export const ABN = '32 624 335 397'
 export const DOMAIN = 'betterat.cricket'
 export const BASE_URL = 'https://betterat.cricket'
 
-export const SUPPORT_EMAIL = 'betteratcricket@gmail.com'
+export const SUPPORT_EMAIL = 'cricket@bettersports.com.au'
 
 // ── Formspree ────────────────────────────────────────────────────────────────
 // Sign up at https://formspree.io, create a form pointed at the support inbox,
