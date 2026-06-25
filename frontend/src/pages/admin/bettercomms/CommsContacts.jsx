@@ -79,6 +79,7 @@ export default function CommsContacts() {
         <Stat label="subscribed" value={s.subscribed ?? 0} tone="text-green-500" />
         <Stat label="unsubscribed" value={s.unsubscribed ?? 0} tone="text-pb-faint" />
         <Stat label="bounced" value={s.bounced ?? 0} tone="text-pb-red" />
+        {(s.excluded ?? 0) > 0 && <Stat label="excluded" value={s.excluded} tone="text-pb-red" />}
       </div>
 
       {/* Add + import */}
@@ -138,6 +139,7 @@ export default function CommsContacts() {
               <div className="flex items-center gap-2 shrink-0">
                 <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">{c.source}</span>
                 {c.bounced && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">bounced</span>}
+                {c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Excluded from outreach by BetterCricket">excluded</span>}
                 <button onClick={() => toggleSub(c)} disabled={busy === `t${c.id}`}
                   className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 disabled:opacity-50 ${
                     c.subscribed ? 'text-green-500 border-green-500/40' : 'text-pb-faint border-pb-faint/30'}`}>

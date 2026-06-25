@@ -235,6 +235,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_comms_contacts_marketing_club "
             "ON comms_contacts(marketing_club_id)"))
+        # Migration 099: admin exclusion flag (marketing + comms).
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS excluded_at TIMESTAMPTZ"))
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS excluded_at TIMESTAMPTZ"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of

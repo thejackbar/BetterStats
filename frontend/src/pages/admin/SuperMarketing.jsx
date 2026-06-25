@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -36,6 +36,55 @@ function CrawlStatus({ status }) {
   )
 }
 
+// Searchable multi-select of associations. Selecting several filters clubs that
+// belong to ANY of them. The ✕ on the button clears all selections.
+function AssocMultiSelect({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  const filtered = options
+    .filter(o => o.name.toLowerCase().includes(q.toLowerCase())).slice(0, 300)
+  const toggle = (name) =>
+    onChange(selected.includes(name) ? selected.filter(n => n !== name) : [...selected, name])
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" className={SELECT_CLS + ' flex items-center gap-1.5'}
+              onClick={() => setOpen(o => !o)}>
+        <span>{selected.length ? `Associations (${selected.length})` : 'Associations'}</span>
+        {selected.length > 0 && (
+          <span role="button" title="Clear selection" className="text-pb-faint hover:text-red-300"
+                onClick={(e) => { e.stopPropagation(); onChange([]) }}>✕</span>
+        )}
+        <span className="text-pb-faint">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-80 max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+          <input autoFocus className={SELECT_CLS + ' w-full mb-2'} placeholder="Search associations..."
+                 value={q} onChange={(e) => setQ(e.target.value)} />
+          {selected.length > 0 && (
+            <button type="button" className="text-[11px] text-pb-faint hover:text-pb-accent mb-1"
+                    onClick={() => onChange([])}>clear selection</button>
+          )}
+          {!filtered.length && <div className="text-xs text-pb-faint px-1 py-2">No matches.</div>}
+          {filtered.map(o => (
+            <label key={o.name}
+                   className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
+              <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
+              <span className="flex-1 truncate" title={o.name}>{o.name}</span>
+              <span className="text-pb-faint">{o.count}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Stat({ label, value }) {
   return (
     <div className="rounded-lg border pb-hairline bg-pb-surface2 px-3 py-2">
@@ -47,7 +96,7 @@ function Stat({ label, value }) {
 
 // Everything collected for one club — all stored contacts, every association it
 // plays in, address and ids. Driven entirely by the /clubs payload (no extra fetch).
-function ClubDetail({ club, onToggleContact, onToggleEmailed }) {
+function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded }) {
   const contacts = club.contacts || []
   const assocs = club.associations
   return (
@@ -118,6 +167,13 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed }) {
               onClick={() => onToggleEmailed(club.id, !club.emailed_at)}>
               {club.emailed_at ? 'Unmark emailed' : 'Mark as emailed'}
             </button>
+            <button
+              className={'ml-2 px-2 py-0.5 rounded border text-[11px] hover:opacity-80 '
+                + (club.excluded ? 'border-red-500/50 text-red-300 bg-red-500/10' : 'pb-hairline text-pb-text')}
+              title="Excluded clubs are never exported, and any contacts already in BetterAdmin Comms are dropped from audiences"
+              onClick={() => onToggleExcluded(club.id, !club.excluded)}>
+              {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
+            </button>
           </div>
         </div>
       </div>
@@ -134,9 +190,11 @@ export default function SuperMarketing() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState('')
+  const [assocOptions, setAssocOptions] = useState([])
   const [filters, setFilters] = useState({
-    q: '', state: '', association: '', postcode_from: '', postcode_to: '', contact: '',
-    person: '', exclude_junior: false, exclude_emailed: false,
+    q: '', state: '', association: '', associations: [], postcode_from: '', postcode_to: '',
+    contact: '', person: '', exclude_junior: false, exclude_emailed: false,
+    exclude_carnival: false, exclude_school: false,
   })
   const [expanded, setExpanded] = useState(null)
 
@@ -162,6 +220,7 @@ export default function SuperMarketing() {
 
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
+  useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
 
   const runCrawl = async () => {
     setBusy('crawl'); setMsg('')
@@ -201,6 +260,17 @@ export default function SuperMarketing() {
     }))
     try {
       await api.mktSetClubEmailed(clubId, emailed)
+      loadStats()
+    } catch (e) {
+      setError(e.message || 'Could not update.')
+      loadClubs()
+    }
+  }
+
+  const toggleExcluded = async (clubId, excluded) => {
+    setClubs(cs => cs.map(c => c.id !== clubId ? c : { ...c, excluded }))
+    try {
+      await api.mktSetClubExcluded(clubId, excluded)
       loadStats()
     } catch (e) {
       setError(e.message || 'Could not update.')
@@ -270,6 +340,11 @@ export default function SuperMarketing() {
             value={filters.q}
             onChange={(e) => setFilters(f => ({ ...f, q: e.target.value }))}
           />
+          <AssocMultiSelect
+            options={assocOptions}
+            selected={filters.associations}
+            onChange={(a) => setFilters(f => ({ ...f, associations: a }))}
+          />
           <input
             className={SELECT_CLS + ' min-w-[160px]'}
             placeholder="Association contains..."
@@ -310,17 +385,29 @@ export default function SuperMarketing() {
             Exclude juniors
           </label>
           <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+            <input type="checkbox" checked={filters.exclude_carnival}
+                   onChange={(e) => setFilters(f => ({ ...f, exclude_carnival: e.target.checked }))} />
+            Exclude carnivals
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+            <input type="checkbox" checked={filters.exclude_school}
+                   onChange={(e) => setFilters(f => ({ ...f, exclude_school: e.target.checked }))} />
+            Exclude schools
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
             <input type="checkbox" checked={filters.exclude_emailed}
                    onChange={(e) => setFilters(f => ({ ...f, exclude_emailed: e.target.checked }))} />
             Hide already-emailed
           </label>
-          {(filters.q || filters.association || filters.state || filters.postcode_from
-            || filters.postcode_to || filters.contact || filters.person
-            || filters.exclude_junior || filters.exclude_emailed) && (
+          {(filters.q || filters.association || filters.associations.length || filters.state
+            || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
+            || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
+            || filters.exclude_school) && (
             <button className="text-[11px] text-pb-faint hover:text-pb-accent"
-                    onClick={() => setFilters({ q: '', state: '', association: '',
+                    onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                 postcode_from: '', postcode_to: '', contact: '',
-                                                person: '', exclude_junior: false, exclude_emailed: false })}>
+                                                person: '', exclude_junior: false, exclude_emailed: false,
+                                                exclude_carnival: false, exclude_school: false })}>
               clear
             </button>
           )}
@@ -368,6 +455,10 @@ export default function SuperMarketing() {
                               emailed{c.emailed_via === 'campaign' ? ' (campaign)' : ''}
                             </span>
                           )}
+                          {c.excluded && (
+                            <span className="text-[10px] text-red-300 border border-red-500/40 rounded px-1"
+                                  title="Excluded from all outreach">excluded</span>
+                          )}
                         </button>
                         {c.website_url && (
                           <a href={c.website_url} target="_blank" rel="noreferrer" className="text-[11px] text-pb-dim hover:text-pb-accent block">
@@ -407,7 +498,8 @@ export default function SuperMarketing() {
                       <tr key={c.id + '-d'} className="bg-pb-surface2/40">
                         <td colSpan={5} className="px-4 py-3">
                           <ClubDetail club={c} onToggleContact={toggleContact}
-                                      onToggleEmailed={toggleEmailed} />
+                                      onToggleEmailed={toggleEmailed}
+                                      onToggleExcluded={toggleExcluded} />
                         </td>
                       </tr>
                     ),

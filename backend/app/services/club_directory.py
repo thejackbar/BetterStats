@@ -49,7 +49,7 @@ try:
 except ImportError:  # pragma: no cover — Python < 3.9
     ZoneInfo = None  # type: ignore
 
-from sqlalchemy import select, func, cast, update, Text, and_, or_, exists
+from sqlalchemy import select, func, cast, update, Text, and_, or_, exists, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
@@ -569,11 +569,20 @@ def _named_email_cond():
                 func.length(func.trim(C.full_name)) > 0)
 
 
+def _assoc_match(name: str):
+    """A club 'belongs to' an association if it's the primary or in the JSONB list."""
+    nl = (name or "").lower()
+    return or_(func.lower(MarketingClub.association_name) == nl,
+               func.lower(cast(MarketingClub.associations, Text)).like(f"%{nl}%"))
+
+
 def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  association: Optional[str] = None, status: Optional[str] = None,
                  postcode_from: Optional[str] = None, postcode_to: Optional[str] = None,
                  contact_filter: Optional[str] = None, person: Optional[str] = None,
-                 exclude_junior: bool = False, exclude_emailed: bool = False) -> list:
+                 exclude_junior: bool = False, exclude_emailed: bool = False,
+                 exclude_carnival: bool = False, exclude_school: bool = False,
+                 associations: Optional[list] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
     filters. Contact-presence filters use correlated EXISTS over the contacts."""
@@ -583,6 +592,12 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(MarketingClub.state == state)
     if exclude_junior:
         conds.append(~func.lower(MarketingClub.name).like("%junior%"))
+    if exclude_carnival:
+        conds.append(~func.lower(MarketingClub.name).like("%carnival%"))
+    if exclude_school:
+        conds.append(~func.lower(MarketingClub.name).like("%school%"))
+    if associations:
+        conds.append(or_(*[_assoc_match(n) for n in associations if n]))
     if exclude_emailed:
         conds.append(MarketingClub.emailed_at.is_(None))
     if person:
@@ -640,9 +655,10 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
     )
     for cond in club_filters(**(filters or {})):
         q = q.where(cond)
-    # Never export a club already marked emailed (manual external send or a prior
-    # campaign) — that's the whole point of the flag.
-    q = q.where(MarketingClub.emailed_at.is_(None))
+    # Hard guards, regardless of the UI filters: never export an excluded club, and
+    # never re-export one already marked emailed (manual send or a prior campaign).
+    q = q.where(MarketingClub.excluded.is_(False),
+                MarketingClub.emailed_at.is_(None))
     if selected_only:
         q = q.where(MarketingClubContact.outreach_selected.is_(True))
     if only_with_email:
@@ -775,6 +791,46 @@ async def mark_emailed(session: AsyncSession, club_id: str, emailed: bool,
     return {"id": str(club.id), "emailed": club.emailed_at is not None,
             "emailed_via": club.emailed_via, "emailed_note": club.emailed_note,
             "emailed_at": club.emailed_at.isoformat() if club.emailed_at else None}
+
+
+async def set_excluded(session: AsyncSession, club_id: str, excluded: bool) -> Optional[dict]:
+    """Exclude / un-exclude a club from outreach. Sets the hard-guard flag and
+    propagates to any comms contacts already exported from this club, so an
+    in-flight BetterAdmin Comms list/campaign drops (or restores) them too.
+    Reversible. Returns the new state, or None if the club isn't found."""
+    club = await session.get(MarketingClub, club_id)
+    if club is None:
+        return None
+    now = func.now()
+    club.excluded = excluded
+    club.excluded_at = now if excluded else None
+    club.updated_at = now
+    # Reflect onto the exported comms contacts (only the directory export sets
+    # marketing_club_id, so this never touches a club's own member contacts).
+    await session.execute(
+        update(CommsContact)
+        .where(CommsContact.marketing_club_id == club.id)
+        .values(excluded=excluded, excluded_at=(now if excluded else None), updated_at=now))
+    await session.commit()
+    await session.refresh(club)
+    return {"id": str(club.id), "excluded": club.excluded,
+            "excluded_at": club.excluded_at.isoformat() if club.excluded_at else None}
+
+
+async def list_associations(session: AsyncSession) -> list[dict]:
+    """Distinct association names across the directory (from each club's full
+    association list) with a club count — powers the multi-select filter."""
+    rows = (await session.execute(text("""
+        SELECT elem->>'name' AS name, COUNT(DISTINCT mc.id) AS n
+        FROM marketing_clubs mc
+        CROSS JOIN LATERAL jsonb_array_elements(mc.associations) elem
+        WHERE mc.associations IS NOT NULL
+          AND jsonb_typeof(mc.associations) = 'array'
+          AND COALESCE(elem->>'name', '') <> ''
+        GROUP BY elem->>'name'
+        ORDER BY elem->>'name'
+    """))).all()
+    return [{"name": r[0], "count": r[1]} for r in rows]
 
 
 async def directory_stats(session: AsyncSession) -> dict:

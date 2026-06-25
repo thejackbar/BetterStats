@@ -1887,6 +1887,10 @@ class CommsContact(Base):
     unsubscribed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     bounced = Column(Boolean, nullable=False, server_default="false", default=False)
     bounced_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Admin exclusion (from the marketing directory) — kept out of every audience,
+    # distinct from a recipient opt-out (subscribed) or a bounce.
+    excluded = Column(Boolean, nullable=False, server_default="false", default=False)
+    excluded_at = Column(TIMESTAMP(timezone=True), nullable=True)
     tags = Column(JSONB, nullable=False, server_default="[]", default=list)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -1994,6 +1998,9 @@ class MarketingClub(Base):
     emailed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     emailed_via = Column(Text, nullable=True)   # manual | campaign
     emailed_note = Column(Text, nullable=True)
+    # Admin exclusion: never export to outreach (reversible). Hard guard.
+    excluded = Column(Boolean, nullable=False, server_default="false", default=False)
+    excluded_at = Column(TIMESTAMP(timezone=True), nullable=True)
     detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)
