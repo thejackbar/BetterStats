@@ -199,6 +199,36 @@ Each release lives in its own file under **`frontend/src/data/changelog/`** — 
 
 See "Feature Changelog" below for the file format.
 
+## Awards — default templates (v8.28.0, Jun 2026)
+
+Award catalogue lives in two tables (created in `main.py` lifespan, not Alembic):
+`org_award_definitions` (the per-club catalogue that drives the dropdowns; clubs
+rename via `display_name`, hide via `active`) and `player_achievements` (the
+records). Templates are built in `backend/app/routers/award_definitions.py`:
+
+- **`STARTER_TEMPLATE`** (`_build_starter_template`) — the **default for new
+  clubs**, ~55 rows, club-agnostic: whole-club Season awards, a 1st/2nd/3rd XI
+  block, generic `Premiership › Team`, the universal Milestone ladders, a
+  `Committee` role list, Hall of Fame + Life Membership. No WASTCA/WABCC/PSWL,
+  no OD/ICL/Colts ladder.
+- **`GLOBAL_TEMPLATE`** (`_build_global_template`) — the old ~450-row
+  comprehensive WA list. Kept as the opt-in **'comprehensive'** preset only.
+- **`APPLECROSS_TEMPLATE`** — ACC's exact trophy names, matching their existing
+  `player_achievements` values. Seeded for slug `applecross` on startup; not in
+  the picker.
+- `/award-definitions/seed?template=` reads the `TEMPLATES` map
+  (`starter`|`comprehensive`|`global`(alias)|`applecross`); unknown → starter.
+  Frontend auto-seeds **`starter`** on first visit to the definitions page when a
+  club has zero defs, and the "Reset to Template" control offers Starter vs
+  Comprehensive.
+
+Seeding only fills an **empty** org (`seed_org_definitions` is a no-op if any def
+exists), so Applecross and any already-seeded club are never touched. The
+hardcoded `ACHIEVEMENT_TREE` in `frontend/src/lib/achievementOptions.js` (+ its
+Python mirror in `routers/achievements.py`, used by the CSV import template) is
+still the ACC-flavoured deep fallback shown only when an org has no defs at all —
+a leaner import template is a possible follow-up, not done here.
+
 ## Branch
 
 Active development branch: `claude/fix-historical-game-data-QEN3b`

@@ -122,6 +122,62 @@ def _numbered(rows):
     return [(cat, sub, ach, i) for i, (cat, sub, ach) in enumerate(rows)]
 
 
+def _build_starter_template():
+    """Lean, club-agnostic starter set (~50 rows) for any new club.
+
+    No association-specific awards (WASTCA/WABCC/PSWL), no fixed OD/ICL/Colts
+    ladder. Just the season awards every club hands out, a 1st/2nd/3rd XI block,
+    generic premierships, the universal milestone ladders, a committee list, and
+    the two honours. A club extends it with its own teams and trophies from the
+    Award Definitions page; the full WA list stays available as the
+    'comprehensive' preset.
+    """
+    r = []
+
+    # Whole-club season awards
+    for a in [
+        'Club Champion', 'Best Batter', 'Best Bowler', 'Best All-Rounder',
+        'Best Fielder', 'Most Improved', 'Best Junior', 'Best First-Year Player',
+        'Clubperson of the Year', 'Coaches Award', 'Spirit of Cricket',
+    ]:
+        r.append(('Club Award', 'Season', a))
+
+    # A starter grade block – the club adds the rest of its teams as needed
+    for grade in ['1st XI', '2nd XI', '3rd XI']:
+        for a in ['Best & Fairest', 'Best Batter', 'Best Bowler']:
+            r.append(('Club Award', grade, a))
+
+    # Premiership – team is recorded per award, not a fixed grade ladder
+    for a in ['Premiership', 'Captain', 'Player of the Final']:
+        r.append(('Premiership', 'Team', a))
+
+    # Milestones – genuinely universal, trimmed to the common thresholds
+    for a in ['50 Games', '100 Games', '150 Games', '200 Games', '250 Games', '300 Games']:
+        r.append(('Milestone', 'Games', a))
+    for a in ['1000 Runs', '2000 Runs', '3000 Runs', '5000 Runs', '10000 Runs']:
+        r.append(('Milestone', 'Runs', a))
+    for a in ['50 Wickets', '100 Wickets', '200 Wickets', '300 Wickets']:
+        r.append(('Milestone', 'Wickets', a))
+    for a in ['50 Catches', '100 Catches']:
+        r.append(('Milestone', 'Catches', a))
+    r.append(('Milestone', 'Hat Tricks', 'Hat Trick'))
+    for a in ['50', '100', '150']:
+        r.append(('Milestone', 'Individual Score', a))
+    for a in ['5 Wickets in an Innings', '10 Wickets in a Match']:
+        r.append(('Milestone', 'Bowling', a))
+
+    # Committee roles
+    for a in ['President', 'Vice President', 'Secretary', 'Treasurer',
+              'Committee Member', 'Head Coach', 'Captain']:
+        r.append(('Office Bearer', 'Committee', a))
+
+    # Honours
+    r.append(('Hall of Fame', 'Club', 'Hall of Fame'))
+    r.append(('Life Membership', 'Club', 'Life Membership'))
+
+    return _numbered(r)
+
+
 def _build_global_template():
     """Generic template suitable for any cricket club. Uses generic award names."""
     r = []
@@ -229,8 +285,19 @@ def _build_applecross_template():
     return _numbered(r)
 
 
+STARTER_TEMPLATE = _build_starter_template()
 GLOBAL_TEMPLATE = _build_global_template()
 APPLECROSS_TEMPLATE = _build_applecross_template()
+
+# Templates a club can (re-)seed from. 'starter' is the default for new clubs;
+# 'comprehensive' is the full WA association list; 'global' kept as an alias for
+# older clients. 'applecross' is club-specific and not offered in the picker.
+TEMPLATES = {
+    "starter": STARTER_TEMPLATE,
+    "comprehensive": GLOBAL_TEMPLATE,
+    "global": GLOBAL_TEMPLATE,
+    "applecross": APPLECROSS_TEMPLATE,
+}
 
 
 # ─── Seeding helper (called from startup) ────────────────────────────────────
@@ -347,11 +414,15 @@ async def delete_award_definition(def_id: str, db: AsyncSession = Depends(get_db
 @router.post("/seed")
 async def seed_definitions(
     org_id: str = Query(...),
-    template: str = Query("global"),
+    template: str = Query("starter"),
     db: AsyncSession = Depends(get_db),
 ):
-    """(Re-)seed an org's award definitions from the global or applecross template."""
-    tmpl = APPLECROSS_TEMPLATE if template == "applecross" else GLOBAL_TEMPLATE
+    """(Re-)seed an org's award definitions from a named template.
+
+    'starter' (default) = lean club-agnostic set, 'comprehensive' = full WA list,
+    'applecross' = ACC's own trophies. Unknown names fall back to the starter set.
+    """
+    tmpl = TEMPLATES.get(template, STARTER_TEMPLATE)
     await db.execute(
         text("DELETE FROM org_award_definitions WHERE org_id = :org_id"),
         {"org_id": org_id},

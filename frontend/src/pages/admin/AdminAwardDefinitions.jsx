@@ -160,6 +160,7 @@ export default function AdminAwardDefinitions() {
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(null)
   const [seeding, setSeeding] = useState(false)
+  const [resetTemplate, setResetTemplate] = useState('starter')
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -174,9 +175,9 @@ export default function AdminAwardDefinitions() {
     if (!orgId) return
     api.listAwardDefinitions(orgId).then(data => {
       setDefs(data)
-      // Auto-seed from global template if this org has no definitions yet
+      // Auto-seed the lean starter set if this org has no definitions yet
       if (data.length === 0) {
-        api.seedAwardDefinitions(orgId, 'global').then(() => {
+        api.seedAwardDefinitions(orgId, 'starter').then(() => {
           api.listAwardDefinitions(orgId).then(setDefs)
         })
       }
@@ -216,10 +217,13 @@ export default function AdminAwardDefinitions() {
   }
 
   const handleReseed = async () => {
-    if (!window.confirm('This will reset all award definitions to the global template. Any custom display names will be lost. Continue?')) return
+    const label = resetTemplate === 'comprehensive'
+      ? 'the comprehensive WA association list'
+      : 'the lean starter set'
+    if (!window.confirm(`This replaces all award definitions with ${label}. Any custom display names and added awards will be lost. Continue?`)) return
     setSeeding(true)
     try {
-      await api.seedAwardDefinitions(orgId, 'global')
+      await api.seedAwardDefinitions(orgId, resetTemplate)
       await load()
     } catch (e) {
       setError(e.message)
@@ -262,16 +266,25 @@ export default function AdminAwardDefinitions() {
           <div>
             <h1 className="font-display font-bold text-2xl text-pb-text tracking-tight">Award Definitions</h1>
             <p className="text-pb-faint text-sm mt-1">
-              Configure the award types available at your club. Set a <strong className="text-pb-dim">Display Name</strong> to rename any award — click any name cell to edit inline.
+              The award types available at your club. New clubs start with a lean starter set; add your own teams and trophies with <strong className="text-pb-dim">Add Award Type</strong>, or set a <strong className="text-pb-dim">Display Name</strong> to rename any award (click a name cell to edit inline).
             </p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
+            <select
+              className="bg-pb-surface border pb-hairline text-pb-faint text-[11px] rounded px-2 py-1.5 focus:outline-none focus:border-pb-accent"
+              value={resetTemplate}
+              onChange={e => setResetTemplate(e.target.value)}
+              title="Which template the reset button loads"
+            >
+              <option value="starter">Starter set (recommended)</option>
+              <option value="comprehensive">Comprehensive (WA associations)</option>
+            </select>
             <button
               onClick={handleReseed}
               disabled={seeding}
               className={`${BTN_CLS} disabled:opacity-50`}
             >
-              {seeding ? 'Resetting…' : '↺ Reset to Standard Template'}
+              {seeding ? 'Resetting…' : '↺ Reset to Template'}
             </button>
             <button
               onClick={() => setShowAdd(s => !s)}
