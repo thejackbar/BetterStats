@@ -81,6 +81,11 @@ function ImportPanel({ orgId, onImported }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [checkedDupes, setCheckedDupes] = useState({})
+  const [pdfParsing, setPdfParsing] = useState(false)
+  const [pdfResult, setPdfResult] = useState(null)
+  const [colMap, setColMap] = useState({})
+  const [pdfImporting, setPdfImporting] = useState(false)
+  const [pdfDone, setPdfDone] = useState(null)
 
   const handleDownloadTemplate = async () => {
     const token = localStorage.getItem('bs_token')
@@ -126,6 +131,82 @@ function ImportPanel({ orgId, onImported }) {
     } finally {
       setImporting(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  // ── Honour-board PDF (no API tokens — parsed from the PDF text layer) ──
+  const guessCategory = (label) => {
+    const l = (label || '').toLowerCase()
+    if (/life member/.test(l)) return 'Life Membership'
+    if (/hall of fame/.test(l)) return 'Hall of Fame'
+    if (/premiership|premiers/.test(l)) return 'Premiership'
+    if (/president|treasurer|secretary|captain|coach|chair|vice|committee|delegate|registrar|officer|manager|selector/.test(l)) return 'Office Bearer'
+    return 'Club Award'
+  }
+  const tcLabel = (s) => (s || '').replace(/[A-Za-z]+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+  const fmtName = (raw) => {
+    let s = (raw || '').replace(/\s+/g, ' ').trim().replace(/\s+\./g, '.')
+    const tc = (x) => x.replace(/[A-Za-z]+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    const m = s.match(/^([A-Za-z])\.\s*(.+)$/)
+    return m ? `${m[1].toUpperCase()}. ${tc(m[2])}` : tc(s)
+  }
+
+  const handleParsePdf = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const name = (file.name || '').toLowerCase()
+    if (!/\.(pdf|png|jpe?g|webp|tiff?|bmp)$/.test(name)) {
+      setError('Upload a PDF or a photo of the board.')
+      return
+    }
+    setPdfParsing(true); setError(null); setPdfResult(null); setPdfDone(null)
+    try {
+      const res = await api.parseAchievementsPdf(orgId, file)
+      if (!res.available) {
+        setPdfResult(res)
+      } else {
+        const map = {}
+        for (const label of res.columns) {
+          map[label] = { include: true, category: guessCategory(label), achievement: tcLabel(label), subcategory: '' }
+        }
+        setColMap(map)
+        setPdfResult(res)
+      }
+    } catch (err) {
+      setError(err.message || 'Could not read the PDF')
+    } finally {
+      setPdfParsing(false)
+    }
+  }
+
+  const setCol = (label, patch) => setColMap(prev => ({ ...prev, [label]: { ...prev[label], ...patch } }))
+
+  const handlePdfImport = async () => {
+    if (!pdfResult?.available) return
+    const rows = []
+    for (const r of pdfResult.rows) {
+      const m = colMap[r.label]
+      if (!m || !m.include) continue
+      rows.push({
+        season: r.season || '',
+        category: m.category,
+        subcategory: m.subcategory || '',
+        achievement: (m.achievement || tcLabel(r.label)).trim(),
+        player_name: fmtName(r.player_name),
+      })
+    }
+    if (!rows.length) { setError('Tick at least one column to import.'); return }
+    setPdfImporting(true); setError(null)
+    try {
+      const res = await api.forceImportAchievements(orgId, rows)
+      setPdfDone({ created: res.created ?? rows.length })
+      setPdfResult(null); setColMap({})
+      onImported()
+    } catch (err) {
+      setError(err.message || 'Import failed')
+    } finally {
+      setPdfImporting(false)
     }
   }
 
@@ -178,7 +259,85 @@ function ImportPanel({ orgId, onImported }) {
           ⬆ {importing ? 'Importing…' : 'Upload File (.xlsx / .csv)'}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </label>
+        <label className={`px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text transition-colors cursor-pointer flex items-center gap-2 ${pdfParsing ? 'opacity-50 pointer-events-none' : ''}`}>
+          📄 {pdfParsing ? 'Reading…' : 'Read honour board (PDF or photo)'}
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" className="hidden" onChange={handleParsePdf} />
+        </label>
       </div>
+      <p className="text-pb-faintest text-xs mt-2 leading-relaxed">
+        Best on a board that's a table with the season down the rows and an award per column.
+        A PDF exported from Word/Excel/Sheets reads exactly. A scan or a straight-on photo is
+        read by OCR, which is rougher, so check the names before importing. It all runs on the
+        server with no AI cost.
+      </p>
+
+      {pdfDone && (
+        <div className="mt-4 p-4 bg-pb-surface2 rounded border pb-hairline text-sm">
+          <p className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>✓ Imported {pdfDone.created} achievements from the honour board</p>
+        </div>
+      )}
+
+      {pdfResult && !pdfResult.available && (
+        <div className="mt-4 p-4 bg-pb-surface2 rounded border pb-hairline text-sm">
+          <p className="font-mono text-[10px] text-pb-amber">{pdfResult.message}</p>
+        </div>
+      )}
+
+      {pdfResult && pdfResult.available && (
+        <div className="mt-4 p-4 bg-pb-surface2 rounded border pb-hairline">
+          <p className="font-mono text-[10px] tracking-wide text-pb-faint mb-1 uppercase">Review honour-board columns</p>
+          <p className="text-pb-faintest text-xs mb-3 leading-relaxed">
+            Read {pdfResult.row_count} entries across {pdfResult.columns.length} columns. Set the
+            category for each column, untick any you don't want, then import. Names are matched to
+            players automatically; unmatched ones still save and can be linked later.
+          </p>
+          {pdfResult.warnings?.length > 0 && (
+            <p className="font-mono text-[10px] text-pb-amber mb-3">⚠ {pdfResult.warnings.join(' ')}</p>
+          )}
+          <div className="space-y-1 max-h-96 overflow-y-auto pb-scroll">
+            {pdfResult.columns.map(label => {
+              const m = colMap[label] || {}
+              const rows = pdfResult.rows.filter(r => r.label === label)
+              const sample = rows.slice(0, 3).map(r => fmtName(r.player_name)).join(', ')
+              return (
+                <div key={label} className="pb-hairline-t pt-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 w-48 flex-shrink-0 cursor-pointer">
+                      <input type="checkbox" checked={!!m.include} onChange={e => setCol(label, { include: e.target.checked })} className="accent-[var(--pb-accent)]" />
+                      <span className="text-pb-text text-sm truncate" title={label}>{tcLabel(label)}</span>
+                    </label>
+                    <span className="font-mono text-[10px] text-pb-faint w-12 flex-shrink-0">{rows.length}</span>
+                    <select className={`${INPUT_CLS} w-40`} value={m.category || ''} onChange={e => setCol(label, { category: e.target.value })} disabled={!m.include}>
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <input className={`${INPUT_CLS} flex-1 min-w-[8rem]`} value={m.achievement || ''} onChange={e => setCol(label, { achievement: e.target.value })} placeholder="Achievement" disabled={!m.include} />
+                    <input className={`${INPUT_CLS} w-40`} value={m.subcategory || ''} onChange={e => setCol(label, { subcategory: e.target.value })} placeholder="Subcategory (optional)" disabled={!m.include} />
+                  </div>
+                  {m.include && sample && (
+                    <p className="font-mono text-[10px] text-pb-faintest mt-1 ml-[3.5rem] truncate">e.g. {sample}{rows.length > 3 ? '…' : ''}</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={handlePdfImport}
+              disabled={pdfImporting}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {pdfImporting ? 'Importing…' : `Import ${pdfResult.rows.filter(r => colMap[r.label]?.include).length} achievements`}
+            </button>
+            <button
+              onClick={() => { setPdfResult(null); setColMap({}) }}
+              className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="mt-4 p-4 bg-pb-surface2 rounded border pb-hairline text-sm space-y-1">

@@ -813,6 +813,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ rows }),
     }),
+  parseAchievementsPdf: (orgId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/achievements/parse-pdf?org_id=${orgId}`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    }).then(async r => {
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.detail || 'Could not read the PDF')
+      return data
+    })
+  },
 
   // Yearbooks
   listYearbooks: (orgId) => request(`/yearbooks/${orgId}`),
