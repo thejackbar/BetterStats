@@ -454,14 +454,32 @@ async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> 
                 await asyncio.sleep(30)
                 continue
 
-        # Once per day, inside the window, (re)discover the whole club universe.
-        # discover_clubs is idempotent + resilient, so this rebuilds a previously
-        # truncated list and adds newly-registered clubs without disturbing the
-        # already-enriched rows.
+        # Once per day, inside the window, (re)discover the whole club universe AND
+        # the association registry. Both are idempotent + resilient.
         if last_discover_day != now.date():
             async with session_maker() as s:
                 await discover_clubs(s)
+                await discover_associations_registry(s)
             last_discover_day = now.date()
+            continue
+
+        # Association roster sweep takes priority — one resolve links a whole
+        # association's clubs at once (far higher leverage than one club at a time),
+        # so association filters fill in fast. Falls through to per-club enrichment
+        # once every association has been resolved (refreshed weekly).
+        async with session_maker() as s:
+            swept = await sweep_association_rosters(s, limit=1, delay=_SWEEP_DELAY)
+        if swept["resolved"] > 0:
+            consecutive_failures = 0
+            since_break += 1
+            if since_break >= next_break_at:
+                brk = random.uniform(settings.marketing_crawl_break_min,
+                                     settings.marketing_crawl_break_max)
+                logger.info("marketing crawl: break for %.0fs after %d items", brk, since_break)
+                await asyncio.sleep(brk)
+                since_break = 0
+                next_break_at = random.randint(settings.marketing_crawl_break_after_min,
+                                               settings.marketing_crawl_break_after_max)
             continue
 
         async with session_maker() as s:
@@ -900,29 +918,41 @@ _MAX_RESOLVE_SEASONS = 2
 _MAX_RESOLVE_GRADES = 80
 
 
+async def register_association(session: AsyncSession, assoc_id: str, name: str) -> None:
+    """Upsert an association into the registry (for the automatic sweep)."""
+    if not assoc_id:
+        return
+    await session.execute(text(
+        "INSERT INTO marketing_associations (id, name) VALUES (:id, :name) "
+        "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()"),
+        {"id": assoc_id, "name": name or ""})
+
+
 async def resolve_association_clubs(session: AsyncSession, assoc_id: str,
-                                    assoc_name: str) -> dict:
+                                    assoc_name: str, delay: tuple | None = None) -> dict:
     """Fetch an association's FULL club roster live (association → seasons → grades
     → ladder → each team's club) and link those clubs to the association in the
     directory, so the association filter shows the complete membership immediately
     instead of waiting for every club to be enriched. Matches clubs by PlayHQ
-    routingCode (``playhq_id``)."""
+    routingCode (``playhq_id``). ``delay`` overrides the per-request pace (the
+    background sweep passes a politer range than the interactive default)."""
     if not assoc_id:
         return {"error": "This association has no PlayHQ id on record; can't fetch its roster."}
-    seasons = await phq.association_seasons(assoc_id)
+    await register_association(session, assoc_id, assoc_name)
+    seasons = await phq.association_seasons(assoc_id, delay=delay)
     # Prefer seasons that have ladders (skip not-yet-started ones), newest-first.
     usable = [s for s in seasons if s.get("status") != "UPCOMING"] or seasons
     usable = usable[:_MAX_RESOLVE_SEASONS]
 
     grade_ids: list[str] = []
     for s in usable:
-        for gid in await phq.season_grade_ids(s["id"]):
+        for gid in await phq.season_grade_ids(s["id"], delay=delay):
             grade_ids.append(gid)
     grade_ids = list(dict.fromkeys(grade_ids))[:_MAX_RESOLVE_GRADES]
 
     club_orgs: dict[str, str] = {}
     for gid in grade_ids:
-        for org in await phq.grade_club_orgs(gid):
+        for org in await phq.grade_club_orgs(gid, delay=delay):
             club_orgs.setdefault(org["id"], org.get("name") or "")
 
     matched = linked = 0
@@ -945,6 +975,10 @@ async def resolve_association_clubs(session: AsyncSession, assoc_id: str,
                 club.association_guid = assoc_id
             club.updated_at = func.now()
             linked += 1
+    # Stamp the registry so the sweep moves on (and refreshes only weekly).
+    await session.execute(text(
+        "UPDATE marketing_associations SET last_resolved_at = NOW(), club_count = :n, "
+        "updated_at = NOW() WHERE id = :id"), {"n": matched, "id": assoc_id})
     await session.commit()
     result = {"association": assoc_name, "seasons_used": len(usable),
               "grades": len(grade_ids), "clubs_found": len(club_orgs),
@@ -952,6 +986,62 @@ async def resolve_association_clubs(session: AsyncSession, assoc_id: str,
               "unmatched_count": len(unmatched), "unmatched": unmatched[:30]}
     logger.info("resolve_association_clubs: %s", result)
     return result
+
+
+# Background association sweep: discover every association, then resolve each
+# roster, refreshing weekly. Politer per-request pace than the interactive button.
+_SWEEP_DELAY = (3.0, 8.0)
+_SWEEP_STALE_DAYS = 7
+
+
+async def discover_associations_registry(session: AsyncSession, max_pages: int = 50) -> dict:
+    """Enumerate every Australian association via the search ASSOCIATION type and
+    upsert them into the registry. Cheap (~8 pages); resilient to a transient page."""
+    page, seen = 1, 0
+    while page <= max_pages:
+        results = None
+        for _ in range(4):
+            results, _tot = await phq.search_organisations("ASSOCIATION", "", page=page, limit=100)
+            if results is not None:
+                break
+        if results is None:
+            break
+        if not results:
+            break
+        for org in results:
+            if (org.get("tenant") or {}).get("name") != AU_TENANT:
+                continue
+            rc = org.get("routingCode")
+            if rc:
+                await register_association(session, rc, org.get("name") or "")
+                seen += 1
+        await session.commit()
+        page += 1
+    logger.info("discover_associations_registry: %d AU associations", seen)
+    return {"associations_seen": seen}
+
+
+async def sweep_association_rosters(session: AsyncSession, limit: int = 1,
+                                    delay: tuple | None = None) -> dict:
+    """Resolve the roster of up to ``limit`` associations that haven't been
+    resolved (or are stale). High leverage — one resolve links a whole roster."""
+    rows = (await session.execute(text(
+        "SELECT id, name FROM marketing_associations "
+        "WHERE last_resolved_at IS NULL "
+        "   OR last_resolved_at < NOW() - make_interval(days => :d) "
+        "ORDER BY last_resolved_at NULLS FIRST, name LIMIT :lim"),
+        {"d": _SWEEP_STALE_DAYS, "lim": limit})).all()
+    resolved = linked = 0
+    for r in rows:
+        res = await resolve_association_clubs(session, r[0], r[1], delay=delay)
+        resolved += 1
+        linked += res.get("newly_linked", 0)
+    pending = await session.scalar(text(
+        "SELECT COUNT(*) FROM marketing_associations "
+        "WHERE last_resolved_at IS NULL "
+        "   OR last_resolved_at < NOW() - make_interval(days => :d)"),
+        {"d": _SWEEP_STALE_DAYS})
+    return {"resolved": resolved, "newly_linked": linked, "pending": pending or 0}
 
 
 async def directory_stats(session: AsyncSession) -> dict:
@@ -975,6 +1065,9 @@ async def directory_stats(session: AsyncSession) -> dict:
     distinct_assoc = await session.scalar(
         select(func.count(func.distinct(MarketingClub.association_guid)))
         .where(MarketingClub.association_guid.isnot(None))) or 0
+    assoc_known = await session.scalar(text("SELECT COUNT(*) FROM marketing_associations")) or 0
+    assoc_resolved = await session.scalar(text(
+        "SELECT COUNT(*) FROM marketing_associations WHERE last_resolved_at IS NOT NULL")) or 0
     return {
         "clubs": clubs,
         "contacts": contacts,
@@ -983,6 +1076,8 @@ async def directory_stats(session: AsyncSession) -> dict:
         "associations_fetched": assoc_fetched,
         "associations_pending": assoc_pending,
         "distinct_associations": distinct_assoc,
+        "associations_registry": assoc_known,
+        "associations_resolved": assoc_resolved,
         "already_customers": customers,
         "emailed": emailed,
         # Back-compat keys the dashboard/CLI may still read.

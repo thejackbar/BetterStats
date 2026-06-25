@@ -265,6 +265,20 @@ async def lifespan(app: FastAPI):
             WHERE utm_code IS NULL
               AND coalesce(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'), '') <> ''
         """))
+        # Migration 102: association registry for the automatic roster sweep.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS marketing_associations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                club_count INTEGER NOT NULL DEFAULT 0,
+                last_resolved_at TIMESTAMPTZ,
+                first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_assoc_resolve "
+            "ON marketing_associations(last_resolved_at)"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
