@@ -126,7 +126,7 @@ BetterCricket was built by a club member at **Applecross Cricket Club** in Perth
 - [Pricing](https://betterat.cricket/pricing): the modular plan calculator, the per-module prices, the bundle discounts and a competitor cost comparison.
 - [Compare](https://betterat.cricket/compare): How BetterCricket sits next to the tools clubs already use.
 - [About](https://betterat.cricket/about): The story behind BetterCricket and BetterSports.
-- [Contact](https://betterat.cricket/contact): Request access, ask a question, or email the team at betteratcricket@gmail.com.
+- [Contact](https://betterat.cricket/contact): Request access, ask a question, or email the team at cricket@bettersports.com.au.
 
 ## Example Public Club Pages
 
@@ -142,7 +142,7 @@ Page types each connected club gets at `betterat.cricket/{club-slug}/...`:
 
 ## Contact
 
-- **Email:** betteratcricket@gmail.com
+- **Email:** cricket@bettersports.com.au
 - **Website:** https://betterat.cricket
 - **X / Twitter:** https://x.com/betterstatsau
 - **Facebook:** https://www.facebook.com/profile.php?id=61590372751599

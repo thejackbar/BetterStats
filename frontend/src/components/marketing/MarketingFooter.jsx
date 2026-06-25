@@ -20,7 +20,7 @@ export default function MarketingFooter() {
             <div className="flex gap-4 text-sm text-pb-dim">
               <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Twitter</a>
               <a href="https://www.facebook.com/profile.php?id=61590372751599" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Facebook</a>
-              <a href="mailto:betteratcricket@gmail.com" className="hover:text-pb-text transition-colors">Email</a>
+              <a href="mailto:cricket@bettersports.com.au" className="hover:text-pb-text transition-colors">Email</a>
             </div>
           </div>
 

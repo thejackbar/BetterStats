@@ -253,7 +253,7 @@ MARKETING_FAQ: list[tuple[str, str]] = [
      "one-tap shareable stat card."),
     ("How do I get BetterCricket for my club?",
      "Fill in the request-access form on the homepage or email "
-     "betteratcricket@gmail.com. The BetterCricket team handles the setup, "
+     "cricket@bettersports.com.au. The BetterCricket team handles the setup, "
      "including the first full historical sync."),
     ("Do we own our club's data?",
      "Always. The data belongs to your club, and you can export all of it to "
