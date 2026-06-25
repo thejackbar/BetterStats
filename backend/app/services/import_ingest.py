@@ -333,6 +333,36 @@ def _parse_initial_form(name: str):
     return None
 
 
+def _name_parts(nn: str):
+    """``(first, last, [middles])`` for a normalised name, or ``None`` for a
+    mononym. Dots are treated as separators so "sahan n.b. amaratunge" →
+    ("sahan", "amaratunge", ["n", "b"]) and "alan d.s. armstrong" →
+    ("alan", "armstrong", ["d", "s"])."""
+    toks = re.sub(r"\s+", " ", (nn or "").replace(".", " ")).strip().split()
+    if len(toks) < 2:
+        return None
+    return (toks[0], toks[-1], toks[1:-1])
+
+
+def _middles_compatible(a: list, b: list) -> bool:
+    """True when two lists of middle tokens could belong to the same person:
+    either side empty (one record simply omits the middle name/initial), or the
+    lists align token-for-token with each pair equal or one an initial of the
+    other ("r" ~ "robert"). Used to treat "Craig R Allen" and our "Craig Allen"
+    as the same player without a manual confirm."""
+    if not a or not b:
+        return True
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b):
+        if x == y:
+            continue
+        if x[0] == y[0] and (len(x) == 1 or len(y) == 1):
+            continue
+        return False
+    return True
+
+
 def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> dict:
     """names → match info. ``players`` = list of (id, display_name).
 
@@ -349,6 +379,7 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
     norm_map: dict = {}
     blocks: dict = {}
     surname_initial: dict = {}          # (surname_last_token, first_initial) → [(pid, pname)]
+    first_last: dict = {}               # (first, last) → [(pid, pname, [middles])]
     for pid, pname in players:
         nn = _normalise_name(pname)
         norm_map.setdefault(nn, []).append((pid, pname))
@@ -356,6 +387,9 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
         toks = nn.split()
         if len(toks) >= 2 and len(toks[-1]) > 1:
             surname_initial.setdefault((toks[-1], toks[0][0]), []).append((pid, pname))
+        parts = _name_parts(nn)
+        if parts and len(parts[0]) > 1 and len(parts[1]) > 1:
+            first_last.setdefault((parts[0], parts[1]), []).append((pid, pname, parts[2]))
 
     out: dict = {}
     for name in names:
@@ -371,6 +405,31 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
                          "note": "Two players share this name — merge them first, then re-import.",
                          "candidates": [{"player_id": str(pid), "name": pn} for pid, pn in exact]}
         else:
+            # Same first + last name, the only difference being an extra middle
+            # initial/name on one side — "Craig R Allen" from a CricketStatz sheet
+            # vs our "Craig Allen". A human reads those as one player, so auto-accept
+            # when it resolves to exactly one of our players (full-string fuzzy only
+            # scores ~0.92, which would otherwise flag every middle-initialled name
+            # for manual review — 200+ on a single club import). Two same first+last
+            # players are genuinely ambiguous, so those drop to a close match instead.
+            parts = _name_parts(n)
+            if parts and len(parts[0]) > 1 and len(parts[1]) > 1:
+                fl_hits = [(pid, pn) for pid, pn, dmids in first_last.get((parts[0], parts[1]), [])
+                           if _middles_compatible(parts[2], dmids)]
+                if len(fl_hits) == 1:
+                    out[name] = {"player_id": str(fl_hits[0][0]), "matched_name": fl_hits[0][1],
+                                 "confidence": 0.98, "status": "exact", "auto_status": "exact",
+                                 "candidates": [],
+                                 "note": "Matched on first and last name (middle initial differs)."}
+                    continue
+                if len(fl_hits) > 1:
+                    out[name] = {
+                        "player_id": None, "confidence": 0.9,
+                        "status": "fuzzy", "auto_status": "fuzzy",
+                        "candidates": [{"player_id": str(pid), "name": pn, "confidence": 0.9}
+                                       for pid, pn in fl_hits[:5]],
+                    }
+                    continue
             # "Surname Initial" sheets (e.g. "Camarda F") are common and full-string
             # fuzzy matching misses them — the words are reordered, so they don't even
             # share a first-character block. Match on exact surname + first-name
