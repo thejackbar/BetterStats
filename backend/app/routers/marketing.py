@@ -72,13 +72,21 @@ class ResolveAssocBody(BaseModel):
     name: str
 
 
+async def _resolve_bg(assoc_id: str, name: str):
+    async with async_session_maker() as session:
+        await cd.resolve_association_clubs(session, assoc_id, name)
+
+
 @router.post("/associations/resolve")
-async def resolve_association(body: ResolveAssocBody, db: AsyncSession = Depends(get_db),
+async def resolve_association(body: ResolveAssocBody, background: BackgroundTasks,
                               _=Depends(require_super_admin)):
     """Fetch an association's full club roster live from PlayHQ and link those
-    clubs to it, so the filter shows the complete membership without waiting for
-    every club to be enriched. Takes ~10-40s (a handful of API calls)."""
-    return await cd.resolve_association_clubs(db, body.id, body.name)
+    clubs to it. Runs in the background (it makes many sequential API calls and
+    can take 30-90s, longer while the daily sweep is also running), so the request
+    returns immediately and never hits the proxy's gateway timeout — refresh the
+    list shortly to see the roster fill in."""
+    background.add_task(_resolve_bg, body.id, body.name)
+    return {"started": True, "association": body.name}
 
 
 @router.get("/clubs")
