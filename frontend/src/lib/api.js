@@ -24,6 +24,19 @@ async function request(path, options = {}) {
   return res.json()
 }
 
+// Build a query string for the marketing directory filters. Skips empty / null /
+// false, and appends array values as repeated params (e.g. ?associations=A&associations=B)
+// so FastAPI List[str] params parse correctly.
+function mktQS(params) {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v === '' || v == null || v === false) continue
+    if (Array.isArray(v)) v.forEach(i => { if (i != null && i !== '') qs.append(k, i) })
+    else qs.append(k, v)
+  }
+  return qs.toString()
+}
+
 // POST a single file as multipart/form-data and return the parsed JSON.
 // Used by the image-upload endpoints (logos, hero, news covers, gallery, etc.).
 async function uploadFile(path, file, field = 'file') {
@@ -415,10 +428,13 @@ export const api = {
   mktStats: () => request('/club-admin/marketing/stats'),
   mktStatus: () => request('/club-admin/marketing/status'),
   mktClubs: (params = {}) => {
-    const qs = new URLSearchParams(
-      Object.entries(params).filter(([, v]) => v !== '' && v != null && v !== false)).toString()
+    const qs = mktQS(params)
     return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
   },
+  mktAssociations: () => request('/club-admin/marketing/associations'),
+  mktSetClubExcluded: (clubId, excluded) =>
+    request(`/club-admin/marketing/clubs/${clubId}/excluded`,
+      { method: 'PATCH', body: JSON.stringify({ excluded }) }),
   mktCrawl: (limit) =>
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
   mktExportComms: (payload) =>
@@ -428,8 +444,7 @@ export const api = {
   mktSyncSuppressions: (orgId) =>
     request(`/club-admin/marketing/sync-suppressions${orgId ? `?organisation_id=${orgId}` : ''}`, { method: 'POST' }),
   mktExportCsvUrl: (filters = {}) => {
-    const qs = new URLSearchParams(
-      Object.entries(filters).filter(([, v]) => v !== '' && v != null && v !== false)).toString()
+    const qs = mktQS(filters)
     return `${BASE}/club-admin/marketing/export.csv${qs ? `?${qs}` : ''}`
   },
   mktSetClubEmailed: (clubId, emailed, note) =>

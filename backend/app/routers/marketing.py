@@ -7,7 +7,7 @@ campaign (the existing send pipeline), and download a CSV.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
@@ -34,7 +34,8 @@ async def status(db: AsyncSession = Depends(get_db), _=Depends(require_super_adm
 
 
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
-                   person=None, exclude_junior=False, exclude_emailed=False):
+                   person=None, exclude_junior=False, exclude_emailed=False,
+                   exclude_carnival=False, exclude_school=False, associations=None):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
@@ -42,7 +43,15 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
         "contact_filter": contact if contact in cd.CONTACT_FILTERS else None,
         "person": person, "exclude_junior": bool(exclude_junior),
         "exclude_emailed": bool(exclude_emailed),
+        "exclude_carnival": bool(exclude_carnival), "exclude_school": bool(exclude_school),
+        "associations": [a for a in (associations or []) if a],
     }
+
+
+@router.get("/associations")
+async def list_associations(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """Distinct associations (name + club count) for the multi-select filter."""
+    return await cd.list_associations(db)
 
 
 @router.get("/clubs")
@@ -50,6 +59,7 @@ async def list_clubs(
     q: Optional[str] = None,
     state: Optional[str] = None,
     association: Optional[str] = None,
+    associations: Optional[List[str]] = Query(None),
     status: Optional[str] = None,
     postcode_from: Optional[str] = None,
     postcode_to: Optional[str] = None,
@@ -57,6 +67,8 @@ async def list_clubs(
     person: Optional[str] = None,
     exclude_junior: bool = False,
     exclude_emailed: bool = False,
+    exclude_carnival: bool = False,
+    exclude_school: bool = False,
     kind: Optional[str] = "club",
     limit: int = Query(100, le=500),
     offset: int = 0,
@@ -68,7 +80,8 @@ async def list_clubs(
         stmt = stmt.where(MarketingClub.kind == kind)
     for cond in cd.club_filters(**_filter_kwargs(
             q, state, association, status, postcode_from, postcode_to, contact,
-            person, exclude_junior, exclude_emailed)):
+            person, exclude_junior, exclude_emailed, exclude_carnival, exclude_school,
+            associations)):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     stmt = stmt.order_by(MarketingClub.name.asc()).limit(limit).offset(offset)
@@ -91,6 +104,7 @@ async def list_clubs(
             "is_customer": c.existing_org_id is not None,
             "emailed_at": c.emailed_at.isoformat() if c.emailed_at else None,
             "emailed_via": c.emailed_via, "emailed_note": c.emailed_note,
+            "excluded": c.excluded,
             "contacts": [{
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
@@ -135,6 +149,9 @@ class ExportBody(BaseModel):
     person: Optional[str] = None
     exclude_junior: bool = False
     exclude_emailed: bool = False
+    exclude_carnival: bool = False
+    exclude_school: bool = False
+    associations: Optional[List[str]] = None
     # Default True: only push contacts a super admin ticked for outreach. Set
     # False to export every subscribed, emailable contact regardless of selection.
     selected_only: bool = True
@@ -145,12 +162,14 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
                        _=Depends(require_super_admin)):
     """Push the selected, currently-filtered contacts into comms_contacts under
     the outreach org, so a BetterAdmin Comms campaign can send to them with full
-    unsubscribe/suppression. Clubs already marked emailed are always skipped."""
+    unsubscribe/suppression. Excluded and already-emailed clubs are always
+    skipped."""
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
         filters=_filter_kwargs(body.q, body.state, body.association, body.status,
                                body.postcode_from, body.postcode_to, body.contact,
-                               body.person, body.exclude_junior, body.exclude_emailed))
+                               body.person, body.exclude_junior, body.exclude_emailed,
+                               body.exclude_carnival, body.exclude_school, body.associations))
 
 
 class EmailedBody(BaseModel):
@@ -165,6 +184,24 @@ async def set_club_emailed(club_id: str, body: EmailedBody,
     """Manually mark / unmark a club as already emailed (e.g. via an external
     mailing tool) so it's excluded from future exports/sends."""
     res = await cd.mark_emailed(db, club_id, body.emailed, via="manual", note=body.note)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return res
+
+
+class ExcludedBody(BaseModel):
+    excluded: bool
+
+
+@router.patch("/clubs/{club_id}/excluded")
+async def set_club_excluded(club_id: str, body: ExcludedBody,
+                            db: AsyncSession = Depends(get_db),
+                            _=Depends(require_super_admin)):
+    """Exclude / un-exclude a club from outreach entirely. Excluded clubs are never
+    exported (regardless of filters), and any contacts already exported to
+    BetterAdmin Comms are flagged excluded there too (dropped from audiences).
+    Reversible."""
+    res = await cd.set_excluded(db, club_id, body.excluded)
     if res is None:
         raise HTTPException(status_code=404, detail="Club not found")
     return res
@@ -208,6 +245,9 @@ async def export_csv(
     person: Optional[str] = None,
     exclude_junior: bool = False,
     exclude_emailed: bool = False,
+    exclude_carnival: bool = False,
+    exclude_school: bool = False,
+    associations: Optional[List[str]] = Query(None),
     only_with_email: bool = True,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_super_admin),
@@ -216,7 +256,8 @@ async def export_csv(
     csv_text = await cd.clubs_to_csv(
         db, only_with_email=only_with_email,
         filters=_filter_kwargs(q, state, association, status, postcode_from,
-                               postcode_to, contact, person, exclude_junior, exclude_emailed))
+                               postcode_to, contact, person, exclude_junior, exclude_emailed,
+                               exclude_carnival, exclude_school, associations))
     return Response(
         content=csv_text, media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=marketing_clubs.csv"})

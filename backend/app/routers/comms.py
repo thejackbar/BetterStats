@@ -79,6 +79,7 @@ def _contact_out(c: CommsContact) -> dict:
         "source": c.source,
         "subscribed": c.subscribed,
         "bounced": c.bounced,
+        "excluded": c.excluded,
         "player_id": str(c.player_id) if c.player_id else None,
     }
 
@@ -205,11 +206,12 @@ async def _campaign_or_404(db: AsyncSession, club: Organisation, cid: str) -> Co
 
 
 async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict) -> list[CommsContact]:
-    """Subscribed, non-bounced contacts matching the chosen segment."""
+    """Subscribed, non-bounced, non-excluded contacts matching the chosen segment."""
     base = select(CommsContact).where(
         CommsContact.organisation_id == club.id,
         CommsContact.subscribed.is_(True),
         CommsContact.bounced.is_(False),
+        CommsContact.excluded.is_(False),
     )
     atype = (audience or {}).get("type", "all")
     if atype == "list":
@@ -267,14 +269,18 @@ async def list_contacts(
     counts = (await db.execute(
         select(
             func.count(CommsContact.id),
-            func.count(CommsContact.id).filter(CommsContact.subscribed.is_(True), CommsContact.bounced.is_(False)),
+            func.count(CommsContact.id).filter(CommsContact.subscribed.is_(True),
+                                               CommsContact.bounced.is_(False),
+                                               CommsContact.excluded.is_(False)),
             func.count(CommsContact.id).filter(CommsContact.subscribed.is_(False)),
             func.count(CommsContact.id).filter(CommsContact.bounced.is_(True)),
+            func.count(CommsContact.id).filter(CommsContact.excluded.is_(True)),
         ).where(CommsContact.organisation_id == club.id)
     )).one()
     return {
         "contacts": [_contact_out(c) for c in rows],
-        "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2], "bounced": counts[3]},
+        "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2],
+                    "bounced": counts[3], "excluded": counts[4]},
     }
 
 
