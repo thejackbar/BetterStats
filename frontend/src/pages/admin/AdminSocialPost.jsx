@@ -2098,7 +2098,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <EventPostEditor
                   event={event} setEvent={setEvent}
-                  presetKey={eventPreset} onPickPreset={onPickPreset}
+                  presetKey={eventPreset} onPickPreset={onPickPreset} setPresetKey={setEventPreset}
                   templateId={templateId} setTemplateId={setTemplateId}
                   motifKey={eventMotifKey} setMotifKey={setEventMotifKey}
                   bgImage={eventBg} setBgImage={setEventBg}
