@@ -18,6 +18,8 @@ import {
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
 import { exportNodeToPng } from '../../social/exportImage'
+import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
+import EventPostEditor from '../../components/admin/EventPostEditor'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
@@ -60,6 +62,9 @@ const TEMPLATES = [
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
+  // Club-event / announcement posters — own "Events" tab, surface + photo flags
+  // come from the event registry.
+  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo })),
 ]
 
 const TAB_MAP = {
@@ -70,6 +75,8 @@ const TAB_MAP = {
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
+  EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
+  EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
 }
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
@@ -80,10 +87,11 @@ const TABS = [
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
+  { key: 'events',       label: 'Events' },
 ]
 const TAB_FIRST = {
   lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
-  result: 'C4', results: 'RR1', scorecard: 'SC1',
+  result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1',
 }
 
 const DISPLAY_FONTS = [
@@ -561,6 +569,23 @@ export default function AdminSocialPost() {
   const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null })
   const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null })
 
+  // Club-event / announcement posters (Events tab). One editable facts object +
+  // a chosen layout, motif glyph and optional background photo.
+  const [event, setEvent] = useState(DEFAULT_EVENT)
+  const [eventPreset, setEventPreset] = useState('curry')
+  const [eventMotifKey, setEventMotifKey] = useState('star')
+  const [eventBg, setEventBg] = useState(null)        // object URL or null
+  const [eventBgOpacity, setEventBgOpacity] = useState(0.85)
+
+  const onPickPreset = (key) => {
+    const p = EVENT_PRESETS.find((x) => x.key === key)
+    if (!p) return
+    setEventPreset(key)
+    setEvent({ ...p.event })
+    setTemplateId(p.template)
+    setEventMotifKey(p.motif)
+  }
+
   const renderRef = useRef(null)
 
   // localStorage persistence
@@ -988,6 +1013,11 @@ export default function AdminSocialPost() {
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
 
+  // Light-surface event layouts (Ticket, Gazette, Sticker, Swiss, Polaroid) want
+  // a paper/ink pair rather than the dark-mode palette; eventPaletteFor is a
+  // no-op for everything else, so the render path stays unchanged otherwise.
+  const renderPalette = tmpl.kind === 'event' ? eventPaletteFor(tmpl.surface, themedPalette) : themedPalette
+
   const filteredPlayers = allPlayers.filter(p => {
     if (!playerSearch) return true
     const q = playerSearch.toLowerCase()
@@ -1100,6 +1130,15 @@ export default function AdminSocialPost() {
     }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
+  if (tmpl.kind === 'event') {
+    extraProps.event = event
+    extraProps.motif = resolveMotif({
+      motifKey: eventMotifKey,
+      imageUrl: eventBg,
+      opacity: eventBgOpacity,
+      label: (EVENT_PRESETS.find((p) => p.key === eventPreset)?.photoLabel) || 'Add a photo',
+    })
+  }
 
   const fontStyle = {
     '--social-display-font': displayFont.family,
@@ -1135,6 +1174,12 @@ export default function AdminSocialPost() {
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
     setScUrlStatus(null)
+    setEvent(DEFAULT_EVENT)
+    setEventPreset('curry')
+    setEventMotifKey('star')
+    if (eventBg) URL.revokeObjectURL(eventBg)
+    setEventBg(null)
+    setEventBgOpacity(0.85)
   }
 
   if (loading) return (
@@ -1150,8 +1195,8 @@ export default function AdminSocialPost() {
   const H = tmpl.h || 1080
 
   // ─── Controls ────────────────────────────────────────────────────────────────
-  const showMatchInfo = activeTab !== 'scorecard'
-  const showOpponent  = !['scorecard', 'fixtures', 'results'].includes(activeTab)
+  const showMatchInfo = !['scorecard', 'events'].includes(activeTab)
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'events'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
 
@@ -1273,8 +1318,9 @@ export default function AdminSocialPost() {
               ))}
             </div>
 
-            {/* Template variant selector (only when multiple exist) */}
-            {tabTemplates.length > 1 && (
+            {/* Template variant selector (only when multiple exist). The Events
+                tab carries its own Layout picker in EventPostEditor. */}
+            {tabTemplates.length > 1 && activeTab !== 'events' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Variant</h2>
                 <div className="grid grid-cols-3 gap-2">
@@ -2047,6 +2093,20 @@ export default function AdminSocialPost() {
               </section>
             )}
 
+            {/* Events — club-event / announcement posters */}
+            {activeTab === 'events' && (
+              <section className="pb-card p-4">
+                <EventPostEditor
+                  event={event} setEvent={setEvent}
+                  presetKey={eventPreset} onPickPreset={onPickPreset}
+                  templateId={templateId} setTemplateId={setTemplateId}
+                  motifKey={eventMotifKey} setMotifKey={setEventMotifKey}
+                  bgImage={eventBg} setBgImage={setEventBg}
+                  bgOpacity={eventBgOpacity} setBgOpacity={setEventBgOpacity}
+                />
+              </section>
+            )}
+
             {/* Mobile preview (visible on small screens, hidden on xl) */}
             <div className="xl:hidden pb-card p-4">
               <div className="flex items-center justify-between mb-3 gap-2">
@@ -2069,7 +2129,7 @@ export default function AdminSocialPost() {
                 return (
                   <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                     <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
-                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} headline={headline} {...extraProps} />
+                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
                     </div>
                   </div>
                 )
@@ -2106,7 +2166,7 @@ export default function AdminSocialPost() {
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                       <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
-                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} headline={headline} {...extraProps} />
+                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
@@ -2124,7 +2184,7 @@ export default function AdminSocialPost() {
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
         <div ref={renderRef} style={{ ...fontStyle, width: W, height: H }}>
-          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} headline={headline} {...extraProps} />
+          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
         </div>
       </div>
 
