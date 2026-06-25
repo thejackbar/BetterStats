@@ -244,6 +244,17 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT FALSE"))
         await conn.execute(text(
             "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS excluded_at TIMESTAMPTZ"))
+        # Migration 100: runtime stop/start control for the marketing crawl.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS marketing_crawl_control (
+                id SMALLINT PRIMARY KEY,
+                paused BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "INSERT INTO marketing_crawl_control (id, paused) VALUES (1, FALSE) "
+            "ON CONFLICT (id) DO NOTHING"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
