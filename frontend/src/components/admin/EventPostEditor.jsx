@@ -9,8 +9,9 @@
 // Props:
 //   event        — the editable facts object ({ kicker, title, … })
 //   setEvent     — patcher: setEvent({ title: '…' })
-//   presetKey    — currently selected preset key (or '')
+//   presetKey    — currently selected example key (or '')
 //   onPickPreset — (presetKey) => void  (fills event + suggests template/motif)
+//   setPresetKey — clears the example highlight once the name is hand-edited
 //   templateId   — selected EVENT template id (e.g. 'EV1')
 //   setTemplateId
 //   motifKey     — selected watermark glyph key
@@ -40,7 +41,7 @@ function TextInput({ value, onChange, placeholder }) {
 
 export default function EventPostEditor({
   event, setEvent,
-  presetKey, onPickPreset,
+  presetKey, onPickPreset, setPresetKey,
   templateId, setTemplateId,
   motifKey, setMotifKey,
   bgImage, setBgImage,
@@ -61,9 +62,14 @@ export default function EventPostEditor({
 
   return (
     <div className="space-y-5">
-      {/* ── Event preset ───────────────────────────────────────────────── */}
+      {/* ── Event name (free text — this is the poster headline) ─────────── */}
+      <Field label="Event name">
+        <TextInput value={event.title} onChange={(v) => { patch({ title: v }); if (presetKey && setPresetKey) setPresetKey('') }} placeholder="e.g. Wine & Cheese Night" />
+      </Field>
+
+      {/* ── Start from an example (optional) ───────────────────────────── */}
       <div>
-        <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-2">Event</label>
+        <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-2">Start from an example (optional)</label>
         <div className="grid grid-cols-2 gap-1.5">
           {EVENT_PRESETS.map((p) => (
             <button key={p.key} onClick={() => onPickPreset(p.key)}
@@ -75,6 +81,9 @@ export default function EventPostEditor({
             </button>
           ))}
         </div>
+        <p className="font-mono text-[9px] text-pb-faintest mt-2 leading-relaxed">
+          Only examples. Pick one to pre-fill the copy and a matching layout, then change anything. Or type your own event name above and fill in the details below.
+        </p>
       </div>
 
       {/* ── Layout (template) ──────────────────────────────────────────── */}
@@ -92,9 +101,8 @@ export default function EventPostEditor({
         </div>
       </Field>
 
-      {/* ── Facts ──────────────────────────────────────────────────────── */}
+      {/* ── Facts (Event name lives up top) ────────────────────────────── */}
       <Field label="Kicker / eyebrow"><TextInput value={event.kicker} onChange={(v) => patch({ kicker: v })} placeholder="Club Social" /></Field>
-      <Field label="Title"><TextInput value={event.title} onChange={(v) => patch({ title: v })} placeholder="Curry Night" /></Field>
       <Field label="Subtitle">
         <textarea value={event.subtitle || ''} onChange={(e) => patch({ subtitle: e.target.value })} rows={2} placeholder="One line about the event…"
           className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text placeholder:text-pb-faintest resize-none" />
