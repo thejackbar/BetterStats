@@ -21,7 +21,12 @@ async function request(path, options = {}) {
     }
     throw new Error(detail)
   }
-  return res.json()
+  // 204 No Content (DELETE endpoints) and any empty 2xx body have nothing to
+  // parse, so return null instead of letting res.json() throw "Unexpected end
+  // of JSON input".
+  if (res.status === 204) return null
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
 }
 
 // Build a query string for the marketing directory filters. Skips empty / null /
