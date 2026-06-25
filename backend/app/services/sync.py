@@ -1268,6 +1268,12 @@ def _dismissed_pids_grassroots(batting_rows: list) -> set:
     return pids
 
 
+# Most extras a single partnership could plausibly add on top of the two batters'
+# own runs. Used to sanity-check FOW-derived stands against corrupt cumulative
+# scores — generous enough never to reject a real stand.
+_MAX_STAND_EXTRAS = 50
+
+
 def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     """Derive per-wicket partnerships from a Grassroots-shaped innings.
 
@@ -1336,6 +1342,22 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
             next_in += 1
         if score is not None:
             prev_score = score
+
+    # CA occasionally records a nonsensical cumulative `score_at_fall` — observed
+    # 435 for a 49-run innings, which turned the 2nd-wicket delta into a phantom
+    # 381-run stand between two batters who made 25 and 1. The count/dismissal
+    # checks above can't catch it: the FOW row COUNT is still right. A stand can
+    # never be worth more than its two batters' innings totals plus a little for
+    # extras, and a cumulative score can't go backwards, so a delta outside those
+    # bounds means the FOW scores are corrupt and every delta in the innings is
+    # unreliable. Refuse the innings, like the checks above.
+    for p in result:
+        runs = p.get("runs")
+        if runs is None:
+            continue
+        cap = (p.get("batter1_runs") or 0) + (p.get("batter2_runs") or 0) + _MAX_STAND_EXTRAS
+        if runs < 0 or runs > cap:
+            return []
     return result
 
 
