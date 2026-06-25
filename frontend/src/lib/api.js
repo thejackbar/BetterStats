@@ -435,6 +435,9 @@ export const api = {
   mktSetClubExcluded: (clubId, excluded) =>
     request(`/club-admin/marketing/clubs/${clubId}/excluded`,
       { method: 'PATCH', body: JSON.stringify({ excluded }) }),
+  mktSetClubUtm: (clubId, utm) =>
+    request(`/club-admin/marketing/clubs/${clubId}/utm`,
+      { method: 'PATCH', body: JSON.stringify({ utm }) }),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
