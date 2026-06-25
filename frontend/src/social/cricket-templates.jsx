@@ -939,7 +939,10 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
   const playersXI = players.slice(0, 11)
   const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
   const rest = playersXI.filter(p => p !== featuredP)
-  const P = [featuredP, ...rest]
+  // featuredP is undefined when no players are picked yet (the empty initial
+  // state) — drop the empty slot so the grid renders nothing instead of
+  // dereferencing an undefined player below.
+  const P = [featuredP, ...rest].filter(Boolean)
   const ROLE_BG = { BAT: palette.accent, BOWL: palette.ink, AR: palette.secondary, WK: palette.primary }
   const ROLE_INK = { BAT: palette.primary, BOWL: palette.primary, AR: palette.ink, WK: palette.ink }
   return (
