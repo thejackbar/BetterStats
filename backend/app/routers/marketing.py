@@ -28,9 +28,22 @@ async def stats(db: AsyncSession = Depends(get_db), _=Depends(require_super_admi
 
 @router.get("/status")
 async def status(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
-    """Live crawl status (running / waiting / paused / idle / complete) derived
-    from the table + window settings — survives page refresh and worker restarts."""
+    """Live crawl status (running / waiting / paused / idle / complete / stopped)
+    derived from the table + window settings — survives page refresh and restarts."""
     return await cd.crawl_status(db)
+
+
+class CrawlControlBody(BaseModel):
+    paused: bool
+
+
+@router.post("/crawl/control")
+async def crawl_control(body: CrawlControlBody, db: AsyncSession = Depends(get_db),
+                        _=Depends(require_super_admin)):
+    """Stop (paused=true) or resume (paused=false) the background crawler. The
+    continuous runner idles while stopped and an in-flight batch aborts at the next
+    page/club; the flag is persisted so a Stop survives a restart."""
+    return await cd.set_crawl_paused(db, body.paused)
 
 
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,

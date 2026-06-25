@@ -62,6 +62,25 @@ logger = logging.getLogger(__name__)
 
 AU_TENANT = "Cricket Australia"
 
+
+# ── runtime stop/start control ──────────────────────────────────────────────────
+# A persisted flag the crawl loops poll, so an operator can stop the background
+# crawler (and resume it) without editing env / recreating the container. A Stop
+# survives a restart — the continuous runner idles while paused.
+
+async def is_crawl_paused(session: AsyncSession) -> bool:
+    val = await session.scalar(text("SELECT paused FROM marketing_crawl_control WHERE id = 1"))
+    return bool(val)
+
+
+async def set_crawl_paused(session: AsyncSession, paused: bool) -> dict:
+    await session.execute(text(
+        "INSERT INTO marketing_crawl_control (id, paused, updated_at) "
+        "VALUES (1, :p, NOW()) ON CONFLICT (id) DO UPDATE SET paused = :p, updated_at = NOW()"),
+        {"p": paused})
+    await session.commit()
+    return {"paused": paused}
+
 # We store the WHOLE committee, with a tidy label + a priority rank so the key
 # people sort to the top of each club's contact list. Office bearers rank highest,
 # then coordinators, then everyone else. Rank ≤ 4 (office bearers) is also the
@@ -225,6 +244,9 @@ async def discover_clubs(session: AsyncSession, max_pages: int = 200) -> dict:
     page, seen, new, skipped = 1, 0, 0, 0
     total_reported = None
     while page <= max_pages:
+        if await is_crawl_paused(session):
+            logger.info("discover_clubs: stopped by operator at %d AU clubs", seen)
+            break
         results, tot = None, 0
         for attempt in range(5):
             results, tot = await phq.search_organisations("CLUB", "", page=page, limit=100)
@@ -278,6 +300,9 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
     stats = {"enriched": 0, "with_association": 0, "with_org_contact": 0,
              "errors": 0, "processed": []}
     for club in frontier:
+        if await is_crawl_paused(session):
+            logger.info("enrich_associations: stopped by operator")
+            break
         assocs = await phq.discover_associations(club.playhq_id)
         club.last_crawled_at = func.now()
         if assocs is None:
@@ -318,6 +343,9 @@ async def crawl_batch(session: AsyncSession, limit: Optional[int] = None,
     """One crawl batch: discover all clubs on first run (or when ``rediscover``),
     then association-enrich the next ``limit`` of the frontier. Safe to call
     repeatedly — it just walks the next slice."""
+    if await is_crawl_paused(session):
+        logger.info("crawl_batch: skipped — crawler is stopped")
+        return {"skipped": "stopped"}
     total = await session.scalar(select(func.count(MarketingClub.id))) or 0
     discovery = {}
     if total == 0 or rediscover:
@@ -410,6 +438,12 @@ async def run_continuous(session_maker, max_consecutive_failures: int = 200) -> 
             await asyncio.sleep(wait)
             continue
 
+        # Operator Stop — idle (and keep checking) until they resume.
+        async with session_maker() as s:
+            if await is_crawl_paused(s):
+                await asyncio.sleep(30)
+                continue
+
         # Once per day, inside the window, (re)discover the whole club universe.
         # discover_clubs is idempotent + resilient, so this rebuilds a previously
         # truncated list and adds newly-registered clubs without disturbing the
@@ -499,12 +533,17 @@ async def crawl_status(session: AsyncSession) -> dict:
     recent = since is not None and since < _ACTIVE_WITHIN_SECONDS
 
     continuous = bool(settings.marketing_crawl_enabled and settings.marketing_crawl_continuous)
+    paused = await is_crawl_paused(session)
     in_win = _in_window(_now_tz())
     window = {"start": settings.marketing_crawl_window_start,
               "end": settings.marketing_crawl_window_end,
               "tz": settings.marketing_crawl_tz}
 
-    if clubs == 0:
+    if paused:
+        state = "stopped"
+        detail = (f"Stopped by an operator. {pending} clubs still await enrichment. "
+                  f"Click Start crawling to resume.")
+    elif clubs == 0:
         state, detail = "idle", "No clubs collected yet. Click Run crawl batch to start."
     elif recent:
         state, detail = "running", f"Active — last fetch {int(since)}s ago."
@@ -524,7 +563,7 @@ async def crawl_status(session: AsyncSession) -> dict:
                   f"or enable the continuous runner.")
 
     return {
-        "state": state, "detail": detail,
+        "state": state, "detail": detail, "paused": paused,
         "clubs": clubs, "associations_pending": pending,
         "last_activity_at": last.isoformat() if last else None,
         "seconds_since_activity": int(since) if since is not None else None,

@@ -16,6 +16,7 @@ const STATE_STYLE = {
   paused:   { dot: 'bg-amber-400',                  text: 'text-amber-300',   label: 'Paused' },
   idle:     { dot: 'bg-pb-faint',                   text: 'text-pb-dim',      label: 'Idle' },
   complete: { dot: 'bg-emerald-400',                text: 'text-emerald-300', label: 'Complete' },
+  stopped:  { dot: 'bg-red-400',                    text: 'text-red-300',     label: 'Stopped' },
 }
 
 function CrawlStatus({ status }) {
@@ -231,6 +232,16 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const setCrawlPaused = async (paused) => {
+    setBusy('control'); setMsg('')
+    try {
+      await api.mktCrawlControl(paused)
+      setMsg(paused ? 'Crawler stopped. It will idle until you start it again.'
+                    : 'Crawler started.')
+      api.mktStatus().then(setStatus).catch(() => {})
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
   const exportComms = async () => {
     setBusy('export'); setMsg('')
     try {
@@ -318,9 +329,20 @@ export default function SuperMarketing() {
         <CrawlStatus status={status} />
 
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <button className={BTN_ACCENT} disabled={busy === 'crawl'} onClick={runCrawl}>
+          <button className={BTN_ACCENT} disabled={busy === 'crawl' || status?.paused} onClick={runCrawl}>
             {busy === 'crawl' ? 'Starting...' : 'Run crawl batch'}
           </button>
+          {status?.paused ? (
+            <button className="px-3 py-1.5 rounded text-xs font-semibold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+                    disabled={busy === 'control'} onClick={() => setCrawlPaused(false)}>
+              {busy === 'control' ? '...' : 'Start crawling'}
+            </button>
+          ) : (
+            <button className="px-3 py-1.5 rounded text-xs font-semibold border border-red-500/40 bg-red-500/15 text-red-300 hover:bg-red-500/25 disabled:opacity-50"
+                    disabled={busy === 'control'} onClick={() => setCrawlPaused(true)}>
+              {busy === 'control' ? '...' : 'Stop crawling'}
+            </button>
+          )}
           <button className={BTN} onClick={() => { loadStats(); loadClubs() }}>Refresh</button>
           <a className={BTN} href={api.mktExportCsvUrl(filters)} target="_blank" rel="noreferrer">
             Download CSV (filtered)
