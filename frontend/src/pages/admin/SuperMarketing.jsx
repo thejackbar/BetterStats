@@ -332,20 +332,18 @@ export default function SuperMarketing() {
   const resolveSelectedAssociations = async () => {
     setBusy('resolve'); setMsg('')
     const byName = Object.fromEntries(assocOptions.map(o => [o.name, o.id]))
-    let found = 0, linked = 0, done = 0
+    let done = 0
     try {
       for (const name of filters.associations) {
         const id = byName[name]
         if (!id) continue
-        const r = await api.mktResolveAssociation(id, name)
-        found += r.clubs_found || 0
-        linked += r.newly_linked || 0
+        await api.mktResolveAssociation(id, name)
         done += 1
       }
-      setMsg(`Fetched ${done} roster(s): ${found} clubs found, ${linked} newly linked to their association.`)
-      api.mktAssociations().then(setAssocOptions).catch(() => {})
-      loadStats(); loadClubs()
-    } catch (e) { setError(e.message || 'Could not fetch the roster.') } finally { setBusy('') }
+      setMsg(`Fetching ${done} roster(s) in the background — this takes up to a minute or two each. Click Refresh to see them fill in.`)
+      // Give the background resolve(s) time, then refresh the view + counts.
+      setTimeout(() => { loadStats(); loadClubs(); api.mktAssociations().then(setAssocOptions).catch(() => {}) }, 60000)
+    } catch (e) { setError(e.message || 'Could not start the roster fetch.') } finally { setBusy('') }
   }
 
   const saveUtm = async (clubId, utm) => {
