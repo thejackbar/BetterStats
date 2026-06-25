@@ -75,17 +75,20 @@ _ORG_QUERY = (
 )
 
 
-async def _post(url: str, payload: dict, extra_headers: dict | None = None) -> Optional[dict]:
+async def _post(url: str, payload: dict, extra_headers: dict | None = None,
+                min_delay: float | None = None, max_delay: float | None = None) -> Optional[dict]:
     """One GraphQL POST behind the concurrency gate, with a jittered courtesy
     delay and a single backoff-and-retry on 429/5xx. Returns the parsed ``data``
-    object, or None on transport error / GraphQL errors."""
+    object, or None on transport error / GraphQL errors. ``min_delay``/``max_delay``
+    override the (polite, slow) crawl delay — used for short interactive lookups."""
     headers = dict(_HEADERS)
     if extra_headers:
         headers.update(extra_headers)
+    lo = settings.marketing_crawl_min_delay if min_delay is None else min_delay
+    hi = settings.marketing_crawl_max_delay if max_delay is None else max_delay
     async with _SEMAPHORE:
         # Delay BEFORE the request so concurrent callers can't burst.
-        await asyncio.sleep(random.uniform(
-            settings.marketing_crawl_min_delay, settings.marketing_crawl_max_delay))
+        await asyncio.sleep(random.uniform(lo, hi))
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=headers) as client:
             for attempt in (1, 2):
                 try:
@@ -178,3 +181,65 @@ async def discover_org_contact(routing_code: str) -> Optional[dict]:
         return None
     return {"email": (org.get("email") or "").strip(),
             "phone": (org.get("contactNumber") or "").strip()}
+
+
+# ── authoritative association → clubs roster ────────────────────────────────────
+# The directory's per-club association list is only as complete as the enrichment
+# pass. To get an association's FULL roster on demand we walk it from the top:
+#   association → discoverCompetitions → seasons → discoverSeason.grades →
+#   discoverGrade.ladder.standings.team.organisation
+# Each standing's team.organisation is a member club (id == its routingCode).
+# These run on a SHORT delay (interactive operator action, low volume), not the
+# slow background-crawl delay.
+_GRAPH_TENANT = lambda: {"tenant": settings.playhq_tenant}  # noqa: E731
+_INTERACTIVE_DELAY = (0.2, 0.7)
+
+_ASSOC_COMPS_QUERY = (
+    "query AC($id: ID!){ discoverCompetitions(organisationID:$id){ "
+    "id name seasons(organisationID:$id){ id name status{ value } } } }"
+)
+_SEASON_GRADES_QUERY = (
+    "query SG($id: String!){ discoverSeason(seasonID:$id){ id name grades{ id name } } }"
+)
+_GRADE_CLUBS_QUERY = (
+    "query GC($id: ID!){ discoverGrade(gradeID:$id){ "
+    "ladder{ standings{ team{ organisation{ id name } } } } } }"
+)
+
+
+async def _post_graph(payload: dict) -> Optional[dict]:
+    return await _post(settings.playhq_graph_url, payload, extra_headers=_GRAPH_TENANT(),
+                       min_delay=_INTERACTIVE_DELAY[0], max_delay=_INTERACTIVE_DELAY[1])
+
+
+async def association_seasons(assoc_routing_code: str) -> list[dict]:
+    """The association's competitions' seasons, newest-first as returned:
+    ``[{"id","name","status"}]``."""
+    data = await _post_graph({"query": _ASSOC_COMPS_QUERY, "variables": {"id": assoc_routing_code}})
+    comps = (data or {}).get("discoverCompetitions") or []
+    out = []
+    for comp in comps:
+        for s in (comp.get("seasons") or []):
+            out.append({"id": s.get("id"), "name": s.get("name") or "",
+                        "status": ((s.get("status") or {}).get("value") or "")})
+    return out
+
+
+async def season_grade_ids(season_id: str) -> list[str]:
+    data = await _post_graph({"query": _SEASON_GRADES_QUERY, "variables": {"id": season_id}})
+    season = (data or {}).get("discoverSeason") or {}
+    return [g["id"] for g in (season.get("grades") or []) if g.get("id")]
+
+
+async def grade_club_orgs(grade_id: str) -> list[dict]:
+    """Distinct member clubs of a grade (from the ladder standings):
+    ``[{"id" (routingCode), "name"}]``."""
+    data = await _post_graph({"query": _GRADE_CLUBS_QUERY, "variables": {"id": grade_id}})
+    grade = (data or {}).get("discoverGrade") or {}
+    seen: dict[str, str] = {}
+    for pool in (grade.get("ladder") or []):
+        for st in ((pool or {}).get("standings") or []):
+            org = ((st or {}).get("team") or {}).get("organisation") or {}
+            if org.get("id") and org["id"] not in seen:
+                seen[org["id"]] = org.get("name") or ""
+    return [{"id": k, "name": v} for k, v in seen.items()]

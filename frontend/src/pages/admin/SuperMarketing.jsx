@@ -329,6 +329,25 @@ export default function SuperMarketing() {
     }
   }
 
+  const resolveSelectedAssociations = async () => {
+    setBusy('resolve'); setMsg('')
+    const byName = Object.fromEntries(assocOptions.map(o => [o.name, o.id]))
+    let found = 0, linked = 0, done = 0
+    try {
+      for (const name of filters.associations) {
+        const id = byName[name]
+        if (!id) continue
+        const r = await api.mktResolveAssociation(id, name)
+        found += r.clubs_found || 0
+        linked += r.newly_linked || 0
+        done += 1
+      }
+      setMsg(`Fetched ${done} roster(s): ${found} clubs found, ${linked} newly linked to their association.`)
+      api.mktAssociations().then(setAssocOptions).catch(() => {})
+      loadStats(); loadClubs()
+    } catch (e) { setError(e.message || 'Could not fetch the roster.') } finally { setBusy('') }
+  }
+
   const saveUtm = async (clubId, utm) => {
     try {
       const r = await api.mktSetClubUtm(clubId, utm)
@@ -415,6 +434,12 @@ export default function SuperMarketing() {
             selected={filters.associations}
             onChange={(a) => setFilters(f => ({ ...f, associations: a }))}
           />
+          {filters.associations.length > 0 && (
+            <button className={BTN} disabled={busy === 'resolve'} onClick={resolveSelectedAssociations}
+                    title="Fetch the complete club roster for the selected association(s) from PlayHQ">
+              {busy === 'resolve' ? 'Fetching rosters…' : `Fetch full roster${filters.associations.length > 1 ? 's' : ''}`}
+            </button>
+          )}
           <input
             className={SELECT_CLS + ' min-w-[160px]'}
             placeholder="Association contains..."

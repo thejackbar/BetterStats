@@ -880,10 +880,10 @@ async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dic
 
 
 async def list_associations(session: AsyncSession) -> list[dict]:
-    """Distinct association names across the directory (from each club's full
-    association list) with a club count — powers the multi-select filter."""
+    """Distinct associations (name + id + club count) for the multi-select filter.
+    The id is the PlayHQ routingCode (used to fetch the full roster on demand)."""
     rows = (await session.execute(text("""
-        SELECT elem->>'name' AS name, COUNT(DISTINCT mc.id) AS n
+        SELECT elem->>'name' AS name, MIN(elem->>'id') AS id, COUNT(DISTINCT mc.id) AS n
         FROM marketing_clubs mc
         CROSS JOIN LATERAL jsonb_array_elements(mc.associations) elem
         WHERE mc.associations IS NOT NULL
@@ -892,7 +892,66 @@ async def list_associations(session: AsyncSession) -> list[dict]:
         GROUP BY elem->>'name'
         ORDER BY elem->>'name'
     """))).all()
-    return [{"name": r[0], "count": r[1]} for r in rows]
+    return [{"name": r[0], "id": r[1], "count": r[2]} for r in rows]
+
+
+# Bounds for the on-demand association-roster traversal (operator action).
+_MAX_RESOLVE_SEASONS = 2
+_MAX_RESOLVE_GRADES = 80
+
+
+async def resolve_association_clubs(session: AsyncSession, assoc_id: str,
+                                    assoc_name: str) -> dict:
+    """Fetch an association's FULL club roster live (association → seasons → grades
+    → ladder → each team's club) and link those clubs to the association in the
+    directory, so the association filter shows the complete membership immediately
+    instead of waiting for every club to be enriched. Matches clubs by PlayHQ
+    routingCode (``playhq_id``)."""
+    if not assoc_id:
+        return {"error": "This association has no PlayHQ id on record; can't fetch its roster."}
+    seasons = await phq.association_seasons(assoc_id)
+    # Prefer seasons that have ladders (skip not-yet-started ones), newest-first.
+    usable = [s for s in seasons if s.get("status") != "UPCOMING"] or seasons
+    usable = usable[:_MAX_RESOLVE_SEASONS]
+
+    grade_ids: list[str] = []
+    for s in usable:
+        for gid in await phq.season_grade_ids(s["id"]):
+            grade_ids.append(gid)
+    grade_ids = list(dict.fromkeys(grade_ids))[:_MAX_RESOLVE_GRADES]
+
+    club_orgs: dict[str, str] = {}
+    for gid in grade_ids:
+        for org in await phq.grade_club_orgs(gid):
+            club_orgs.setdefault(org["id"], org.get("name") or "")
+
+    matched = linked = 0
+    unmatched: list[str] = []
+    for rc, cname in club_orgs.items():
+        club = await session.scalar(
+            select(MarketingClub).where(MarketingClub.playhq_id == rc))
+        if club is None:
+            unmatched.append(cname or rc)
+            continue
+        matched += 1
+        assocs = list(club.associations or [])
+        already = any(a.get("id") == assoc_id
+                      or (a.get("name") or "").lower() == assoc_name.lower() for a in assocs)
+        if not already:
+            assocs.append({"id": assoc_id, "name": assoc_name, "competition": ""})
+            club.associations = assocs
+            if not club.association_name:
+                club.association_name = assoc_name
+                club.association_guid = assoc_id
+            club.updated_at = func.now()
+            linked += 1
+    await session.commit()
+    result = {"association": assoc_name, "seasons_used": len(usable),
+              "grades": len(grade_ids), "clubs_found": len(club_orgs),
+              "matched": matched, "newly_linked": linked,
+              "unmatched_count": len(unmatched), "unmatched": unmatched[:30]}
+    logger.info("resolve_association_clubs: %s", result)
+    return result
 
 
 async def directory_stats(session: AsyncSession) -> dict:

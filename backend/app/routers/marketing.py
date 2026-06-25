@@ -63,8 +63,22 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
 
 @router.get("/associations")
 async def list_associations(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
-    """Distinct associations (name + club count) for the multi-select filter."""
+    """Distinct associations (name + id + club count) for the multi-select filter."""
     return await cd.list_associations(db)
+
+
+class ResolveAssocBody(BaseModel):
+    id: str
+    name: str
+
+
+@router.post("/associations/resolve")
+async def resolve_association(body: ResolveAssocBody, db: AsyncSession = Depends(get_db),
+                              _=Depends(require_super_admin)):
+    """Fetch an association's full club roster live from PlayHQ and link those
+    clubs to it, so the filter shows the complete membership without waiting for
+    every club to be enriched. Takes ~10-40s (a handful of API calls)."""
+    return await cd.resolve_association_clubs(db, body.id, body.name)
 
 
 @router.get("/clubs")
