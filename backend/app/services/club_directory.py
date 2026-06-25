@@ -120,11 +120,27 @@ def _role_for_position(position: Optional[str]) -> tuple[Optional[str], int]:
 
 
 def _default_utm(name: Optional[str]) -> str:
-    """First word of the club name (alphanumeric, lowercased) + '-cricket-club'.
-    'Applecross Cricket Club' → 'applecross-cricket-club'. Empty if no usable word."""
-    first = re.split(r"\s+", (name or "").strip())
-    token = re.sub(r"[^a-z0-9]", "", (first[0] if first else "").lower())
-    return f"{token}-cricket-club" if token else ""
+    """The first one OR two words before 'Cricket Club' in the name (split on a
+    space OR hyphen), lowercased and hyphen-joined, + '-cricket-club'.
+      'Applecross Cricket Club'        → 'applecross-cricket-club'
+      'Mount Lawley Cricket Club'      → 'mount-lawley-cricket-club'
+      'Bedford-Morley Cricket Club'    → 'bedford-morley-cricket-club'
+      'Swan Athletic Caversham CC'     → 'swan-athletic-cricket-club'
+    Empty if there's no usable word."""
+    raw = (name or "").strip()
+    if not raw:
+        return ""
+    # Drop a trailing 'cricket club' so we don't repeat it in the slug.
+    prefix = re.split(r"(?i)\bcricket[\s-]+club\b", raw, maxsplit=1)[0]
+    base = prefix if prefix.strip() else raw
+    tokens = []
+    for part in re.split(r"[\s-]+", base):           # split on spaces AND hyphens
+        tok = re.sub(r"[^a-z0-9]", "", part.lower())
+        if tok and tok not in ("cricket", "club"):
+            tokens.append(tok)
+    if not tokens:
+        return ""
+    return "-".join(tokens[:2]) + "-cricket-club"     # first one or two words
 
 
 def _full_name(contact: dict) -> Optional[str]:
