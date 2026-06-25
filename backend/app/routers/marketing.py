@@ -118,6 +118,7 @@ async def list_clubs(
             "emailed_at": c.emailed_at.isoformat() if c.emailed_at else None,
             "emailed_via": c.emailed_via, "emailed_note": c.emailed_note,
             "excluded": c.excluded,
+            "utm_code": c.utm_code or cd._default_utm(c.name),
             "contacts": [{
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
@@ -215,6 +216,21 @@ async def set_club_excluded(club_id: str, body: ExcludedBody,
     BetterAdmin Comms are flagged excluded there too (dropped from audiences).
     Reversible."""
     res = await cd.set_excluded(db, club_id, body.excluded)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return res
+
+
+class UtmBody(BaseModel):
+    utm: str
+
+
+@router.patch("/clubs/{club_id}/utm")
+async def set_club_utm(club_id: str, body: UtmBody, db: AsyncSession = Depends(get_db),
+                       _=Depends(require_super_admin)):
+    """Manually edit a club's UTM code. A blank value resets it to the
+    name-derived default (first word + '-cricket-club')."""
+    res = await cd.set_utm(db, club_id, body.utm)
     if res is None:
         raise HTTPException(status_code=404, detail="Club not found")
     return res

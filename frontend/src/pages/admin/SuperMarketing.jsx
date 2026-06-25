@@ -95,11 +95,38 @@ function Stat({ label, value }) {
   )
 }
 
+function Pager({ total, page, pageSize, onPage, loading }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const from = total ? page * pageSize + 1 : 0
+  const to = Math.min((page + 1) * pageSize, total)
+  const btn = 'px-2 py-0.5 rounded border pb-hairline text-pb-text hover:border-pb-accent disabled:opacity-40'
+  return (
+    <div className="flex items-center justify-between text-[11px] text-pb-faint my-2">
+      <span>{total} matching club(s){total > 0 ? ` · showing ${from}–${to}` : ''}</span>
+      {pages > 1 && (
+        <span className="flex items-center gap-2">
+          <button className={btn} disabled={page === 0 || loading}
+                  onClick={() => onPage(p => Math.max(0, p - 1))}>Prev</button>
+          <span>Page {page + 1} / {pages}</span>
+          <button className={btn} disabled={page + 1 >= pages || loading}
+                  onClick={() => onPage(p => p + 1)}>Next</button>
+        </span>
+      )}
+    </div>
+  )
+}
+
 // Everything collected for one club — all stored contacts, every association it
 // plays in, address and ids. Driven entirely by the /clubs payload (no extra fetch).
-function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded }) {
+function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, onSaveUtm }) {
   const contacts = club.contacts || []
   const assocs = club.associations
+  const [utm, setUtm] = useState(club.utm_code || '')
+  const [utmBusy, setUtmBusy] = useState(false)
+  const saveUtm = async () => {
+    setUtmBusy(true)
+    try { await onSaveUtm(club.id, utm) } finally { setUtmBusy(false) }
+  }
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
@@ -156,6 +183,16 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded }
               : '-'}</div>
           <div><span className="text-pb-faint">PlayHQ code: </span>{club.playhq_id || '-'}
             <span className="text-pb-faint"> · GUID: </span><span className="font-mono text-[10px]">{club.grassroots_guid || '-'}</span></div>
+          <div className="flex items-center gap-1 pt-1">
+            <span className="text-pb-faint">UTM:</span>
+            <input className={SELECT_CLS + ' w-56 font-mono'} value={utm}
+                   placeholder={club.utm_code || 'utm code'}
+                   onChange={(e) => setUtm(e.target.value)} />
+            <button disabled={utmBusy || utm === (club.utm_code || '')}
+                    className="px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent disabled:opacity-40"
+                    onClick={saveUtm}>{utmBusy ? '...' : 'Save'}</button>
+            <span className="text-[10px] text-pb-faint" title="Blank resets to the default">(blank = default)</span>
+          </div>
           <div><span className="text-pb-faint">Status: </span>{club.status || '-'}
             {club.is_customer && <span className="text-emerald-300"> · already a customer</span>}</div>
           <div className="pt-1">
@@ -191,7 +228,9 @@ export default function SuperMarketing() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState('')
+  const [page, setPage] = useState(0)
   const [assocOptions, setAssocOptions] = useState([])
+  const PAGE = 100
   const [filters, setFilters] = useState({
     q: '', state: '', association: '', associations: [], postcode_from: '', postcode_to: '',
     contact: '', person: '', exclude_junior: false, exclude_emailed: false,
@@ -213,14 +252,15 @@ export default function SuperMarketing() {
 
   const loadClubs = useCallback(() => {
     setLoading(true)
-    api.mktClubs({ ...filters, limit: 100 })
+    api.mktClubs({ ...filters, limit: PAGE, offset: page * PAGE })
       .then((d) => { setClubs(d.clubs); setTotal(d.total); setError('') })
       .catch((e) => setError(e.message || 'Could not load the directory.'))
       .finally(() => setLoading(false))
-  }, [filters])
+  }, [filters, page])
 
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
+  useEffect(() => { setPage(0) }, [filters])  // back to first page when filters change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
 
   const runCrawl = async () => {
@@ -287,6 +327,14 @@ export default function SuperMarketing() {
       setError(e.message || 'Could not update.')
       loadClubs()
     }
+  }
+
+  const saveUtm = async (clubId, utm) => {
+    try {
+      const r = await api.mktSetClubUtm(clubId, utm)
+      setClubs(cs => cs.map(c => c.id === clubId ? { ...c, utm_code: r.utm_code } : c))
+      setMsg(`UTM updated to ${r.utm_code}`)
+    } catch (e) { setError(e.message || 'Could not update the UTM.') }
   }
 
   const syncSuppressions = async () => {
@@ -441,7 +489,7 @@ export default function SuperMarketing() {
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}
         {error && <div className="mb-3 text-xs text-red-300 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">{error}</div>}
 
-        <div className="text-[11px] text-pb-faint mb-2">{total} matching club(s)</div>
+        <Pager total={total} page={page} pageSize={PAGE} onPage={setPage} loading={loading} />
 
         {loading ? (
           <div className="text-sm text-pb-dim">Loading...</div>
@@ -521,7 +569,8 @@ export default function SuperMarketing() {
                         <td colSpan={5} className="px-4 py-3">
                           <ClubDetail club={c} onToggleContact={toggleContact}
                                       onToggleEmailed={toggleEmailed}
-                                      onToggleExcluded={toggleExcluded} />
+                                      onToggleExcluded={toggleExcluded}
+                                      onSaveUtm={saveUtm} />
                         </td>
                       </tr>
                     ),
@@ -535,6 +584,9 @@ export default function SuperMarketing() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && total > PAGE && (
+          <Pager total={total} page={page} pageSize={PAGE} onPage={setPage} loading={loading} />
         )}
       </div>
     </AdminLayout>

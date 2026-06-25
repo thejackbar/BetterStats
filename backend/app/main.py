@@ -255,6 +255,16 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "INSERT INTO marketing_crawl_control (id, paused) VALUES (1, FALSE) "
             "ON CONFLICT (id) DO NOTHING"))
+        # Migration 101: per-club editable UTM code (defaulted from the name).
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS utm_code TEXT"))
+        await conn.execute(text(r"""
+            UPDATE marketing_clubs
+            SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
+                           || '-cricket-club'
+            WHERE utm_code IS NULL
+              AND coalesce(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'), '') <> ''
+        """))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of

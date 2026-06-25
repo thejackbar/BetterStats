@@ -119,6 +119,14 @@ def _role_for_position(position: Optional[str]) -> tuple[Optional[str], int]:
     return label, _OTHER_RANK
 
 
+def _default_utm(name: Optional[str]) -> str:
+    """First word of the club name (alphanumeric, lowercased) + '-cricket-club'.
+    'Applecross Cricket Club' → 'applecross-cricket-club'. Empty if no usable word."""
+    first = re.split(r"\s+", (name or "").strip())
+    token = re.sub(r"[^a-z0-9]", "", (first[0] if first else "").lower())
+    return f"{token}-cricket-club" if token else ""
+
+
 def _full_name(contact: dict) -> Optional[str]:
     name = " ".join(filter(None, [
         (contact.get("firstName") or "").strip(),
@@ -206,6 +214,8 @@ async def _upsert_club(session: AsyncSession, org: dict) -> bool:
     club.latitude = addr.get("latitude") or club.latitude
     club.longitude = addr.get("longitude") or club.longitude
     club.raw_json = org
+    if not club.utm_code:   # default once; never clobber a manual edit on re-crawl
+        club.utm_code = _default_utm(club.name)
     club.detail_fetched_at = func.now()   # core data (contacts/address) is present
     club.last_crawled_at = func.now()
     if club.status in (None, "new"):
@@ -794,7 +804,7 @@ async def clubs_to_csv(session: AsyncSession, only_with_email: bool = True,
         if only_with_email and not (contact and contact.email):
             continue
         w.writerow([
-            club.name, _slug(club.name),
+            club.name, club.utm_code or _default_utm(club.name),
             (contact.full_name if contact else "") or "",
             (contact.role if contact else "") or "",
             (contact.email if contact else "") or "",
@@ -854,6 +864,19 @@ async def set_excluded(session: AsyncSession, club_id: str, excluded: bool) -> O
     await session.refresh(club)
     return {"id": str(club.id), "excluded": club.excluded,
             "excluded_at": club.excluded_at.isoformat() if club.excluded_at else None}
+
+
+async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dict]:
+    """Set a club's UTM code (manual edit). Blank resets it to the name-derived
+    default. Returns the new value, or None if the club isn't found."""
+    club = await session.get(MarketingClub, club_id)
+    if club is None:
+        return None
+    cleaned = (utm or "").strip()
+    club.utm_code = cleaned or _default_utm(club.name)
+    club.updated_at = func.now()
+    await session.commit()
+    return {"id": str(club.id), "utm_code": club.utm_code}
 
 
 async def list_associations(session: AsyncSession) -> list[dict]:
