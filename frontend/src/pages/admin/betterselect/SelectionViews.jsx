@@ -147,7 +147,10 @@ function DualCard({ p, kind, idx, vm, drag }) {
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
   const unavail = p.availability === 'UNAVAILABLE'
   const clash = p.clash?.length > 0
-  const blocked = unavail || clash
+  // A call-up (higher grade taking a player from a lower XI) stays pickable;
+  // only a same/higher-grade clash blocks.
+  const callUp = clash && !p.clash_blocks
+  const blocked = unavail || (clash && p.clash_blocks)
   const dragItem = kind === 'pool' ? { kind: 'pool', player: p } : { kind: 'slot', idx, player: p }
   const interactive = vm.canEdit && !blocked
   return (
@@ -170,7 +173,9 @@ function DualCard({ p, kind, idx, vm, drag }) {
         </div>
         <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
         {clash
-          ? <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>
+          ? (callUp
+              ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
+              : <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
           : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
       </div>
       {kind === 'pool' ? (
@@ -313,7 +318,8 @@ function TrayCard({ p, vm, drag }) {
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
   const unavail = p.availability === 'UNAVAILABLE'
   const clash = p.clash?.length > 0
-  const blocked = unavail || clash
+  const callUp = clash && !p.clash_blocks
+  const blocked = unavail || (clash && p.clash_blocks)
   const interactive = vm.canEdit && !blocked
   return (
     <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border border-pb-hairline bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}
@@ -331,7 +337,9 @@ function TrayCard({ p, vm, drag }) {
         </div>
         <div className="text-[11.5px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
         {clash
-          ? <div className="text-[10.5px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>
+          ? (callUp
+              ? <div className="text-[10.5px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
+              : <div className="text-[10.5px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
           : <div className="mt-1"><FormInline p={p} /></div>}
       </div>
       {!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent transition-colors"><Icon name="plus" size={14} /></span>}
