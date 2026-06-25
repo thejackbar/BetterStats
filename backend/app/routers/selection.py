@@ -308,8 +308,9 @@ async def set_selection(
     """Replace a fixture's lineup with the given set of players.
 
     Full-replace (not incremental): the selection board sends the whole side.
-    Validates players belong to the club; de-dupes; clamps roles. Cross-fixture
-    clash is reported by GET but NOT blocked here — that policy is deferred.
+    Validates players belong to the club; de-dupes; clamps roles. A same-date
+    clash with a same/higher grade is blocked (409); a clash with a strictly
+    lower grade is a call-up — the player is removed from that lower XI here.
     """
     fx = await _get_owned_fixture(db, fixture_id, club.id)
 
@@ -335,30 +336,60 @@ async def set_selection(
         if missing:
             raise HTTPException(status_code=400, detail="One or more players are not in your club")
 
-        # Clash policy: a player may be in only ONE XI per date. Block the save
-        # if any picked player is already selected for another fixture that day.
-        # ORM .in_() (portable param binding) rather than raw ANY(array).
+        # Clash policy: a player may be in only ONE XI per date — BUT a higher
+        # grade takes precedence over a lower one. Team.sequence ranks our teams
+        # (1st XI = 1, 2nd XI = 2 …), so a strictly lower sequence is the higher
+        # grade. Picking a player here who's already in a *lower* grade calls
+        # them up: we remove them from that XI on save. A clash with the same/a
+        # higher grade (or one whose rank we can't tell) still blocks the save.
         if fx.played_on:
+            this_seq: Optional[int] = None
+            if fx.team_id:
+                this_team = await db.get(Team, fx.team_id)
+                if this_team and (this_team.sequence or 0) > 0:
+                    this_seq = this_team.sequence
+
             clash_res = await db.execute(
-                select(func.coalesce(Player.display_name_override, Player.name))
+                select(
+                    FixtureLineup.player_id,
+                    FixtureLineup.fixture_id,
+                    func.coalesce(Player.display_name_override, Player.name),
+                    Team.sequence,
+                )
                 .select_from(FixtureLineup)
                 .join(Fixture, FixtureLineup.fixture_id == Fixture.id)
                 .join(Player, FixtureLineup.player_id == Player.id)
+                .outerjoin(Team, Fixture.team_id == Team.id)
                 .where(
                     FixtureLineup.organisation_id == club.id,
                     Fixture.id != fx.id,
                     Fixture.played_on == fx.played_on,
                     FixtureLineup.player_id.in_(seen),
                 )
-                .distinct()
-                .order_by(func.coalesce(Player.display_name_override, Player.name))
             )
-            clashing = [r[0] for r in clash_res.fetchall()]
-            if clashing:
-                names = ", ".join(clashing)
+            blocking: set[str] = set()
+            call_ups: list[tuple] = []  # (player_id, other_fixture_id) to vacate
+            for pid, other_fid, pname, other_seq in clash_res.fetchall():
+                can_override = (
+                    this_seq is not None
+                    and (other_seq or 0) > 0
+                    and this_seq < other_seq
+                )
+                if can_override:
+                    call_ups.append((pid, other_fid))
+                else:
+                    blocking.add(pname)
+            if blocking:
+                names = ", ".join(sorted(blocking))
                 raise HTTPException(
                     status_code=409,
                     detail=f"Already selected for another fixture on {fx.played_on.isoformat()}: {names}",
+                )
+            # Vacate the lower-grade XIs the called-up players came from.
+            for pid, other_fid in call_ups:
+                await db.execute(
+                    text("DELETE FROM fixture_lineups WHERE fixture_id = :fid AND player_id = :pid"),
+                    {"fid": other_fid, "pid": pid},
                 )
 
     # Replace: clear existing rows, insert the new set.

@@ -74,6 +74,21 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
     return None
 
 
+def _clash_blocks(this_seq: int | None, other_seqs: list[int | None]) -> bool:
+    """Whether a same-date selection elsewhere blocks picking the player here.
+
+    A higher grade (strictly lower team sequence — 1st XI = 1, 2nd XI = 2 …)
+    takes precedence over a lower one, so a clash is *overridable* — the player
+    can be called up — only when THIS fixture outranks every other XI they're
+    named in. If our own rank is unknown, or any clashing XI is the same/a
+    higher grade (or its rank is unknown), the pick stays blocked."""
+    if not other_seqs:
+        return False
+    if not this_seq:
+        return True
+    return any((not s) or this_seq >= s for s in other_seqs)
+
+
 async def _recent_batting_form(db: AsyncSession, org_id) -> dict[str, dict]:
     """Per-player last-N batting innings: {total_runs, innings, series}. Excludes
     DNB/absent so a no-show doesn't drag the average down. ``series`` is the
@@ -299,12 +314,15 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 if info.get("reason"):
                     avail_reason[pid] = info["reason"]
 
-    # Players already selected for ANOTHER fixture on the same date (clash).
+    # Players already selected for ANOTHER fixture on the same date (clash). We
+    # also keep each clashing XI's team sequence so the pool can flag whether
+    # THIS fixture outranks it (a higher grade can call the player up) or not.
     clash: dict[str, list] = {}
+    clash_seqs: dict[str, list] = {}
     if fx.played_on:
         cl_res = await db.execute(
             text(
-                "SELECT fl.player_id, COALESCE(t.name, f.label, f.opponent_name) AS where_ "
+                "SELECT fl.player_id, COALESCE(t.name, f.label, f.opponent_name) AS where_, t.sequence AS seq "
                 "FROM fixture_lineups fl "
                 "JOIN fixtures f ON fl.fixture_id = f.id "
                 "LEFT JOIN teams t ON f.team_id = t.id "
@@ -313,8 +331,9 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             ),
             {"org": club.id, "fid": fx.id, "d": fx.played_on},
         )
-        for pid, where_ in cl_res.fetchall():
+        for pid, where_, seq in cl_res.fetchall():
             clash.setdefault(str(pid), []).append(where_ or "another fixture")
+            clash_seqs.setdefault(str(pid), []).append(seq)
 
     pl_res = await db.execute(
         select(Player).where(Player.organisation_id == club.id, Player.is_player.is_(True))
@@ -407,6 +426,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "is_current": not manual_inactive and not dormant,
             "selected": pid in lineup,
             "clash": clash.get(pid, []),
+            "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
             "squad_match": squad_match,
             "tier": tier,
             "gender_ok": gender_ok,
