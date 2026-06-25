@@ -120,12 +120,12 @@ def _role_for_position(position: Optional[str]) -> tuple[Optional[str], int]:
 
 
 def _default_utm(name: Optional[str]) -> str:
-    """The first one OR two words before 'Cricket Club' in the name (split on a
+    """The first up-to-THREE words before 'Cricket Club' in the name (split on a
     space OR hyphen), lowercased and hyphen-joined, + '-cricket-club'.
-      'Applecross Cricket Club'        → 'applecross-cricket-club'
-      'Mount Lawley Cricket Club'      → 'mount-lawley-cricket-club'
-      'Bedford-Morley Cricket Club'    → 'bedford-morley-cricket-club'
-      'Swan Athletic Caversham CC'     → 'swan-athletic-cricket-club'
+      'Applecross Cricket Club'            → 'applecross-cricket-club'
+      'Mount Lawley Cricket Club'          → 'mount-lawley-cricket-club'
+      'Bedford-Morley Cricket Club'        → 'bedford-morley-cricket-club'
+      'Swan Athletic Caversham CC'         → 'swan-athletic-caversham-cricket-club'
     Empty if there's no usable word."""
     raw = (name or "").strip()
     if not raw:
@@ -140,7 +140,7 @@ def _default_utm(name: Optional[str]) -> str:
             tokens.append(tok)
     if not tokens:
         return ""
-    return "-".join(tokens[:2]) + "-cricket-club"     # first one or two words
+    return "-".join(tokens[:3]) + "-cricket-club"     # first one, two or three words
 
 
 def _full_name(contact: dict) -> Optional[str]:
