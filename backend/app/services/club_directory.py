@@ -666,6 +666,7 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  contact_filter: Optional[str] = None, person: Optional[str] = None,
                  exclude_junior: bool = False, exclude_emailed: bool = False,
                  exclude_carnival: bool = False, exclude_school: bool = False,
+                 exclude_exported: bool = False, exclude_suppressed: bool = False,
                  associations: Optional[list] = None,
                  association_extra: Optional[list] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
@@ -685,6 +686,14 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(or_(*[_assoc_match(n) for n in associations if n]))
     if exclude_emailed:
         conds.append(MarketingClub.emailed_at.is_(None))
+    if exclude_exported:
+        # Only clubs that still have an emailable contact not yet in BetterComms.
+        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
+                                    C.email.isnot(None), C.exported_at.is_(None)))
+    if exclude_suppressed:
+        # Only clubs that still have an emailable, subscribed (non-opted-out) contact.
+        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
+                                    C.email.isnot(None), C.subscribed.is_(True)))
     if person:
         p = f"%{person.lower()}%"
         conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
@@ -756,6 +765,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
 
     rows = (await session.execute(q)).all()
     added = skipped = suppressed = 0
+    now = func.now()
     for contact, club in rows:
         if not contact.email:
             continue
@@ -765,6 +775,9 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
                 CommsContact.organisation_id == org.id,
                 func.lower(CommsContact.email) == email))
         if existing:
+            # Already in BetterComms — stamp it exported (idempotent) so the
+            # directory shows the badge and won't offer it for re-export.
+            contact.exported_at = contact.exported_at or now
             if not existing.subscribed:
                 suppressed += 1  # respect an opt-out already on the comms side
             else:
@@ -776,6 +789,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
             marketing_club_id=club.id,   # link back so a campaign send flags the club
             tags=[club.name] + _assoc_names(club),
         ))
+        contact.exported_at = now
         added += 1
     await session.commit()
 
@@ -808,24 +822,60 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
 
 
 async def sync_suppressions(session: AsyncSession, organisation_id: Optional[str] = None) -> dict:
-    """Pull unsubscribes/bounces from the platform org's comms_contacts back into
-    marketing_club_contacts, so an opt-out is never re-contacted in a later
-    campaign or CSV export."""
+    """Reconcile the directory with the outreach org's ``comms_contacts``:
+
+    1. Pull unsubscribes/bounces back into ``marketing_club_contacts.subscribed``
+       so an opt-out is never re-contacted in a later campaign or CSV export.
+    2. Reconcile the per-contact ``exported_at`` flag against the live comms set —
+       mark contacts that exist in BetterComms as exported, and clear the flag for
+       any contact whose comms record was deleted (so it shows as not-exported and
+       can be exported again)."""
     org = await _resolve_outreach_org(session, organisation_id)
+    now = func.now()
+
+    # 1. Suppressions (opt-outs / bounces).
     suppressed_emails = (await session.execute(
         select(func.lower(CommsContact.email)).where(
             CommsContact.organisation_id == org.id,
             (CommsContact.subscribed.is_(False)) | (CommsContact.bounced.is_(True)))
     )).scalars().all()
-    if not suppressed_emails:
-        return {"suppressed": 0}
-    result = await session.execute(
-        update(MarketingClubContact)
-        .where(func.lower(MarketingClubContact.email).in_(list(suppressed_emails)),
-               MarketingClubContact.subscribed.is_(True))
-        .values(subscribed=False, unsubscribed_at=func.now(), updated_at=func.now()))
+    suppressed_n = 0
+    if suppressed_emails:
+        res = await session.execute(
+            update(MarketingClubContact)
+            .where(func.lower(MarketingClubContact.email).in_(list(suppressed_emails)),
+                   MarketingClubContact.subscribed.is_(True))
+            .values(subscribed=False, unsubscribed_at=now, updated_at=now))
+        suppressed_n = res.rowcount or 0
+
+    # 2. Exported reconcile against the full live comms set for this org.
+    comms_emails = (await session.execute(
+        select(func.lower(CommsContact.email)).where(CommsContact.organisation_id == org.id)
+    )).scalars().all()
+    comms_set = list({e for e in comms_emails if e})
+    marked_n = 0
+    if comms_set:
+        cleared = await session.execute(
+            update(MarketingClubContact)
+            .where(MarketingClubContact.exported_at.isnot(None),
+                   func.lower(MarketingClubContact.email).notin_(comms_set))
+            .values(exported_at=None, updated_at=now))
+        marked = await session.execute(
+            update(MarketingClubContact)
+            .where(MarketingClubContact.exported_at.is_(None),
+                   MarketingClubContact.email.isnot(None),
+                   func.lower(MarketingClubContact.email).in_(comms_set))
+            .values(exported_at=now, updated_at=now))
+        marked_n = marked.rowcount or 0
+    else:
+        # No comms contacts left at all → every exported flag is stale.
+        cleared = await session.execute(
+            update(MarketingClubContact)
+            .where(MarketingClubContact.exported_at.isnot(None))
+            .values(exported_at=None, updated_at=now))
+    cleared_n = cleared.rowcount or 0
     await session.commit()
-    return {"suppressed": result.rowcount or 0}
+    return {"suppressed": suppressed_n, "export_marked": marked_n, "export_cleared": cleared_n}
 
 
 # ── CSV export ──────────────────────────────────────────────────────────────────

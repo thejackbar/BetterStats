@@ -1909,6 +1909,12 @@ class CommsContact(Base):
     # category → bool (transactional / operational / news / marketing). Absent key
     # ⇒ opted in. transactional is never gated. See services/comms_policy.py.
     preferences = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    # Per-contact merge-variable overrides (migration 115): key → value for the
+    # editable merge variables (first_name / club / association / utm_code / state /
+    # website). An override wins over the value derived from the linked directory
+    # club or the org default, so any contact (manual, imported or exported) can be
+    # personalised. Absent key ⇒ use the derived default.
+    merge_vars = Column(JSONB, nullable=False, server_default="{}", default=dict)
     tags = Column(JSONB, nullable=False, server_default="[]", default=list)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -2176,6 +2182,10 @@ class MarketingClubContact(Base):
     # Whether this contact is ticked to receive outreach (drives export_to_comms).
     # Office bearers are pre-selected on insert; a super admin adjusts per club.
     outreach_selected = Column(Boolean, nullable=False, server_default="false", default=False)
+    # When this contact was pushed into BetterComms (comms_contacts under the
+    # outreach org). NULL = never exported. Cleared when the comms contact is
+    # deleted or reconciled away, so the directory badge/filter stay accurate.
+    exported_at = Column(TIMESTAMP(timezone=True), nullable=True)
     subscribed = Column(Boolean, nullable=False, server_default="true", default=True)
     unsubscribed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     bounced = Column(Boolean, nullable=False, server_default="false", default=False)

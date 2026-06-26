@@ -48,7 +48,8 @@ async def crawl_control(body: CrawlControlBody, db: AsyncSession = Depends(get_d
 
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
                    person=None, exclude_junior=False, exclude_emailed=False,
-                   exclude_carnival=False, exclude_school=False, associations=None):
+                   exclude_carnival=False, exclude_school=False, associations=None,
+                   exclude_exported=False, exclude_suppressed=False):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
@@ -57,6 +58,8 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
         "person": person, "exclude_junior": bool(exclude_junior),
         "exclude_emailed": bool(exclude_emailed),
         "exclude_carnival": bool(exclude_carnival), "exclude_school": bool(exclude_school),
+        "exclude_exported": bool(exclude_exported),
+        "exclude_suppressed": bool(exclude_suppressed),
         "associations": [a for a in (associations or []) if a],
     }
 
@@ -120,6 +123,8 @@ async def list_clubs(
     exclude_emailed: bool = False,
     exclude_carnival: bool = False,
     exclude_school: bool = False,
+    exclude_exported: bool = False,
+    exclude_suppressed: bool = False,
     kind: Optional[str] = "club",
     group_by_association: bool = False,
     assoc_sort: str = "asc",
@@ -135,7 +140,7 @@ async def list_clubs(
     kw = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact,
         person, exclude_junior, exclude_emailed, exclude_carnival, exclude_school,
-        associations))
+        associations, exclude_exported=exclude_exported, exclude_suppressed=exclude_suppressed))
     for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
@@ -182,6 +187,7 @@ async def list_clubs(
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
                 "subscribed": ct.subscribed, "selected": ct.outreach_selected,
+                "exported": ct.exported_at is not None,
             } for ct in contacts_by_club.get(c.id, [])],
         })
     return {"total": total or 0, "limit": limit, "offset": offset, "clubs": out}
@@ -224,6 +230,8 @@ class ExportBody(BaseModel):
     exclude_emailed: bool = False
     exclude_carnival: bool = False
     exclude_school: bool = False
+    exclude_exported: bool = False
+    exclude_suppressed: bool = False
     associations: Optional[List[str]] = None
     # Default True: only push contacts a super admin ticked for outreach. Set
     # False to export every subscribed, emailable contact regardless of selection.
@@ -240,7 +248,8 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
     filters = await cd.expand_shortcode(db, _filter_kwargs(
         body.q, body.state, body.association, body.status, body.postcode_from,
         body.postcode_to, body.contact, body.person, body.exclude_junior,
-        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations))
+        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
+        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed))
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
         filters=filters)
@@ -298,6 +307,8 @@ class BulkActionBody(BaseModel):
     exclude_emailed: bool = False
     exclude_carnival: bool = False
     exclude_school: bool = False
+    exclude_exported: bool = False
+    exclude_suppressed: bool = False
     associations: Optional[List[str]] = None
 
 
@@ -305,7 +316,8 @@ async def _bulk_filters(db: AsyncSession, body: BulkActionBody) -> dict:
     return await cd.expand_shortcode(db, _filter_kwargs(
         body.q, body.state, body.association, body.status, body.postcode_from,
         body.postcode_to, body.contact, body.person, body.exclude_junior,
-        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations))
+        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
+        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed))
 
 
 @router.post("/clubs/bulk-emailed")
@@ -381,6 +393,8 @@ async def export_csv(
     exclude_emailed: bool = False,
     exclude_carnival: bool = False,
     exclude_school: bool = False,
+    exclude_exported: bool = False,
+    exclude_suppressed: bool = False,
     associations: Optional[List[str]] = Query(None),
     only_with_email: bool = True,
     db: AsyncSession = Depends(get_db),
@@ -389,7 +403,8 @@ async def export_csv(
     """CSV of the currently-filtered directory (one row per club+contact)."""
     filters = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact, person,
-        exclude_junior, exclude_emailed, exclude_carnival, exclude_school, associations))
+        exclude_junior, exclude_emailed, exclude_carnival, exclude_school, associations,
+        exclude_exported=exclude_exported, exclude_suppressed=exclude_suppressed))
     csv_text = await cd.clubs_to_csv(db, only_with_email=only_with_email, filters=filters)
     return Response(
         content=csv_text, media_type="text/csv",

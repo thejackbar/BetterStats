@@ -40,7 +40,8 @@ from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership, Team,
     CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
-    CommsList, CommsListMember, EmailSuppression, EmailEvent, MarketingClub,
+    CommsList, CommsListMember, EmailSuppression, EmailEvent,
+    MarketingClub, MarketingClubContact,
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
@@ -302,6 +303,47 @@ MERGE_VARIABLES = [
     {"name": "website", "desc": "The recipient club's website", "marketing_only": True},
 ]
 
+# Merge-variable keys a user can override per contact (stored in
+# comms_contacts.merge_vars). name/email live in their own columns and are edited
+# directly; unsubscribe_url is per-recipient and never editable.
+EDITABLE_MERGE_KEYS = ("first_name", "club", "association", "utm_code", "state", "website")
+
+
+def _context_var_keys(org: Organisation) -> list:
+    """The merge variables that apply in this org's context, in display order.
+    The club/association/utm_code set only makes sense for BetterCricket directory
+    outreach, so a normal club just sees the universal ones."""
+    keys = ["first_name", "name", "email", "club"]
+    if org_is_outreach(org):
+        keys += ["association", "utm_code", "state", "website"]
+    keys.append("unsubscribe_url")
+    return keys
+
+
+def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisation) -> dict:
+    """Every merge variable resolved for one contact: a per-contact override wins,
+    then the linked directory club, then a sensible default. Used by both the
+    contact-detail view and the actual send, so they always agree — regardless of
+    whether the contact was added manually, imported, or exported."""
+    ov = c.merge_vars or {}
+    mv = _marketing_vars(mc)
+
+    def pick(key, default):
+        v = ov.get(key)
+        return v if (v is not None and str(v).strip() != "") else default
+
+    name = (c.name or "").strip()
+    return {
+        "first_name": pick("first_name", _first_name(c.name, c.email)),
+        "name": name or _first_name(c.name, c.email),
+        "email": c.email,
+        "club": pick("club", mv.get("club") or (org.name or "")),
+        "association": pick("association", mv.get("association", "")),
+        "utm_code": pick("utm_code", mv.get("utm_code", "")),
+        "state": pick("state", mv.get("state", "")),
+        "website": pick("website", mv.get("website", "")),
+    }
+
 
 def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
                   email: str, name: Optional[str], unsub_url: str, footer: str,
@@ -529,7 +571,12 @@ async def create_contact(
 
 class ContactUpdate(BaseModel):
     name: Optional[str] = None
+    email: Optional[str] = None
     subscribed: Optional[bool] = None
+    # Per-contact merge-variable overrides (first_name / club / association /
+    # utm_code / state / website). Keys present are applied; a blank value reverts
+    # that variable to its derived default.
+    merge_vars: Optional[dict] = None
 
 
 @router.patch("/contacts/{contact_id}")
@@ -548,6 +595,30 @@ async def update_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     if data.name is not None:
         c.name = data.name.strip() or None
+    if data.email is not None:
+        new_email = _norm_email(data.email)
+        if not new_email:
+            raise HTTPException(status_code=422, detail="A valid email is required")
+        if new_email != c.email:
+            dup = await db.scalar(select(CommsContact.id).where(
+                CommsContact.organisation_id == club.id,
+                func.lower(CommsContact.email) == new_email,
+                CommsContact.id != c.id))
+            if dup:
+                raise HTTPException(status_code=409, detail="Another contact already uses that email")
+            c.email = new_email
+    if data.merge_vars is not None:
+        # Authoritative for the keys present: set non-empty, drop blank (revert to
+        # default). Keys not present are left untouched.
+        merged = dict(c.merge_vars or {})
+        for k in EDITABLE_MERGE_KEYS:
+            if k in data.merge_vars:
+                val = str(data.merge_vars.get(k) or "").strip()
+                if val:
+                    merged[k] = val
+                else:
+                    merged.pop(k, None)
+        c.merge_vars = merged
     if data.subscribed is not None:
         c.subscribed = data.subscribed
         c.unsubscribed_at = None if data.subscribed else datetime.now(timezone.utc)
@@ -569,6 +640,14 @@ async def delete_contact(
         raise HTTPException(status_code=422, detail="Invalid contact id")
     if not c or c.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Contact not found")
+    # If this contact came from the Club Directory export, flip its source
+    # marketing contact back to not-exported so the directory can re-offer it.
+    if c.marketing_club_id and c.email:
+        await db.execute(
+            update(MarketingClubContact)
+            .where(MarketingClubContact.marketing_club_id == c.marketing_club_id,
+                   func.lower(MarketingClubContact.email) == c.email.lower())
+            .values(exported_at=None, updated_at=func.now()))
     await db.delete(c)
     await db.commit()
     return {"status": "ok"}
@@ -860,12 +939,19 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
             mc_vars: dict = {}
             cids = [r.contact_id for r in recips if r.contact_id]
             if cids:
-                for cid, mc in (await s.execute(
-                    select(CommsContact.id, MarketingClub)
-                    .join(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
+                # Outer join so a contact with no directory club still gets its own
+                # per-contact merge_vars overrides applied.
+                for cid, ov, mc in (await s.execute(
+                    select(CommsContact.id, CommsContact.merge_vars, MarketingClub)
+                    .outerjoin(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
                     .where(CommsContact.id.in_(cids))
                 )).all():
-                    mc_vars[cid] = _marketing_vars(mc)
+                    merged = dict(_marketing_vars(mc))
+                    for k, v in (ov or {}).items():
+                        if k in EDITABLE_MERGE_KEYS and v is not None and str(v).strip() != "":
+                            merged[k] = v
+                    if merged:
+                        mc_vars[cid] = merged
             # Snapshot to plain data so the network phase touches no ORM objects.
             jobs = [{
                 "rid": r.id,
@@ -1169,19 +1255,13 @@ async def get_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     mc = await db.get(MarketingClub, c.marketing_club_id) if c.marketing_club_id else None
     mvars = _marketing_vars(mc)
-    variables = {
-        "first_name": _first_name(c.name, c.email),
-        "name": (c.name or "").strip() or _first_name(c.name, c.email),
-        "email": c.email,
-        # {{club}} = the recipient's club (directory club if linked, else this org).
-        "club": mvars.get("club") or (club.name or ""),
-    }
-    # The association/utm_code/state/website set only applies to BetterCricket
-    # directory outreach, so only surface them in that context.
-    if org_is_outreach(club):
-        for k in ("association", "utm_code", "state", "website"):
-            variables[k] = mvars.get(k, "")
-    variables["unsubscribe_url"] = "(unique per recipient, added automatically)"
+    resolved = _resolved_vars(c, mc, club)
+    keys = _context_var_keys(club)
+    # The full org-context set, resolved (possibly blank) for THIS contact — shown
+    # the same way no matter how the contact was added.
+    variables = {k: resolved.get(k, "") for k in keys if k != "unsubscribe_url"}
+    if "unsubscribe_url" in keys:
+        variables["unsubscribe_url"] = "(unique per recipient, added automatically)"
     return {
         "id": str(c.id), "email": c.email, "name": c.name, "source": c.source,
         "subscribed": c.subscribed, "bounced": c.bounced,
@@ -1192,6 +1272,10 @@ async def get_contact(
             "utm_code": mc.utm_code, "state": mc.state, "website": mc.website_url,
         } if mc else None),
         "variables": variables,
+        # Which variables can be edited, and the raw per-contact override stored for
+        # each (so the editor shows the override, not the resolved/derived value).
+        "editable": [k for k in keys if k != "unsubscribe_url"],
+        "overrides": {k: (c.merge_vars or {}).get(k, "") for k in EDITABLE_MERGE_KEYS},
     }
 
 

@@ -182,6 +182,12 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                         ? <a href={`mailto:${ct.email}`} className="text-pb-accent">{ct.email}</a>
                         : <span className="text-pb-faint">-</span>}
                       {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300">unsub</span>}
+                      {ct.exported && (
+                        <span className="ml-1 text-[10px] text-emerald-300 border border-emerald-500/40 rounded px-1"
+                              title="Already in BetterComms — a re-export will skip it (no duplicate)">
+                          exported
+                        </span>
+                      )}
                     </td>
                     <td className="py-0.5 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
                   </tr>
@@ -265,6 +271,7 @@ export default function SuperMarketing() {
     q: '', state: '', association: '', associations: [], postcode_from: '', postcode_to: '',
     contact: '', person: '', exclude_junior: false, exclude_emailed: false,
     exclude_carnival: false, exclude_school: false,
+    exclude_exported: false, exclude_suppressed: false,
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
@@ -439,7 +446,9 @@ export default function SuperMarketing() {
     setBusy('supp'); setMsg('')
     try {
       const r = await api.mktSyncSuppressions()
-      setMsg(`Synced ${r.suppressed} suppression(s) back to the directory.`)
+      let m = `Synced ${r.suppressed} suppression(s) back to the directory.`
+      if (r.export_cleared) m += ` ${r.export_cleared} contact(s) deleted from BetterComms reset to not-exported.`
+      setMsg(m)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -501,12 +510,13 @@ export default function SuperMarketing() {
             {(filters.q || filters.association || filters.associations.length || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
               || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
-              || filters.exclude_school) && (
+              || filters.exclude_school || filters.exclude_exported || filters.exclude_suppressed) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                   postcode_from: '', postcode_to: '', contact: '',
                                                   person: '', exclude_junior: false, exclude_emailed: false,
-                                                  exclude_carnival: false, exclude_school: false })}>
+                                                  exclude_carnival: false, exclude_school: false,
+                                                  exclude_exported: false, exclude_suppressed: false })}>
                 Clear all
               </button>
             )}
@@ -602,6 +612,18 @@ export default function SuperMarketing() {
               <input type="checkbox" checked={filters.exclude_emailed}
                      onChange={(e) => setFilters(f => ({ ...f, exclude_emailed: e.target.checked }))} />
               Already-emailed
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
+                   title="Hide clubs with no emailable contact left that isn't already in BetterComms">
+              <input type="checkbox" checked={filters.exclude_exported}
+                     onChange={(e) => setFilters(f => ({ ...f, exclude_exported: e.target.checked }))} />
+              Exported
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
+                   title="Hide clubs with no subscribed (non-opted-out) emailable contact">
+              <input type="checkbox" checked={filters.exclude_suppressed}
+                     onChange={(e) => setFilters(f => ({ ...f, exclude_suppressed: e.target.checked }))} />
+              Suppressed
             </label>
           </div>
         </section>
@@ -700,6 +722,7 @@ export default function SuperMarketing() {
                   const groupName = c.association_name || 'Unassigned'
                   const prevName = idx > 0 ? (clubs[idx - 1].association_name || 'Unassigned') : null
                   const showHeader = view.group && groupName !== prevName
+                  const exportedCount = (c.contacts || []).filter(ct => ct.exported).length
                   return [
                     showHeader && (
                       <tr key={c.id + '-h'} className="bg-pb-surface2/70 border-t-2 border-pb-accent/30">
@@ -725,6 +748,12 @@ export default function SuperMarketing() {
                           {c.excluded && (
                             <span className="text-[10px] text-red-300 border border-red-500/40 rounded px-1"
                                   title="Excluded from all outreach">excluded</span>
+                          )}
+                          {exportedCount > 0 && (
+                            <span className="text-[10px] text-emerald-300 border border-emerald-500/40 rounded px-1"
+                                  title={`${exportedCount} contact(s) already in BetterComms`}>
+                              {exportedCount} exported
+                            </span>
                           )}
                         </button>
                         {c.website_url && (
