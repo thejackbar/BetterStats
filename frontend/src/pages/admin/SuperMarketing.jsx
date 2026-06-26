@@ -183,7 +183,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                         : <span className="text-pb-faint">-</span>}
                       {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300">unsub</span>}
                       {ct.exported && (
-                        <span className="ml-1 text-[10px] text-emerald-300 border border-emerald-500/40 rounded px-1"
+                        <span className="ml-1 text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1"
                               title="Already in BetterComms — a re-export will skip it (no duplicate)">
                           exported
                         </span>
@@ -750,7 +750,7 @@ export default function SuperMarketing() {
                                   title="Excluded from all outreach">excluded</span>
                           )}
                           {exportedCount > 0 && (
-                            <span className="text-[10px] text-emerald-300 border border-emerald-500/40 rounded px-1"
+                            <span className="text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1"
                                   title={`${exportedCount} contact(s) already in BetterComms`}>
                               {exportedCount} exported
                             </span>
