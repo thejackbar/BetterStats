@@ -1421,6 +1421,11 @@ export const api = {
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
   iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
+  // Teammates: who a player has shared a side with (most games first), and the
+  // with-vs-without split of the focal player's output alongside one teammate.
+  iqTeammates: (playerId) => request(`/iq/teammates/${encodeURIComponent(playerId)}`),
+  iqTeammateSplit: (playerId, teammateId) =>
+    request(`/iq/teammates/${encodeURIComponent(playerId)}/with/${encodeURIComponent(teammateId)}`),
   // Manual scouting card for one of OUR players (batting/bowling intel — the
   // ball-level read CA can't give us). Mirror of the opponent player tags.
   iqPlayerScouting: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`),
