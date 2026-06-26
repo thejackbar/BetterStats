@@ -140,6 +140,23 @@ export default function AdminLayout({ children }) {
     } catch {}
   }, [])
 
+  // Mark all read without closing — clears the unread (sync runs, milestones,
+  // what's new), refetches so the panel settles on what's coming up, and
+  // refreshes the bell badge. Marking seen is the load-bearing step; the
+  // refetch is best-effort so a hiccup there still leaves the badge cleared.
+  const clearBell = useCallback(async () => {
+    try {
+      await api.markNotificationsSeen(SITE_VERSION)
+    } catch {
+      return
+    }
+    try {
+      const s = await api.getNotificationsSummary()
+      setBellSummary(s)
+    } catch {}
+    setBellRefresh(r => r + 1)
+  }, [])
+
   // Auto-open on login if there's anything unseen (sync runs, milestones,
   // pending requests, or a changelog entry newer than last_seen_version).
   useEffect(() => {
@@ -396,7 +413,7 @@ export default function AdminLayout({ children }) {
         </main>
       </div>
 
-      <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} />
+      <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
     </div>
   )
 }

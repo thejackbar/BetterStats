@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CHANGELOG } from '../data/changelog'
 
@@ -121,7 +121,14 @@ function UpcomingMilestoneRow({ milestone }) {
   )
 }
 
-export default function NotificationModal({ isOpen, summary, error, onClose }) {
+export default function NotificationModal({ isOpen, summary, error, onClose, onClear }) {
+  // `cleared` collapses the time-based sections the moment you mark all read, so
+  // the panel settles to just what's coming up without waiting on the refetch
+  // (and covers the date-granular milestone window, which a fresh "seen" stamp
+  // can't shift within the same day).
+  const [cleared, setCleared] = useState(false)
+  const [clearing, setClearing] = useState(false)
+
   useEffect(() => {
     if (!isOpen) return
     const handler = e => { if (e.key === 'Escape') onClose() }
@@ -129,18 +136,36 @@ export default function NotificationModal({ isOpen, summary, error, onClose }) {
     return () => window.removeEventListener('keydown', handler)
   }, [isOpen, onClose])
 
+  // Fresh open starts un-cleared so genuinely new items show again.
+  useEffect(() => { if (isOpen) setCleared(false) }, [isOpen])
+
   if (!isOpen) return null
 
   const loading = !summary && !error
-  const newEntries = getNewEntries(summary?.last_seen_version)
-  const syncRuns = summary?.sync_runs || []
-  const newMilestones = summary?.new_milestones || []
+  const newEntries = cleared ? [] : getNewEntries(summary?.last_seen_version)
+  const syncRuns = cleared ? [] : (summary?.sync_runs || [])
+  const newMilestones = cleared ? [] : (summary?.new_milestones || [])
   const upcoming = (summary?.upcoming_milestones || []).slice(0, 5)
   const pendingCount = summary?.pending_sync_requests || 0
   const pendingReportsCount = summary?.pending_reports_count || 0
   const failedSyncs = syncRuns.filter(r => r.status === 'error')
 
   const hasSinceLastVisit = syncRuns.length > 0 || newMilestones.length > 0
+  // Only the time-based items are "readable" — pending requests / report
+  // approvals are live state and stay put until they're actually dealt with.
+  const canClear = !cleared && !!onClear && (hasSinceLastVisit || newEntries.length > 0)
+
+  const handleClear = async () => {
+    if (clearing || !onClear) return
+    setClearing(true)
+    try {
+      await onClear()
+      setCleared(true)
+    } finally {
+      setClearing(false)
+    }
+  }
+
   const hasAnything =
     newEntries.length > 0 ||
     hasSinceLastVisit ||
@@ -161,15 +186,26 @@ export default function NotificationModal({ isOpen, summary, error, onClose }) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b pb-hairline-b shrink-0">
           <span className="font-mono text-[11px] tracking-wide3 text-pb-faintest uppercase">Notifications</span>
-          <button
-            onClick={onClose}
-            className="p-1 rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
-            aria-label="Close notifications"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1.5">
+            {canClear && (
+              <button
+                onClick={handleClear}
+                disabled={clearing}
+                className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-2 py-1 hover:bg-pb-surface2 transition disabled:opacity-50"
+              >
+                {clearing ? 'Clearing…' : 'Mark all read'}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1 rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
+              aria-label="Close notifications"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Scrollable content */}
@@ -185,6 +221,20 @@ export default function NotificationModal({ isOpen, summary, error, onClose }) {
               style={{ borderColor: 'var(--pb-negative)', color: 'var(--pb-negative)', background: 'color-mix(in srgb, var(--pb-negative) 8%, transparent)' }}
             >
               Couldn't load notifications: {error}
+            </div>
+          )}
+
+          {/* Confirmation after Mark all read — leaves the panel on the
+              forward-looking milestones. */}
+          {cleared && (
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm"
+              style={{ borderColor: 'var(--pb-positive)', color: 'var(--pb-positive)', background: 'color-mix(in srgb, var(--pb-positive) 8%, transparent)' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <span>All caught up.{upcoming.length > 0 ? " Here's what's coming up." : ''}</span>
             </div>
           )}
 
@@ -307,7 +357,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose }) {
             </section>
           )}
 
-          {!loading && !error && !hasAnything && (
+          {!loading && !error && !cleared && !hasAnything && (
             <p className="text-sm text-pb-faint text-center py-6">
               Nothing new since your last visit.
             </p>
