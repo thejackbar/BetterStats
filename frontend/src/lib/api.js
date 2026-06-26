@@ -1525,6 +1525,7 @@ export const api = {
   commsGetContext: () => request('/club-admin/comms/context'),
   commsSetMarketingOrg: (organisationId) =>
     request('/club-admin/comms/marketing-org', { method: 'POST', body: JSON.stringify({ organisation_id: organisationId }) }),
+  commsEnsureMarketingOrg: () => request('/club-admin/comms/marketing-org/ensure', { method: 'POST' }),
   // Deliverability (Phase 1): global suppression + per-contact event history.
   commsListSuppressions: () => request('/club-admin/comms/suppressions'),
   commsRemoveSuppression: (email) =>

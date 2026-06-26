@@ -882,6 +882,37 @@ async def set_marketing_org(
     return {"status": "ok", "marketing_org": {"id": str(target.id), "name": target.name}}
 
 
+@router.post("/marketing-org/ensure")
+async def ensure_marketing_org(
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Designate the BetterCricket marketing org, creating a dedicated platform
+    org if none exists yet. The outreach org is NOT a real cricket club — turning
+    a club into it would co-mingle their audiences — so when nothing is designated
+    we mint a dedicated 'BetterCricket' org and flag it. Idempotent: returns the
+    existing one if already set."""
+    existing = await get_outreach_org(db)
+    if existing:
+        return {"status": "ok", "created": False,
+                "marketing_org": {"id": str(existing.id), "name": existing.name}}
+    base = slug = "bettercricket-marketing"
+    n = 1
+    while await db.scalar(select(Organisation.id).where(Organisation.slug == slug)):
+        n += 1
+        slug = f"{base}-{n}"
+    # Not a real club: a fresh uuid (never synced against Cricket Australia) and
+    # is_active False so it stays off public club listings; the super admin reaches
+    # it via this context bar / the club switcher, not a login.
+    org = Organisation(id=uuid.uuid4(), name="BetterCricket", slug=slug,
+                       is_active=False, is_marketing_outreach=True)
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+    return {"status": "ok", "created": True,
+            "marketing_org": {"id": str(org.id), "name": org.name}}
+
+
 # ─── Deliverability: suppression + event history (Phase 1) ───────────────────
 
 @router.get("/suppressions")
