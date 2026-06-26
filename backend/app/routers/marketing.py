@@ -67,6 +67,22 @@ async def list_associations(db: AsyncSession = Depends(get_db), _=Depends(requir
     return await cd.list_associations(db)
 
 
+class ShortcodeBody(BaseModel):
+    short_code: str
+
+
+@router.patch("/associations/{assoc_id}/shortcode")
+async def set_assoc_shortcode(assoc_id: str, body: ShortcodeBody,
+                              db: AsyncSession = Depends(get_db),
+                              _=Depends(require_super_admin)):
+    """Edit an association's (searchable) short code. Blank resets it to the
+    name-derived acronym."""
+    res = await cd.set_association_shortcode(db, assoc_id, body.short_code)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Association not found")
+    return res
+
+
 class ResolveAssocBody(BaseModel):
     id: str
     name: str

@@ -39,7 +39,7 @@ function CrawlStatus({ status }) {
 
 // Searchable multi-select of associations. Selecting several filters clubs that
 // belong to ANY of them. The ✕ on the button clears all selections.
-function AssocMultiSelect({ options, selected, onChange }) {
+function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const ref = useRef(null)
@@ -73,19 +73,27 @@ function AssocMultiSelect({ options, selected, onChange }) {
             <button type="button" className="text-[11px] text-pb-faint hover:text-pb-accent mb-1"
                     onClick={() => onChange([])}>clear selection</button>
           )}
+          <div className="text-[10px] text-pb-faint px-1 mb-1">Short code is editable — type and press Enter (blank resets to default).</div>
           {!filtered.length && <div className="text-xs text-pb-faint px-1 py-2">No matches.</div>}
           {filtered.map(o => (
-            <label key={o.name}
-                   className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
-              <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
-              <span className="flex-1 truncate" title={o.name}>
-                {o.name}
-                {o.short && <span className="text-[10px] text-pb-faint ml-1">{o.short}</span>}
-              </span>
+            <div key={o.name}
+                 className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded">
+              <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
+                <span className="truncate" title={o.name}>{o.name}</span>
+              </label>
               {o.resolved === false
-                ? <span className="text-[10px] text-pb-faint italic" title="Roster not fetched yet — select and click Fetch full roster">not fetched</span>
-                : <span className="text-pb-faint">{o.count}</span>}
-            </label>
+                ? <span className="text-[10px] text-pb-faint italic shrink-0" title="Roster not fetched yet — select and click Fetch full roster">not fetched</span>
+                : <span className="text-pb-faint shrink-0">{o.count}</span>}
+              <input
+                key={`sc-${o.id}-${o.short || ''}`}
+                defaultValue={o.short || ''}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onSaveShort(o.id, e.target.value); e.target.blur() } }}
+                onBlur={(e) => { if ((e.target.value || '') !== (o.short || '')) onSaveShort(o.id, e.target.value) }}
+                title="Short code — edit and press Enter (blank resets to default)"
+                className="w-16 shrink-0 text-[10px] uppercase bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 focus:outline-none focus:border-pb-accent" />
+            </div>
           ))}
         </div>
       )}
@@ -353,6 +361,13 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message || 'Could not start the roster fetch.') } finally { setBusy('') }
   }
 
+  const saveAssocShort = async (id, short) => {
+    try {
+      const r = await api.mktSetAssocShortcode(id, short)
+      setAssocOptions(opts => opts.map(o => o.id === id ? { ...o, short: r.short } : o))
+    } catch (e) { setError(e.message || 'Could not update the short code.') }
+  }
+
   const saveUtm = async (clubId, utm) => {
     try {
       const r = await api.mktSetClubUtm(clubId, utm)
@@ -441,6 +456,7 @@ export default function SuperMarketing() {
             options={assocOptions}
             selected={filters.associations}
             onChange={(a) => setFilters(f => ({ ...f, associations: a }))}
+            onSaveShort={saveAssocShort}
           />
           {filters.associations.length > 0 && (
             <button className={BTN} disabled={busy === 'resolve'} onClick={resolveSelectedAssociations}

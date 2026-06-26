@@ -967,11 +967,30 @@ async def register_association(session: AsyncSession, assoc_id: str, name: str) 
     derived short code (e.g. WASTCA) so it's searchable by acronym."""
     if not assoc_id:
         return
+    # Set the derived short code on first insert only; never overwrite on the
+    # daily re-register, so a hand-edited code persists.
     await session.execute(text(
         "INSERT INTO marketing_associations (id, name, short_code) VALUES (:id, :name, :short) "
         "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "
-        "short_code = EXCLUDED.short_code, updated_at = NOW()"),
+        "short_code = COALESCE(marketing_associations.short_code, EXCLUDED.short_code), "
+        "updated_at = NOW()"),
         {"id": assoc_id, "name": name or "", "short": assoc_acronym(name)})
+
+
+async def set_association_shortcode(session: AsyncSession, assoc_id: str,
+                                    short: str) -> Optional[dict]:
+    """Manually set an association's short code. Blank resets it to the
+    name-derived acronym. Returns the new value, or None if not found."""
+    name = await session.scalar(text(
+        "SELECT name FROM marketing_associations WHERE id = :id"), {"id": assoc_id})
+    if name is None:
+        return None
+    code = (short or "").strip().upper() or assoc_acronym(name)
+    await session.execute(text(
+        "UPDATE marketing_associations SET short_code = :c, updated_at = NOW() WHERE id = :id"),
+        {"c": code or None, "id": assoc_id})
+    await session.commit()
+    return {"id": assoc_id, "short": code}
 
 
 async def shortcode_association_names(session: AsyncSession, text_q: str) -> list[str]:
