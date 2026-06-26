@@ -279,6 +279,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_assoc_resolve "
             "ON marketing_associations(last_resolved_at)"))
+        # Migration 105: derived association short code (acronym) for shortcode search.
+        await conn.execute(text(
+            "ALTER TABLE marketing_associations ADD COLUMN IF NOT EXISTS short_code TEXT"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
