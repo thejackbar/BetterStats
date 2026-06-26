@@ -58,13 +58,59 @@ def _window_start(last_seen: Optional[datetime]) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=_DEFAULT_WINDOW_DAYS)
 
 
+def _empty_count(current_user: User) -> dict:
+    return {
+        "unseen_count": 0,
+        "failed_sync_count": 0,
+        "pending_reports_count": 0,
+        "merch_alert_count": 0,
+        "last_seen_version": getattr(current_user, "last_seen_app_version", None),
+    }
+
+
+def _empty_summary(current_user: User) -> dict:
+    return {
+        "last_seen_at": None,
+        "last_seen_version": getattr(current_user, "last_seen_app_version", None),
+        "unseen_count": 0,
+        "failed_sync_count": 0,
+        "sync_runs": [],
+        "new_milestones": [],
+        "upcoming_milestones": [],
+        "pending_sync_requests": 0,
+        "pending_reports_count": 0,
+        "merch_alerts": {"low_stock": [], "expiring": [], "service_due": [], "total": 0},
+    }
+
+
 @router.get("/notifications/count")
 async def get_notifications_count(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cheap badge-count poll — called every 60 s by the bell icon."""
+    """Cheap badge-count poll — called every 60 s by the bell icon.
+
+    Wrapped in a top-level guard so the bell badge can never 500: on any
+    unexpected failure it logs, rolls back, and returns a zero count. The
+    per-section ``_safe()`` guards below cover the common case; this is the
+    final backstop for the response assembly and anything they miss."""
+    try:
+        return await _build_notifications_count(current_user, club, db)
+    except Exception:
+        logger.exception("notifications: count failed at top level")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return _empty_count(current_user)
+
+
+async def _build_notifications_count(
+    current_user: User,
+    club: Organisation,
+    db: AsyncSession,
+):
     last_seen = current_user.last_notification_seen_at
     ws = _window_start(last_seen)
     cutoff_date = ws.date()
@@ -139,7 +185,29 @@ async def get_notifications_summary(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Full summary — fetched once when the notification modal opens."""
+    """Full summary — fetched once when the notification modal opens.
+
+    Same top-level guard as the count poll: the panel renders whatever it can
+    via the per-section ``_safe()`` guards, and this backstop turns any
+    remaining failure (response assembly, an un-run migration on this club,
+    anything unforeseen) into a valid empty payload instead of the bare 500
+    that surfaced as "Couldn't load notifications" in the bell."""
+    try:
+        return await _build_notifications_summary(current_user, club, db)
+    except Exception:
+        logger.exception("notifications: summary failed at top level")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return _empty_summary(current_user)
+
+
+async def _build_notifications_summary(
+    current_user: User,
+    club: Organisation,
+    db: AsyncSession,
+):
     last_seen = current_user.last_notification_seen_at
     ws = _window_start(last_seen)
     cutoff_date = ws.date()
@@ -230,7 +298,7 @@ async def get_notifications_summary(
         return await get_merch_alerts(db, club.id)
     merch = await _safe(db, _merch, _empty_merch, what="summary.merch")
 
-    unseen_count = len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count + merch["total"]
+    unseen_count = len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count + (merch.get("total", 0) if isinstance(merch, dict) else 0)
     failed_sync_count = sum(1 for r in sync_runs if r["status"] == "error")
 
     return {
