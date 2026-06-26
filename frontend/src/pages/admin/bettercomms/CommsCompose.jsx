@@ -32,6 +32,8 @@ export default function CommsCompose() {
   const [templates, setTemplates] = useState([])
   const [utm, setUtm] = useState({})
   const [isMarketing, setIsMarketing] = useState(false)
+  const [preview, setPreview] = useState(null) // { total, index, html, subject, contact }
+  const [previewBusy, setPreviewBusy] = useState(false)
   const [testEmail, setTestEmail] = useState('')
   const [showPreview, setShowPreview] = useState(false)
   const [live, setLive] = useState(true)
@@ -86,6 +88,26 @@ export default function CommsCompose() {
     const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience, utm })
     setCampaign(c)
     return c
+  }
+
+  // Render the email exactly as a real recipient in the audience will see it.
+  // Saves the draft first so the server renders current content.
+  const openPreview = async () => {
+    setPreviewBusy(true); setMsg(null)
+    try {
+      await save()
+      setPreview(await api.commsPreviewCampaign(id, 0))
+    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
+    finally { setPreviewBusy(false) }
+  }
+  const pagePreview = async (delta) => {
+    if (!preview) return
+    const next = Math.max(0, Math.min((preview.total || 1) - 1, (preview.index || 0) + delta))
+    if (next === preview.index) return
+    setPreviewBusy(true)
+    try { setPreview(await api.commsPreviewCampaign(id, next)) }
+    catch (e) { setMsg({ kind: 'error', text: e.message }) }
+    finally { setPreviewBusy(false) }
   }
 
   const loadTemplate = async (tid) => {
@@ -190,24 +212,14 @@ export default function CommsCompose() {
 
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm text-pb-faint">Message</label>
-              <button onClick={() => setShowPreview(p => !p)} className="text-xs text-pb-faint hover:text-pb-text underline">
-                {showPreview ? 'Edit' : 'Preview'}
+              <button onClick={openPreview} disabled={previewBusy} className="text-xs text-pb-faint hover:text-pb-text underline disabled:opacity-50">
+                {previewBusy ? 'Loading…' : 'Preview email'}
               </button>
             </div>
 
-            {showPreview ? (
-              <div className="pb-card p-4 mb-2 min-h-[180px]">
-                <div className="font-medium text-pb-text mb-2">{mergeSample(subject) || '(no subject)'}</div>
-                <div className="text-pb-faint text-sm" dangerouslySetInnerHTML={{ __html: mergeSample(bodyToHtml(body)) }} />
-                <div className="mt-4 pt-3 pb-hairline-t text-pb-faintest text-xs">
-                  Your club footer + a one-click unsubscribe link are added automatically.
-                </div>
-              </div>
-            ) : (
-              <textarea value={body} onChange={e => setBody(e.target.value)} rows={10}
-                placeholder={'Hi {{first_name}},\n\nWrite your message here…'}
-                className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline font-sans text-sm mb-2" />
-            )}
+            <textarea value={body} onChange={e => setBody(e.target.value)} rows={10}
+              placeholder={'Hi {{first_name}},\n\nWrite your message here…'}
+              className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline font-sans text-sm mb-2" />
             <div className="text-pb-faintest text-xs mb-5">
               Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club}}'}</code>.
             </div>
@@ -250,7 +262,10 @@ export default function CommsCompose() {
               <div className="pb-card p-4 mb-4">
                 <div className="text-sm text-pb-text mb-1">UTM link tracking</div>
                 <div className="text-pb-faintest text-xs mb-3">
-                  BetterCricket marketing only. These tags are added to every link in this email so clicks show up in Usage.
+                  BetterCricket marketing only. Two ways to use these: leave them and they are added to every untagged link
+                  automatically, or place them yourself in a link, e.g.{' '}
+                  <code className="text-pb-faint">?utm_source=&#123;&#123;utm_code&#125;&#125;&amp;utm_medium=&#123;&#123;utm_medium&#125;&#125;&amp;utm_campaign=&#123;&#123;utm_campaign&#125;&#125;</code>.
+                  A link you tag by hand is left as-is.
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[['utm_source', 'Source', 'e.g. bettercricket'], ['utm_medium', 'Medium', 'e.g. email'], ['utm_campaign', 'Campaign', 'e.g. winter-2026']].map(([k, label, ph]) => (
@@ -293,6 +308,36 @@ export default function CommsCompose() {
           </>
         )}
       </div>
+
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setPreview(null)}>
+          <div className="bg-pb-surface border pb-hairline rounded-lg shadow-xl w-full max-w-2xl mt-[6vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 pb-hairline-b gap-3">
+              <div className="min-w-0">
+                <div className="text-pb-text font-medium truncate">{preview.subject || '(no subject)'}</div>
+                <div className="text-pb-faintest text-xs truncate">
+                  {preview.contact
+                    ? <>To {preview.contact.name || preview.contact.email} · contact {(preview.index || 0) + 1} of {preview.total}</>
+                    : 'No audience selected yet — showing a sample recipient.'}
+                </div>
+              </div>
+              <button onClick={() => setPreview(null)} className="text-pb-faint hover:text-pb-text text-lg px-1 shrink-0">✕</button>
+            </div>
+            <div className="p-3">
+              <iframe title="email preview" srcDoc={preview.html} className="w-full rounded border pb-hairline bg-white" style={{ height: 460 }} />
+              {preview.total > 1 && (
+                <div className="flex items-center justify-between mt-3">
+                  <button onClick={() => pagePreview(-1)} disabled={previewBusy || preview.index <= 0}
+                    className="px-3 py-1.5 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-40">← Previous</button>
+                  <span className="text-pb-faintest text-xs">{(preview.index || 0) + 1} / {preview.total}</span>
+                  <button onClick={() => pagePreview(1)} disabled={previewBusy || preview.index >= preview.total - 1}
+                    className="px-3 py-1.5 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-40">Next →</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </BetterCommsLayout>
   )
 }

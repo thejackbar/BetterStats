@@ -301,12 +301,26 @@ MERGE_VARIABLES = [
     {"name": "utm_code", "desc": "The recipient club's unique UTM code, for link tracking", "marketing_only": True},
     {"name": "state", "desc": "The recipient club's state", "marketing_only": True},
     {"name": "website", "desc": "The recipient club's website", "marketing_only": True},
+    {"name": "utm_source", "desc": "Source from this email's UTM section (place inside a link)", "marketing_only": True},
+    {"name": "utm_medium", "desc": "Medium from this email's UTM section (place inside a link)", "marketing_only": True},
+    {"name": "utm_campaign", "desc": "Campaign from this email's UTM section (place inside a link)", "marketing_only": True},
 ]
 
 # Merge-variable keys a user can override per contact (stored in
 # comms_contacts.merge_vars). name/email live in their own columns and are edited
 # directly; unsubscribe_url is per-recipient and never editable.
 EDITABLE_MERGE_KEYS = ("first_name", "club", "association", "utm_code", "state", "website")
+
+
+def _send_vars(c: "CommsContact", mc: "Optional[MarketingClub]") -> dict:
+    """The per-contact extra merge vars used at send time: the linked directory
+    club's vars plus the contact's own merge_vars overrides. Mirrors the build in
+    _run_send so a preview matches the real send exactly."""
+    merged = dict(_marketing_vars(mc))
+    for k, v in (c.merge_vars or {}).items():
+        if k in EDITABLE_MERGE_KEYS and v is not None and str(v).strip() != "":
+            merged[k] = v
+    return merged
 
 
 def _context_var_keys(org: Organisation) -> list:
@@ -370,8 +384,16 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
         # Per-recipient directory vars (club / association / utm_code …) override
         # the defaults (e.g. {{club}} → the prospect club's name).
         ctx.update(extra_vars)
-    subject = _merge(subject or "", ctx)
     apply_utm = org_is_outreach(org)  # UTM is a BetterCricket-marketing-only feature
+    if apply_utm:
+        # Expose the email's UTM-section values as merge variables, so a template
+        # can build hrefs by hand, e.g.
+        #   ?utm_source={{utm_code}}&utm_medium={{utm_medium}}&utm_campaign={{utm_campaign}}
+        u = utm or {}
+        ctx.setdefault("utm_source", str(u.get("utm_source") or ""))
+        ctx.setdefault("utm_medium", str(u.get("utm_medium") or ""))
+        ctx.setdefault("utm_campaign", str(u.get("utm_campaign") or ""))
+    subject = _merge(subject or "", ctx)
     club_name = ctx.get("club") or org.name or ""
     unsub_text = _unsub_sentence_text(club_name, unsub_url, apply_utm)
     text_tail = f"\n\n—\n{footer}\n{unsub_text}" if footer else f"\n\n—\n{unsub_text}"
@@ -748,6 +770,43 @@ async def audience_preview(
         "count": len(contacts),
         "sample": [{"email": c.email, "name": c.name} for c in contacts[:8]],
     }
+
+
+@router.get("/campaigns/{campaign_id}/preview")
+async def preview_campaign(
+    campaign_id: str,
+    index: int = 0,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Render the email exactly as the Nth contact in the chosen audience will
+    receive it (true merged values + footer), so you can page through real
+    recipients. Falls back to a sample when the audience is empty."""
+    c = await _campaign_or_404(db, club, campaign_id)
+    contacts = await _resolve_audience(db, club, c.audience or {"type": "all"})
+    total = len(contacts)
+    _, _, _, footer = _sender(club)
+    if total == 0:
+        sample = ({"club": "Sample Cricket Club", "association": "Sample Association",
+                   "utm_code": "sample-cricket-club", "state": "WA",
+                   "website": "https://example.com"} if org_is_outreach(club) else None)
+        unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
+        subject, html, _ = _render_parts(
+            club, subject=c.subject or "", body_html=c.body_html or "", utm=c.utm or {},
+            email="sample@example.com", name="Sam Example", unsub_url=unsub, footer=footer,
+            extra_vars=sample)
+        return {"total": 0, "index": 0, "html": html, "subject": subject, "contact": None}
+    idx = max(0, min(index, total - 1))
+    ct = contacts[idx]
+    mc = await db.get(MarketingClub, ct.marketing_club_id) if ct.marketing_club_id else None
+    unsub = _unsub_url(_unsub_token(club.id, ct.id))
+    subject, html, _ = _render_parts(
+        club, subject=c.subject or "", body_html=c.body_html or "", utm=c.utm or {},
+        email=ct.email, name=ct.name, unsub_url=unsub, footer=footer,
+        extra_vars=_send_vars(ct, mc))
+    return {"total": total, "index": idx, "html": html, "subject": subject,
+            "contact": {"name": ct.name, "email": ct.email}}
 
 
 # ─── Campaigns ───────────────────────────────────────────────────────────────

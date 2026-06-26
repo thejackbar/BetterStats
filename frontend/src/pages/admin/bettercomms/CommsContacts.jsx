@@ -163,7 +163,7 @@ export default function CommsContacts() {
 // per-contact merge_vars overrides. unsubscribe_url is auto and read-only.
 const COLUMN_KEYS = ['name', 'email']
 
-function ContactDetailModal({ id, onClose, onSaved }) {
+export function ContactDetailModal({ id, onClose, onSaved }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState('')

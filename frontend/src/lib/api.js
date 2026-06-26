@@ -1517,6 +1517,7 @@ export const api = {
   commsSendCampaign: (id) =>
     request(`/club-admin/comms/campaigns/${id}/send`, { method: 'POST' }),
   commsCampaignStatus: (id) => request(`/club-admin/comms/campaigns/${id}/status`),
+  commsPreviewCampaign: (id, index = 0) => request(`/club-admin/comms/campaigns/${id}/preview?index=${index}`),
 
   commsGetSettings: () => request('/club-admin/comms/settings'),
   commsSetSettings: (data) =>

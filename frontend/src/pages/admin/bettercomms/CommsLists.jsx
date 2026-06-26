@@ -1,94 +1,93 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { ContactDetailModal } from './CommsContacts'
 
-// Add-members panel: search the club's contacts and tick the ones to add.
-function AddMembers({ listId, memberIds, onAdded }) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
-  const [picked, setPicked] = useState({})
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    let live = true
-    const t = setTimeout(() => {
-      api.commsListContacts({ query }).then(rows => { if (live) setResults(Array.isArray(rows) ? rows : []) }).catch(() => {})
-    }, 250)
-    return () => { live = false; clearTimeout(t) }
-  }, [query])
-
-  const toggle = (id) => setPicked(p => ({ ...p, [id]: !p[id] }))
-  const add = async () => {
-    const ids = Object.keys(picked).filter(k => picked[k])
-    if (!ids.length) return
-    setBusy(true)
-    try { await api.commsAddListMembers(listId, ids); setPicked({}); onAdded() }
-    finally { setBusy(false) }
-  }
-
-  const candidates = results.filter(c => !memberIds.has(c.id))
-
+function ContactRow({ c, action, onDetails, last }) {
   return (
-    <div className="mt-3 pt-3 pb-hairline-t">
-      <div className="flex items-center gap-2 mb-2">
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search contacts to add…"
-          className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-        <button onClick={add} disabled={busy || !Object.values(picked).some(Boolean)}
-          className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-          Add
-        </button>
-      </div>
-      <div className="max-h-52 overflow-y-auto">
-        {candidates.length === 0 ? (
-          <div className="text-pb-faintest text-xs py-2">No more contacts match.</div>
-        ) : candidates.slice(0, 50).map(c => (
-          <label key={c.id} className="flex items-center gap-2 py-1.5 cursor-pointer">
-            <input type="checkbox" checked={!!picked[c.id]} onChange={() => toggle(c.id)} />
-            <span className="text-sm text-pb-text truncate">{c.name || c.email}</span>
-            <span className="text-pb-faintest text-xs truncate">{c.email}</span>
-          </label>
-        ))}
-      </div>
+    <div className={`flex items-center justify-between gap-3 py-1.5 ${last ? '' : 'pb-hairline-t'}`}>
+      <button onClick={() => onDetails(c.id)} className="min-w-0 text-left hover:opacity-80 flex-1" title="View details">
+        <span className="text-sm text-pb-text truncate">{c.name || c.email}</span>
+        {c.name && <span className="text-pb-faintest text-xs ml-2 truncate">{c.email}</span>}
+      </button>
+      {action}
     </div>
   )
 }
 
 function ListDetail({ list, onChanged }) {
   const [members, setMembers] = useState(null)
-  const load = useCallback(() => {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [detailId, setDetailId] = useState(null)
+
+  const loadMembers = useCallback(() => {
     api.commsListMembers(list.id).then(setMembers).catch(() => setMembers([]))
   }, [list.id])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { loadMembers() }, [loadMembers])
 
-  const remove = async (cid) => {
-    await api.commsRemoveListMember(list.id, cid)
-    setMembers(m => (m || []).filter(x => x.id !== cid))
-    onChanged()
-  }
+  // Search ALL of the club's contacts (the previous version mishandled the
+  // {contacts,summary} response and always came up empty).
+  useEffect(() => {
+    let live = true
+    const t = setTimeout(() => {
+      api.commsListContacts({ query }).then(r => { if (live) setResults(r.contacts || []) }).catch(() => {})
+    }, 250)
+    return () => { live = false; clearTimeout(t) }
+  }, [query])
 
   const memberIds = new Set((members || []).map(m => m.id))
+  const q = query.trim().toLowerCase()
+  const matchesQ = (c) => !q || (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q)
+  const shownMembers = (members || []).filter(matchesQ)
+  const candidates = results.filter(c => !memberIds.has(c.id)).slice(0, 50)
+
+  const add = async (cid) => {
+    setBusy(true)
+    try { await api.commsAddListMembers(list.id, [cid]); loadMembers(); onChanged() }
+    finally { setBusy(false) }
+  }
+  const remove = async (cid) => {
+    setBusy(true)
+    try { await api.commsRemoveListMember(list.id, cid); loadMembers(); onChanged() }
+    finally { setBusy(false) }
+  }
 
   return (
     <div className="pb-card p-4">
-      <div className="text-sm text-pb-text font-medium mb-2">{list.name}</div>
+      <div className="text-sm text-pb-text font-medium mb-3">{list.name}</div>
+      <input value={query} onChange={e => setQuery(e.target.value)}
+        placeholder="Search contacts (in this list and not yet added)…"
+        className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-4" />
+
+      <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">In this list ({(members || []).length})</div>
       {members == null ? (
-        <div className="text-pb-faint text-sm">Loading…</div>
-      ) : members.length === 0 ? (
-        <div className="text-pb-faintest text-sm">No contacts in this list yet. Add some below.</div>
+        <div className="text-pb-faint text-sm mb-4">Loading…</div>
+      ) : shownMembers.length === 0 ? (
+        <div className="text-pb-faintest text-sm mb-4">{q ? 'No members match your search.' : 'No contacts in this list yet. Add some below.'}</div>
       ) : (
-        <div>
-          {members.map((m, i) => (
-            <div key={m.id} className={`flex items-center justify-between gap-3 py-1.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <div className="min-w-0">
-                <span className="text-sm text-pb-text truncate">{m.name || m.email}</span>
-                <span className="text-pb-faintest text-xs ml-2 truncate">{m.email}</span>
-              </div>
-              <button onClick={() => remove(m.id)} className="text-pb-faint hover:text-pb-red text-xs px-1 shrink-0">Remove</button>
-            </div>
+        <div className="mb-4">
+          {shownMembers.map((m, i) => (
+            <ContactRow key={m.id} c={m} last={i === 0} onDetails={setDetailId}
+              action={<button onClick={() => remove(m.id)} disabled={busy} className="text-pb-faint hover:text-pb-red text-xs px-1 shrink-0 disabled:opacity-50">Remove</button>} />
           ))}
         </div>
       )}
-      <AddMembers listId={list.id} memberIds={memberIds} onAdded={() => { load(); onChanged() }} />
+
+      <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2 pt-3 pb-hairline-t">Not in this list</div>
+      {candidates.length === 0 ? (
+        <div className="text-pb-faintest text-sm">{q ? 'No other contacts match.' : 'Every contact is already in this list.'}</div>
+      ) : (
+        <div className="max-h-72 overflow-y-auto">
+          {candidates.map((c, i) => (
+            <ContactRow key={c.id} c={c} last={i === 0} onDetails={setDetailId}
+              action={<button onClick={() => add(c.id)} disabled={busy} className="px-2.5 py-1 rounded text-xs font-medium text-white disabled:opacity-50 shrink-0" style={{ background: 'var(--pb-accent)' }}>Add</button>} />
+          ))}
+        </div>
+      )}
+
+      {detailId && <ContactDetailModal id={detailId} onClose={() => setDetailId(null)} onSaved={() => loadMembers()} />}
     </div>
   )
 }
