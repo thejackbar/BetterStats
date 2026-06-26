@@ -1,5 +1,6 @@
 import { CAP } from '../../lib/capabilities'
 import ModuleLayout from './ModuleLayout'
+import CommsContextBar from './CommsContextBar'
 
 // BetterComms — bulk email — runs as its own module surface (part of the
 // BetterAdmin umbrella), mirroring BetterFees.
@@ -12,6 +13,7 @@ const NAV = [
 export default function BetterCommsLayout({ children, title, actions }) {
   return (
     <ModuleLayout moduleName="Comms" nav={NAV} title={title} actions={actions}>
+      <CommsContextBar />
       {children}
     </ModuleLayout>
   )

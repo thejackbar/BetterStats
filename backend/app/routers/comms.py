@@ -30,17 +30,18 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import select, func, or_, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.config.settings import settings
 from app.models.db import (
-    User, Organisation, Player, FeeMember,
+    User, Organisation, Player, FeeMember, ClubMembership,
     CommsContact, CommsCampaign, CommsRecipient,
     async_session_maker, get_db,
 )
-from app.routers.auth import get_current_user, get_current_club
+from app.routers.auth import get_current_user, get_current_club, require_super_admin
+from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services.email_service import EmailMessage, get_email_provider, provider_status
 
 logger = logging.getLogger(__name__)
@@ -768,3 +769,70 @@ async def update_settings(
         org.comms_sender_footer = data.sender_footer.strip() or None
     await db.commit()
     return {"status": "ok"}
+
+
+# ─── Context: club vs BetterCricket marketing (super admin) ──────────────────
+#
+# BetterComms is scoped to the acted-as org (get_current_club), so a super admin
+# already manages a club's comms by switching into that club. BetterCricket's own
+# Clubs Directory campaigns live on a dedicated "outreach" org (a normal
+# organisations row flagged is_marketing_outreach). These endpoints let the
+# BetterComms UI surface that outreach org as a first-class choice — switch into
+# it with the existing act-as-club mechanism — instead of hunting for it in the
+# generic club switcher. Non-super admins see only their own club.
+
+@router.get("/context")
+async def comms_context(
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    membership = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == user.id)
+    )).scalar_one_or_none()
+    is_super = bool(membership and membership.role == "super_admin")
+
+    out = {
+        "is_super": is_super,
+        "current": {
+            "id": str(club.id),
+            "name": club.name,
+            "is_marketing": org_is_outreach(club),
+        },
+        "marketing_org": None,
+    }
+    if is_super:
+        mk = await get_outreach_org(db)
+        if mk:
+            out["marketing_org"] = {"id": str(mk.id), "name": mk.name}
+    return out
+
+
+class DesignateMarketingOrg(BaseModel):
+    organisation_id: str
+
+
+@router.post("/marketing-org")
+async def set_marketing_org(
+    data: DesignateMarketingOrg,
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Super-admin: designate which org runs BetterCricket's Clubs Directory
+    campaigns. Clears any previous holder first so at most one org is flagged
+    (the partial unique index would otherwise reject two true rows)."""
+    try:
+        target_id = uuid.UUID(data.organisation_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid organisation id")
+    target = await db.get(Organisation, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+    await db.execute(
+        update(Organisation)
+        .where(Organisation.is_marketing_outreach.is_(True),
+               Organisation.id != target_id)
+        .values(is_marketing_outreach=False))
+    target.is_marketing_outreach = True
+    await db.commit()
+    return {"status": "ok", "marketing_org": {"id": str(target.id), "name": target.name}}

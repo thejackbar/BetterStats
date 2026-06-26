@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import scouting_intel
+from app.services.bowling_style import bowling_class, bowling_label
 from app.services.aggregations import (
     get_bowling_by_batter_position,
     get_bowling_dismissal_breakdown,
@@ -1027,7 +1028,7 @@ async def list_players(session: AsyncSession, org_id: str, season_id: str | None
         text(
             f"""
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   p.player_role, p.skill_positions,
+                   p.player_role, p.skill_positions, p.bowling_action, p.bowling_type,
                    t.id::text AS squad_id, t.name AS squad_name,
                    COALESCE(SUM(st.runs), 0) AS runs,
                    COALESCE(SUM(st.batting_innings), 0) AS inns,
@@ -1063,6 +1064,8 @@ async def list_players(session: AsyncSession, org_id: str, season_id: str | None
             "wickets": r["wickets"], "matches": r["matches"],
             "bat_avg": bat_avg, "bowl_avg": bowl_avg,
             "role": r["player_role"], "is_keeper": keeper,
+            "bowling_style": bowling_label(r["bowling_action"], r["bowling_type"]),
+            "bowling_class": bowling_class(r["bowling_type"]),
             "squad_id": r["squad_id"], "squad_name": r["squad_name"],
         })
     return out

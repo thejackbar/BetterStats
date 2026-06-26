@@ -1424,6 +1424,11 @@ export const api = {
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
   iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
+  // Teammates: who a player has shared a side with (most games first), and the
+  // with-vs-without split of the focal player's output alongside one teammate.
+  iqTeammates: (playerId) => request(`/iq/teammates/${encodeURIComponent(playerId)}`),
+  iqTeammateSplit: (playerId, teammateId) =>
+    request(`/iq/teammates/${encodeURIComponent(playerId)}/with/${encodeURIComponent(teammateId)}`),
   // Manual scouting card for one of OUR players (batting/bowling intel — the
   // ball-level read CA can't give us). Mirror of the opponent player tags.
   iqPlayerScouting: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`),
@@ -1509,6 +1514,10 @@ export const api = {
   commsGetSettings: () => request('/club-admin/comms/settings'),
   commsSetSettings: (data) =>
     request('/club-admin/comms/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // Super-admin: club vs BetterCricket marketing-outreach context.
+  commsGetContext: () => request('/club-admin/comms/context'),
+  commsSetMarketingOrg: (organisationId) =>
+    request('/club-admin/comms/marketing-org', { method: 'POST', body: JSON.stringify({ organisation_id: organisationId }) }),
 
   // BetterFantasyCricket (admin surface)
   fantasyConfig: () => request('/club-admin/fantasy/config'),

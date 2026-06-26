@@ -121,6 +121,9 @@ async def list_clubs(
     exclude_carnival: bool = False,
     exclude_school: bool = False,
     kind: Optional[str] = "club",
+    group_by_association: bool = False,
+    assoc_sort: str = "asc",
+    club_sort: str = "asc",
     limit: int = Query(100, le=500),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -136,7 +139,16 @@ async def list_clubs(
     for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    stmt = stmt.order_by(MarketingClub.name.asc()).limit(limit).offset(offset)
+
+    def _dir(col, d):
+        return col.desc() if (d or "").lower() == "desc" else col.asc()
+    order = []
+    if group_by_association:
+        # group by the primary association; unassigned clubs sort last
+        ac = func.lower(MarketingClub.association_name)
+        order.append((ac.desc() if assoc_sort.lower() == "desc" else ac.asc()).nullslast())
+    order.append(_dir(func.lower(MarketingClub.name), club_sort))
+    stmt = stmt.order_by(*order).limit(limit).offset(offset)
     clubs = (await db.execute(stmt)).scalars().all()
 
     # Fetch all contacts for this page's clubs in ONE query (was N+1, which under

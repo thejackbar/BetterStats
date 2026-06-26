@@ -133,8 +133,13 @@ BetterCricket reuses the per-club BetterComms machinery for its own sends rather
 than a second send path. The flow:
 
 1. **Create a platform org** that owns the outreach campaigns (a normal
-   `organisations` row, e.g. slug `bettercricket-marketing`). Set
-   `marketing_outreach_org_slug` to it, or pass `organisation_id` to the export.
+   `organisations` row, e.g. slug `bettercricket-marketing`). Then designate it
+   as the outreach org one of three ways (the DB flag wins): flag it from the
+   BetterComms UI (a super admin uses the "Comms context" bar → "Set up
+   BetterCricket marketing", which sets `organisations.is_marketing_outreach`),
+   set `marketing_outreach_org_slug` to its slug, or pass `organisation_id` to
+   the export. The UI flag needs no env change or redeploy; at most one org can
+   hold it (partial unique index `uq_org_marketing_outreach`).
 2. **`POST /club-admin/marketing/export-comms`** materialises the filtered
    selection (subscribed, has email, not already a customer, optional state
    filter) into `comms_contacts` under that org. Existing suppressions on the

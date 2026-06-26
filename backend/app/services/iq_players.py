@@ -12,6 +12,8 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.bowling_style import bowling_class, bowling_label
+
 
 async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
     res = await session.execute(
@@ -20,6 +22,7 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             SELECT p.id::text AS player_id,
                    COALESCE(p.display_name_override, p.name) AS name,
                    p.player_role, p.skill_positions,
+                   p.bowling_action, p.bowling_type,
                    MAX(t.name) AS squad,
                    COALESCE(SUM(pss.matches) FILTER (WHERE s.organisation_id = CAST(:org AS UUID)), 0) AS matches,
                    COALESCE(SUM(pss.runs) FILTER (WHERE s.organisation_id = CAST(:org AS UUID)), 0) AS runs,
@@ -45,6 +48,8 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             "name": r["name"],
             "player_role": r["player_role"],
             "is_keeper": keeper,
+            "bowling_style": bowling_label(r["bowling_action"], r["bowling_type"]),
+            "bowling_class": bowling_class(r["bowling_type"]),
             "squad": r["squad"],
             "matches": int(r["matches"] or 0),
             "runs": int(r["runs"] or 0),

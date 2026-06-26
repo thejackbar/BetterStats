@@ -24,6 +24,7 @@ from sqlalchemy import func, update
 
 from app.config.settings import settings
 from app.models.db import CommsContact, MarketingClubContact, Organisation, get_db
+from app.services.marketing_org import org_is_outreach
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,7 @@ async def _unsubscribe(token: str, db: AsyncSession) -> tuple[str, str, str]:
         # never re-exported or re-emailed — no manual "Sync suppressions" needed.
         # Scoped to the outreach org so a club member opting out of THEIR club's
         # emails doesn't touch the separate marketing list, and vice versa.
-        outreach_slug = (settings.marketing_outreach_org_slug or "").strip()
-        if contact.email and org and outreach_slug and org.slug == outreach_slug:
+        if contact.email and org and org_is_outreach(org):
             await db.execute(
                 update(MarketingClubContact)
                 .where(func.lower(MarketingClubContact.email) == contact.email.lower(),
