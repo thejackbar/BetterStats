@@ -435,6 +435,9 @@ export const api = {
   mktResolveAssociation: (id, name) =>
     request('/club-admin/marketing/associations/resolve',
       { method: 'POST', body: JSON.stringify({ id, name }) }),
+  mktSetAssocShortcode: (id, short) =>
+    request(`/club-admin/marketing/associations/${id}/shortcode`,
+      { method: 'PATCH', body: JSON.stringify({ short_code: short }) }),
   mktSetClubExcluded: (clubId, excluded) =>
     request(`/club-admin/marketing/clubs/${clubId}/excluded`,
       { method: 'PATCH', body: JSON.stringify({ excluded }) }),
