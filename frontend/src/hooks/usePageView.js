@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
+import { getVisitorId, getAttribution } from '../lib/visitor'
 
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -23,9 +24,21 @@ export function usePageView() {
     lastPath.current = path
     lastSentAt.current = now
 
+    // Stable visitor id + first-touch acquisition (UTMs / ad-click ids) so the
+    // Usage page can recognise returning visitors and tell where they came from.
+    const attr = getAttribution()
     const body = JSON.stringify({
       path,
       referer: document.referrer || null,
+      visitor_id: getVisitorId(),
+      utm_source: attr.utm_source || null,
+      utm_medium: attr.utm_medium || null,
+      utm_campaign: attr.utm_campaign || null,
+      utm_content: attr.utm_content || null,
+      click_id: attr.click_id || null,
+      click_source: attr.click_source || null,
+      landing_referrer: attr.landing_referrer || null,
+      landing_path: attr.landing_path || null,
     })
 
     // Prefer sendBeacon for fire-and-forget semantics (won't block page
