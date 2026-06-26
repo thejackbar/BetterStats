@@ -134,6 +134,7 @@ const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaig
 const CommsCompose = lazy(() => import('./pages/admin/bettercomms/CommsCompose'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
 const CommsSegments = lazy(() => import('./pages/admin/bettercomms/CommsSegments'))
+const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsSettings = lazy(() => import('./pages/admin/bettercomms/CommsSettings'))
 
 // Public club pages — lazy loaded (not needed for marketing visitors)
@@ -306,6 +307,7 @@ export default function App() {
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
           <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><CommsSegments /></ProtectedRoute>} />
+          <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
           <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCompose /></ProtectedRoute>} />
 

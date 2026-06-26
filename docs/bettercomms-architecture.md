@@ -148,16 +148,28 @@ AWS account
   events, writes them, and maintains suppression.
 - Category taxonomy + a reusable `deliverable()` gate the rest of the app can call.
 
-**Phase 2 (first increment built): segmentation — our unfair advantage.** Dynamic
-segments as saved queries over data Mailchimp can't see. `comms_segments` stores a
-rule set (`{match: all, rules: [{field, op, value}]}`) evaluated at send time by
+**Phase 2 (built): segmentation — our unfair advantage.** Two audience builders,
+both over data Mailchimp can't see, both always passed through the send gate
+(`sendable_where`) so neither can reach a suppressed address.
+
+*Dynamic segments* (`comms_segments`) are saved queries: a rule set
+(`{match: all, rules: [{field, op, value}]}`) evaluated at send time by
 `services/comms_segments.py` against the club's contacts joined to the player and
-current-season stats. Whitelisted fields only (no client SQL): tag, source, and
-matches / runs / wickets / catches this season. A segment is a valid campaign
-audience (`{type: "segment", segment_id}`) and always re-evaluates, so it reflects
-current data. The send gate (`sendable_where`) is always applied, so a segment can
-never reach a suppressed address. Next: more fields (role, squad, fees unpaid,
-availability set) and saved static lists.
+current-season stats. Whitelisted fields only (no client SQL): tag, source, role,
+gender, squad/team, an availability check (available for an upcoming game / no
+availability set), and this-season matches / runs / wickets / catches / fifties /
+hundreds / five-wicket hauls. `GET /segments/options` feeds the role and team
+dropdowns the club's real values. A segment is a campaign audience
+(`{type: "segment", segment_id}`) and re-evaluates every send, so it reflects
+current data.
+
+*Static lists* (`comms_lists` + `comms_list_members`) are the curated counterpart:
+a fixed, hand-picked set of contacts (committee, sponsors, a team), also a campaign
+audience (`{type: "saved_list", list_id}`). Membership is FK-cascaded, so a deleted
+contact drops out cleanly.
+
+Next: a "fees unpaid" segment field (needs the fee-allocation join), and building a
+list straight from a filtered contacts view.
 
 **Phase 3: templates with versioning.** Reusable blocks, merge fields, categories.
 

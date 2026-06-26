@@ -1539,6 +1539,17 @@ export const api = {
   commsDeleteSegment: (id) => request(`/club-admin/comms/segments/${id}`, { method: 'DELETE' }),
   commsPreviewSegment: (definition) =>
     request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
+  commsSegmentOptions: () => request('/club-admin/comms/segments/options'),
+  // Static lists (Phase 2): curated sets of contacts.
+  commsListLists: () => request('/club-admin/comms/lists'),
+  commsCreateList: (name) => request('/club-admin/comms/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  commsRenameList: (id, name) => request(`/club-admin/comms/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  commsDeleteList: (id) => request(`/club-admin/comms/lists/${id}`, { method: 'DELETE' }),
+  commsListMembers: (id) => request(`/club-admin/comms/lists/${id}/members`),
+  commsAddListMembers: (id, contactIds) =>
+    request(`/club-admin/comms/lists/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  commsRemoveListMember: (id, contactId) =>
+    request(`/club-admin/comms/lists/${id}/members/${contactId}`, { method: 'DELETE' }),
 
   // BetterFantasyCricket (admin surface)
   fantasyConfig: () => request('/club-admin/fantasy/config'),

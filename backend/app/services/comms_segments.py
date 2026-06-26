@@ -23,20 +23,28 @@ from sqlalchemy import select, func, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CommsContact, EmailSuppression, Player, PlayerSeasonStats, Season,
+    CommsContact, EmailSuppression, Player, PlayerSeasonStats, PlayerAvailability, Season,
 )
 
 # Field groups decide which joins a definition needs.
 CONTACT_FIELDS = {"tag", "source"}
 PLAYER_FIELDS = {"role", "gender", "squad_team"}
-STAT_FIELDS = {"matches_this_season", "runs_this_season", "wickets_this_season", "catches_this_season"}
-ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS
+STAT_FIELDS = {
+    "matches_this_season", "runs_this_season", "wickets_this_season", "catches_this_season",
+    "fifties_this_season", "hundreds_this_season", "five_wickets_this_season",
+}
+# availability correlates on the contact's player_id, so it needs no join.
+SPECIAL_FIELDS = {"availability"}
+ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS
 
 _STAT_COLUMN = {
     "matches_this_season": "matches",
     "runs_this_season": "runs",
     "wickets_this_season": "wickets",
     "catches_this_season": "catches",
+    "fifties_this_season": "fifties",
+    "hundreds_this_season": "hundreds",
+    "five_wickets_this_season": "five_wickets",
 }
 
 
@@ -61,7 +69,20 @@ def _num(value) -> Optional[float]:
         return None
 
 
-def _condition(rule: dict, stats):
+def _avail_exists(club_id, *, available_only: bool):
+    """A correlated EXISTS over future availability rows for the contact's player.
+    available_only ⇒ status AVAILABLE; otherwise any future response row."""
+    conds = [
+        PlayerAvailability.player_id == CommsContact.player_id,
+        PlayerAvailability.organisation_id == club_id,
+        PlayerAvailability.avail_date >= func.current_date(),
+    ]
+    if available_only:
+        conds.append(PlayerAvailability.status == "AVAILABLE")
+    return exists().where(*conds)
+
+
+def _condition(rule: dict, stats, club_id):
     field = (rule or {}).get("field")
     op = (rule or {}).get("op")
     val = (rule or {}).get("value")
@@ -78,6 +99,12 @@ def _condition(rule: dict, stats):
             return Player.squad_team_id == uuid.UUID(str(val))
         except (ValueError, TypeError):
             return None
+    if field == "availability":
+        if val == "available":
+            return _avail_exists(club_id, available_only=True)
+        if val == "not_set":
+            return ~_avail_exists(club_id, available_only=False)
+        return None
     if field in STAT_FIELDS and stats is not None:
         col = stats.c[_STAT_COLUMN[field]]
         n = _num(val)
@@ -115,6 +142,9 @@ async def build_query(session: AsyncSession, club, definition: dict):
                 func.coalesce(func.sum(PlayerSeasonStats.runs), 0).label("runs"),
                 func.coalesce(func.sum(PlayerSeasonStats.wickets), 0).label("wickets"),
                 func.coalesce(func.sum(PlayerSeasonStats.catches), 0).label("catches"),
+                func.coalesce(func.sum(PlayerSeasonStats.fifties), 0).label("fifties"),
+                func.coalesce(func.sum(PlayerSeasonStats.hundreds), 0).label("hundreds"),
+                func.coalesce(func.sum(PlayerSeasonStats.five_wicket_innings), 0).label("five_wickets"),
             )
             .join(Season, Season.id == PlayerSeasonStats.season_id)
             .where(Season.organisation_id == club.id, Season.year == year)
@@ -124,7 +154,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
         q = q.join(stats, stats.c.pid == CommsContact.player_id)
 
     for rule in rules:
-        cond = _condition(rule, stats)
+        cond = _condition(rule, stats, club.id)
         if cond is not None:
             q = q.where(cond)
     return q

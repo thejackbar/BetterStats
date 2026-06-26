@@ -1984,6 +1984,35 @@ class CommsSegment(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CommsList(Base):
+    """A curated static list of contacts (migration 112) — the counterpart to a
+    dynamic segment. Membership is the fixed set in ``comms_list_members``."""
+    __tablename__ = "comms_lists"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_comms_list_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommsListMember(Base):
+    """One contact's membership of a static list (migration 112). Cascaded to both
+    the list and the contact, so a deleted contact drops out automatically."""
+    __tablename__ = "comms_list_members"
+    __table_args__ = (
+        UniqueConstraint("list_id", "contact_id", name="uq_comms_list_member"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    list_id = Column(UUID(as_uuid=True), ForeignKey("comms_lists.id", ondelete="CASCADE"), nullable=False)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("comms_contacts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class EmailSuppression(Base):
     """Global, address-level suppression (migration 110, BetterComms Phase 1).
 

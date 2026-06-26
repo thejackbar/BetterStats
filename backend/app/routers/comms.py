@@ -37,8 +37,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.config.settings import settings
 from app.models.db import (
-    User, Organisation, Player, FeeMember, ClubMembership,
-    CommsContact, CommsCampaign, CommsRecipient, CommsSegment, EmailSuppression, EmailEvent,
+    User, Organisation, Player, FeeMember, ClubMembership, Team,
+    CommsContact, CommsCampaign, CommsRecipient, CommsSegment,
+    CommsList, CommsListMember, EmailSuppression, EmailEvent,
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
@@ -241,6 +242,22 @@ async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict
         if not seg or seg.organisation_id != club.id:
             return []
         return await comms_segments.resolve_contacts(db, club, seg.definition)
+    if atype == "saved_list":
+        try:
+            lid = uuid.UUID(str((audience or {}).get("list_id")))
+        except (ValueError, TypeError):
+            return []
+        member_ids = select(CommsListMember.contact_id).where(CommsListMember.list_id == lid)
+        base = select(CommsContact).where(
+            *comms_segments.sendable_where(club.id), CommsContact.id.in_(member_ids))
+        rows = (await db.execute(base.order_by(CommsContact.email))).scalars().all()
+        seen, out = set(), []
+        for c in rows:
+            if c.email in seen:
+                continue
+            seen.add(c.email)
+            out.append(c)
+        return out
     base = select(CommsContact).where(*comms_segments.sendable_where(club.id))
     if atype == "list":
         ids = []
@@ -1045,3 +1062,185 @@ async def preview_segment(
         "count": len(contacts),
         "sample": [{"email": c.email, "name": c.name} for c in contacts[:8]],
     }
+
+
+@router.get("/segments/options")
+async def segment_options(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Option lists for the segment rule builder, so role / squad dropdowns use the
+    club's real values instead of guessed vocab."""
+    teams = (await db.execute(
+        select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))
+        .order_by(Team.name)
+    )).scalars().all()
+    return {
+        "roles": ["Batter", "Bowler", "All Rounder", "Wicketkeeper", "Wicketkeeper-Batter"],
+        "genders": [["male", "Male"], ["female", "Female"]],
+        "teams": [{"id": str(t.id), "name": t.name} for t in teams],
+    }
+
+
+# ─── Static lists (Phase 2) ──────────────────────────────────────────────────
+
+async def _list_or_404(db: AsyncSession, club: Organisation, lid: str) -> CommsList:
+    try:
+        u = uuid.UUID(lid)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid list id")
+    lst = await db.get(CommsList, u)
+    if not lst or lst.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="List not found")
+    return lst
+
+
+async def _list_count(db: AsyncSession, list_id) -> int:
+    return int((await db.execute(
+        select(func.count(CommsListMember.id)).where(CommsListMember.list_id == list_id)
+    )).scalar_one() or 0)
+
+
+@router.get("/lists")
+async def list_lists(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(CommsList).where(CommsList.organisation_id == club.id).order_by(CommsList.name)
+    )).scalars().all()
+    out = []
+    for l in rows:
+        out.append({"id": str(l.id), "name": l.name, "count": await _list_count(db, l.id)})
+    return out
+
+
+class ListIn(BaseModel):
+    name: str
+
+
+@router.post("/lists")
+async def create_list(
+    data: ListIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A list name is required")
+    lst = CommsList(organisation_id=club.id, name=name)
+    db.add(lst)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A list with that name already exists")
+    await db.refresh(lst)
+    return {"id": str(lst.id), "name": lst.name, "count": 0}
+
+
+@router.put("/lists/{list_id}")
+async def rename_list(
+    list_id: str,
+    data: ListIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    lst = await _list_or_404(db, club, list_id)
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A list name is required")
+    lst.name = name
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A list with that name already exists")
+    return {"id": str(lst.id), "name": lst.name, "count": await _list_count(db, lst.id)}
+
+
+@router.delete("/lists/{list_id}")
+async def delete_list(
+    list_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    lst = await _list_or_404(db, club, list_id)
+    await db.delete(lst)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/lists/{list_id}/members")
+async def list_members(
+    list_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    await _list_or_404(db, club, list_id)
+    rows = (await db.execute(
+        select(CommsContact)
+        .join(CommsListMember, CommsListMember.contact_id == CommsContact.id)
+        .where(CommsListMember.list_id == uuid.UUID(list_id))
+        .order_by(CommsContact.email)
+    )).scalars().all()
+    return [{"id": str(c.id), "email": c.email, "name": c.name} for c in rows]
+
+
+class ListMembersIn(BaseModel):
+    contact_ids: list[str] = []
+
+
+@router.post("/lists/{list_id}/members")
+async def add_list_members(
+    list_id: str,
+    data: ListMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    lst = await _list_or_404(db, club, list_id)
+    added = 0
+    for raw in (data.contact_ids or []):
+        try:
+            cid = uuid.UUID(str(raw))
+        except (ValueError, TypeError):
+            continue
+        # Only the club's own contacts can join the list.
+        contact = await db.get(CommsContact, cid)
+        if not contact or contact.organisation_id != club.id:
+            continue
+        exists_row = await db.scalar(select(CommsListMember.id).where(
+            CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
+        if exists_row:
+            continue
+        db.add(CommsListMember(list_id=lst.id, contact_id=cid))
+        added += 1
+    await db.commit()
+    return {"added": added, "count": await _list_count(db, lst.id)}
+
+
+@router.delete("/lists/{list_id}/members/{contact_id}")
+async def remove_list_member(
+    list_id: str,
+    contact_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    lst = await _list_or_404(db, club, list_id)
+    try:
+        cid = uuid.UUID(contact_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid contact id")
+    await db.execute(
+        CommsListMember.__table__.delete().where(
+            CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
+    await db.commit()
+    return {"status": "ok", "count": await _list_count(db, lst.id)}

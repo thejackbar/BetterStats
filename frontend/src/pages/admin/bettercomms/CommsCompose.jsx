@@ -28,6 +28,7 @@ export default function CommsCompose() {
   const [audienceCount, setAudienceCount] = useState(null)
   const [audience, setAudience] = useState({ type: 'all' })
   const [segments, setSegments] = useState([])
+  const [lists, setLists] = useState([])
   const [testEmail, setTestEmail] = useState('')
   const [showPreview, setShowPreview] = useState(false)
   const [live, setLive] = useState(true)
@@ -53,6 +54,7 @@ export default function CommsCompose() {
       .catch(e => setMsg({ kind: 'error', text: e.message }))
       .finally(() => setLoading(false))
     api.commsListSegments().then(setSegments).catch(() => {})
+    api.commsListLists().then(setLists).catch(() => {})
     api.commsGetSettings().then(s => setLive(!!s?.provider?.live)).catch(() => {})
     return () => clearInterval(pollRef.current)
   }, [load])
@@ -187,20 +189,34 @@ export default function CommsCompose() {
             <div className="pb-card p-4 mb-4">
               <div className="text-sm text-pb-text mb-2">Audience</div>
               <select
-                value={audience.type === 'segment' ? `segment:${audience.segment_id}` : 'all'}
+                value={audience.type === 'segment' ? `segment:${audience.segment_id}`
+                  : audience.type === 'saved_list' ? `list:${audience.list_id}` : 'all'}
                 onChange={e => {
                   const v = e.target.value
-                  setAudience(v.startsWith('segment:') ? { type: 'segment', segment_id: v.slice(8) } : { type: 'all' })
+                  if (v.startsWith('segment:')) setAudience({ type: 'segment', segment_id: v.slice(8) })
+                  else if (v.startsWith('list:')) setAudience({ type: 'saved_list', list_id: v.slice(5) })
+                  else setAudience({ type: 'all' })
                 }}
                 className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
                 <option value="all">All subscribed contacts</option>
-                {segments.map(s => <option key={s.id} value={`segment:${s.id}`}>Segment: {s.name}</option>)}
+                {segments.length > 0 && (
+                  <optgroup label="Segments">
+                    {segments.map(s => <option key={s.id} value={`segment:${s.id}`}>{s.name}</option>)}
+                  </optgroup>
+                )}
+                {lists.length > 0 && (
+                  <optgroup label="Lists">
+                    {lists.map(l => <option key={l.id} value={`list:${l.id}`}>{l.name}</option>)}
+                  </optgroup>
+                )}
               </select>
               <div className="text-pb-faintest text-xs mt-2">
                 {audienceCount != null
                   ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
                   : 'Counting…'}{' '}
-                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent)' }}>Manage segments</a>
+                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent)' }}>Segments</a>
+                {' · '}
+                <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent)' }}>Lists</a>
               </div>
             </div>
 

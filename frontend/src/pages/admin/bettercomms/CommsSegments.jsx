@@ -2,52 +2,74 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 
-// The whitelisted segment fields (mirrors services/comms_segments.py). Each rule
-// is {field, op, value}; rules are ANDed. Stat fields read the club's current
-// season, so a stat rule narrows to the playing squad automatically.
-const FIELDS = {
+// Whitelisted segment fields (mirrors services/comms_segments.py). Each rule is
+// {field, op, value}; rules are ANDed. Stat / role / availability fields read the
+// linked player, so they narrow to the playing squad automatically. Fields whose
+// `optionsKey` is set pull their dropdown values from /segments/options (the
+// club's real roles / teams), so we never guess vocab.
+const STAT_OPS = [['gte', 'at least'], ['lte', 'at most']]
+const FIELD_DEFS = {
   tag: { label: 'Has tag', input: 'text', ops: [['has', 'is']] },
   source: {
     label: 'Source', input: 'select', ops: [['eq', 'is']],
     options: [['player', 'A player'], ['member', 'A fee member'], ['import', 'Imported'], ['manual', 'Added manually']],
   },
-  matches_this_season: { label: 'Matches this season', input: 'number', ops: [['gte', 'at least'], ['lte', 'at most']] },
-  runs_this_season: { label: 'Runs this season', input: 'number', ops: [['gte', 'at least'], ['lte', 'at most']] },
-  wickets_this_season: { label: 'Wickets this season', input: 'number', ops: [['gte', 'at least'], ['lte', 'at most']] },
-  catches_this_season: { label: 'Catches this season', input: 'number', ops: [['gte', 'at least'], ['lte', 'at most']] },
+  role: { label: 'Player role', input: 'select', ops: [['eq', 'is']], optionsKey: 'roles' },
+  gender: { label: 'Gender', input: 'select', ops: [['eq', 'is']], optionsKey: 'genders' },
+  squad_team: { label: 'Squad / team', input: 'select', ops: [['eq', 'is']], optionsKey: 'teams' },
+  availability: {
+    label: 'Availability', input: 'select', ops: [['eq', 'is']],
+    options: [['available', 'available for an upcoming game'], ['not_set', 'no availability set']],
+  },
+  matches_this_season: { label: 'Matches this season', input: 'number', ops: STAT_OPS },
+  runs_this_season: { label: 'Runs this season', input: 'number', ops: STAT_OPS },
+  wickets_this_season: { label: 'Wickets this season', input: 'number', ops: STAT_OPS },
+  catches_this_season: { label: 'Catches this season', input: 'number', ops: STAT_OPS },
+  fifties_this_season: { label: 'Fifties this season', input: 'number', ops: STAT_OPS },
+  hundreds_this_season: { label: 'Hundreds this season', input: 'number', ops: STAT_OPS },
+  five_wickets_this_season: { label: '5-wicket hauls this season', input: 'number', ops: STAT_OPS },
 }
-const FIELD_KEYS = Object.keys(FIELDS)
+const FIELD_KEYS = Object.keys(FIELD_DEFS)
 
 function newRule() {
   return { field: 'tag', op: 'has', value: '' }
 }
 
-function RuleRow({ rule, onChange, onRemove }) {
-  const f = FIELDS[rule.field] || FIELDS.tag
+// Resolve a field's dropdown options from the fetched club options.
+function optionsFor(def, opts) {
+  if (def.options) return def.options
+  if (def.optionsKey === 'roles') return (opts.roles || []).map(r => [r, r])
+  if (def.optionsKey === 'genders') return opts.genders || []
+  if (def.optionsKey === 'teams') return (opts.teams || []).map(t => [t.id, t.name])
+  return []
+}
+
+function RuleRow({ rule, opts, onChange, onRemove }) {
+  const def = FIELD_DEFS[rule.field] || FIELD_DEFS.tag
   return (
     <div className="flex flex-wrap items-center gap-2 py-1.5">
       <select value={rule.field}
         onChange={e => {
-          const nf = FIELDS[e.target.value]
-          onChange({ field: e.target.value, op: nf.ops[0][0], value: '' })
+          const nd = FIELD_DEFS[e.target.value]
+          onChange({ field: e.target.value, op: nd.ops[0][0], value: '' })
         }}
         className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
-        {FIELD_KEYS.map(k => <option key={k} value={k}>{FIELDS[k].label}</option>)}
+        {FIELD_KEYS.map(k => <option key={k} value={k}>{FIELD_DEFS[k].label}</option>)}
       </select>
       <select value={rule.op} onChange={e => onChange({ ...rule, op: e.target.value })}
         className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
-        {f.ops.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        {def.ops.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
-      {f.input === 'select' ? (
+      {def.input === 'select' ? (
         <select value={rule.value} onChange={e => onChange({ ...rule, value: e.target.value })}
-          className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
+          className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm max-w-[200px]">
           <option value="">choose…</option>
-          {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          {optionsFor(def, opts).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       ) : (
         <input value={rule.value} onChange={e => onChange({ ...rule, value: e.target.value })}
-          type={f.input === 'number' ? 'number' : 'text'}
-          placeholder={f.input === 'number' ? '0' : 'e.g. Committee'}
+          type={def.input === 'number' ? 'number' : 'text'}
+          placeholder={def.input === 'number' ? '0' : 'e.g. Committee'}
           className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm w-32" />
       )}
       <button onClick={onRemove} className="text-pb-faint hover:text-pb-red text-sm px-1">✕</button>
@@ -55,7 +77,7 @@ function RuleRow({ rule, onChange, onRemove }) {
   )
 }
 
-function Editor({ initial, onSaved, onCancel, onDeleted }) {
+function Editor({ initial, opts, onSaved, onCancel, onDeleted }) {
   const [name, setName] = useState(initial?.name || '')
   const [rules, setRules] = useState(initial?.definition?.rules?.length ? initial.definition.rules : [newRule()])
   const [count, setCount] = useState(null)
@@ -64,7 +86,6 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
 
   const definition = { match: 'all', rules: rules.filter(r => String(r.value).trim() !== '') }
 
-  // Live preview, debounced on the rules.
   useEffect(() => {
     let live = true
     const t = setTimeout(() => {
@@ -98,7 +119,7 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
       <div className="text-pb-faintest text-xs mb-1">Match contacts where ALL of these are true:</div>
       <div className="mb-2">
         {rules.map((r, i) => (
-          <RuleRow key={i} rule={r}
+          <RuleRow key={i} rule={r} opts={opts}
             onChange={nr => setRules(rs => rs.map((x, j) => j === i ? nr : x))}
             onRemove={() => setRules(rs => rs.length > 1 ? rs.filter((_, j) => j !== i) : rs)} />
         ))}
@@ -127,13 +148,17 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
 
 export default function CommsSegments() {
   const [segments, setSegments] = useState(null)
-  const [editing, setEditing] = useState(null) // segment object, {} for new, or null
+  const [opts, setOpts] = useState({ roles: [], genders: [], teams: [] })
+  const [editing, setEditing] = useState(null)
   const [error, setError] = useState('')
 
   const load = useCallback(() => {
     api.commsListSegments().then(setSegments).catch(e => { setError(e.message); setSegments([]) })
   }, [])
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    api.commsSegmentOptions().then(setOpts).catch(() => {})
+  }, [load])
 
   const onSaved = () => { setEditing(null); load() }
   const onDeleted = () => { setEditing(null); load() }
@@ -152,11 +177,12 @@ export default function CommsSegments() {
 
       <div className="text-pb-faintest text-sm mb-4 max-w-2xl">
         A segment is a saved filter that re-runs every time you send, so it always reflects who fits today.
-        Mix contact tags with this season's cricket data, like "played at least 5 matches" or "took 10+ wickets".
+        Mix contact tags with this season's cricket data, like "played at least 5 matches", "in the women's squad",
+        or "available for an upcoming game".
       </div>
 
       {editing ? (
-        <Editor initial={editing.id ? editing : null} onSaved={onSaved} onCancel={() => setEditing(null)} onDeleted={onDeleted} />
+        <Editor initial={editing.id ? editing : null} opts={opts} onSaved={onSaved} onCancel={() => setEditing(null)} onDeleted={onDeleted} />
       ) : segments == null ? (
         <div className="text-pb-faint text-sm">Loading…</div>
       ) : segments.length === 0 ? (
