@@ -49,7 +49,7 @@ export default function CommsContextBar() {
         {onMarketing ? (
           <>
             <span className="text-pb-text font-medium">BetterCricket Clubs Directory</span>
-            <a href="/admin/marketing" className="ml-2 text-xs underline" style={{ color: 'var(--pb-accent)' }}>
+            <a href="/admin/super/marketing" className="ml-2 text-xs underline" style={{ color: 'var(--pb-accent)' }}>
               open Clubs Directory
             </a>
           </>

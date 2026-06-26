@@ -11,9 +11,9 @@ const BTN = 'px-3 py-1.5 rounded text-xs font-semibold border pb-hairline bg-pb-
 const BTN_ACCENT = 'px-3 py-1.5 rounded text-xs font-semibold bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25 disabled:opacity-50'
 
 // Shared layout primitives so the toolbar reads as tidy, labelled cards.
-const CARD = 'rounded-xl border pb-hairline bg-pb-surface2/40 p-4 mb-4'
+const CARD = 'rounded-xl border pb-hairline bg-pb-surface2/40 px-3 py-2.5 mb-2.5'
 const SECTION = 'text-[11px] uppercase tracking-wide text-pb-faint font-semibold'
-const FIELD_LABEL = 'block text-[10px] uppercase tracking-wide text-pb-faint mb-1'
+const FIELD_LABEL = 'block text-[10px] uppercase tracking-wide text-pb-faint mb-0.5'
 
 // A labelled filter cell — keeps every control on a tidy grid with its caption.
 function Field({ label, children, className = '' }) {
@@ -38,7 +38,7 @@ function CrawlStatus({ status }) {
   if (!status) return null
   const s = STATE_STYLE[status.state] || STATE_STYLE.idle
   return (
-    <div className="flex items-center gap-2 rounded-lg border pb-hairline bg-pb-surface2 px-3 py-2 mb-4">
+    <div className="flex items-center gap-2 rounded-lg border pb-hairline bg-pb-surface2 px-3 py-2 mb-2.5">
       <span className={`inline-block w-2.5 h-2.5 rounded-full ${s.dot}`} />
       <span className={`text-xs font-semibold ${s.text}`}>{s.label}</span>
       <span className="text-xs text-pb-dim">{status.detail}</span>
@@ -430,20 +430,18 @@ export default function SuperMarketing() {
   return (
     <AdminLayout>
       <div className="max-w-[1200px] mx-auto p-4 sm:p-6">
-        <div className="mb-5">
+        <div className="mb-3">
           <h1 className="text-xl font-semibold text-pb-text">Club directory</h1>
-          <p className="text-sm text-pb-dim mt-1">
+          <p className="text-xs text-pb-dim mt-0.5">
             Every Australian cricket club from the PlayHQ public directory, for
-            BetterCricket outreach. Each club stores its whole published committee
-            (names, roles, emails, mobiles) plus the association(s) it plays in. Click
-            a club to see everything collected and tick which contacts to email —
-            office bearers are pre-ticked. "Export to BetterAdmin Comms" pushes only
-            the ticked contacts (within the current filter) into the comms send pipeline.
+            BetterCricket outreach. Click a club to see its committee and tick which
+            contacts to email; "Export to BetterAdmin Comms" pushes the ticked
+            contacts (within the current filter) into the send pipeline.
           </p>
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3">
             <Stat label="Clubs" value={stats.clubs} />
             <Stat label="Contacts" value={stats.contacts} />
             <Stat label="To email" value={stats.selected_contacts} />
@@ -462,7 +460,7 @@ export default function SuperMarketing() {
         <CrawlStatus status={status} />
 
         {/* Crawler controls — sit directly under the status pill */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="flex flex-wrap items-center gap-2 mb-2.5">
           <button className={BTN_ACCENT} disabled={busy === 'crawl' || status?.paused} onClick={runCrawl}>
             {busy === 'crawl' ? 'Starting...' : 'Run crawl batch'}
           </button>
@@ -482,7 +480,7 @@ export default function SuperMarketing() {
 
         {/* ── Filter card ─────────────────────────────────────────────── */}
         <section className={CARD}>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <span className={SECTION}>Filter clubs</span>
             {(filters.q || filters.association || filters.associations.length || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
@@ -497,7 +495,7 @@ export default function SuperMarketing() {
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-2">
             <Field label="Search">
               <input
                 className={SELECT_CLS + ' w-full'}
@@ -567,7 +565,7 @@ export default function SuperMarketing() {
               />
             </Field>
           </div>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-4 pt-3 border-t pb-hairline">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 mt-2.5 pt-2.5 border-t pb-hairline">
             <span className="text-[10px] uppercase tracking-wide text-pb-faint">Exclude</span>
             <label className="flex items-center gap-1.5 text-xs text-pb-dim">
               <input type="checkbox" checked={filters.exclude_junior}
@@ -594,7 +592,7 @@ export default function SuperMarketing() {
 
         {/* ── Actions card — everything here acts on the filtered list ─── */}
         <section className={CARD}>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <span className={SECTION}>Actions on the filtered list</span>
             <span className="text-[11px] text-pb-faint">{total} matching club(s)</span>
           </div>
@@ -609,7 +607,7 @@ export default function SuperMarketing() {
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t pb-hairline">
+          <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2.5 border-t pb-hairline">
             <span className="text-[10px] uppercase tracking-wide text-pb-faint mr-1">Bulk update</span>
             <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(true)}>
               Mark all emailed
