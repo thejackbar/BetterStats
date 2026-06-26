@@ -42,6 +42,9 @@ class ContactIn(BaseModel):
     interests: Optional[str] = None
     heard: Optional[str] = None
     contactMethod: Optional[str] = None
+    # First-party visitor id (localStorage UUID) so the enquiry links back to the
+    # anonymous browsing journey behind it on the super-admin Usage page.
+    visitorId: Optional[str] = None
 
 
 def _clip(value: Optional[str], limit: int) -> Optional[str]:
@@ -90,6 +93,7 @@ async def submit_contact(
         contact_method=_clip(payload.contactMethod, 20),
         source="contact_form",
         user_agent=_clip(request.headers.get("user-agent"), 500),
+        visitor_id=_clip(payload.visitorId, 64),
     )
     db.add(row)
     await db.commit()

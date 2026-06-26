@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import uuid as _uuid
 from typing import Optional
 
 import httpx
@@ -44,6 +45,102 @@ def hash_ip(ip: Optional[str]) -> Optional[str]:
     return hashlib.sha256(ip.encode("utf-8")).hexdigest()[:16]
 
 
+# ─── Traffic-source bucketing ────────────────────────────────────────────────
+# We bucket each visitor's *first-touch* acquisition into a single readable
+# label at insert time so the Usage page can group on it cheaply. Strongest
+# signal wins: an explicit utm_source, then the ad-network click id the client
+# detected (fbclid → facebook, gclid → google …), then the referring host,
+# then "direct".
+
+# Normalise the messy spellings people put in utm_source.
+_UTM_SOURCE_NORM = {
+    "fb": "facebook", "facebook": "facebook", "meta": "facebook",
+    "facebook.com": "facebook", "messenger": "facebook",
+    "ig": "instagram", "instagram": "instagram",
+    "google": "google", "adwords": "google", "googleads": "google",
+    "google-ads": "google", "gmb": "google",
+    "bing": "bing", "microsoft": "bing",
+    "tiktok": "tiktok", "tik-tok": "tiktok",
+    "linkedin": "linkedin", "twitter": "twitter", "x": "twitter",
+    "youtube": "youtube", "yt": "youtube",
+    "reddit": "reddit", "whatsapp": "whatsapp",
+    "email": "email", "newsletter": "email", "mailchimp": "email",
+    "mailerlite": "email", "sendgrid": "email", "klaviyo": "email",
+}
+
+# Referrer-host substrings → bucket. Checked in order.
+_HOST_SOURCE = (
+    ("l.facebook.", "facebook"), ("lm.facebook.", "facebook"),
+    ("m.facebook.", "facebook"), ("facebook.", "facebook"), ("fb.", "facebook"),
+    ("instagram.", "instagram"), ("l.instagram.", "instagram"),
+    ("google.", "google"), ("googleads.", "google"), ("googlesyndication.", "google"),
+    ("bing.", "bing"), ("duckduckgo.", "duckduckgo"), ("yahoo.", "yahoo"),
+    ("t.co", "twitter"), ("twitter.", "twitter"), ("x.com", "twitter"),
+    ("linkedin.", "linkedin"), ("lnkd.in", "linkedin"),
+    ("youtube.", "youtube"), ("youtu.be", "youtube"),
+    ("tiktok.", "tiktok"), ("reddit.", "reddit"),
+    ("whatsapp.", "whatsapp"), ("wa.me", "whatsapp"),
+    ("play.cricket.com.au", "playcricket"), ("playhq.com", "playhq"),
+)
+
+# Our own hosts — a referrer here is internal navigation, not an acquisition.
+_INTERNAL_HOST_BITS = ("betterat.cricket", "betterstats.cricket",
+                       "betterstats.bltbox", "localhost", "127.0.0.1")
+
+
+def _host_of(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    s = url.strip().lower()
+    if "//" in s:
+        s = s.split("//", 1)[1]
+    s = s.split("/", 1)[0].split("?", 1)[0]
+    return s or None
+
+
+def derive_traffic_source(
+    utm_source: Optional[str],
+    utm_medium: Optional[str],
+    click_id: Optional[str],
+    click_source: Optional[str],
+    referrer: Optional[str],
+) -> Optional[str]:
+    """Bucket a first-touch acquisition into one readable source label."""
+    src = (utm_source or "").strip().lower()
+    if src:
+        return _UTM_SOURCE_NORM.get(src, src)[:40]
+    # Ad-network click id the client classified for us (fbclid → facebook …).
+    cs = (click_source or "").strip().lower()
+    if cs:
+        return cs[:40]
+    cid = (click_id or "").strip().lower()
+    if cid.startswith("fbclid") or "fbclid=" in cid:
+        return "facebook"
+    if cid.startswith("gclid") or cid.startswith("gbraid") or cid.startswith("wbraid"):
+        return "google"
+    # Referrer host.
+    host = _host_of(referrer)
+    if host:
+        if any(bit in host for bit in _INTERNAL_HOST_BITS):
+            return None  # internal navigation — leave first-touch unset
+        for needle, bucket in _HOST_SOURCE:
+            if needle in host:
+                return bucket
+        return host[:40]  # bare external host as the referral source
+    return "direct"
+
+
+def _valid_uuid(value: Optional[str]) -> Optional[str]:
+    """Return a lowercase UUID string, or None if not a valid UUID. Keeps a
+    bad client-supplied visitor_id from poisoning a UUID column."""
+    if not value:
+        return None
+    try:
+        return str(_uuid.UUID(str(value)))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 async def record_event(
     *,
     event_type: str,
@@ -59,6 +156,15 @@ async def record_event(
     referer: Optional[str] = None,
     country: Optional[str] = None,
     metadata: Optional[dict] = None,
+    visitor_id: Optional[str] = None,
+    utm_source: Optional[str] = None,
+    utm_medium: Optional[str] = None,
+    utm_campaign: Optional[str] = None,
+    utm_content: Optional[str] = None,
+    click_id: Optional[str] = None,
+    click_source: Optional[str] = None,
+    landing_referrer: Optional[str] = None,
+    landing_path: Optional[str] = None,
 ) -> None:
     """Insert one breadcrumb. Opens its own session so it can run after the
     request session has been closed. Never raises."""
@@ -72,6 +178,14 @@ async def record_event(
         region = cached.get("region")
         city = cached.get("city")
 
+    visitor = _valid_uuid(visitor_id)
+    # First-touch acquisition source, bucketed once at insert time. Only the
+    # page-view beacon supplies these; API rows leave them NULL.
+    traffic_source = derive_traffic_source(
+        utm_source, utm_medium, click_id, click_source,
+        landing_referrer or referer,
+    ) if event_type == "page_view" else None
+
     try:
         async with async_session_maker() as session:
             result = await session.execute(
@@ -80,12 +194,16 @@ async def record_event(
                     INSERT INTO usage_events (
                         event_type, method, path, route, status, duration_ms,
                         user_id, org_id, ip_hash, user_agent, referer,
-                        country, region, city, metadata
+                        country, region, city, metadata,
+                        visitor_id, utm_source, utm_medium, utm_campaign,
+                        utm_content, click_id, traffic_source, landing_path
                     ) VALUES (
                         :event_type, :method, :path, :route, :status, :duration_ms,
                         :user_id, :org_id, :ip_hash, :user_agent, :referer,
                         :country, :region, :city,
-                        CAST(:metadata AS JSONB)
+                        CAST(:metadata AS JSONB),
+                        :visitor_id, :utm_source, :utm_medium, :utm_campaign,
+                        :utm_content, :click_id, :traffic_source, :landing_path
                     )
                     RETURNING id
                     """
@@ -106,6 +224,14 @@ async def record_event(
                     "region": (region or "")[:80] or None,
                     "city": (city or "")[:80] or None,
                     "metadata": json.dumps(metadata or {}),
+                    "visitor_id": visitor,
+                    "utm_source": (utm_source or "")[:120] or None,
+                    "utm_medium": (utm_medium or "")[:120] or None,
+                    "utm_campaign": (utm_campaign or "")[:200] or None,
+                    "utm_content": (utm_content or "")[:200] or None,
+                    "click_id": (click_id or "")[:300] or None,
+                    "traffic_source": traffic_source,
+                    "landing_path": (landing_path or "")[:500] or None,
                 },
             )
             row_id = result.scalar()
