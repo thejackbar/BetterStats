@@ -10,6 +10,21 @@ const SELECT_CLS = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-p
 const BTN = 'px-3 py-1.5 rounded text-xs font-semibold border pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-accent disabled:opacity-50'
 const BTN_ACCENT = 'px-3 py-1.5 rounded text-xs font-semibold bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25 disabled:opacity-50'
 
+// Shared layout primitives so the toolbar reads as tidy, labelled cards.
+const CARD = 'rounded-xl border pb-hairline bg-pb-surface2/40 p-4 mb-4'
+const SECTION = 'text-[11px] uppercase tracking-wide text-pb-faint font-semibold'
+const FIELD_LABEL = 'block text-[10px] uppercase tracking-wide text-pb-faint mb-1'
+
+// A labelled filter cell — keeps every control on a tidy grid with its caption.
+function Field({ label, children, className = '' }) {
+  return (
+    <div className={className}>
+      <label className={FIELD_LABEL}>{label}</label>
+      {children}
+    </div>
+  )
+}
+
 const STATE_STYLE = {
   running:  { dot: 'bg-emerald-400 animate-pulse', text: 'text-emerald-300', label: 'Running' },
   waiting:  { dot: 'bg-sky-400',                    text: 'text-sky-300',     label: 'Waiting' },
@@ -428,7 +443,7 @@ export default function SuperMarketing() {
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-2 mb-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-5">
             <Stat label="Clubs" value={stats.clubs} />
             <Stat label="Contacts" value={stats.contacts} />
             <Stat label="To email" value={stats.selected_contacts} />
@@ -446,6 +461,7 @@ export default function SuperMarketing() {
 
         <CrawlStatus status={status} />
 
+        {/* Crawler controls — sit directly under the status pill */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <button className={BTN_ACCENT} disabled={busy === 'crawl' || status?.paused} onClick={runCrawl}>
             {busy === 'crawl' ? 'Starting...' : 'Run crawl batch'}
@@ -462,148 +478,185 @@ export default function SuperMarketing() {
             </button>
           )}
           <button className={BTN} onClick={() => { loadStats(); loadClubs() }}>Refresh</button>
-          <a className={BTN} href={api.mktExportCsvUrl(filters)} target="_blank" rel="noreferrer">
-            Download CSV (filtered)
-          </a>
-          <button className={BTN} disabled={busy === 'export'} onClick={exportComms}>
-            {busy === 'export' ? 'Exporting...' : 'Export to BetterAdmin Comms (filtered)'}
-          </button>
-          <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
-            {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}
-          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 mb-1">
-          <input
-            className={SELECT_CLS + ' min-w-[180px]'}
-            placeholder="Search club or association..."
-            value={filters.q}
-            onChange={(e) => setFilters(f => ({ ...f, q: e.target.value }))}
-          />
-          <AssocMultiSelect
-            options={assocOptions}
-            selected={filters.associations}
-            onChange={(a) => setFilters(f => ({ ...f, associations: a }))}
-            onSaveShort={saveAssocShort}
-          />
-          {filters.associations.length > 0 && (
-            <button className={BTN} disabled={busy === 'resolve'} onClick={resolveSelectedAssociations}
-                    title="Fetch the complete club roster for the selected association(s) from PlayHQ">
-              {busy === 'resolve' ? 'Fetching rosters…' : `Fetch full roster${filters.associations.length > 1 ? 's' : ''}`}
-            </button>
-          )}
-          <input
-            className={SELECT_CLS + ' min-w-[160px]'}
-            placeholder="Association contains..."
-            value={filters.association}
-            onChange={(e) => setFilters(f => ({ ...f, association: e.target.value }))}
-          />
-          <select className={SELECT_CLS} value={filters.state}
-                  onChange={(e) => setFilters(f => ({ ...f, state: e.target.value }))}>
-            <option value="">All states</option>
-            {STATES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <div className="flex items-center gap-1 text-xs text-pb-dim">
-            <span>Postcode</span>
-            <input className={SELECT_CLS + ' w-20'} placeholder="from" inputMode="numeric"
-                   value={filters.postcode_from}
-                   onChange={(e) => setFilters(f => ({ ...f, postcode_from: e.target.value }))} />
-            <span>–</span>
-            <input className={SELECT_CLS + ' w-20'} placeholder="to" inputMode="numeric"
-                   value={filters.postcode_to}
-                   onChange={(e) => setFilters(f => ({ ...f, postcode_to: e.target.value }))} />
+        {/* ── Filter card ─────────────────────────────────────────────── */}
+        <section className={CARD}>
+          <div className="flex items-center justify-between mb-3">
+            <span className={SECTION}>Filter clubs</span>
+            {(filters.q || filters.association || filters.associations.length || filters.state
+              || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
+              || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
+              || filters.exclude_school) && (
+              <button className="text-[11px] text-pb-faint hover:text-pb-accent"
+                      onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
+                                                  postcode_from: '', postcode_to: '', contact: '',
+                                                  person: '', exclude_junior: false, exclude_emailed: false,
+                                                  exclude_carnival: false, exclude_school: false })}>
+                Clear all
+              </button>
+            )}
           </div>
-          <select className={SELECT_CLS} value={filters.contact}
-                  onChange={(e) => setFilters(f => ({ ...f, contact: e.target.value }))}>
-            <option value="">Any contacts</option>
-            <option value="any_email">Has an email (any)</option>
-            <option value="named_email">Has a named email</option>
-            <option value="pst">Has Pres + Sec + Treas (named, emailed)</option>
-          </select>
-          <input
-            className={SELECT_CLS + ' min-w-[150px]'}
-            placeholder="Person name contains..."
-            value={filters.person}
-            onChange={(e) => setFilters(f => ({ ...f, person: e.target.value }))}
-          />
-          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-            <input type="checkbox" checked={filters.exclude_junior}
-                   onChange={(e) => setFilters(f => ({ ...f, exclude_junior: e.target.checked }))} />
-            Exclude juniors
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-            <input type="checkbox" checked={filters.exclude_carnival}
-                   onChange={(e) => setFilters(f => ({ ...f, exclude_carnival: e.target.checked }))} />
-            Exclude carnivals
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-            <input type="checkbox" checked={filters.exclude_school}
-                   onChange={(e) => setFilters(f => ({ ...f, exclude_school: e.target.checked }))} />
-            Exclude schools
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-            <input type="checkbox" checked={filters.exclude_emailed}
-                   onChange={(e) => setFilters(f => ({ ...f, exclude_emailed: e.target.checked }))} />
-            Hide already-emailed
-          </label>
-          {(filters.q || filters.association || filters.associations.length || filters.state
-            || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
-            || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
-            || filters.exclude_school) && (
-            <button className="text-[11px] text-pb-faint hover:text-pb-accent"
-                    onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
-                                                postcode_from: '', postcode_to: '', contact: '',
-                                                person: '', exclude_junior: false, exclude_emailed: false,
-                                                exclude_carnival: false, exclude_school: false })}>
-              clear
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <Field label="Search">
+              <input
+                className={SELECT_CLS + ' w-full'}
+                placeholder="Club or association..."
+                value={filters.q}
+                onChange={(e) => setFilters(f => ({ ...f, q: e.target.value }))}
+              />
+            </Field>
+            <Field label="Association">
+              <div className="flex items-center gap-2">
+                <AssocMultiSelect
+                  options={assocOptions}
+                  selected={filters.associations}
+                  onChange={(a) => setFilters(f => ({ ...f, associations: a }))}
+                  onSaveShort={saveAssocShort}
+                />
+                {filters.associations.length > 0 && (
+                  <button className={BTN + ' whitespace-nowrap'} disabled={busy === 'resolve'}
+                          onClick={resolveSelectedAssociations}
+                          title="Fetch the complete club roster for the selected association(s) from PlayHQ">
+                    {busy === 'resolve' ? 'Fetching…' : `Fetch roster${filters.associations.length > 1 ? 's' : ''}`}
+                  </button>
+                )}
+              </div>
+            </Field>
+            <Field label="Association contains">
+              <input
+                className={SELECT_CLS + ' w-full'}
+                placeholder="Name or short code..."
+                value={filters.association}
+                onChange={(e) => setFilters(f => ({ ...f, association: e.target.value }))}
+              />
+            </Field>
+            <Field label="State">
+              <select className={SELECT_CLS + ' w-full'} value={filters.state}
+                      onChange={(e) => setFilters(f => ({ ...f, state: e.target.value }))}>
+                <option value="">All states</option>
+                {STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </Field>
+            <Field label="Postcode range">
+              <div className="flex items-center gap-1">
+                <input className={SELECT_CLS + ' w-full'} placeholder="from" inputMode="numeric"
+                       value={filters.postcode_from}
+                       onChange={(e) => setFilters(f => ({ ...f, postcode_from: e.target.value }))} />
+                <span className="text-pb-faint">–</span>
+                <input className={SELECT_CLS + ' w-full'} placeholder="to" inputMode="numeric"
+                       value={filters.postcode_to}
+                       onChange={(e) => setFilters(f => ({ ...f, postcode_to: e.target.value }))} />
+              </div>
+            </Field>
+            <Field label="Contacts">
+              <select className={SELECT_CLS + ' w-full'} value={filters.contact}
+                      onChange={(e) => setFilters(f => ({ ...f, contact: e.target.value }))}>
+                <option value="">Any contacts</option>
+                <option value="any_email">Has an email (any)</option>
+                <option value="named_email">Has a named email</option>
+                <option value="pst">Has Pres + Sec + Treas (named, emailed)</option>
+              </select>
+            </Field>
+            <Field label="Person name">
+              <input
+                className={SELECT_CLS + ' w-full'}
+                placeholder="Person name contains..."
+                value={filters.person}
+                onChange={(e) => setFilters(f => ({ ...f, person: e.target.value }))}
+              />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-4 pt-3 border-t pb-hairline">
+            <span className="text-[10px] uppercase tracking-wide text-pb-faint">Exclude</span>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+              <input type="checkbox" checked={filters.exclude_junior}
+                     onChange={(e) => setFilters(f => ({ ...f, exclude_junior: e.target.checked }))} />
+              Juniors
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+              <input type="checkbox" checked={filters.exclude_carnival}
+                     onChange={(e) => setFilters(f => ({ ...f, exclude_carnival: e.target.checked }))} />
+              Carnivals
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+              <input type="checkbox" checked={filters.exclude_school}
+                     onChange={(e) => setFilters(f => ({ ...f, exclude_school: e.target.checked }))} />
+              Schools
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+              <input type="checkbox" checked={filters.exclude_emailed}
+                     onChange={(e) => setFilters(f => ({ ...f, exclude_emailed: e.target.checked }))} />
+              Already-emailed
+            </label>
+          </div>
+        </section>
+
+        {/* ── Actions card — everything here acts on the filtered list ─── */}
+        <section className={CARD}>
+          <div className="flex items-center justify-between mb-3">
+            <span className={SECTION}>Actions on the filtered list</span>
+            <span className="text-[11px] text-pb-faint">{total} matching club(s)</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <a className={BTN} href={api.mktExportCsvUrl(filters)} target="_blank" rel="noreferrer">
+              Download CSV
+            </a>
+            <button className={BTN} disabled={busy === 'export'} onClick={exportComms}>
+              {busy === 'export' ? 'Exporting...' : 'Export to BetterAdmin Comms'}
             </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 mb-1">
-          <span className="text-[11px] text-pb-faint">Bulk on filtered list ({total}):</span>
-          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(true)}>
-            Mark all emailed
-          </button>
-          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(false)}>
-            Unmark all emailed
-          </button>
-          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkExcluded(true)}>
-            Exclude all
-          </button>
-          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkExcluded(false)}>
-            Include all
-          </button>
-        </div>
-        <div className="text-[11px] text-pb-faint mb-3">
-          Download CSV, Export to BetterAdmin Comms and the bulk actions all act on this filtered list.
-        </div>
+            <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
+              {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t pb-hairline">
+            <span className="text-[10px] uppercase tracking-wide text-pb-faint mr-1">Bulk update</span>
+            <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(true)}>
+              Mark all emailed
+            </button>
+            <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(false)}>
+              Unmark all emailed
+            </button>
+            <span className="text-pb-faint px-1">·</span>
+            <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkExcluded(true)}>
+              Exclude all
+            </button>
+            <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkExcluded(false)}>
+              Include all
+            </button>
+          </div>
+        </section>
 
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}
         {error && <div className="mb-3 text-xs text-red-300 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">{error}</div>}
 
-        <div className="flex flex-wrap items-center gap-3 mb-1">
-          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-            <input type="checkbox" checked={view.group}
-                   onChange={(e) => setView(v => ({ ...v, group: e.target.checked }))} />
-            Group by association
-          </label>
-          {view.group && (
+        {/* ── Results toolbar: grouping/sort on the left, pager on the right ── */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+          <div className="flex flex-wrap items-center gap-4">
+            <span className={SECTION}>View</span>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+              <input type="checkbox" checked={view.group}
+                     onChange={(e) => setView(v => ({ ...v, group: e.target.checked }))} />
+              Group by association
+            </label>
+            {view.group && (
+              <div className="flex items-center gap-1 text-xs text-pb-dim">
+                <span>Assoc.</span>
+                <select className={SELECT_CLS} value={view.assocSort}
+                        onChange={(e) => setView(v => ({ ...v, assocSort: e.target.value }))}>
+                  <option value="asc">A → Z</option>
+                  <option value="desc">Z → A</option>
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-1 text-xs text-pb-dim">
-              <span>Associations</span>
-              <select className={SELECT_CLS} value={view.assocSort}
-                      onChange={(e) => setView(v => ({ ...v, assocSort: e.target.value }))}>
+              <span>Clubs</span>
+              <select className={SELECT_CLS} value={view.clubSort}
+                      onChange={(e) => setView(v => ({ ...v, clubSort: e.target.value }))}>
                 <option value="asc">A → Z</option>
                 <option value="desc">Z → A</option>
               </select>
             </div>
-          )}
-          <div className="flex items-center gap-1 text-xs text-pb-dim">
-            <span>Clubs</span>
-            <select className={SELECT_CLS} value={view.clubSort}
-                    onChange={(e) => setView(v => ({ ...v, clubSort: e.target.value }))}>
-              <option value="asc">A → Z</option>
-              <option value="desc">Z → A</option>
-            </select>
           </div>
         </div>
 
