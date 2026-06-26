@@ -5,8 +5,8 @@ of each alphabetic word), e.g. 'West Australian Suburban Turf Cricket Associatio
 → 'WASTCA'. Stored on the registry so the 'Association contains' filter and the
 multi-select can be searched by shortcode.
 
-Revision ID: 105
-Revises: 104
+Revision ID: 108
+Revises: 107
 Create Date: 2026-06-25
 """
 import re
@@ -14,8 +14,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '105'
-down_revision = '104'
+revision = '108'
+down_revision = '107'
 branch_labels = None
 depends_on = None
 
