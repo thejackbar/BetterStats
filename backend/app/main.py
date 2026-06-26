@@ -690,6 +690,26 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE player_achievements ADD COLUMN IF NOT EXISTS season_end TEXT"
         ))
+        # Performance indexes on the per-game tables' join columns (migration
+        # 103). Postgres doesn't index foreign keys automatically, so the records
+        # board scanned the whole partnerships table four times per request.
+        # Additive only — they change no results, just the planner's options.
+        # Idempotent so they boot the API even if alembic lags.
+        for _ix_name, _ix_table, _ix_col in (
+            ("ix_partnerships_game", "partnerships", "game_id"),
+            ("ix_partnerships_batter1", "partnerships", "batter1_id"),
+            ("ix_partnerships_batter2", "partnerships", "batter2_id"),
+            ("ix_batting_innings_player", "batting_innings", "player_id"),
+            ("ix_batting_innings_game", "batting_innings", "game_id"),
+            ("ix_bowling_spells_player", "bowling_spells", "player_id"),
+            ("ix_bowling_spells_game", "bowling_spells", "game_id"),
+            ("ix_fielding_stats_player", "fielding_stats", "player_id"),
+            ("ix_fielding_stats_game", "fielding_stats", "game_id"),
+            ("ix_games_grade", "games", "grade_id"),
+        ):
+            await conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS {_ix_name} ON {_ix_table} ({_ix_col})"
+            ))
         # Mark any sync_runs left in 'running' state by a previous crash/restart
         # as errored so the dashboard doesn't show a phantom in-flight sync.
         await conn.execute(text("""
