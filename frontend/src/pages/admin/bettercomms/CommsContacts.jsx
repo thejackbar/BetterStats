@@ -21,6 +21,7 @@ export default function CommsContacts() {
   const [importText, setImportText] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
+  const [detailId, setDetailId] = useState(null)
 
   const reload = useCallback(async (q = query) => {
     const d = await api.commsListContacts({ query: q })
@@ -132,10 +133,10 @@ export default function CommsContacts() {
         <div className="pb-card overflow-hidden">
           {data.contacts.map((c, i) => (
             <div key={c.id} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <div className="min-w-0">
+              <button onClick={() => setDetailId(c.id)} className="min-w-0 text-left hover:opacity-80" title="View details & merge variables">
                 <div className="text-pb-text text-sm truncate">{c.name || c.email}</div>
                 {c.name && <div className="text-pb-faintest text-xs truncate">{c.email}</div>}
-              </div>
+              </button>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">{c.source}</span>
                 {c.bounced && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">bounced</span>}
@@ -151,6 +152,79 @@ export default function CommsContacts() {
           ))}
         </div>
       )}
+
+      {detailId && <ContactDetailModal id={detailId} onClose={() => setDetailId(null)} />}
     </BetterCommsLayout>
+  )
+}
+
+function ContactDetailModal({ id, onClose }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState('')
+
+  useEffect(() => {
+    api.commsContactDetail(id).then(setD).catch(e => setErr(e.message))
+  }, [id])
+
+  const copy = (name) => {
+    const token = `{{${name}}}`
+    try { navigator.clipboard?.writeText(token) } catch { /* clipboard may be blocked */ }
+    setCopied(name)
+    setTimeout(() => setCopied(''), 1200)
+  }
+
+  const mc = d?.marketing_club
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="bg-pb-surface border pb-hairline rounded-lg shadow-xl w-full max-w-lg mt-[8vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 pb-hairline-b">
+          <div className="text-pb-text font-medium truncate">{d?.name || d?.email || 'Contact'}</div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text text-lg px-1">✕</button>
+        </div>
+        <div className="p-5">
+          {err && <div className="text-pb-red text-sm">{err}</div>}
+          {!d && !err && <div className="text-pb-faint text-sm">Loading…</div>}
+          {d && (
+            <>
+              <div className="text-sm text-pb-text mb-1">{d.email}</div>
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">{d.source}</span>
+                <span className={`font-mono text-[9px] uppercase tracking-wide2 border rounded px-1.5 py-0.5 ${d.subscribed ? 'text-green-500 border-green-500/40' : 'text-pb-faint border-pb-faint/30'}`}>{d.subscribed ? 'subscribed' : 'unsubscribed'}</span>
+                {d.bounced && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">bounced</span>}
+                {d.complained && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">complaint</span>}
+                {d.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">excluded</span>}
+              </div>
+
+              {mc && (
+                <div className="pb-card p-3 mb-4">
+                  <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">From the Clubs Directory</div>
+                  {[['Club', mc.name], ['Association', mc.association], ['UTM code', mc.utm_code], ['State', mc.state], ['Website', mc.website]].map(([k, v]) => v ? (
+                    <div key={k} className="flex justify-between gap-3 py-0.5 text-sm">
+                      <span className="text-pb-faint">{k}</span>
+                      <span className="text-pb-text truncate">{v}</span>
+                    </div>
+                  ) : null)}
+                </div>
+              )}
+
+              <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">Merge variables — click to copy</div>
+              <div className="text-pb-faintest text-xs mb-2">Drop these into a template; this is how they resolve for this contact.</div>
+              <div>
+                {Object.entries(d.variables || {}).map(([k, v]) => (
+                  <button key={k} onClick={() => copy(k)} title="Copy"
+                    className="w-full flex items-center justify-between gap-3 py-1.5 pb-hairline-t text-left hover:bg-pb-surface2 rounded px-1">
+                    <span className="font-mono text-xs text-pb-accent shrink-0" style={{ color: 'var(--pb-accent)' }}>{`{{${k}}}`}</span>
+                    <span className="text-pb-faint text-xs truncate">{String(v) || <span className="text-pb-faintest italic">empty</span>}</span>
+                    <span className="text-pb-faintest text-[10px] shrink-0 w-12 text-right">{copied === k ? 'copied' : ''}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

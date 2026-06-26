@@ -1531,6 +1531,8 @@ export const api = {
   commsRemoveSuppression: (email) =>
     request(`/club-admin/comms/suppressions?email=${encodeURIComponent(email)}`, { method: 'DELETE' }),
   commsContactEvents: (contactId) => request(`/club-admin/comms/contacts/${contactId}/events`),
+  commsContactDetail: (contactId) => request(`/club-admin/comms/contacts/${contactId}`),
+  commsMergeVariables: () => request('/club-admin/comms/merge-variables'),
   // Dynamic segments (Phase 2): saved queries over contacts + cricket data.
   commsListSegments: () => request('/club-admin/comms/segments'),
   commsCreateSegment: (name, definition) =>

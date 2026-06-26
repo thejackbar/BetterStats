@@ -40,7 +40,7 @@ from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership, Team,
     CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
-    CommsList, CommsListMember, EmailSuppression, EmailEvent,
+    CommsList, CommsListMember, EmailSuppression, EmailEvent, MarketingClub,
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
@@ -242,8 +242,44 @@ def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str) -> st
 </td></tr></table></body></html>"""
 
 
+def _marketing_vars(mc: Optional[MarketingClub]) -> dict:
+    """Per-recipient merge variables drawn from the linked Clubs Directory club —
+    so a BetterCricket outreach email can personalise with the prospect club's own
+    name / association / UTM code. Empty for an ordinary (non-directory) contact."""
+    if mc is None:
+        return {}
+    assoc = (mc.association_name or "").strip()
+    if not assoc and isinstance(mc.associations, list):
+        assoc = next((a.get("name") for a in mc.associations
+                      if isinstance(a, dict) and a.get("name")), "") or ""
+    return {
+        "club": mc.name or "",
+        "association": assoc,
+        "utm_code": mc.utm_code or "",
+        "state": mc.state or "",
+        "website": mc.website_url or "",
+    }
+
+
+# The merge variables BetterComms understands, for the editor reference. The
+# club/association/utm_code set only resolves for BetterCricket directory contacts.
+MERGE_VARIABLES = [
+    {"name": "first_name", "desc": "Recipient's first name", "marketing_only": False},
+    {"name": "name", "desc": "Recipient's full name", "marketing_only": False},
+    {"name": "email", "desc": "Recipient's email address", "marketing_only": False},
+    {"name": "club_name", "desc": "The sending club's name", "marketing_only": False},
+    {"name": "unsubscribe_url", "desc": "One-click unsubscribe link (also added to the footer automatically)", "marketing_only": False},
+    {"name": "club", "desc": "The recipient club's name (from the Clubs Directory)", "marketing_only": True},
+    {"name": "association", "desc": "The recipient club's primary association", "marketing_only": True},
+    {"name": "utm_code", "desc": "The recipient club's unique UTM code, for link tracking", "marketing_only": True},
+    {"name": "state", "desc": "The recipient club's state", "marketing_only": True},
+    {"name": "website", "desc": "The recipient club's website", "marketing_only": True},
+]
+
+
 def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
-                  email: str, name: Optional[str], unsub_url: str, footer: str) -> tuple[str, str, str]:
+                  email: str, name: Optional[str], unsub_url: str, footer: str,
+                  extra_vars: Optional[dict] = None) -> tuple[str, str, str]:
     """(subject, html, text) for one recipient. A full-HTML template renders as-is
     with the mandatory unsubscribe footer injected; a fragment gets the club shell.
     UTM tagging of links is applied ONLY for the BetterCricket marketing org."""
@@ -256,6 +292,11 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
         # the automatic footer, e.g. "…or [unsubscribe]({{unsubscribe_url}})".
         "unsubscribe_url": unsub_url,
     }
+    if extra_vars:
+        # Per-recipient directory vars (club / association / utm_code …). Never
+        # overrides a core key.
+        for k, v in extra_vars.items():
+            ctx.setdefault(k, v)
     subject = _merge(subject or "", ctx)
     apply_utm = org_is_outreach(org)  # UTM is a BetterCricket-marketing-only feature
     if _is_full_doc(body_html):
@@ -274,10 +315,11 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
 
 
 def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Optional[str],
-            unsub_url: str, footer: str) -> EmailMessage:
+            unsub_url: str, footer: str, extra_vars: Optional[dict] = None) -> EmailMessage:
     subject, html, text = _render_parts(
         org, subject=campaign.subject or "", body_html=campaign.body_html or "",
-        utm=(campaign.utm or {}), email=email, name=name, unsub_url=unsub_url, footer=footer)
+        utm=(campaign.utm or {}), email=email, name=name, unsub_url=unsub_url, footer=footer,
+        extra_vars=extra_vars)
     return EmailMessage(
         to_email=email, to_name=name, subject=subject, html=html, text=text,
         from_email=_from_address(org),
@@ -709,7 +751,12 @@ async def send_test(
     # Synthetic unsubscribe token (no contact yet) — the public route handles a
     # missing contact gracefully, so the test still shows a real working link.
     unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
-    msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer)
+    # In the BetterCricket marketing context, fill the directory vars with a sample
+    # so a test send shows {{club}} / {{utm_code}} rather than blanks.
+    sample = ({"club": "Sample Cricket Club", "association": "Sample Association",
+               "utm_code": "sample-cricket-club", "state": "WA",
+               "website": "https://example.com"} if org_is_outreach(club) else None)
+    msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer, extra_vars=sample)
     msg.subject = f"[TEST] {msg.subject}"
     res = await get_email_provider().send(msg)
     if not res.ok:
@@ -774,17 +821,29 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
             recips = (await s.execute(select(CommsRecipient).where(
                 CommsRecipient.campaign_id == camp.id, CommsRecipient.status == "queued"
             ))).scalars().all()
+            # Per-recipient directory vars (club / association / utm_code) for any
+            # contact exported from the Clubs Directory — one batched lookup.
+            mc_vars: dict = {}
+            cids = [r.contact_id for r in recips if r.contact_id]
+            if cids:
+                for cid, mc in (await s.execute(
+                    select(CommsContact.id, MarketingClub)
+                    .join(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
+                    .where(CommsContact.id.in_(cids))
+                )).all():
+                    mc_vars[cid] = _marketing_vars(mc)
             # Snapshot to plain data so the network phase touches no ORM objects.
             jobs = [{
                 "rid": r.id,
                 "email": r.email,
                 "name": r.name,
                 "unsub": _unsub_url(_unsub_token(org.id, r.contact_id or r.id)),
+                "vars": mc_vars.get(r.contact_id, {}),
             } for r in recips]
             # Pre-render every message while we still hold the org (pure CPU).
             messages = {
                 j["rid"]: _render(org, camp, email=j["email"], name=j["name"],
-                                  unsub_url=j["unsub"], footer=footer)
+                                  unsub_url=j["unsub"], footer=footer, extra_vars=j["vars"])
                 for j in jobs
             }
 
@@ -1043,6 +1102,58 @@ async def delete_suppression(
     await db.commit()
     logger.info("BetterComms: un-suppressed %s for org %s (removed=%d)", e, club.id, removed)
     return {"status": "ok", "removed": removed}
+
+
+@router.get("/merge-variables")
+async def merge_variables(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The merge variables a template can use. The club/association/utm_code set
+    only resolves for BetterCricket Clubs Directory contacts, so the editor flags
+    them and we report whether we're in that context."""
+    return {"is_marketing": org_is_outreach(club), "variables": MERGE_VARIABLES}
+
+
+@router.get("/contacts/{contact_id}")
+async def get_contact(
+    contact_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """One contact's full detail, including the Clubs Directory fields it was
+    exported with and the resolved value of every merge variable for this person —
+    so you can see exactly what {{club}}, {{utm_code}} etc. will become."""
+    try:
+        cid = uuid.UUID(contact_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid contact id")
+    c = await db.get(CommsContact, cid)
+    if not c or c.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    mc = await db.get(MarketingClub, c.marketing_club_id) if c.marketing_club_id else None
+    mvars = _marketing_vars(mc)
+    variables = {
+        "first_name": _first_name(c.name, c.email),
+        "name": (c.name or "").strip() or _first_name(c.name, c.email),
+        "email": c.email,
+        "club_name": club.name or "",
+        **mvars,
+        "unsubscribe_url": "(unique per recipient, added automatically)",
+    }
+    return {
+        "id": str(c.id), "email": c.email, "name": c.name, "source": c.source,
+        "subscribed": c.subscribed, "bounced": c.bounced,
+        "complained": getattr(c, "complained", False), "excluded": c.excluded,
+        "tags": c.tags or [],
+        "marketing_club": ({
+            "name": mc.name, "association": mvars.get("association", ""),
+            "utm_code": mc.utm_code, "state": mc.state, "website": mc.website_url,
+        } if mc else None),
+        "variables": variables,
+    }
 
 
 @router.get("/contacts/{contact_id}/events")

@@ -182,8 +182,18 @@ email's font so it adopts the style) so an author can never drop it. UTM tagging
 a BetterCricket-marketing-only feature: `comms_campaigns.utm` is appended to every
 outbound link at render, but only when the org is the marketing-outreach org
 (`org_is_outreach`), so a club's own member email never gets UTM tags. The tags
-feed the Usage/visitors analytics, which already read UTM params. Next: template
-versioning, and a block editor.
+feed the Usage/visitors analytics, which already read UTM params.
+
+*Merge variables*: `{{first_name}}`, `{{name}}`, `{{email}}`, `{{club_name}}` (sender)
+and `{{unsubscribe_url}}` resolve for every send. For a BetterCricket Clubs
+Directory contact, four more resolve per recipient from the linked `marketing_clubs`
+row — `{{club}}` (the prospect club's name), `{{association}}`, `{{utm_code}}` (its
+unique tracking code) and `{{state}}` — built by `_marketing_vars` and threaded
+through `_render` via `extra_vars`. The catalogue is `MERGE_VARIABLES` (served by
+`GET /merge-variables`, marketing-only ones flagged). The Templates editor lists
+them (click to copy), and a contact's detail view (`GET /contacts/{id}`) shows the
+resolved value of each variable for that person. Next: template versioning, and a
+block editor.
 
 **Phase 4 (last): automation / journeys.** Triggered sends ("membership approved →
 welcome", "selection published → email the named players", "invoice overdue →
