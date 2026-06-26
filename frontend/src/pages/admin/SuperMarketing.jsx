@@ -66,7 +66,7 @@ function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
         <span className="text-pb-faint">▾</span>
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 w-80 max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+        <div className="absolute z-30 mt-1 w-[40rem] max-w-[92vw] max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
           <input autoFocus className={SELECT_CLS + ' w-full mb-2'} placeholder="Search associations..."
                  value={q} onChange={(e) => setQ(e.target.value)} />
           {selected.length > 0 && (
