@@ -14,7 +14,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.services.aggregations import get_upcoming_milestones_for_org
-from app.auth.modules import org_has_module
+from app.auth.modules import org_entitled_modules
 from app.services.merch import merch_alerts as get_merch_alerts
 
 logger = logging.getLogger(__name__)
@@ -37,14 +37,17 @@ async def _safe(db: AsyncSession, factory, default, *, what: str):
         return default
 
 
-async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
+async def _user_can_manage_reports(db: AsyncSession, user_id, user_role: Optional[str], org_id) -> bool:
+    # Takes plain ids, not ORM instances: a prior _safe() rollback may have
+    # expired the User/Organisation rows, and re-reading them here would emit
+    # SQL from a sync attribute access (greenlet error).
     row = await db.execute(
         select(ClubMembership)
-        .where(ClubMembership.user_id == user.id, ClubMembership.club_id == club.id)
+        .where(ClubMembership.user_id == user_id, ClubMembership.club_id == org_id)
     )
     m = row.scalar_one_or_none()
     if not m:
-        return user.role in PRIVILEGED_ROLES
+        return user_role in PRIVILEGED_ROLES
     return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS)
 
 router = APIRouter(prefix="/club-admin", tags=["notifications"])
@@ -58,20 +61,20 @@ def _window_start(last_seen: Optional[datetime]) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=_DEFAULT_WINDOW_DAYS)
 
 
-def _empty_count(current_user: User) -> dict:
+def _empty_count(last_seen_version: Optional[str]) -> dict:
     return {
         "unseen_count": 0,
         "failed_sync_count": 0,
         "pending_reports_count": 0,
         "merch_alert_count": 0,
-        "last_seen_version": getattr(current_user, "last_seen_app_version", None),
+        "last_seen_version": last_seen_version,
     }
 
 
-def _empty_summary(current_user: User) -> dict:
+def _empty_summary(last_seen_version: Optional[str]) -> dict:
     return {
         "last_seen_at": None,
-        "last_seen_version": getattr(current_user, "last_seen_app_version", None),
+        "last_seen_version": last_seen_version,
         "unseen_count": 0,
         "failed_sync_count": 0,
         "sync_runs": [],
@@ -95,6 +98,7 @@ async def get_notifications_count(
     unexpected failure it logs, rolls back, and returns a zero count. The
     per-section ``_safe()`` guards below cover the common case; this is the
     final backstop for the response assembly and anything they miss."""
+    last_seen_version = current_user.last_seen_app_version
     try:
         return await _build_notifications_count(current_user, club, db)
     except Exception:
@@ -103,7 +107,7 @@ async def get_notifications_count(
             await db.rollback()
         except Exception:
             pass
-        return _empty_count(current_user)
+        return _empty_count(last_seen_version)
 
 
 async def _build_notifications_count(
@@ -111,13 +115,24 @@ async def _build_notifications_count(
     club: Organisation,
     db: AsyncSession,
 ):
+    # Snapshot everything we read off the ORM instances up front, before any
+    # query runs. _safe() rolls the session back on a section failure, which
+    # EXPIRES these instances; reading an expired attribute afterwards emits SQL
+    # from a sync attribute access (greenlet error) and turns one failing
+    # section into a cascade through the rest of the body. Plain locals are
+    # immune, so a single bad section now only zeroes itself out.
+    org_id = club.id
+    user_id = current_user.id
+    user_role = current_user.role
     last_seen = current_user.last_notification_seen_at
+    last_seen_version = current_user.last_seen_app_version
+    entitled_modules = org_entitled_modules(club)
     ws = _window_start(last_seen)
     cutoff_date = ws.date()
 
     sync_count = (await _safe(db, lambda: db.scalar(
         select(func.count(SyncRun.id))
-        .where(SyncRun.org_id == club.id)
+        .where(SyncRun.org_id == org_id)
         .where(SyncRun.status.in_(["success", "error"]))
         .where(SyncRun.player_id.is_(None))
         .where(SyncRun.completed_at > ws)
@@ -128,7 +143,7 @@ async def _build_notifications_count(
     # a milestone or pending merge request.
     failed_sync_count = (await _safe(db, lambda: db.scalar(
         select(func.count(SyncRun.id))
-        .where(SyncRun.org_id == club.id)
+        .where(SyncRun.org_id == org_id)
         .where(SyncRun.status == "error")
         .where(SyncRun.player_id.is_(None))
         .where(SyncRun.completed_at > ws)
@@ -137,24 +152,24 @@ async def _build_notifications_count(
     milestone_count = (await _safe(db, lambda: db.scalar(
         select(func.count(Milestone.id))
         .join(Player, Player.id == Milestone.player_id)
-        .where(Player.organisation_id == club.id)
+        .where(Player.organisation_id == org_id)
         .where(Milestone.achieved_at.isnot(None))
         .where(Milestone.achieved_at >= cutoff_date)
     ), 0, what="count.milestone")) or 0
 
     pending_count = (await _safe(db, lambda: db.scalar(
         select(func.count(PlayerSyncRequest.id))
-        .where(PlayerSyncRequest.org_id == club.id)
+        .where(PlayerSyncRequest.org_id == org_id)
         .where(PlayerSyncRequest.status == "pending")
     ), 0, what="count.pending")) or 0
 
     # Saved-report approval queue — only counted for users who can act on it.
     async def _pending_reports():
-        if not await _user_can_manage_reports(db, current_user, club):
+        if not await _user_can_manage_reports(db, user_id, user_role, org_id):
             return 0
         return (await db.scalar(
             select(func.count(SavedReport.id))
-            .where(SavedReport.org_id == club.id)
+            .where(SavedReport.org_id == org_id)
             .where(SavedReport.visibility == "club")
             .where(SavedReport.status == "pending")
         )) or 0
@@ -165,9 +180,9 @@ async def _build_notifications_count(
     # — a low-stock badge stands until the club restocks. Only for clubs holding
     # the module.
     async def _merch_count():
-        if not org_has_module(club, "merch"):
+        if "merch" not in entitled_modules:
             return 0
-        return (await get_merch_alerts(db, club.id))["total"]
+        return (await get_merch_alerts(db, org_id))["total"]
     merch_alert_count = await _safe(db, _merch_count, 0, what="count.merch")
 
     return {
@@ -175,7 +190,7 @@ async def _build_notifications_count(
         "failed_sync_count": failed_sync_count,
         "pending_reports_count": pending_reports_count,
         "merch_alert_count": merch_alert_count,
-        "last_seen_version": current_user.last_seen_app_version,
+        "last_seen_version": last_seen_version,
     }
 
 
@@ -192,6 +207,7 @@ async def get_notifications_summary(
     remaining failure (response assembly, an un-run migration on this club,
     anything unforeseen) into a valid empty payload instead of the bare 500
     that surfaced as "Couldn't load notifications" in the bell."""
+    last_seen_version = current_user.last_seen_app_version
     try:
         return await _build_notifications_summary(current_user, club, db)
     except Exception:
@@ -200,7 +216,7 @@ async def get_notifications_summary(
             await db.rollback()
         except Exception:
             pass
-        return _empty_summary(current_user)
+        return _empty_summary(last_seen_version)
 
 
 async def _build_notifications_summary(
@@ -208,7 +224,16 @@ async def _build_notifications_summary(
     club: Organisation,
     db: AsyncSession,
 ):
+    # Snapshot scalar reads off the ORM instances before any query — see the
+    # note in _build_notifications_count: a _safe() rollback expires them, and a
+    # later expired read would cascade one failing section into the next and
+    # into the response assembly.
+    org_id = club.id
+    user_id = current_user.id
+    user_role = current_user.role
     last_seen = current_user.last_notification_seen_at
+    last_seen_version = current_user.last_seen_app_version
+    entitled_modules = org_entitled_modules(club)
     ws = _window_start(last_seen)
     cutoff_date = ws.date()
 
@@ -217,7 +242,7 @@ async def _build_notifications_summary(
     async def _sync_runs():
         res = await db.execute(
             select(SyncRun)
-            .where(SyncRun.org_id == club.id)
+            .where(SyncRun.org_id == org_id)
             .where(SyncRun.status.in_(["success", "error"]))
             .where(SyncRun.player_id.is_(None))
             .where(SyncRun.completed_at > ws)
@@ -242,7 +267,7 @@ async def _build_notifications_summary(
         res = await db.execute(
             select(Milestone, Player)
             .join(Player, Player.id == Milestone.player_id)
-            .where(Player.organisation_id == club.id)
+            .where(Player.organisation_id == org_id)
             .where(Milestone.achieved_at.isnot(None))
             .where(Milestone.achieved_at >= cutoff_date)
             .order_by(Milestone.achieved_at.desc())
@@ -264,7 +289,7 @@ async def _build_notifications_summary(
     # Upcoming milestones (always fresh, top 5)
     upcoming = await _safe(
         db,
-        lambda: get_upcoming_milestones_for_org(db, str(club.id), limit=10),
+        lambda: get_upcoming_milestones_for_org(db, str(org_id), limit=10),
         [],
         what="summary.upcoming",
     )
@@ -273,17 +298,17 @@ async def _build_notifications_summary(
     # Pending sync requests count
     pending_count = (await _safe(db, lambda: db.scalar(
         select(func.count(PlayerSyncRequest.id))
-        .where(PlayerSyncRequest.org_id == club.id)
+        .where(PlayerSyncRequest.org_id == org_id)
         .where(PlayerSyncRequest.status == "pending")
     ), 0, what="summary.pending")) or 0
 
     # Pending saved-report approvals (admin-only)
     async def _pending_reports():
-        if not await _user_can_manage_reports(db, current_user, club):
+        if not await _user_can_manage_reports(db, user_id, user_role, org_id):
             return 0
         return (await db.scalar(
             select(func.count(SavedReport.id))
-            .where(SavedReport.org_id == club.id)
+            .where(SavedReport.org_id == org_id)
             .where(SavedReport.visibility == "club")
             .where(SavedReport.status == "pending")
         )) or 0
@@ -293,9 +318,9 @@ async def _build_notifications_summary(
     _empty_merch = {"low_stock": [], "expiring": [], "service_due": [], "total": 0}
 
     async def _merch():
-        if not org_has_module(club, "merch"):
+        if "merch" not in entitled_modules:
             return _empty_merch
-        return await get_merch_alerts(db, club.id)
+        return await get_merch_alerts(db, org_id)
     merch = await _safe(db, _merch, _empty_merch, what="summary.merch")
 
     unseen_count = len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count + (merch.get("total", 0) if isinstance(merch, dict) else 0)
@@ -303,7 +328,7 @@ async def _build_notifications_summary(
 
     return {
         "last_seen_at": last_seen.isoformat() if last_seen else None,
-        "last_seen_version": current_user.last_seen_app_version,
+        "last_seen_version": last_seen_version,
         "unseen_count": unseen_count,
         "failed_sync_count": failed_sync_count,
         "sync_runs": sync_runs,
