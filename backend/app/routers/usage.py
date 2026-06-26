@@ -108,6 +108,99 @@ def _role_params(roles: list[str]) -> dict:
     return {}
 
 
+# ─── Visitor identity ────────────────────────────────────────────────────────
+# A visitor is keyed by the first-party `visitor_id` (a random UUID the SPA
+# keeps in localStorage) when present, falling back to the hashed IP for legacy
+# rows written before visitor_id existed. This single expression is reused
+# across the visitor/lead views so "returning" is computed the same way
+# everywhere — and survives an IP change, which the hash alone could not.
+_VKEY = "COALESCE(ue.visitor_id::text, ue.ip_hash)"
+
+# Page paths that signal buying intent — a visit here is a warm lead.
+_INTENT_CONTACT = "split_part(ue.path, '?', 1) ~* '^/contact(/|$)'"
+_INTENT_PRICING = "split_part(ue.path, '?', 1) ~* '^/pricing(/|$)'"
+
+
+def _parse_device(ua: Optional[str]) -> dict:
+    """Coarse device read from the user-agent. Good enough to tell a phone
+    from a laptop and name the browser — we don't ship a full UA database."""
+    s = ua or ""
+    low = s.lower()
+    if not s:
+        dtype = "unknown"
+    elif any(b in low for b in (
+        "bot", "crawl", "spider", "slurp", "bingpreview",
+        "facebookexternalhit", "headless", "lighthouse", "preview",
+    )):
+        dtype = "bot"
+    elif "ipad" in low or "tablet" in low or ("android" in low and "mobile" not in low):
+        dtype = "tablet"
+    elif any(b in low for b in ("mobi", "iphone", "ipod", "android")):
+        dtype = "mobile"
+    else:
+        dtype = "desktop"
+
+    if any(b in low for b in ("iphone", "ipad", "ipod")) or "cpu os" in low:
+        os_ = "iOS"
+    elif "android" in low:
+        os_ = "Android"
+    elif "windows" in low:
+        os_ = "Windows"
+    elif "mac os" in low or "macintosh" in low:
+        os_ = "macOS"
+    elif "cros" in low:
+        os_ = "ChromeOS"
+    elif "linux" in low:
+        os_ = "Linux"
+    else:
+        os_ = None
+
+    if "edg" in low:
+        br = "Edge"
+    elif "opr" in low or "opera" in low:
+        br = "Opera"
+    elif "samsungbrowser" in low:
+        br = "Samsung"
+    elif "crios" in low or "chrome" in low:
+        br = "Chrome"
+    elif "fxios" in low or "firefox" in low:
+        br = "Firefox"
+    elif "safari" in low:
+        br = "Safari"
+    else:
+        br = None
+    return {"type": dtype, "os": os_, "browser": br}
+
+
+async def _resolve_utm_clubs(db: AsyncSession, codes: set[str]) -> dict[str, dict]:
+    """Map lowercased UTM codes → the marketing club that owns them.
+
+    Clubs get a per-club ``utm_code`` for outreach links (Club Directory), so a
+    visitor arriving with ``?utm_source=<code>`` is very likely that club. One
+    query for the whole page of visitors."""
+    codes = {c for c in codes if c}
+    if not codes:
+        return {}
+    rows = await db.execute(
+        text(
+            """
+            SELECT lower(utm_code) AS code, name, existing_org_id
+            FROM marketing_clubs
+            WHERE utm_code IS NOT NULL AND utm_code <> ''
+              AND lower(utm_code) = ANY(:codes)
+            """
+        ),
+        {"codes": list(codes)},
+    )
+    out: dict[str, dict] = {}
+    for r in rows.mappings().all():
+        out.setdefault(r["code"], {
+            "name": r["name"],
+            "org_id": str(r["existing_org_id"]) if r["existing_org_id"] else None,
+        })
+    return out
+
+
 # ─── Feature categorisation (Python-side, after group-by route) ──────────────
 
 def _categorise(route: Optional[str], path: Optional[str], event_type: str) -> str:
@@ -180,6 +273,17 @@ class PageViewIn(BaseModel):
     path: str
     referer: Optional[str] = None
     name: Optional[str] = None
+    # Lead-tracking: a stable first-party visitor id + first-touch acquisition,
+    # all supplied by the SPA beacon (see frontend lib/visitor.js).
+    visitor_id: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    click_id: Optional[str] = None
+    click_source: Optional[str] = None
+    landing_referrer: Optional[str] = None
+    landing_path: Optional[str] = None
 
 
 @router.post("/usage/event")
@@ -198,6 +302,15 @@ async def post_event(payload: PageViewIn, request: Request):
         user_agent=request.headers.get("user-agent"),
         referer=payload.referer or request.headers.get("referer"),
         country=_cf_country(request),
+        visitor_id=payload.visitor_id,
+        utm_source=payload.utm_source,
+        utm_medium=payload.utm_medium,
+        utm_campaign=payload.utm_campaign,
+        utm_content=payload.utm_content,
+        click_id=payload.click_id,
+        click_source=payload.click_source,
+        landing_referrer=payload.landing_referrer,
+        landing_path=payload.landing_path,
     )
     return {"ok": True}
 
@@ -452,18 +565,20 @@ async def by_club(
 async def visitors(
     days: int = 7,
     event_type: Optional[str] = None,
+    anon_only: bool = False,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return-visitor analytics from the (privacy-preserving) IP hash.
+    """Return-visitor analytics keyed on the stable visitor id (falling back to
+    the hashed IP for legacy rows). We never store raw IPs.
 
-    We never store raw IPs — only a truncated SHA-256 — but that's enough to
-    count distinct visitors and tell new from returning:
-      - visitors:          distinct IP hashes seen in the window
-      - returning:         visitors whose first-ever hit predates the window
-      - new:               visitors − returning
-      - multi_day:         visitors active on ≥2 distinct days in the window
-      - avg_hits:          hits per visitor
+      - visitors:    distinct visitors seen in the window
+      - returning:   visitors whose first-ever hit predates the window
+      - new:         visitors − returning
+      - multi_day:   visitors active on ≥2 distinct days in the window
+      - high_intent: visitors who viewed the contact or pricing page
+      - identified:  visitors carrying a real first-party id (not IP-only)
+      - avg_hits:    hits per visitor
     """
     days = max(1, min(days, 365))
     params: dict = {"days": days}
@@ -471,28 +586,34 @@ async def visitors(
     if event_type:
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
+    anon_clause = "AND ue.user_id IS NULL" if anon_only else ""
     row = (await db.execute(
         text(
             f"""
             WITH win AS (
-                SELECT ue.ip_hash,
+                SELECT {_VKEY} AS vkey,
                        COUNT(*) AS hits,
-                       COUNT(DISTINCT date_trunc('day', ue.created_at)) AS active_days
+                       COUNT(DISTINCT date_trunc('day', ue.created_at)) AS active_days,
+                       bool_or(ue.visitor_id IS NOT NULL) AS identified,
+                       bool_or({_INTENT_CONTACT} OR {_INTENT_PRICING}) AS high_intent
                 FROM usage_events ue
-                WHERE ue.ip_hash IS NOT NULL
+                WHERE {_VKEY} IS NOT NULL
                   AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
                   {type_clause}
-                GROUP BY ue.ip_hash
+                  {anon_clause}
+                GROUP BY {_VKEY}
             ),
             first_seen AS (
-                SELECT ip_hash, MIN(created_at) AS first_ever
-                FROM usage_events
-                WHERE ip_hash IN (SELECT ip_hash FROM win)
-                GROUP BY ip_hash
+                SELECT {_VKEY} AS vkey, MIN(ue.created_at) AS first_ever
+                FROM usage_events ue
+                WHERE {_VKEY} IN (SELECT vkey FROM win)
+                GROUP BY {_VKEY}
             )
             SELECT
                 (SELECT COUNT(*) FROM win)                                  AS visitors,
                 (SELECT COUNT(*) FROM win WHERE active_days >= 2)           AS multi_day,
+                (SELECT COUNT(*) FROM win WHERE high_intent)               AS high_intent,
+                (SELECT COUNT(*) FROM win WHERE identified)                AS identified,
                 (SELECT COALESCE(SUM(hits), 0) FROM win)                    AS total_hits,
                 (SELECT COUNT(*) FROM first_seen
                   WHERE first_ever < NOW() - (:days * INTERVAL '1 day'))    AS returning
@@ -509,6 +630,8 @@ async def visitors(
         "returning": returning_n,
         "new": max(visitors_n - returning_n, 0),
         "multi_day": int(row["multi_day"] or 0),
+        "high_intent": int(row["high_intent"] or 0),
+        "identified": int(row["identified"] or 0),
         "total_hits": total_hits,
         "avg_hits": round(total_hits / visitors_n, 1) if visitors_n else 0.0,
         "returning_pct": round(100 * returning_n / visitors_n) if visitors_n else 0,
@@ -853,4 +976,539 @@ async def by_location(
             }
             for r in city_rows.mappings().all()
         ],
+    }
+
+
+# ─── Visitor profiles (who's on the site, and which club they're likely from) ─
+
+# Whitelisted sort keys so the order clause is never built from raw input.
+_VISITOR_SORTS = {
+    "intent":  "(a.hit_contact OR a.hit_pricing) DESC, a.last_seen DESC",
+    "recent":  "a.last_seen DESC",
+    "visits":  "a.page_views DESC, a.last_seen DESC",
+    "engaged": "a.active_days DESC, a.page_views DESC",
+}
+
+
+@router.get("/club-admin/usage/visitors-list")
+async def visitors_list(
+    days: int = 1,
+    limit: int = 100,
+    anon_only: bool = True,
+    intent_only: bool = False,
+    sort: str = "intent",
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """One row per visitor for the window: who they are, where they came from,
+    and the club they're most likely tied to.
+
+    Identity is the stable first-party ``visitor_id`` (falling back to the
+    hashed IP for legacy rows). Club is inferred from the club pages they
+    browse (``/{slug}/…`` → organisations); when they have no club browsing
+    but arrived on a club's UTM code we resolve that instead. Page views only —
+    this is about people, not API noise. Defaults to anonymous visitors in the
+    last 24h, the lead-capture view."""
+    days = max(1, min(days, 365))
+    limit = max(1, min(limit, 500))
+    order_clause = _VISITOR_SORTS.get(sort, _VISITOR_SORTS["intent"])
+    anon_clause = "AND ue.user_id IS NULL" if anon_only else ""
+    intent_clause = "WHERE (a.hit_contact OR a.hit_pricing)" if intent_only else ""
+    rows = (await db.execute(
+        text(
+            f"""
+            WITH ev AS (
+                SELECT
+                    {_VKEY} AS vkey,
+                    ue.visitor_id, ue.user_id, ue.created_at, ue.path,
+                    split_part(ue.path, '?', 1) AS path_clean,
+                    ue.country, ue.region, ue.city,
+                    ue.traffic_source, ue.utm_source, ue.utm_campaign,
+                    ue.landing_path, ue.user_agent,
+                    ({_INTENT_CONTACT}) AS is_contact,
+                    ({_INTENT_PRICING}) AS is_pricing
+                FROM usage_events ue
+                WHERE ue.event_type = 'page_view'
+                  AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+                  AND {_VKEY} IS NOT NULL
+                  {anon_clause}
+            ),
+            agg AS (
+                SELECT vkey,
+                    MIN(created_at) AS first_seen,
+                    MAX(created_at) AS last_seen,
+                    COUNT(*) AS page_views,
+                    COUNT(DISTINCT path_clean) AS distinct_paths,
+                    COUNT(DISTINCT date_trunc('day', created_at)) AS active_days,
+                    bool_or(is_contact) AS hit_contact,
+                    bool_or(is_pricing) AS hit_pricing,
+                    bool_or(user_id IS NOT NULL) AS has_account,
+                    bool_or(visitor_id IS NOT NULL) AS identified
+                FROM ev GROUP BY vkey
+            ),
+            sess AS (
+                SELECT vkey, COUNT(*) FILTER (WHERE is_new) AS sessions FROM (
+                    SELECT vkey,
+                        (LAG(created_at) OVER (PARTITION BY vkey ORDER BY created_at) IS NULL
+                         OR created_at - LAG(created_at) OVER (PARTITION BY vkey ORDER BY created_at)
+                            > INTERVAL '30 minutes') AS is_new
+                    FROM ev
+                ) g GROUP BY vkey
+            ),
+            latest AS (
+                SELECT DISTINCT ON (vkey)
+                    vkey, country, region, city, traffic_source, utm_source,
+                    utm_campaign, landing_path, user_agent, path_clean AS last_path
+                FROM ev ORDER BY vkey, created_at DESC
+            ),
+            firstever AS (
+                SELECT {_VKEY} AS vkey, MIN(ue.created_at) AS first_ever
+                FROM usage_events ue
+                WHERE {_VKEY} IN (SELECT vkey FROM agg)
+                GROUP BY {_VKEY}
+            ),
+            club_hits AS (
+                SELECT ev.vkey, o.slug AS club_slug, o.name AS club_name, COUNT(*) AS hits
+                FROM ev JOIN organisations o ON o.slug = split_part(ev.path_clean, '/', 2)
+                GROUP BY ev.vkey, o.slug, o.name
+            ),
+            club_ranked AS (
+                SELECT vkey, club_slug, club_name, hits,
+                    ROW_NUMBER() OVER (PARTITION BY vkey ORDER BY hits DESC) AS rn,
+                    SUM(hits) OVER (PARTITION BY vkey) AS total_club_hits
+                FROM club_hits
+            )
+            SELECT
+                a.vkey, a.first_seen, a.last_seen, a.page_views, a.distinct_paths,
+                a.active_days, a.hit_contact, a.hit_pricing, a.has_account, a.identified,
+                COALESCE(s.sessions, 1) AS sessions,
+                l.country, l.region, l.city, l.traffic_source, l.utm_source,
+                l.utm_campaign, l.landing_path, l.user_agent, l.last_path,
+                fe.first_ever,
+                (fe.first_ever < NOW() - (:days * INTERVAL '1 day')) AS returning_before,
+                cr.club_slug, cr.club_name, cr.hits AS club_hits, cr.total_club_hits
+            FROM agg a
+            LEFT JOIN sess s ON s.vkey = a.vkey
+            LEFT JOIN latest l ON l.vkey = a.vkey
+            LEFT JOIN firstever fe ON fe.vkey = a.vkey
+            LEFT JOIN club_ranked cr ON cr.vkey = a.vkey AND cr.rn = 1
+            {intent_clause}
+            ORDER BY {order_clause}
+            LIMIT :lim
+            """
+        ),
+        {"days": days, "lim": limit},
+    )).mappings().all()
+
+    items = []
+    utm_codes: set[str] = set()
+    pending_utm: list[tuple[int, list[str]]] = []
+    for r in rows:
+        club = None
+        if r["club_slug"]:
+            total = int(r["total_club_hits"] or 0)
+            hits = int(r["club_hits"] or 0)
+            club = {
+                "name": r["club_name"], "slug": r["club_slug"], "source": "pages",
+                "confidence": round(100 * hits / total) if total else None,
+                "page_views": hits, "org_id": None,
+            }
+        returning = bool(r["returning_before"]) or int(r["active_days"] or 0) >= 2
+        items.append({
+            "vkey": r["vkey"],
+            "is_known_visitor": bool(r["identified"]),
+            "first_seen": r["first_seen"].isoformat() if r["first_seen"] else None,
+            "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
+            "first_ever": r["first_ever"].isoformat() if r["first_ever"] else None,
+            "page_views": int(r["page_views"] or 0),
+            "distinct_paths": int(r["distinct_paths"] or 0),
+            "active_days": int(r["active_days"] or 0),
+            "sessions": int(r["sessions"] or 1),
+            "returning": returning,
+            "has_account": bool(r["has_account"]),
+            "hit_contact": bool(r["hit_contact"]),
+            "hit_pricing": bool(r["hit_pricing"]),
+            "high_intent": bool(r["hit_contact"] or r["hit_pricing"]),
+            "country": r["country"], "region": r["region"], "city": r["city"],
+            "traffic_source": r["traffic_source"] or "direct",
+            "utm_source": r["utm_source"], "utm_campaign": r["utm_campaign"],
+            "landing_path": r["landing_path"], "last_path": r["last_path"],
+            "device": _parse_device(r["user_agent"]),
+            "club": club,
+        })
+        if club is None and (r["utm_source"] or r["utm_campaign"]):
+            cands = [(r["utm_source"] or "").strip().lower(),
+                     (r["utm_campaign"] or "").strip().lower()]
+            for c in cands:
+                if c:
+                    utm_codes.add(c)
+            pending_utm.append((len(items) - 1, cands))
+
+    utm_map = await _resolve_utm_clubs(db, utm_codes)
+    for idx, cands in pending_utm:
+        for c in cands:
+            if c and c in utm_map:
+                items[idx]["club"] = {
+                    "name": utm_map[c]["name"], "slug": None, "source": "utm",
+                    "confidence": None, "page_views": None,
+                    "org_id": utm_map[c]["org_id"],
+                }
+                break
+    return items
+
+
+@router.get("/club-admin/usage/visitor/{vkey}")
+async def visitor_detail(
+    vkey: str,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Everything we know about one visitor (all-time): their page journey,
+    inferred clubs, acquisition, device, and any onboarding enquiry they left."""
+    vkey = (vkey or "").strip()[:64]
+    if not vkey:
+        return {"vkey": vkey, "events": [], "clubs": [], "leads": []}
+
+    raw = (await db.execute(
+        text(
+            f"""
+            SELECT ue.id, ue.created_at, ue.event_type, ue.method, ue.path,
+                   ue.route, ue.status, ue.duration_ms, ue.user_id,
+                   ue.ip_hash, ue.referer, ue.country, ue.region, ue.city,
+                   ue.traffic_source, ue.utm_source, ue.utm_medium,
+                   ue.utm_campaign, ue.utm_content, ue.click_id,
+                   ue.landing_path, ue.user_agent, ue.visitor_id,
+                   NULL AS user_email, NULL AS user_display_name, NULL AS user_role
+            FROM usage_events ue
+            WHERE {_VKEY} = :vkey
+              AND ue.event_type = 'page_view'
+            ORDER BY ue.created_at DESC
+            LIMIT 400
+            """
+        ),
+        {"vkey": vkey},
+    )).mappings().all()
+
+    events = await _enrich_targets(db, raw)
+    # _enrich_targets keeps the breadcrumb fields; add the acquisition columns
+    # it doesn't carry so the journey can show how each visit was sourced.
+    by_id = {row["id"]: row for row in raw}
+    for ev in events:
+        src = by_id.get(ev["id"])
+        if src is not None:
+            ev["traffic_source"] = src["traffic_source"]
+            ev["utm_source"] = src["utm_source"]
+            ev["utm_campaign"] = src["utm_campaign"]
+            ev["landing_path"] = src["landing_path"]
+
+    clubs = (await db.execute(
+        text(
+            f"""
+            SELECT o.slug AS club_slug, o.name AS club_name, o.id::text AS org_id,
+                   COUNT(*) AS hits, MAX(ue.created_at) AS last_seen
+            FROM usage_events ue
+            JOIN organisations o
+              ON o.slug = split_part(split_part(ue.path, '?', 1), '/', 2)
+            WHERE {_VKEY} = :vkey AND ue.event_type = 'page_view'
+            GROUP BY o.slug, o.name, o.id
+            ORDER BY hits DESC
+            LIMIT 15
+            """
+        ),
+        {"vkey": vkey},
+    )).mappings().all()
+
+    # Acquisition + device from the most recent page view.
+    latest = raw[0] if raw else None
+    summary = {
+        "vkey": vkey,
+        "is_known_visitor": bool(latest and latest["visitor_id"]),
+        "page_views": len(raw),
+        "first_seen": raw[-1]["created_at"].isoformat() if raw else None,
+        "last_seen": raw[0]["created_at"].isoformat() if raw else None,
+        "traffic_source": (latest["traffic_source"] if latest else None) or "direct",
+        "utm_source": latest["utm_source"] if latest else None,
+        "utm_medium": latest["utm_medium"] if latest else None,
+        "utm_campaign": latest["utm_campaign"] if latest else None,
+        "click_id": latest["click_id"] if latest else None,
+        "landing_path": latest["landing_path"] if latest else None,
+        "country": latest["country"] if latest else None,
+        "region": latest["region"] if latest else None,
+        "city": latest["city"] if latest else None,
+        "device": _parse_device(latest["user_agent"] if latest else None),
+        "has_account": bool(latest and latest["user_id"]),
+    }
+
+    ua = (latest["user_agent"] if latest else None) or ""
+    leads = (await db.execute(
+        text(
+            """
+            SELECT id::text AS id, name, club, email, phone, association, grades,
+                   timeline, message, interests, role, status, visitor_id,
+                   user_agent, created_at
+            FROM club_onboarding_requests
+            WHERE visitor_id = :vkey OR (:ua <> '' AND user_agent = :ua)
+            ORDER BY created_at DESC
+            LIMIT 10
+            """
+        ),
+        {"vkey": vkey, "ua": ua},
+    )).mappings().all()
+
+    return {
+        "summary": summary,
+        "events": events,
+        "clubs": [
+            {
+                "club_slug": c["club_slug"], "club_name": c["club_name"],
+                "org_id": c["org_id"], "page_views": int(c["hits"] or 0),
+                "last_seen": c["last_seen"].isoformat() if c["last_seen"] else None,
+            }
+            for c in clubs
+        ],
+        "leads": [
+            {
+                "id": ld["id"], "name": ld["name"], "club": ld["club"],
+                "email": ld["email"], "phone": ld["phone"],
+                "association": ld["association"], "grades": ld["grades"],
+                "timeline": ld["timeline"], "message": ld["message"],
+                "interests": ld["interests"], "role": ld["role"],
+                "status": ld["status"],
+                "match": "id" if ld["visitor_id"] == vkey else "device",
+                "created_at": ld["created_at"].isoformat() if ld["created_at"] else None,
+            }
+            for ld in leads
+        ],
+    }
+
+
+@router.get("/club-admin/usage/sources")
+async def sources(
+    days: int = 7,
+    anon_only: bool = True,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Where visitors come from (first-touch) + the UTM campaigns driving them.
+
+    ``by_source`` counts distinct visitors per bucketed source (facebook,
+    google, direct, referral …). ``by_campaign`` lists the live UTM campaigns,
+    resolving each code to the club that owns it when it's a Club Directory
+    outreach code."""
+    days = max(1, min(days, 365))
+    anon_clause = "AND ue.user_id IS NULL" if anon_only else ""
+
+    src_rows = (await db.execute(
+        text(
+            f"""
+            WITH ev AS (
+                SELECT {_VKEY} AS vkey, ue.traffic_source,
+                       ({_INTENT_CONTACT}) AS is_contact,
+                       ({_INTENT_PRICING}) AS is_pricing
+                FROM usage_events ue
+                WHERE ue.event_type = 'page_view'
+                  AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+                  AND {_VKEY} IS NOT NULL
+                  {anon_clause}
+            ),
+            vis AS (
+                SELECT vkey,
+                    COALESCE(MAX(traffic_source), 'direct') AS source,
+                    COUNT(*) AS pv,
+                    bool_or(is_contact) AS hit_contact,
+                    bool_or(is_pricing) AS hit_pricing
+                FROM ev GROUP BY vkey
+            )
+            SELECT source,
+                COUNT(*) AS visitors,
+                SUM(pv) AS page_views,
+                COUNT(*) FILTER (WHERE hit_contact OR hit_pricing) AS intent_visitors
+            FROM vis GROUP BY source ORDER BY visitors DESC
+            """
+        ),
+        {"days": days},
+    )).mappings().all()
+
+    camp_rows = (await db.execute(
+        text(
+            f"""
+            SELECT ue.utm_source, ue.utm_campaign, ue.utm_medium,
+                   COUNT(DISTINCT {_VKEY}) AS visitors,
+                   COUNT(*) AS page_views,
+                   MAX(ue.created_at) AS last_seen
+            FROM usage_events ue
+            WHERE ue.event_type = 'page_view'
+              AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+              AND ue.utm_source IS NOT NULL
+              {anon_clause}
+            GROUP BY ue.utm_source, ue.utm_campaign, ue.utm_medium
+            ORDER BY visitors DESC
+            LIMIT 40
+            """
+        ),
+        {"days": days},
+    )).mappings().all()
+
+    codes: set[str] = set()
+    for r in camp_rows:
+        for c in (r["utm_source"], r["utm_campaign"]):
+            if c:
+                codes.add(c.strip().lower())
+    utm_map = await _resolve_utm_clubs(db, codes)
+
+    def _campaign_club(r):
+        for c in (r["utm_source"], r["utm_campaign"]):
+            key = (c or "").strip().lower()
+            if key in utm_map:
+                return utm_map[key]["name"]
+        return None
+
+    return {
+        "by_source": [
+            {
+                "source": r["source"],
+                "visitors": int(r["visitors"] or 0),
+                "page_views": int(r["page_views"] or 0),
+                "intent_visitors": int(r["intent_visitors"] or 0),
+            }
+            for r in src_rows
+        ],
+        "by_campaign": [
+            {
+                "utm_source": r["utm_source"],
+                "utm_campaign": r["utm_campaign"],
+                "utm_medium": r["utm_medium"],
+                "visitors": int(r["visitors"] or 0),
+                "page_views": int(r["page_views"] or 0),
+                "club_name": _campaign_club(r),
+                "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
+            }
+            for r in camp_rows
+        ],
+    }
+
+
+@router.get("/club-admin/usage/leads")
+async def leads(
+    days: int = 90,
+    limit: int = 200,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Onboarding enquiries (the Contact form) enriched with the browsing
+    journey behind each one — so a lead isn't just a name in a list, it's
+    "this club, came via Facebook, read the pricing page twice, then enquired".
+    Linked precisely by the first-party visitor id stamped on submit."""
+    days = max(1, min(days, 365))
+    limit = max(1, min(limit, 500))
+
+    rows = (await db.execute(
+        text(
+            """
+            SELECT id::text AS id, name, club, email, phone, association, grades,
+                   timeline, message, interests, role, heard_about, status,
+                   source, visitor_id, created_at
+            FROM club_onboarding_requests
+            WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
+            ORDER BY created_at DESC
+            LIMIT :lim
+            """
+        ),
+        {"days": days, "lim": limit},
+    )).mappings().all()
+
+    status_rows = (await db.execute(
+        text(
+            """
+            SELECT status, COUNT(*) AS n FROM club_onboarding_requests
+            WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
+            GROUP BY status
+            """
+        ),
+        {"days": days},
+    )).mappings().all()
+    status_counts = {r["status"]: int(r["n"] or 0) for r in status_rows}
+
+    vids = [r["visitor_id"] for r in rows if r["visitor_id"]]
+    browse: dict[str, dict] = {}
+    clubs_seen: dict[str, dict] = {}
+    if vids:
+        b_rows = (await db.execute(
+            text(
+                """
+                SELECT visitor_id::text AS vkey,
+                       MIN(created_at) AS first_seen,
+                       MAX(created_at) AS last_seen,
+                       COUNT(*) AS page_views,
+                       COUNT(DISTINCT split_part(path, '?', 1)) AS distinct_paths,
+                       COUNT(DISTINCT date_trunc('day', created_at)) AS active_days,
+                       COALESCE(MAX(traffic_source), 'direct') AS source,
+                       MAX(utm_campaign) AS utm_campaign,
+                       bool_or(split_part(path, '?', 1) ~* '^/pricing(/|$)') AS hit_pricing
+                FROM usage_events
+                WHERE event_type = 'page_view' AND visitor_id::text = ANY(:vids)
+                GROUP BY visitor_id::text
+                """
+            ),
+            {"vids": vids},
+        )).mappings().all()
+        browse = {r["vkey"]: r for r in b_rows}
+
+        c_rows = (await db.execute(
+            text(
+                """
+                SELECT ue.visitor_id::text AS vkey, o.name AS club_name,
+                       o.slug AS club_slug, COUNT(*) AS hits,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY ue.visitor_id ORDER BY COUNT(*) DESC
+                       ) AS rn
+                FROM usage_events ue
+                JOIN organisations o
+                  ON o.slug = split_part(split_part(ue.path, '?', 1), '/', 2)
+                WHERE ue.event_type = 'page_view' AND ue.visitor_id::text = ANY(:vids)
+                GROUP BY ue.visitor_id, o.name, o.slug
+                """
+            ),
+            {"vids": vids},
+        )).mappings().all()
+        clubs_seen = {r["vkey"]: r for r in c_rows if r["rn"] == 1}
+
+    out_leads = []
+    for r in rows:
+        vid = r["visitor_id"]
+        b = browse.get(vid) if vid else None
+        cm = clubs_seen.get(vid) if vid else None
+        browsing = None
+        if b:
+            browsing = {
+                "vkey": vid,
+                "first_seen": b["first_seen"].isoformat() if b["first_seen"] else None,
+                "last_seen": b["last_seen"].isoformat() if b["last_seen"] else None,
+                "page_views": int(b["page_views"] or 0),
+                "distinct_paths": int(b["distinct_paths"] or 0),
+                "active_days": int(b["active_days"] or 0),
+                "traffic_source": b["source"] or "direct",
+                "utm_campaign": b["utm_campaign"],
+                "hit_pricing": bool(b["hit_pricing"]),
+                "browsed_club": cm["club_name"] if cm else None,
+                "browsed_club_slug": cm["club_slug"] if cm else None,
+            }
+        out_leads.append({
+            "id": r["id"], "name": r["name"], "club": r["club"],
+            "email": r["email"], "phone": r["phone"],
+            "association": r["association"], "grades": r["grades"],
+            "timeline": r["timeline"], "message": r["message"],
+            "interests": r["interests"], "role": r["role"],
+            "heard_about": r["heard_about"], "status": r["status"],
+            "source": r["source"],
+            "has_visitor": bool(vid),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "browsing": browsing,
+        })
+
+    return {
+        "days": days,
+        "total": len(out_leads),
+        "status_counts": status_counts,
+        "leads": out_leads,
     }

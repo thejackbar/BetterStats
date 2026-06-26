@@ -4,6 +4,7 @@ import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import { FORMSPREE_ID, SUPPORT_EMAIL } from '../../data/marketing'
 import { api } from '../../lib/api'
+import { getVisitorId } from '../../lib/visitor'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
@@ -141,6 +142,8 @@ function ContactForm() {
       storage: fields.storage, interests: fields.interests.join(', '),
       timeline: fields.timeline, contactMethod: fields.contactMethod,
       clubUrl: fields.clubUrl, heard: fields.heard, message: fields.message,
+      // Links this enquiry to the anonymous browsing journey behind it.
+      visitorId: getVisitorId(),
     }).catch(() => {})
     try {
       const res = await fetch(FORMSPREE_URL, {

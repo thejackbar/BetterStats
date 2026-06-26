@@ -1,0 +1,117 @@
+// First-party visitor identity + acquisition attribution.
+//
+// We give every browser a random UUID kept in localStorage (`bs_visitor_id`).
+// Unlike the hashed IP the backend already records, this survives an IP change
+// and a new session, so returning visitors group correctly on the Usage page.
+// It is NOT a tracking pixel and carries no personal data — just a random id so
+// "the same browser" can be recognised across visits.
+//
+// We also remember each visitor's FIRST-TOUCH acquisition (`bs_attr`): the UTM
+// tags and ad-network click id (fbclid → Facebook, gclid → Google …) from the
+// URL they first arrived on. That's how the Usage page knows a visit came from
+// a Facebook share or a club's outreach link even after they browse on.
+
+const VISITOR_KEY = 'bs_visitor_id'
+const ATTR_KEY = 'bs_attr'
+
+function uuid() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  } catch (_) { /* fall through */ }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
+export function getVisitorId() {
+  try {
+    let v = localStorage.getItem(VISITOR_KEY)
+    if (!v) {
+      v = uuid()
+      localStorage.setItem(VISITOR_KEY, v)
+    }
+    return v
+  } catch (_) {
+    // Private mode / storage blocked — fall back to anonymous (IP-hash only).
+    return null
+  }
+}
+
+// Known ad-network click-id params → the source they imply. Checked in order;
+// the first present wins.
+const CLICK_IDS = [
+  ['fbclid', 'facebook'],
+  ['gclid', 'google'], ['gbraid', 'google'], ['wbraid', 'google'],
+  ['msclkid', 'bing'],
+  ['ttclid', 'tiktok'],
+  ['igshid', 'instagram'],
+  ['li_fat_id', 'linkedin'],
+  ['twclid', 'twitter'],
+  ['yclid', 'yandex'],
+]
+
+function parseAcquisition() {
+  let params
+  try {
+    params = new URLSearchParams(window.location.search || '')
+  } catch (_) {
+    params = new URLSearchParams('')
+  }
+  const get = (k) => {
+    const v = params.get(k)
+    return v ? v.slice(0, 200) : null
+  }
+  let clickId = null
+  let clickSource = null
+  for (const [key, source] of CLICK_IDS) {
+    const v = params.get(key)
+    if (v) {
+      clickId = v.slice(0, 300)
+      clickSource = source
+      break
+    }
+  }
+  const utmSource = get('utm_source')
+  return {
+    utm_source: utmSource,
+    utm_medium: get('utm_medium'),
+    utm_campaign: get('utm_campaign'),
+    utm_content: get('utm_content'),
+    click_id: clickId,
+    click_source: clickSource,
+    has_signal: !!(utmSource || clickId),
+  }
+}
+
+// Returns the visitor's first-touch attribution, capturing it on the first
+// visit. If that first visit carried no source (a plain direct hit) and a later
+// visit arrives via a real campaign/share, we upgrade it once to that source —
+// the acquisition that actually mattered for a lead.
+export function getAttribution() {
+  let stored = null
+  try {
+    stored = JSON.parse(localStorage.getItem(ATTR_KEY) || 'null')
+  } catch (_) { /* ignore */ }
+
+  const current = parseAcquisition()
+  const landing = {
+    landing_path: (window.location.pathname || '/') + (window.location.search || ''),
+    landing_referrer: (typeof document !== 'undefined' && document.referrer) || null,
+  }
+
+  let next = stored
+  if (!stored) {
+    next = { ...current, ...landing }
+  } else if (!stored.has_signal && current.has_signal) {
+    next = { ...current, ...landing }
+  }
+
+  if (next !== stored) {
+    try {
+      localStorage.setItem(ATTR_KEY, JSON.stringify(next))
+    } catch (_) { /* ignore */ }
+  }
+  return next || { has_signal: false, ...landing }
+}
