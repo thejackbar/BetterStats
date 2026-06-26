@@ -451,7 +451,7 @@ export default function SuperMarketing() {
           <p className="text-xs text-pb-dim mt-0.5">
             Every Australian cricket club from the PlayHQ public directory, for
             BetterCricket outreach. Click a club to see its committee and tick which
-            contacts to email; "Export to BetterAdmin Comms" pushes the ticked
+            contacts to email; "Export to BetterComms" pushes the ticked
             contacts (within the current filter) into the send pipeline.
           </p>
         </div>
@@ -617,7 +617,7 @@ export default function SuperMarketing() {
               Download CSV
             </a>
             <button className={BTN} disabled={busy === 'export'} onClick={exportComms}>
-              {busy === 'export' ? 'Exporting...' : 'Export to BetterAdmin Comms'}
+              {busy === 'export' ? 'Exporting...' : 'Export to BetterComms'}
             </button>
             <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}
