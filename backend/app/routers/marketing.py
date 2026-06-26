@@ -122,13 +122,21 @@ async def list_clubs(
     stmt = stmt.order_by(MarketingClub.name.asc()).limit(limit).offset(offset)
     clubs = (await db.execute(stmt)).scalars().all()
 
-    out = []
-    for c in clubs:
-        contacts = (await db.execute(
+    # Fetch all contacts for this page's clubs in ONE query (was N+1, which under
+    # the sweep's DB load could stall the request long enough to 502).
+    club_ids = [c.id for c in clubs]
+    contacts_by_club: dict = {}
+    if club_ids:
+        rows = (await db.execute(
             select(MarketingClubContact)
-            .where(MarketingClubContact.marketing_club_id == c.id)
+            .where(MarketingClubContact.marketing_club_id.in_(club_ids))
             .order_by(MarketingClubContact.role_rank.asc())
         )).scalars().all()
+        for ct in rows:
+            contacts_by_club.setdefault(ct.marketing_club_id, []).append(ct)
+
+    out = []
+    for c in clubs:
         out.append({
             "id": str(c.id), "name": c.name, "playhq_id": c.playhq_id,
             "grassroots_guid": c.grassroots_guid, "association_name": c.association_name,
@@ -145,7 +153,7 @@ async def list_clubs(
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
                 "subscribed": ct.subscribed, "selected": ct.outreach_selected,
-            } for ct in contacts],
+            } for ct in contacts_by_club.get(c.id, [])],
         })
     return {"total": total or 0, "limit": limit, "offset": offset, "clubs": out}
 

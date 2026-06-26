@@ -555,8 +555,10 @@ async def _sleep_until_window() -> None:
 
 
 # Treat the crawl as "running" if something was fetched within this many seconds.
-# Longer than the continuous runner's max break (so a break doesn't read as idle).
-_ACTIVE_WITHIN_SECONDS = 300
+# Wide enough to span a single big association resolve (which only commits its
+# club timestamps at the end — up to ~10 min) plus the runner's max break, so a
+# healthy sweep doesn't flicker to "paused".
+_ACTIVE_WITHIN_SECONDS = 900
 
 
 async def crawl_status(session: AsyncSession) -> dict:
@@ -980,6 +982,7 @@ async def resolve_association_clubs(session: AsyncSession, assoc_id: str,
             unmatched.append(cname or rc)
             continue
         matched += 1
+        club.last_crawled_at = func.now()   # so the status pill reflects sweep activity
         assocs = list(club.associations or [])
         already = any(a.get("id") == assoc_id
                       or (a.get("name") or "").lower() == assoc_name.lower() for a in assocs)
