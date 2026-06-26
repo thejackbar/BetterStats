@@ -30,18 +30,19 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_, text, update
+from sqlalchemy import select, func, or_, text, update, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership,
-    CommsContact, CommsCampaign, CommsRecipient,
+    CommsContact, CommsCampaign, CommsRecipient, EmailSuppression, EmailEvent,
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.services.marketing_org import get_outreach_org, org_is_outreach
+from app.services import email_suppression as suppress
 from app.services.email_service import EmailMessage, get_email_provider, provider_status
 
 logger = logging.getLogger(__name__)
@@ -207,12 +208,16 @@ async def _campaign_or_404(db: AsyncSession, club: Organisation, cid: str) -> Co
 
 
 async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict) -> list[CommsContact]:
-    """Subscribed, non-bounced, non-excluded contacts matching the chosen segment."""
+    """Sendable contacts matching the chosen segment: subscribed, not bounced /
+    complained / excluded per club, and not on the global suppression list (a
+    hard bounce or complaint blocks the address across every club)."""
     base = select(CommsContact).where(
         CommsContact.organisation_id == club.id,
         CommsContact.subscribed.is_(True),
         CommsContact.bounced.is_(False),
+        CommsContact.complained.is_(False),
         CommsContact.excluded.is_(False),
+        ~exists().where(func.lower(EmailSuppression.email) == func.lower(CommsContact.email)),
     )
     atype = (audience or {}).get("type", "all")
     if atype == "list":
@@ -836,3 +841,80 @@ async def set_marketing_org(
     target.is_marketing_outreach = True
     await db.commit()
     return {"status": "ok", "marketing_org": {"id": str(target.id), "name": target.name}}
+
+
+# ─── Deliverability: suppression + event history (Phase 1) ───────────────────
+
+@router.get("/suppressions")
+async def list_suppressions(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Addresses on the global suppression list that are in THIS club's contacts —
+    so a club sees which of its own people are blocked (hard bounce / complaint /
+    manual) and why, without seeing other clubs' lists."""
+    rows = (await db.execute(
+        select(EmailSuppression.email, EmailSuppression.reason,
+               EmailSuppression.detail, EmailSuppression.created_at)
+        .where(exists().where(
+            func.lower(CommsContact.email) == func.lower(EmailSuppression.email),
+            CommsContact.organisation_id == club.id))
+        .order_by(EmailSuppression.created_at.desc())
+    )).all()
+    return [{
+        "email": r.email, "reason": r.reason, "detail": r.detail,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    } for r in rows]
+
+
+@router.delete("/suppressions")
+async def delete_suppression(
+    email: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Un-suppress an address (the member fixed their mailbox). Removes the global
+    row and clears this club's per-contact bounced / complained flags so they can
+    be emailed again."""
+    e = _norm_email(email)
+    if not e:
+        raise HTTPException(status_code=422, detail="A valid email is required")
+    removed = await suppress.remove_suppression(db, e)
+    await db.execute(
+        update(CommsContact)
+        .where(CommsContact.organisation_id == club.id,
+               func.lower(CommsContact.email) == e)
+        .values(bounced=False, bounced_at=None, complained=False, complained_at=None))
+    await db.commit()
+    logger.info("BetterComms: un-suppressed %s for org %s (removed=%d)", e, club.id, removed)
+    return {"status": "ok", "removed": removed}
+
+
+@router.get("/contacts/{contact_id}/events")
+async def contact_events(
+    contact_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent delivery events for one contact (delivered / bounce / complaint …)."""
+    try:
+        cid = uuid.UUID(contact_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid contact id")
+    contact = await db.get(CommsContact, cid)
+    if not contact or contact.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    rows = (await db.execute(
+        select(EmailEvent)
+        .where(or_(EmailEvent.contact_id == cid,
+                   func.lower(EmailEvent.email) == func.lower(contact.email)))
+        .order_by(EmailEvent.created_at.desc())
+        .limit(50)
+    )).scalars().all()
+    return [{
+        "event_type": ev.event_type, "event_subtype": ev.event_subtype,
+        "reason": ev.reason, "created_at": ev.created_at.isoformat() if ev.created_at else None,
+    } for ev in rows]

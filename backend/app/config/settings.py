@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     # pipeline (and a separate SES-verified sending domain) for its own sends.
     marketing_outreach_org_slug: str = ""
 
+    # BetterComms — SES inbound event webhook (SNS → /public/ses/events). Verify
+    # the SNS message signature by default; the suppression list is forgeable
+    # otherwise. An optional shared token on the path adds defence in depth.
+    ses_sns_verify_signatures: bool = True
+    ses_event_token: str = ""
+
     @property
     def square_api_base(self) -> str:
         return (

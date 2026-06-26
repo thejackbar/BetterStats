@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 
+const SUPPRESSION_LABEL = {
+  hard_bounce: 'Bounced (address undeliverable)',
+  complaint: 'Marked as spam',
+  manual: 'Suppressed manually',
+}
+
 export default function CommsSettings() {
   const [s, setS] = useState(null)
   const [fromName, setFromName] = useState('')
@@ -9,6 +15,7 @@ export default function CommsSettings() {
   const [footer, setFooter] = useState('')
   const [msg, setMsg] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [suppressions, setSuppressions] = useState(null)
 
   useEffect(() => {
     api.commsGetSettings().then(d => {
@@ -17,7 +24,17 @@ export default function CommsSettings() {
       setReplyTo(d.reply_to || '')
       setFooter(d.sender_footer || '')
     }).catch(e => setMsg({ kind: 'error', text: e.message }))
+    api.commsListSuppressions().then(setSuppressions).catch(() => setSuppressions([]))
   }, [])
+
+  const unsuppress = async (email) => {
+    setMsg(null)
+    try {
+      await api.commsRemoveSuppression(email)
+      setSuppressions(list => (list || []).filter(r => r.email !== email))
+      setMsg({ kind: 'ok', text: `${email} can be emailed again.` })
+    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
+  }
 
   const save = async () => {
     setSaving(true); setMsg(null)
@@ -92,6 +109,35 @@ export default function CommsSettings() {
             {saving ? 'Saving…' : 'Save settings'}
           </button>
           <span className="text-pb-faintest text-xs">{s.subscribed_contacts} subscribed contact{s.subscribed_contacts === 1 ? '' : 's'}</span>
+        </div>
+
+        {/* Deliverability — blocked addresses (Phase 1) */}
+        <div className="pb-card p-4 mt-4">
+          <div className="text-sm text-pb-text font-medium mb-1">Deliverability</div>
+          <div className="text-pb-faintest text-xs mb-3 leading-relaxed">
+            Addresses that bounced or marked an email as spam are blocked automatically so they never get another send.
+            If someone has fixed their inbox, you can let them back in.
+          </div>
+          {suppressions === null ? (
+            <div className="text-pb-faint text-sm">Loading…</div>
+          ) : suppressions.length === 0 ? (
+            <div className="text-pb-faintest text-sm">No blocked addresses. Good standing.</div>
+          ) : (
+            <div>
+              {suppressions.map((r, i) => (
+                <div key={r.email} className={`flex items-center justify-between gap-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                  <div className="min-w-0">
+                    <div className="text-pb-text text-sm truncate">{r.email}</div>
+                    <div className="text-pb-faintest text-xs">{SUPPRESSION_LABEL[r.reason] || r.reason}</div>
+                  </div>
+                  <button onClick={() => unsuppress(r.email)}
+                    className="shrink-0 px-2.5 py-1 rounded text-xs border pb-hairline text-pb-faint hover:text-pb-text">
+                    Allow again
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </BetterCommsLayout>

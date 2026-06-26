@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -1181,6 +1181,52 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_comms_recipients_campaign ON comms_recipients(campaign_id)"
         ))
+        # BetterComms Phase 1 (migration 110) — global suppression + email events
+        # + per-person prefs. email_suppressions is the ONE global, address-level
+        # table (a hard bounce / complaint is a fact about the mailbox, not a
+        # club); email_events is the append-only SES audit. Defensive idempotent
+        # creates so the API boots even if alembic lags. See
+        # docs/bettercomms-architecture.md.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS email_suppressions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                source TEXT,
+                detail TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_email_suppressions_email UNIQUE (email)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS email_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID REFERENCES organisations(id) ON DELETE SET NULL,
+                campaign_id UUID REFERENCES comms_campaigns(id) ON DELETE SET NULL,
+                recipient_id UUID REFERENCES comms_recipients(id) ON DELETE SET NULL,
+                contact_id UUID REFERENCES comms_contacts(id) ON DELETE SET NULL,
+                email TEXT,
+                event_type TEXT NOT NULL,
+                event_subtype TEXT,
+                reason TEXT,
+                ses_message_id TEXT,
+                payload JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_email_event_dedupe UNIQUE (ses_message_id, event_type, email)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_email_events_org ON email_events(organisation_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_email_events_campaign ON email_events(campaign_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_email_events_email ON email_events(lower(email))"))
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS complained BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS complained_at TIMESTAMPTZ"))
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'"))
         # KlubPro → BetterStats migration (migration 072) — sponsor contact
         # columns + audit/rollback bookkeeping. Idempotent defensive creates so
         # the API boots even if alembic hasn't run yet (mirrors the blocks above).
@@ -1902,6 +1948,7 @@ app.include_router(net_manager.router, dependencies=[Depends(require_module("sel
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
+app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)

@@ -1537,6 +1537,11 @@ export const api = {
   commsGetContext: () => request('/club-admin/comms/context'),
   commsSetMarketingOrg: (organisationId) =>
     request('/club-admin/comms/marketing-org', { method: 'POST', body: JSON.stringify({ organisation_id: organisationId }) }),
+  // Deliverability (Phase 1): global suppression + per-contact event history.
+  commsListSuppressions: () => request('/club-admin/comms/suppressions'),
+  commsRemoveSuppression: (email) =>
+    request(`/club-admin/comms/suppressions?email=${encodeURIComponent(email)}`, { method: 'DELETE' }),
+  commsContactEvents: (contactId) => request(`/club-admin/comms/contacts/${contactId}/events`),
 
   // BetterFantasyCricket (admin surface)
   fantasyConfig: () => request('/club-admin/fantasy/config'),

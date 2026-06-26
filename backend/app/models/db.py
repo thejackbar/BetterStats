@@ -1900,6 +1900,15 @@ class CommsContact(Base):
     # distinct from a recipient opt-out (subscribed) or a bounce.
     excluded = Column(Boolean, nullable=False, server_default="false", default=False)
     excluded_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Per-club complaint state (mirror of bounced, migration 110): a spam complaint
+    # routed back from SES. The address is also added to the global
+    # email_suppressions table; this flag is the per-club view for the UI/audience.
+    complained = Column(Boolean, nullable=False, server_default="false", default=False)
+    complained_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Per-person, per-category email preferences (migration 110): a JSONB map of
+    # category → bool (transactional / operational / news / marketing). Absent key
+    # ⇒ opted in. transactional is never gated. See services/comms_policy.py.
+    preferences = Column(JSONB, nullable=False, server_default="{}", default=dict)
     tags = Column(JSONB, nullable=False, server_default="[]", default=list)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -1950,6 +1959,55 @@ class CommsRecipient(Base):
     provider_message_id = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EmailSuppression(Base):
+    """Global, address-level suppression (migration 110, BetterComms Phase 1).
+
+    The ONE piece of cross-club comms state. A hard bounce or a spam complaint is
+    a fact about the mailbox, not a club, so it is keyed on the email and blocks
+    that address across every club's sends. Per-club opt-outs stay on
+    ``comms_contacts.subscribed``; this table is only the global deliverability
+    truth. ``reason`` is hard_bounce | complaint | manual.
+    """
+    __tablename__ = "email_suppressions"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_email_suppressions_email"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)  # stored lowercased + trimmed
+    reason = Column(Text, nullable=False)
+    source = Column(Text, nullable=True)   # ses | admin | import
+    detail = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EmailEvent(Base):
+    """Append-only SES event audit (migration 110, BetterComms Phase 1).
+
+    One row per delivery / bounce / complaint / reject / delay / open / click,
+    tied back to the person + campaign via the recipient's ``provider_message_id``
+    (= the SES ``messageId``). Deduped on (ses_message_id, event_type, email) so a
+    redelivered SNS notification is a no-op. The spine for analytics later.
+    """
+    __tablename__ = "email_events"
+    __table_args__ = (
+        UniqueConstraint("ses_message_id", "event_type", "email", name="uq_email_event_dedupe"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="SET NULL"), nullable=True)
+    campaign_id = Column(UUID(as_uuid=True), ForeignKey("comms_campaigns.id", ondelete="SET NULL"), nullable=True)
+    recipient_id = Column(UUID(as_uuid=True), ForeignKey("comms_recipients.id", ondelete="SET NULL"), nullable=True)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("comms_contacts.id", ondelete="SET NULL"), nullable=True)
+    email = Column(Text, nullable=True)
+    event_type = Column(Text, nullable=False)     # delivery | bounce | complaint | reject | deliverydelay | open | click | send
+    event_subtype = Column(Text, nullable=True)   # Permanent / Transient, etc.
+    reason = Column(Text, nullable=True)
+    ses_message_id = Column(Text, nullable=True)
+    payload = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
