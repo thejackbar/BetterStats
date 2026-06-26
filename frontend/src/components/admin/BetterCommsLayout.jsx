@@ -9,6 +9,7 @@ const NAV = [
   { to: '/admin/comms/contacts', label: 'Contacts', icon: 'teams', cap: CAP.MANAGE_COMMS },
   { to: '/admin/comms/segments', label: 'Segments', icon: 'teams', cap: CAP.MANAGE_COMMS },
   { to: '/admin/comms/lists', label: 'Lists', icon: 'list', cap: CAP.MANAGE_COMMS },
+  { to: '/admin/comms/templates', label: 'Templates', icon: 'list', cap: CAP.MANAGE_COMMS },
   { to: '/admin/comms/settings', label: 'Settings', icon: 'settings', cap: CAP.MANAGE_COMMS },
 ]
 

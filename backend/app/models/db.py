@@ -1931,6 +1931,10 @@ class CommsCampaign(Base):
     body_html = Column(Text, nullable=True)
     body_text = Column(Text, nullable=True)
     audience = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    # UTM tags appended to outbound links at render (migration 113). Only applied
+    # for the BetterCricket marketing-outreach org — a club's own member email
+    # never gets UTM tagging. Keys: utm_source / utm_medium / utm_campaign / ...
+    utm = Column(JSONB, nullable=False, server_default="{}", default=dict)
     status = Column(Text, nullable=False, server_default="draft")  # draft | sending | sent | error
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -1980,6 +1984,27 @@ class CommsSegment(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     definition = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommsTemplate(Base):
+    """A reusable email template (migration 113, BetterComms Phase 3).
+
+    ``html`` is the full email HTML — built from scratch, pasted, or imported from
+    a .html file. A campaign can start from a template (copy-on-use). Rendering
+    merges variables anywhere (incl. link URLs) and always injects the mandatory
+    unsubscribe footer, so a template can never opt out of unsubscribe.
+    """
+    __tablename__ = "comms_templates"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_comms_template_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    html = Column(Text, nullable=False, server_default="")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

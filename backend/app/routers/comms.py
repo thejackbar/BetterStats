@@ -26,6 +26,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
@@ -38,7 +39,7 @@ from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership, Team,
-    CommsContact, CommsCampaign, CommsRecipient, CommsSegment,
+    CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
     CommsList, CommsListMember, EmailSuppression, EmailEvent,
     async_session_maker, get_db,
 )
@@ -96,6 +97,7 @@ def _campaign_out(c: CommsCampaign) -> dict:
         "preheader": c.preheader,
         "body_html": c.body_html,
         "audience": c.audience or {},
+        "utm": c.utm or {},
         "status": c.status,
         "stats": c.stats or {},
         "error": c.error,
@@ -160,6 +162,62 @@ def _html_to_text(html: str) -> str:
     return html_lib.unescape(t).strip()
 
 
+_UTM_KEYS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+_HREF_RE = re.compile(r'(href=["\'])([^"\']+)(["\'])', re.I)
+
+
+def _is_full_doc(html: str) -> bool:
+    """A pasted/imported template is a full HTML document; the compose box is a
+    fragment. Full docs render as-is (no double club shell)."""
+    low = (html or "").lower()
+    return "<html" in low or "<body" in low
+
+
+def _apply_utm(html: str, utm: dict) -> str:
+    """Append the campaign's UTM tags to every outbound http(s) link, leaving the
+    unsubscribe link, mailto/tel, anchors and already-tagged links alone. Only the
+    BetterCricket marketing-outreach org uses this (see _render_parts)."""
+    params = [(k, str(v).strip()) for k in _UTM_KEYS if (v := (utm or {}).get(k)) and str(v).strip()]
+    if not params:
+        return html
+    qs = "&".join(f"{k}={quote(v, safe='')}" for k, v in params)
+
+    def repl(m):
+        url = m.group(2)
+        low = url.lower()
+        if (not low.startswith(("http://", "https://"))
+                or "/public/comms/unsubscribe/" in low
+                or "utm_source=" in low):
+            return m.group(0)
+        sep = "&" if "?" in url else "?"
+        return f"{m.group(1)}{url}{sep}{qs}{m.group(3)}"
+
+    return _HREF_RE.sub(repl, html)
+
+
+def _footer_block(footer: str, unsub_url: str) -> str:
+    """The mandatory sender-id + unsubscribe footer, injected into a full-HTML
+    template before </body>. Inherits the email's font so it adopts its style; the
+    unsubscribe link can never be removed by the author (Spam Act 2003)."""
+    safe_footer = html_lib.escape(footer).replace("\n", "<br>") if footer else ""
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="margin-top:24px;"><tr><td align="center" '
+        'style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
+        'font-size:12px;line-height:1.5;font-family:inherit;text-align:center;">'
+        f'{safe_footer}<br>'
+        f'<a href="{unsub_url}" style="color:#6b7280;text-decoration:underline;">'
+        'Unsubscribe</a> from these emails.</td></tr></table>'
+    )
+
+
+def _inject_footer(full_html: str, footer: str, unsub_url: str) -> str:
+    block = _footer_block(footer, unsub_url)
+    if re.search(r"</body>", full_html, flags=re.I):
+        return re.sub(r"</body>", block + "</body>", full_html, count=1, flags=re.I)
+    return full_html + block
+
+
 def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str) -> str:
     accent = org.accent_color or "#243352"
     name = html_lib.escape(org.name or "Our Club")
@@ -184,8 +242,11 @@ def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str) -> st
 </td></tr></table></body></html>"""
 
 
-def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Optional[str],
-            unsub_url: str, footer: str) -> EmailMessage:
+def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
+                  email: str, name: Optional[str], unsub_url: str, footer: str) -> tuple[str, str, str]:
+    """(subject, html, text) for one recipient. A full-HTML template renders as-is
+    with the mandatory unsubscribe footer injected; a fragment gets the club shell.
+    UTM tagging of links is applied ONLY for the BetterCricket marketing org."""
     ctx = {
         "first_name": _first_name(name, email),
         "name": (name or "").strip() or _first_name(name, email),
@@ -195,10 +256,28 @@ def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Opt
         # the automatic footer, e.g. "…or [unsubscribe]({{unsubscribe_url}})".
         "unsubscribe_url": unsub_url,
     }
-    subject = _merge(campaign.subject or "", ctx)
-    inner = _merge(_body_to_html(campaign.body_html or ""), ctx)
-    html = _wrap_html(org, inner, footer, unsub_url)
-    text = _html_to_text(inner) + f"\n\n—\n{footer}\nUnsubscribe: {unsub_url}"
+    subject = _merge(subject or "", ctx)
+    apply_utm = org_is_outreach(org)  # UTM is a BetterCricket-marketing-only feature
+    if _is_full_doc(body_html):
+        merged = _merge(body_html or "", ctx)
+        if apply_utm:
+            merged = _apply_utm(merged, utm)
+        html = _inject_footer(merged, footer, unsub_url)
+        text = _html_to_text(merged) + f"\n\n—\n{footer}\nUnsubscribe: {unsub_url}"
+    else:
+        inner = _merge(_body_to_html(body_html or ""), ctx)
+        if apply_utm:
+            inner = _apply_utm(inner, utm)
+        html = _wrap_html(org, inner, footer, unsub_url)
+        text = _html_to_text(inner) + f"\n\n—\n{footer}\nUnsubscribe: {unsub_url}"
+    return subject, html, text
+
+
+def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Optional[str],
+            unsub_url: str, footer: str) -> EmailMessage:
+    subject, html, text = _render_parts(
+        org, subject=campaign.subject or "", body_html=campaign.body_html or "",
+        utm=(campaign.utm or {}), email=email, name=name, unsub_url=unsub_url, footer=footer)
     return EmailMessage(
         to_email=email, to_name=name, subject=subject, html=html, text=text,
         from_email=_from_address(org),
@@ -535,6 +614,7 @@ class CampaignIn(BaseModel):
     preheader: Optional[str] = None
     body_html: str = ""
     audience: Optional[dict] = None
+    utm: Optional[dict] = None
 
 
 @router.post("/campaigns")
@@ -550,6 +630,7 @@ async def create_campaign(
         preheader=(data.preheader or None),
         body_html=data.body_html or "",
         audience=data.audience or {"type": "all"},
+        utm=data.utm or {},
         status="draft",
         created_by=user.id,
         stats={},
@@ -586,6 +667,8 @@ async def update_campaign(
     c.body_html = data.body_html or ""
     if data.audience is not None:
         c.audience = data.audience
+    if data.utm is not None:
+        c.utm = data.utm
     c.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return _campaign_out(c)
@@ -1275,3 +1358,130 @@ async def remove_list_member(
             CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
     await db.commit()
     return {"status": "ok", "count": await _list_count(db, lst.id)}
+
+
+# ─── Email templates (Phase 3) ───────────────────────────────────────────────
+
+def _template_out(t: CommsTemplate, *, full: bool = False) -> dict:
+    d = {"id": str(t.id), "name": t.name,
+         "updated_at": t.updated_at.isoformat() if t.updated_at else None}
+    if full:
+        d["html"] = t.html or ""
+    return d
+
+
+@router.get("/templates")
+async def list_templates(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(CommsTemplate).where(CommsTemplate.organisation_id == club.id)
+        .order_by(CommsTemplate.name)
+    )).scalars().all()
+    return [_template_out(t) for t in rows]
+
+
+class TemplateIn(BaseModel):
+    name: str
+    html: str = ""
+
+
+@router.post("/templates")
+async def create_template(
+    data: TemplateIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A template name is required")
+    t = CommsTemplate(organisation_id=club.id, name=name, html=data.html or "")
+    db.add(t)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A template with that name already exists")
+    await db.refresh(t)
+    return _template_out(t, full=True)
+
+
+async def _template_or_404(db: AsyncSession, club: Organisation, tid: str) -> CommsTemplate:
+    try:
+        u = uuid.UUID(tid)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid template id")
+    t = await db.get(CommsTemplate, u)
+    if not t or t.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return t
+
+
+@router.get("/templates/{template_id}")
+async def get_template(
+    template_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    return _template_out(await _template_or_404(db, club, template_id), full=True)
+
+
+@router.put("/templates/{template_id}")
+async def update_template(
+    template_id: str,
+    data: TemplateIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    t = await _template_or_404(db, club, template_id)
+    name = (data.name or "").strip()
+    if name:
+        t.name = name
+    t.html = data.html or ""
+    t.updated_at = datetime.now(timezone.utc)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A template with that name already exists")
+    return _template_out(t, full=True)
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(
+    template_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    t = await _template_or_404(db, club, template_id)
+    await db.delete(t)
+    await db.commit()
+    return {"status": "ok"}
+
+
+class TemplatePreview(BaseModel):
+    html: str = ""
+    utm: Optional[dict] = None
+
+
+@router.post("/templates/preview")
+async def preview_template(
+    data: TemplatePreview,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Render a template the way a real send would (sample recipient, mandatory
+    footer injected), so the editor can show a true preview."""
+    _, _, _, footer = _sender(club)
+    unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
+    _, html, _ = _render_parts(
+        club, subject="", body_html=data.html or "", utm=data.utm or {},
+        email="sample@example.com", name="Sam Example", unsub_url=unsub, footer=footer)
+    return {"html": html}

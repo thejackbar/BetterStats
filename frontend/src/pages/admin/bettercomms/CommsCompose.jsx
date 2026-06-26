@@ -29,6 +29,9 @@ export default function CommsCompose() {
   const [audience, setAudience] = useState({ type: 'all' })
   const [segments, setSegments] = useState([])
   const [lists, setLists] = useState([])
+  const [templates, setTemplates] = useState([])
+  const [utm, setUtm] = useState({})
+  const [isMarketing, setIsMarketing] = useState(false)
   const [testEmail, setTestEmail] = useState('')
   const [showPreview, setShowPreview] = useState(false)
   const [live, setLive] = useState(true)
@@ -43,6 +46,7 @@ export default function CommsCompose() {
     setSubject(c.subject || '')
     setBody(c.body_html || '')
     setAudience(c.audience && c.audience.type ? c.audience : { type: 'all' })
+    setUtm(c.utm || {})
     return c
   }, [id])
 
@@ -55,6 +59,8 @@ export default function CommsCompose() {
       .finally(() => setLoading(false))
     api.commsListSegments().then(setSegments).catch(() => {})
     api.commsListLists().then(setLists).catch(() => {})
+    api.commsListTemplates().then(setTemplates).catch(() => {})
+    api.commsGetContext().then(c => setIsMarketing(!!c?.current?.is_marketing)).catch(() => {})
     api.commsGetSettings().then(s => setLive(!!s?.provider?.live)).catch(() => {})
     return () => clearInterval(pollRef.current)
   }, [load])
@@ -77,9 +83,18 @@ export default function CommsCompose() {
   }
 
   const save = async () => {
-    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience })
+    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience, utm })
     setCampaign(c)
     return c
+  }
+
+  const loadTemplate = async (tid) => {
+    if (!tid) return
+    if (body.trim() && !window.confirm('Replace the current message with this template?')) return
+    try {
+      const t = await api.commsGetTemplate(tid)
+      setBody(t.html || '')
+    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
   }
 
   const onSave = async () => {
@@ -162,6 +177,17 @@ export default function CommsCompose() {
             <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Round 5 — training this Thursday"
               className="w-full pb-input mb-4 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline" />
 
+            {templates.length > 0 && (
+              <div className="mb-3">
+                <label className="block text-xs text-pb-faint mb-1">Start from a template</label>
+                <select defaultValue="" onChange={e => { loadTemplate(e.target.value); e.target.value = '' }}
+                  className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
+                  <option value="">Choose a template…</option>
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm text-pb-faint">Message</label>
               <button onClick={() => setShowPreview(p => !p)} className="text-xs text-pb-faint hover:text-pb-text underline">
@@ -219,6 +245,25 @@ export default function CommsCompose() {
                 <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent)' }}>Lists</a>
               </div>
             </div>
+
+            {isMarketing && (
+              <div className="pb-card p-4 mb-4">
+                <div className="text-sm text-pb-text mb-1">UTM link tracking</div>
+                <div className="text-pb-faintest text-xs mb-3">
+                  BetterCricket marketing only. These tags are added to every link in this email so clicks show up in Usage.
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[['utm_source', 'Source', 'e.g. bettercricket'], ['utm_medium', 'Medium', 'e.g. email'], ['utm_campaign', 'Campaign', 'e.g. winter-2026']].map(([k, label, ph]) => (
+                    <div key={k}>
+                      <label className="block text-xs text-pb-faint mb-1">{label}</label>
+                      <input value={utm[k] || ''} onChange={e => setUtm(u => ({ ...u, [k]: e.target.value }))}
+                        placeholder={ph}
+                        className="w-full px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2 mb-6">
               <button onClick={onSave} disabled={busy === 'save'}

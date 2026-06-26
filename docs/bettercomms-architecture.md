@@ -171,7 +171,19 @@ contact drops out cleanly.
 Next: a "fees unpaid" segment field (needs the fee-allocation join), and building a
 list straight from a filtered contacts view.
 
-**Phase 3: templates with versioning.** Reusable blocks, merge fields, categories.
+**Phase 3 (built): email templates + UTM link tracking.** `comms_templates` stores
+reusable full-HTML emails, built from scratch, pasted, or imported from a `.html`
+file, with a live preview that renders exactly as a send would. A campaign starts
+from a template (copy-on-use). Rendering (`_render_parts` in `routers/comms.py`):
+merge variables resolve anywhere including inside link URLs; a full-HTML template
+renders as-is (no double club shell) while a plain body still gets the shell; and
+the mandatory unsubscribe footer is injected before `</body>` (inheriting the
+email's font so it adopts the style) so an author can never drop it. UTM tagging is
+a BetterCricket-marketing-only feature: `comms_campaigns.utm` is appended to every
+outbound link at render, but only when the org is the marketing-outreach org
+(`org_is_outreach`), so a club's own member email never gets UTM tags. The tags
+feed the Usage/visitors analytics, which already read UTM params. Next: template
+versioning, and a block editor.
 
 **Phase 4 (last): automation / journeys.** Triggered sends ("membership approved →
 welcome", "selection published → email the named players", "invoice overdue →

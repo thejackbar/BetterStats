@@ -1551,6 +1551,16 @@ export const api = {
     request(`/club-admin/comms/lists/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
   commsRemoveListMember: (id, contactId) =>
     request(`/club-admin/comms/lists/${id}/members/${contactId}`, { method: 'DELETE' }),
+  // Email templates (Phase 3).
+  commsListTemplates: () => request('/club-admin/comms/templates'),
+  commsGetTemplate: (id) => request(`/club-admin/comms/templates/${id}`),
+  commsCreateTemplate: (name, html) =>
+    request('/club-admin/comms/templates', { method: 'POST', body: JSON.stringify({ name, html }) }),
+  commsUpdateTemplate: (id, name, html) =>
+    request(`/club-admin/comms/templates/${id}`, { method: 'PUT', body: JSON.stringify({ name, html }) }),
+  commsDeleteTemplate: (id) => request(`/club-admin/comms/templates/${id}`, { method: 'DELETE' }),
+  commsPreviewTemplate: (html, utm) =>
+    request('/club-admin/comms/templates/preview', { method: 'POST', body: JSON.stringify({ html, utm }) }),
 
   // BetterFantasyCricket (admin surface)
   fantasyConfig: () => request('/club-admin/fantasy/config'),
