@@ -31,18 +31,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_, text, update, exists
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership,
-    CommsContact, CommsCampaign, CommsRecipient, EmailSuppression, EmailEvent,
+    CommsContact, CommsCampaign, CommsRecipient, CommsSegment, EmailSuppression, EmailEvent,
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
+from app.services import comms_segments
 from app.services.email_service import EmailMessage, get_email_provider, provider_status
 
 logger = logging.getLogger(__name__)
@@ -101,10 +103,22 @@ def _campaign_out(c: CommsCampaign) -> dict:
     }
 
 
+def _from_address(org: Organisation) -> str:
+    """The From address for a send. SES puts the per-club local-part on the
+    verified per-silo domain (clubs vs BetterCricket marketing), so no per-club
+    AWS setup is needed; other providers keep the configured platform address."""
+    if (settings.email_provider or "").strip().lower() == "ses":
+        domain = settings.ses_marketing_domain if org_is_outreach(org) else settings.ses_club_domain
+        local = re.sub(r"[^a-z0-9._-]", "", (org.slug or "club").lower()) or "club"
+        if domain:
+            return f"{local}@{domain}"
+    return settings.email_from_address
+
+
 def _sender(org: Organisation) -> tuple[str, str, Optional[str], str]:
     """(from_name, from_email, reply_to, footer) for a club, with fallbacks."""
     from_name = (org.comms_from_name or org.name or settings.email_from_name).strip()
-    from_email = settings.email_from_address  # platform domain (authenticated)
+    from_email = _from_address(org)
     reply_to = (org.comms_reply_to or org.contact_email or settings.email_reply_to or "").strip() or None
     footer = (org.comms_sender_footer or org.name or "").strip()
     return from_name, from_email, reply_to, footer
@@ -186,13 +200,16 @@ def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Opt
     text = _html_to_text(inner) + f"\n\n—\n{footer}\nUnsubscribe: {unsub_url}"
     return EmailMessage(
         to_email=email, to_name=name, subject=subject, html=html, text=text,
-        from_email=settings.email_from_address,
+        from_email=_from_address(org),
         from_name=_sender(org)[0],
         reply_to=_sender(org)[2],
         headers={
             "List-Unsubscribe": f"<{unsub_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         },
+        # Campaigns are the bulk (news / marketing) stream — keep them on the
+        # campaign configuration set, apart from transactional sends.
+        configuration_set=(settings.ses_configuration_set or None),
     )
 
 
@@ -208,18 +225,23 @@ async def _campaign_or_404(db: AsyncSession, club: Organisation, cid: str) -> Co
 
 
 async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict) -> list[CommsContact]:
-    """Sendable contacts matching the chosen segment: subscribed, not bounced /
+    """Sendable contacts matching the chosen audience: subscribed, not bounced /
     complained / excluded per club, and not on the global suppression list (a
     hard bounce or complaint blocks the address across every club)."""
-    base = select(CommsContact).where(
-        CommsContact.organisation_id == club.id,
-        CommsContact.subscribed.is_(True),
-        CommsContact.bounced.is_(False),
-        CommsContact.complained.is_(False),
-        CommsContact.excluded.is_(False),
-        ~exists().where(func.lower(EmailSuppression.email) == func.lower(CommsContact.email)),
-    )
     atype = (audience or {}).get("type", "all")
+    if atype == "segment":
+        seg_id = (audience or {}).get("segment_id")
+        if not seg_id:
+            return []
+        try:
+            sid = uuid.UUID(str(seg_id))
+        except (ValueError, TypeError):
+            return []
+        seg = await db.get(CommsSegment, sid)
+        if not seg or seg.organisation_id != club.id:
+            return []
+        return await comms_segments.resolve_contacts(db, club, seg.definition)
+    base = select(CommsContact).where(*comms_segments.sendable_where(club.id))
     if atype == "list":
         ids = []
         for raw in (audience.get("contact_ids") or []):
@@ -918,3 +940,108 @@ async def contact_events(
         "event_type": ev.event_type, "event_subtype": ev.event_subtype,
         "reason": ev.reason, "created_at": ev.created_at.isoformat() if ev.created_at else None,
     } for ev in rows]
+
+
+# ─── Dynamic segments (Phase 2) ──────────────────────────────────────────────
+
+def _segment_out(s: CommsSegment) -> dict:
+    return {"id": str(s.id), "name": s.name, "definition": s.definition or {}}
+
+
+@router.get("/segments")
+async def list_segments(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(CommsSegment).where(CommsSegment.organisation_id == club.id)
+        .order_by(CommsSegment.name)
+    )).scalars().all()
+    return [_segment_out(s) for s in rows]
+
+
+class SegmentIn(BaseModel):
+    name: str
+    definition: dict = {}
+
+
+@router.post("/segments")
+async def create_segment(
+    data: SegmentIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A segment name is required")
+    seg = CommsSegment(organisation_id=club.id, name=name, definition=data.definition or {})
+    db.add(seg)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A segment with that name already exists")
+    await db.refresh(seg)
+    return _segment_out(seg)
+
+
+async def _segment_or_404(db: AsyncSession, club: Organisation, sid: str) -> CommsSegment:
+    try:
+        u = uuid.UUID(sid)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid segment id")
+    s = await db.get(CommsSegment, u)
+    if not s or s.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return s
+
+
+@router.put("/segments/{segment_id}")
+async def update_segment(
+    segment_id: str,
+    data: SegmentIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    seg = await _segment_or_404(db, club, segment_id)
+    name = (data.name or "").strip()
+    if name:
+        seg.name = name
+    seg.definition = data.definition or {}
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A segment with that name already exists")
+    return _segment_out(seg)
+
+
+@router.delete("/segments/{segment_id}")
+async def delete_segment(
+    segment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    seg = await _segment_or_404(db, club, segment_id)
+    await db.delete(seg)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/segments/preview")
+async def preview_segment(
+    data: SegmentIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Live count for an unsaved definition (powers the segment builder)."""
+    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
+    return {
+        "count": len(contacts),
+        "sample": [{"email": c.email, "name": c.name} for c in contacts[:8]],
+    }

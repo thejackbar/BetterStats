@@ -1227,6 +1227,22 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS complained_at TIMESTAMPTZ"))
         await conn.execute(text(
             "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'"))
+        # BetterComms Phase 2 (migration 111) — saved dynamic segments. A segment
+        # is a saved query (rules in JSONB) evaluated at send time against the
+        # club's contacts + current-season stats. Defensive idempotent create.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS comms_segments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                definition JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_comms_segment_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_comms_segments_org ON comms_segments(organisation_id)"))
         # KlubPro → BetterStats migration (migration 072) — sponsor contact
         # columns + audit/rollback bookkeeping. Idempotent defensive creates so
         # the API boots even if alembic hasn't run yet (mirrors the blocks above).

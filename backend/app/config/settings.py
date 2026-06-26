@@ -109,6 +109,18 @@ class Settings(BaseSettings):
     ses_sns_verify_signatures: bool = True
     ses_event_token: str = ""
 
+    # BetterComms — Amazon SES sending provider (SESv2 API, SigV4-signed). Set
+    # email_provider=ses to use it. Per-club From sits on the verified per-silo
+    # domains with a per-club local-part (no per-club AWS setup); the
+    # configuration set routes events to the webhook and isolates reputation.
+    ses_region: str = "ap-southeast-2"            # Sydney — closest AU region
+    ses_access_key_id: str = ""
+    ses_secret_access_key: str = ""
+    ses_configuration_set: str = ""               # campaign stream (carries the event destination)
+    ses_configuration_set_transactional: str = ""  # transactional stream, kept apart
+    ses_club_domain: str = "betteradmin-comms.work"
+    ses_marketing_domain: str = "betteratcricket-comms.work"
+
     @property
     def square_api_base(self) -> str:
         return (

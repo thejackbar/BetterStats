@@ -1523,6 +1523,15 @@ export const api = {
   commsRemoveSuppression: (email) =>
     request(`/club-admin/comms/suppressions?email=${encodeURIComponent(email)}`, { method: 'DELETE' }),
   commsContactEvents: (contactId) => request(`/club-admin/comms/contacts/${contactId}/events`),
+  // Dynamic segments (Phase 2): saved queries over contacts + cricket data.
+  commsListSegments: () => request('/club-admin/comms/segments'),
+  commsCreateSegment: (name, definition) =>
+    request('/club-admin/comms/segments', { method: 'POST', body: JSON.stringify({ name, definition }) }),
+  commsUpdateSegment: (id, name, definition) =>
+    request(`/club-admin/comms/segments/${id}`, { method: 'PUT', body: JSON.stringify({ name, definition }) }),
+  commsDeleteSegment: (id) => request(`/club-admin/comms/segments/${id}`, { method: 'DELETE' }),
+  commsPreviewSegment: (definition) =>
+    request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
 
   // BetterFantasyCricket (admin surface)
   fantasyConfig: () => request('/club-admin/fantasy/config'),

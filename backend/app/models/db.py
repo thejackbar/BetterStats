@@ -1962,6 +1962,28 @@ class CommsRecipient(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CommsSegment(Base):
+    """A saved dynamic segment (migration 111, BetterComms Phase 2).
+
+    ``definition`` is a JSONB rule set ({"match": "all", "rules": [{field, op,
+    value}, ...]}) evaluated at send time against the club's contacts joined to
+    the player + current-season stats. Not a stored membership — it re-evaluates
+    every time, so it always reflects current data. See
+    services/comms_segments.py.
+    """
+    __tablename__ = "comms_segments"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_comms_segment_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    definition = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class EmailSuppression(Base):
     """Global, address-level suppression (migration 110, BetterComms Phase 1).
 

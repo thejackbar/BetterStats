@@ -23,6 +23,10 @@ so mail authenticates and lands in the inbox.
 """
 from __future__ import annotations
 
+import datetime
+import hashlib
+import hmac
+import json
 import logging
 from dataclasses import dataclass, field
 from email.message import EmailMessage as MIMEMessage
@@ -53,6 +57,10 @@ class EmailMessage:
     # which improve deliverability and give Gmail/Apple Mail a native one-click
     # unsubscribe (on top of the in-body link the Spam Act requires).
     headers: dict[str, str] = field(default_factory=dict)
+    # SES configuration set for this send. Drives which event destination (and so
+    # the bounce/complaint webhook) and reputation stream the send belongs to.
+    # Ignored by non-SES providers.
+    configuration_set: Optional[str] = None
 
 
 @dataclass
@@ -211,6 +219,109 @@ class SMTPEmailProvider(EmailProvider):
             return SendResult(ok=False, error=f"smtp error: {e}")
 
 
+def _sign(key: bytes, msg: str) -> bytes:
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def _sigv4_headers(*, service: str, region: str, host: str, path: str, body: str,
+                   access_key: str, secret_key: str,
+                   content_type: str = "application/json") -> dict:
+    """Minimal AWS SigV4 (POST) signer — stdlib only, no boto3. Signs the four
+    headers SES needs and returns the request headers including Authorization."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = now.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+    canonical_headers = (
+        f"content-type:{content_type}\n"
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+    canonical_request = "\n".join([
+        "POST", path, "", canonical_headers, signed_headers, payload_hash,
+    ])
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = "\n".join([
+        "AWS4-HMAC-SHA256", amz_date, credential_scope,
+        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+    ])
+    k_date = _sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    k_region = _sign(k_date, region)
+    k_service = _sign(k_region, service)
+    k_signing = _sign(k_service, "aws4_request")
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    authorization = (
+        f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+    return {
+        "Content-Type": content_type,
+        "X-Amz-Date": amz_date,
+        "X-Amz-Content-Sha256": payload_hash,
+        "Authorization": authorization,
+    }
+
+
+class SesEmailProvider(EmailProvider):
+    """Amazon SES via the SESv2 send API (SigV4-signed, no boto3 dependency).
+
+    This is the production sender. Each send carries a per-club From on the
+    verified per-silo domain (resolved by the caller) and a configuration set,
+    which is what routes bounce/complaint events back to /public/ses/events and
+    keeps each tenant's reputation isolated. See docs/bettercomms-architecture.md.
+    """
+    name = "ses"
+
+    def __init__(self, region: str, access_key: str, secret_key: str,
+                 default_config_set: str = ""):
+        self.region = region
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.default_config_set = default_config_set
+        self.host = f"email.{region}.amazonaws.com"
+        self.path = "/v2/email/outbound-emails"
+
+    async def send(self, msg: EmailMessage) -> SendResult:
+        from_field = f"{msg.from_name} <{msg.from_email}>" if msg.from_name else (msg.from_email or "")
+        body_content: dict = {}
+        if msg.text:
+            body_content["Text"] = {"Data": msg.text, "Charset": "UTF-8"}
+        if msg.html:
+            body_content["Html"] = {"Data": msg.html, "Charset": "UTF-8"}
+        simple: dict = {
+            "Subject": {"Data": msg.subject, "Charset": "UTF-8"},
+            "Body": body_content,
+        }
+        if msg.headers:
+            simple["Headers"] = [{"Name": k, "Value": v} for k, v in msg.headers.items()]
+        payload: dict = {
+            "FromEmailAddress": from_field,
+            "Destination": {"ToAddresses": [msg.to_email]},
+            "Content": {"Simple": simple},
+        }
+        if msg.reply_to:
+            payload["ReplyToAddresses"] = [msg.reply_to]
+        cfg = msg.configuration_set or self.default_config_set
+        if cfg:
+            payload["ConfigurationSetName"] = cfg
+        body = json.dumps(payload)
+        headers = _sigv4_headers(
+            service="ses", region=self.region, host=self.host, path=self.path,
+            body=body, access_key=self.access_key, secret_key=self.secret_key)
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(f"https://{self.host}{self.path}", content=body, headers=headers)
+            if resp.status_code >= 400:
+                return SendResult(ok=False, error=f"ses {resp.status_code}: {resp.text[:300]}")
+            data = resp.json() if resp.content else {}
+            return SendResult(ok=True, message_id=str(data.get("MessageId") or ""))
+        except Exception as e:
+            return SendResult(ok=False, error=f"ses error: {e}")
+
+
 def get_email_provider() -> EmailProvider:
     """Resolve the active provider from settings, falling back to console.
 
@@ -225,7 +336,10 @@ def get_email_provider() -> EmailProvider:
         return ResendEmailProvider(key)
     if name == "smtp" and (settings.smtp_host or "").strip():
         return SMTPEmailProvider(settings.smtp_host, settings.smtp_port, settings.smtp_user, settings.smtp_password)
-    if name not in ("console", "brevo", "resend", "smtp"):
+    if name == "ses" and (settings.ses_access_key_id or "").strip() and (settings.ses_secret_access_key or "").strip():
+        return SesEmailProvider(settings.ses_region, settings.ses_access_key_id,
+                                settings.ses_secret_access_key, settings.ses_configuration_set)
+    if name not in ("console", "brevo", "resend", "smtp", "ses"):
         logger.warning("Unknown email_provider %r — using console", name)
     return ConsoleEmailProvider()
 

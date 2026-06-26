@@ -119,6 +119,11 @@ AWS account
                       └─ SNS event destination → /public/ses/events webhook → email_events + suppression
 ```
 
+- The **SES sending provider is built** (`SesEmailProvider` in
+  `services/email_service.py`): the SESv2 send API, SigV4-signed with stdlib only
+  (no boto3). Set `email_provider=ses` plus the `ses_*` settings. Each send gets a
+  per-club From on the verified silo domain (`{slug}@betteradmin-comms.work`, or
+  the marketing domain for the outreach org) and the campaign configuration set.
 - One verified domain per silo, one SES tenant per club, so reputation is isolated
   and a bad actor pauses only their own tenant. Per-club From local-parts need no
   per-club AWS admin (domain verification covers every local-part).
@@ -143,10 +148,16 @@ AWS account
   events, writes them, and maintains suppression.
 - Category taxonomy + a reusable `deliverable()` gate the rest of the app can call.
 
-**Phase 2: segmentation — our unfair advantage.** Static lists plus dynamic
-segments as saved queries over data Mailchimp can't see: "played more than 10
-matches", "fees unpaid", "selected this weekend", "no availability set". Tags on
-top.
+**Phase 2 (first increment built): segmentation — our unfair advantage.** Dynamic
+segments as saved queries over data Mailchimp can't see. `comms_segments` stores a
+rule set (`{match: all, rules: [{field, op, value}]}`) evaluated at send time by
+`services/comms_segments.py` against the club's contacts joined to the player and
+current-season stats. Whitelisted fields only (no client SQL): tag, source, and
+matches / runs / wickets / catches this season. A segment is a valid campaign
+audience (`{type: "segment", segment_id}`) and always re-evaluates, so it reflects
+current data. The send gate (`sendable_where`) is always applied, so a segment can
+never reach a suppressed address. Next: more fields (role, squad, fees unpaid,
+availability set) and saved static lists.
 
 **Phase 3: templates with versioning.** Reusable blocks, merge fields, categories.
 

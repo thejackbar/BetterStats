@@ -26,6 +26,8 @@ export default function CommsCompose() {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [audienceCount, setAudienceCount] = useState(null)
+  const [audience, setAudience] = useState({ type: 'all' })
+  const [segments, setSegments] = useState([])
   const [testEmail, setTestEmail] = useState('')
   const [showPreview, setShowPreview] = useState(false)
   const [live, setLive] = useState(true)
@@ -39,6 +41,7 @@ export default function CommsCompose() {
     setCampaign(c)
     setSubject(c.subject || '')
     setBody(c.body_html || '')
+    setAudience(c.audience && c.audience.type ? c.audience : { type: 'all' })
     return c
   }, [id])
 
@@ -49,10 +52,16 @@ export default function CommsCompose() {
       })
       .catch(e => setMsg({ kind: 'error', text: e.message }))
       .finally(() => setLoading(false))
-    api.commsAudiencePreview({ type: 'all' }).then(r => setAudienceCount(r.count)).catch(() => {})
+    api.commsListSegments().then(setSegments).catch(() => {})
     api.commsGetSettings().then(s => setLive(!!s?.provider?.live)).catch(() => {})
     return () => clearInterval(pollRef.current)
   }, [load])
+
+  // Re-count whenever the chosen audience changes.
+  useEffect(() => {
+    setAudienceCount(null)
+    api.commsAudiencePreview(audience).then(r => setAudienceCount(r.count)).catch(() => setAudienceCount(null))
+  }, [audience])
 
   const startPolling = () => {
     clearInterval(pollRef.current)
@@ -66,7 +75,7 @@ export default function CommsCompose() {
   }
 
   const save = async () => {
-    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience: { type: 'all' } })
+    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience })
     setCampaign(c)
     return c
   }
@@ -176,11 +185,23 @@ export default function CommsCompose() {
             </div>
 
             <div className="pb-card p-4 mb-4">
-              <div className="text-sm text-pb-text">
-                Audience: <span className="font-medium">All subscribed contacts</span>
-                {audienceCount != null && <span className="text-pb-faint"> ({audienceCount})</span>}
+              <div className="text-sm text-pb-text mb-2">Audience</div>
+              <select
+                value={audience.type === 'segment' ? `segment:${audience.segment_id}` : 'all'}
+                onChange={e => {
+                  const v = e.target.value
+                  setAudience(v.startsWith('segment:') ? { type: 'segment', segment_id: v.slice(8) } : { type: 'all' })
+                }}
+                className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
+                <option value="all">All subscribed contacts</option>
+                {segments.map(s => <option key={s.id} value={`segment:${s.id}`}>Segment: {s.name}</option>)}
+              </select>
+              <div className="text-pb-faintest text-xs mt-2">
+                {audienceCount != null
+                  ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
+                  : 'Counting…'}{' '}
+                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent)' }}>Manage segments</a>
               </div>
-              <div className="text-pb-faintest text-xs mt-1">Segments (by team / grade) coming soon.</div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mb-6">

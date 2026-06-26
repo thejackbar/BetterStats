@@ -7,6 +7,7 @@ import CommsContextBar from './CommsContextBar'
 const NAV = [
   { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, exact: true },
   { to: '/admin/comms/contacts', label: 'Contacts', icon: 'teams', cap: CAP.MANAGE_COMMS },
+  { to: '/admin/comms/segments', label: 'Segments', icon: 'teams', cap: CAP.MANAGE_COMMS },
   { to: '/admin/comms/settings', label: 'Settings', icon: 'settings', cap: CAP.MANAGE_COMMS },
 ]
 
