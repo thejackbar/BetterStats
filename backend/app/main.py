@@ -1230,6 +1230,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS complained_at TIMESTAMPTZ"))
         await conn.execute(text(
             "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'"))
+        # Migration 115: per-contact merge-variable overrides.
+        await conn.execute(text(
+            "ALTER TABLE comms_contacts ADD COLUMN IF NOT EXISTS merge_vars JSONB NOT NULL DEFAULT '{}'"))
         # BetterComms Phase 2 (migration 111) — saved dynamic segments. A segment
         # is a saved query (rules in JSONB) evaluated at send time against the
         # club's contacts + current-season stats. Defensive idempotent create.

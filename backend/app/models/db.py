@@ -1909,6 +1909,12 @@ class CommsContact(Base):
     # category → bool (transactional / operational / news / marketing). Absent key
     # ⇒ opted in. transactional is never gated. See services/comms_policy.py.
     preferences = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    # Per-contact merge-variable overrides (migration 115): key → value for the
+    # editable merge variables (first_name / club / association / utm_code / state /
+    # website). An override wins over the value derived from the linked directory
+    # club or the org default, so any contact (manual, imported or exported) can be
+    # personalised. Absent key ⇒ use the derived default.
+    merge_vars = Column(JSONB, nullable=False, server_default="{}", default=dict)
     tags = Column(JSONB, nullable=False, server_default="[]", default=list)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

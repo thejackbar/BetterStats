@@ -153,19 +153,28 @@ export default function CommsContacts() {
         </div>
       )}
 
-      {detailId && <ContactDetailModal id={detailId} onClose={() => setDetailId(null)} />}
+      {detailId && <ContactDetailModal id={detailId} onClose={() => setDetailId(null)}
+                                       onSaved={() => reload().catch(() => {})} />}
     </BetterCommsLayout>
   )
 }
 
-function ContactDetailModal({ id, onClose }) {
+// name/email live in their own columns; the rest of the editable keys are
+// per-contact merge_vars overrides. unsubscribe_url is auto and read-only.
+const COLUMN_KEYS = ['name', 'email']
+
+function ContactDetailModal({ id, onClose, onSaved }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({})
+  const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.commsContactDetail(id).then(setD).catch(e => setErr(e.message))
   }, [id])
+  useEffect(() => { load() }, [load])
 
   const copy = (name) => {
     const token = `{{${name}}}`
@@ -174,17 +183,51 @@ function ContactDetailModal({ id, onClose }) {
     setTimeout(() => setCopied(''), 1200)
   }
 
+  const startEdit = () => {
+    // Seed the form: columns from their stored value, override keys from the raw
+    // stored override (so a blank field falls back to the shown default).
+    const f = { name: d.name || '', email: d.email || '' }
+    for (const k of (d.editable || [])) {
+      if (!COLUMN_KEYS.includes(k)) f[k] = (d.overrides || {})[k] || ''
+    }
+    setForm(f); setErr(''); setEditing(true)
+  }
+
+  const save = async () => {
+    setSaving(true); setErr('')
+    const merge_vars = {}
+    for (const k of (d.editable || [])) {
+      if (!COLUMN_KEYS.includes(k)) merge_vars[k] = (form[k] || '').trim()
+    }
+    try {
+      await api.commsUpdateContact(id, {
+        name: (form.name || '').trim(),
+        email: (form.email || '').trim(),
+        merge_vars,
+      })
+      setEditing(false)
+      load()
+      onSaved && onSaved()
+    } catch (e) { setErr(e.message || 'Could not save.') } finally { setSaving(false) }
+  }
+
   const mc = d?.marketing_club
+  const editableSet = new Set(d?.editable || [])
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div className="bg-pb-surface border pb-hairline rounded-lg shadow-xl w-full max-w-lg mt-[8vh]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 pb-hairline-b">
           <div className="text-pb-text font-medium truncate">{d?.name || d?.email || 'Contact'}</div>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text text-lg px-1">✕</button>
+          <div className="flex items-center gap-2">
+            {d && !editing && (
+              <button onClick={startEdit} className="text-xs px-2 py-1 rounded border pb-hairline text-pb-text hover:bg-pb-surface2">Edit</button>
+            )}
+            <button onClick={onClose} className="text-pb-faint hover:text-pb-text text-lg px-1">✕</button>
+          </div>
         </div>
         <div className="p-5">
-          {err && <div className="text-pb-red text-sm">{err}</div>}
+          {err && <div className="text-pb-red text-sm mb-2">{err}</div>}
           {!d && !err && <div className="text-pb-faint text-sm">Loading…</div>}
           {d && (
             <>
@@ -197,7 +240,7 @@ function ContactDetailModal({ id, onClose }) {
                 {d.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">excluded</span>}
               </div>
 
-              {mc && (
+              {mc && !editing && (
                 <div className="pb-card p-3 mb-4">
                   <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">From the Clubs Directory</div>
                   {[['Club', mc.name], ['Association', mc.association], ['UTM code', mc.utm_code], ['State', mc.state], ['Website', mc.website]].map(([k, v]) => v ? (
@@ -209,18 +252,54 @@ function ContactDetailModal({ id, onClose }) {
                 </div>
               )}
 
-              <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">Merge variables — click to copy</div>
-              <div className="text-pb-faintest text-xs mb-2">Drop these into a template; this is how they resolve for this contact.</div>
-              <div>
-                {Object.entries(d.variables || {}).map(([k, v]) => (
-                  <button key={k} onClick={() => copy(k)} title="Copy"
-                    className="w-full flex items-center justify-between gap-3 py-1.5 pb-hairline-t text-left hover:bg-pb-surface2 rounded px-1">
-                    <span className="font-mono text-xs text-pb-accent shrink-0" style={{ color: 'var(--pb-accent)' }}>{`{{${k}}}`}</span>
-                    <span className="text-pb-faint text-xs truncate">{String(v) || <span className="text-pb-faintest italic">empty</span>}</span>
-                    <span className="text-pb-faintest text-[10px] shrink-0 w-12 text-right">{copied === k ? 'copied' : ''}</span>
-                  </button>
-                ))}
+              <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">
+                Merge variables {editing ? '— edit each value' : '— click to copy'}
               </div>
+              <div className="text-pb-faintest text-xs mb-2">
+                {editing
+                  ? 'Set any value for this contact. Leave blank to use the default shown.'
+                  : 'Drop these into a template; this is how they resolve for this contact.'}
+              </div>
+
+              {editing ? (
+                <div className="space-y-2">
+                  {Object.keys(d.variables || {}).map((k) => {
+                    const canEdit = editableSet.has(k)
+                    return (
+                      <div key={k} className="flex items-center gap-2">
+                        <span className="font-mono text-xs shrink-0 w-32 truncate" style={{ color: 'var(--pb-accent)' }} title={`{{${k}}}`}>{`{{${k}}}`}</span>
+                        {canEdit ? (
+                          <input
+                            value={form[k] ?? ''}
+                            onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+                            placeholder={String(d.variables[k] || '')}
+                            className="flex-1 min-w-0 px-2 py-1 rounded bg-pb-surface2 text-pb-text border pb-hairline text-xs" />
+                        ) : (
+                          <span className="flex-1 text-pb-faintest text-xs italic truncate">{String(d.variables[k] || '')} (auto)</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <div className="flex gap-2 pt-2">
+                    <button onClick={save} disabled={saving}
+                      className="px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button onClick={() => { setEditing(false); setErr('') }} className="px-3 py-1.5 rounded text-sm text-pb-faint hover:text-pb-text">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  {Object.entries(d.variables || {}).map(([k, v]) => (
+                    <button key={k} onClick={() => copy(k)} title="Copy"
+                      className="w-full flex items-center justify-between gap-3 py-1.5 pb-hairline-t text-left hover:bg-pb-surface2 rounded px-1">
+                      <span className="font-mono text-xs text-pb-accent shrink-0" style={{ color: 'var(--pb-accent)' }}>{`{{${k}}}`}</span>
+                      <span className="text-pb-faint text-xs truncate">{String(v) || <span className="text-pb-faintest italic">empty</span>}</span>
+                      <span className="text-pb-faintest text-[10px] shrink-0 w-12 text-right">{copied === k ? 'copied' : ''}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>
