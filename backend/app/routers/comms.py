@@ -40,7 +40,8 @@ from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership, Team,
     CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
-    CommsList, CommsListMember, EmailSuppression, EmailEvent, MarketingClub,
+    CommsList, CommsListMember, EmailSuppression, EmailEvent,
+    MarketingClub, MarketingClubContact,
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
@@ -539,6 +540,14 @@ async def delete_contact(
         raise HTTPException(status_code=422, detail="Invalid contact id")
     if not c or c.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Contact not found")
+    # If this contact came from the Club Directory export, flip its source
+    # marketing contact back to not-exported so the directory can re-offer it.
+    if c.marketing_club_id and c.email:
+        await db.execute(
+            update(MarketingClubContact)
+            .where(MarketingClubContact.marketing_club_id == c.marketing_club_id,
+                   func.lower(MarketingClubContact.email) == c.email.lower())
+            .values(exported_at=None, updated_at=func.now()))
     await db.delete(c)
     await db.commit()
     return {"status": "ok"}

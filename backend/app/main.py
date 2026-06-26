@@ -222,6 +222,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS "
             "outreach_selected BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        # Migration 114: per-contact exported-to-BetterComms flag.
+        await conn.execute(text(
+            "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS exported_at TIMESTAMPTZ"))
         # Migration 098: emailed tracking + comms link.
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS emailed_at TIMESTAMPTZ"))
