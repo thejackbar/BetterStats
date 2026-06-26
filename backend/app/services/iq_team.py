@@ -577,6 +577,200 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
     return out
 
 
+async def _combinations(session: AsyncSession, org_id: str, season_id: str | None,
+                        grade_id: str | None = None, baseline: float | None = None) -> dict | None:
+    """Selection combinations (brief §6 / §15) — which pairs of players have the
+    best (and worst) team record when both are in the XI together. Built from
+    ``game_appearances`` over decided games; the ``lift`` is the pair's win%
+    minus the club's overall win% in this scope (``baseline``), so a pair that
+    wins more than the side's own baseline rises to the top.
+
+    This is distinct from batting partnerships (runs at the crease) — it's about
+    the SIDE winning when both are selected, the synergy a selector cares about."""
+    season_clause = _scope(season_id, grade_id)
+    min_together = 5 if (season_id or grade_id) else 8
+    res = await session.execute(
+        text(
+            f"""
+            WITH og AS (
+                SELECT g.id, g.result
+                FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID)
+                  AND g.result IN ('WIN', 'LOSS', 'DRAW', 'TIE') {season_clause}
+            ),
+            app AS (
+                SELECT DISTINCT ga.game_id, ga.player_id
+                FROM game_appearances ga JOIN og ON og.id = ga.game_id
+            )
+            SELECT a.player_id::text AS a_id, b.player_id::text AS b_id,
+                   COALESCE(pa.display_name_override, pa.name) AS a_name,
+                   COALESCE(pb.display_name_override, pb.name) AS b_name,
+                   COUNT(*) AS together,
+                   COUNT(*) FILTER (WHERE og.result = 'WIN') AS wins,
+                   COUNT(*) FILTER (WHERE og.result = 'LOSS') AS losses,
+                   COUNT(*) FILTER (WHERE og.result IN ('DRAW', 'TIE')) AS draws
+            FROM app a
+            JOIN app b ON a.game_id = b.game_id AND a.player_id < b.player_id
+            JOIN og ON og.id = a.game_id
+            JOIN players pa ON pa.id = a.player_id
+            JOIN players pb ON pb.id = b.player_id
+            GROUP BY a.player_id, b.player_id, a_name, b_name
+            HAVING COUNT(*) FILTER (WHERE og.result IN ('WIN', 'LOSS')) >= :min_together
+            """
+        ),
+        {"org": org_id, "season": season_id, "grade": grade_id, "min_together": min_together},
+    )
+    rows = []
+    for r in res.mappings():
+        wins, losses, draws = int(r["wins"] or 0), int(r["losses"] or 0), int(r["draws"] or 0)
+        decided = wins + losses
+        win_pct = _win_pct(wins, decided)
+        rows.append({
+            "a": r["a_name"], "b": r["b_name"], "a_id": r["a_id"], "b_id": r["b_id"],
+            "games": int(r["together"] or 0), "wins": wins, "losses": losses, "draws": draws,
+            "win_pct": win_pct,
+            "lift": round(win_pct - baseline, 1) if (win_pct is not None and baseline is not None) else None,
+        })
+    if not rows:
+        return None
+    # Best: highest win% together, more shared games breaks ties.
+    best = sorted(rows, key=lambda x: (x["win_pct"] if x["win_pct"] is not None else -1.0, x["games"]), reverse=True)[:8]
+    # Tougher together: pairs clearly below the side's baseline (only worth
+    # surfacing when there's a real spread of pairs to compare against).
+    worst = []
+    if baseline is not None and len(rows) >= 8:
+        below = [x for x in rows if x["win_pct"] is not None and x["win_pct"] < baseline]
+        worst = sorted(below, key=lambda x: x["win_pct"])[:5]
+    return {"baseline_win_pct": baseline, "best": best, "worst": worst, "min_games": min_together}
+
+
+async def pair_synergy(session: AsyncSession, org_id: str, a_id: str, b_id: str) -> dict:
+    """Two players' record AS A PAIR, all-time (powers the Ask 'players_together'
+    tool). Team win/loss/draw and win% in games BOTH played, the same for games
+    exactly one of them played (the selection lift), plus each player's batting &
+    bowling output in their shared games. Org-scoped via grades→seasons."""
+    rec = (await session.execute(
+        text(
+            """
+            WITH og AS (
+                SELECT g.id, g.result
+                FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID)
+                  AND g.result IN ('WIN', 'LOSS', 'DRAW', 'TIE')
+            ),
+            ag AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:a AS UUID)),
+            bg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:b AS UUID)),
+            f AS (
+                SELECT result,
+                       id IN (SELECT game_id FROM ag) AS in_a,
+                       id IN (SELECT game_id FROM bg) AS in_b
+                FROM og
+            )
+            SELECT
+                COUNT(*) FILTER (WHERE in_a AND in_b) AS tog,
+                COUNT(*) FILTER (WHERE in_a AND in_b AND result = 'WIN') AS tog_w,
+                COUNT(*) FILTER (WHERE in_a AND in_b AND result = 'LOSS') AS tog_l,
+                COUNT(*) FILTER (WHERE in_a AND in_b AND result IN ('DRAW', 'TIE')) AS tog_d,
+                COUNT(*) FILTER (WHERE (in_a OR in_b) AND NOT (in_a AND in_b)) AS one,
+                COUNT(*) FILTER (WHERE (in_a OR in_b) AND NOT (in_a AND in_b) AND result = 'WIN') AS one_w,
+                COUNT(*) FILTER (WHERE (in_a OR in_b) AND NOT (in_a AND in_b) AND result = 'LOSS') AS one_l
+            FROM f
+            """
+        ),
+        {"org": org_id, "a": a_id, "b": b_id},
+    )).mappings().first()
+
+    names = {r["id"]: r["name"] for r in (await session.execute(
+        text("SELECT id::text AS id, COALESCE(display_name_override, name) AS name FROM players WHERE id IN (CAST(:a AS UUID), CAST(:b AS UUID))"),
+        {"a": a_id, "b": b_id},
+    )).mappings()}
+
+    # Each player's batting & bowling in the games they shared.
+    bat = {r["pid"]: r for r in (await session.execute(
+        text(
+            """
+            WITH shared AS (
+                SELECT ga.game_id
+                FROM game_appearances ga
+                JOIN game_appearances gb ON gb.game_id = ga.game_id AND gb.player_id = CAST(:b AS UUID)
+                JOIN v_effective_games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE ga.player_id = CAST(:a AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+            )
+            SELECT bi.player_id::text AS pid,
+                   COALESCE(SUM(bi.runs), 0) AS runs,
+                   COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS inns,
+                   COUNT(*) FILTER (WHERE bi.not_out) AS not_outs
+            FROM v_effective_batting_innings bi
+            WHERE bi.game_id IN (SELECT game_id FROM shared)
+              AND bi.player_id IN (CAST(:a AS UUID), CAST(:b AS UUID))
+              AND bi.did_not_bat IS NOT TRUE
+            GROUP BY bi.player_id
+            """
+        ),
+        {"org": org_id, "a": a_id, "b": b_id},
+    )).mappings()}
+
+    bowl = {r["pid"]: r for r in (await session.execute(
+        text(
+            """
+            WITH shared AS (
+                SELECT ga.game_id
+                FROM game_appearances ga
+                JOIN game_appearances gb ON gb.game_id = ga.game_id AND gb.player_id = CAST(:b AS UUID)
+                JOIN v_effective_games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE ga.player_id = CAST(:a AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+            )
+            SELECT bs.player_id::text AS pid,
+                   COALESCE(SUM(bs.wickets), 0) AS wkts,
+                   COALESCE(SUM(bs.runs), 0) AS conceded
+            FROM v_effective_bowling_spells bs
+            WHERE bs.game_id IN (SELECT game_id FROM shared)
+              AND bs.player_id IN (CAST(:a AS UUID), CAST(:b AS UUID))
+            GROUP BY bs.player_id
+            """
+        ),
+        {"org": org_id, "a": a_id, "b": b_id},
+    )).mappings()}
+
+    def _output(pid):
+        b = bat.get(pid)
+        bo = bowl.get(pid)
+        runs = int(b["runs"]) if b else 0
+        inns = int(b["inns"]) if b else 0
+        outs = inns - (int(b["not_outs"]) if b else 0)
+        wkts = int(bo["wkts"]) if bo else 0
+        conceded = int(bo["conceded"]) if bo else 0
+        return {
+            "runs": runs, "innings": inns,
+            "bat_avg": round(runs / outs, 1) if outs > 0 else None,
+            "wickets": wkts,
+            "bowl_avg": round(conceded / wkts, 1) if wkts > 0 else None,
+        }
+
+    tog, tog_w, tog_l = int(rec["tog"] or 0), int(rec["tog_w"] or 0), int(rec["tog_l"] or 0)
+    tog_d = int(rec["tog_d"] or 0)
+    one, one_w, one_l = int(rec["one"] or 0), int(rec["one_w"] or 0), int(rec["one_l"] or 0)
+    tog_win_pct = _win_pct(tog_w, tog_w + tog_l)
+    one_win_pct = _win_pct(one_w, one_w + one_l)
+    return {
+        "a": names.get(a_id), "b": names.get(b_id),
+        "together": {"games": tog, "wins": tog_w, "losses": tog_l, "draws": tog_d, "win_pct": tog_win_pct},
+        "apart": {"games": one, "wins": one_w, "losses": one_l, "win_pct": one_win_pct},
+        "lift": (round(tog_win_pct - one_win_pct, 1) if (tog_win_pct is not None and one_win_pct is not None) else None),
+        "a_in_shared_games": _output(a_id),
+        "b_in_shared_games": _output(b_id),
+        "note": "Record is over games both played; 'apart' is games exactly one of them played. All-time, this club only.",
+    }
+
+
 async def _discipline(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> dict | None:
     """Bowling discipline / extras (brief §2.9/§8.5) — wides & no-balls per over
     and extras as a share of runs conceded, club-wide and per bowler. Often
@@ -1277,6 +1471,7 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
     attack = await _safe(session, lambda: _attack_structure(session, org_id, season_id, grade_id), None)
     discipline = await _safe(session, lambda: _discipline(session, org_id, season_id, grade_id), None)
     captaincy = await _safe(session, lambda: _captaincy(session, org_id, season_id, grade_id), [])
+    combinations = await _safe(session, lambda: _combinations(session, org_id, season_id, grade_id, record.get("win_pct")), None)
     wickets_quality = await _safe(session, lambda: _wickets_quality(session, org_id, season_id, grade_id), None)
     collapse_bowlers = await _safe(session, lambda: _collapse_bowlers(session, org_id, season_id, grade_id), None)
     starts = await _safe(session, lambda: _team_starts(session, org_id, season_id, grade_id), None)
@@ -1297,6 +1492,7 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
         "attack": attack,
         "discipline": discipline,
         "captaincy": captaincy,
+        "combinations": combinations,
         "wickets_quality": wickets_quality,
         "collapse_bowlers": collapse_bowlers,
         "starts": starts,
