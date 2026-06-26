@@ -666,7 +666,8 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  contact_filter: Optional[str] = None, person: Optional[str] = None,
                  exclude_junior: bool = False, exclude_emailed: bool = False,
                  exclude_carnival: bool = False, exclude_school: bool = False,
-                 associations: Optional[list] = None) -> list:
+                 associations: Optional[list] = None,
+                 association_extra: Optional[list] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
     filters. Contact-presence filters use correlated EXISTS over the contacts."""
@@ -696,9 +697,14 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                          func.lower(MarketingClub.association_name).like(like)))
     if association:
         a = f"%{association.lower()}%"
-        # primary association OR any in the associations JSONB list
-        conds.append(or_(func.lower(MarketingClub.association_name).like(a),
-                         func.lower(cast(MarketingClub.associations, Text)).like(a)))
+        # primary association OR any in the associations JSONB list OR (when the
+        # text matched an association short code, e.g. 'wastca') any club in those
+        # association(s).
+        name_conds = [func.lower(MarketingClub.association_name).like(a),
+                      func.lower(cast(MarketingClub.associations, Text)).like(a)]
+        for n in (association_extra or []):
+            name_conds.append(_assoc_match(n))
+        conds.append(or_(*name_conds))
     # AU postcodes are 4-digit; lexical compare of 4-char numeric strings == numeric,
     # and the regex guard keeps non-4-digit values out (no CAST, so never errors).
     pc_ok = MarketingClub.postcode.op("~")("^[0-9]{4}$")
@@ -915,8 +921,21 @@ async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dic
 
 
 async def list_associations(session: AsyncSession) -> list[dict]:
-    """Distinct associations (name + id + club count) for the multi-select filter.
-    The id is the PlayHQ routingCode (used to fetch the full roster on demand)."""
+    """All associations for the multi-select filter, from the registry (every
+    association we've discovered, ~677) — not just the ones already linked to
+    clubs. ``count`` is the linked club count (0 until that association's roster
+    has been swept), ``resolved`` says whether its roster has been fetched. The id
+    is the PlayHQ routingCode (used to fetch the roster on demand)."""
+    known = await session.scalar(text("SELECT COUNT(*) FROM marketing_associations")) or 0
+    if known:
+        rows = (await session.execute(text("""
+            SELECT id, name, club_count, (last_resolved_at IS NOT NULL) AS resolved, short_code
+            FROM marketing_associations
+            ORDER BY name
+        """))).all()
+        return [{"name": r[1], "id": r[0], "count": r[2] or 0, "resolved": bool(r[3]),
+                 "short": r[4] or ""} for r in rows]
+    # Fallback before the registry is populated: derive from linked clubs.
     rows = (await session.execute(text("""
         SELECT elem->>'name' AS name, MIN(elem->>'id') AS id, COUNT(DISTINCT mc.id) AS n
         FROM marketing_clubs mc
@@ -927,7 +946,7 @@ async def list_associations(session: AsyncSession) -> list[dict]:
         GROUP BY elem->>'name'
         ORDER BY elem->>'name'
     """))).all()
-    return [{"name": r[0], "id": r[1], "count": r[2]} for r in rows]
+    return [{"name": r[0], "id": r[1], "count": r[2], "resolved": True} for r in rows]
 
 
 # Bounds for the on-demand association-roster traversal (operator action).
@@ -935,14 +954,65 @@ _MAX_RESOLVE_SEASONS = 2
 _MAX_RESOLVE_GRADES = 80
 
 
+def assoc_acronym(name: str) -> str:
+    """Derive a searchable short code from the name (PlayHQ has none): the first
+    letter of each alphabetic word, uppercased. 'West Australian Suburban Turf
+    Cricket Association' → 'WASTCA'."""
+    return "".join(w[0] for w in re.findall(r"[A-Za-z]+", name or "")).upper()
+
+
 async def register_association(session: AsyncSession, assoc_id: str, name: str) -> None:
-    """Upsert an association into the registry (for the automatic sweep)."""
+    """Upsert an association into the registry (for the automatic sweep), with a
+    derived short code (e.g. WASTCA) so it's searchable by acronym."""
     if not assoc_id:
         return
+    # Set the derived short code on first insert only; never overwrite on the
+    # daily re-register, so a hand-edited code persists.
     await session.execute(text(
-        "INSERT INTO marketing_associations (id, name) VALUES (:id, :name) "
-        "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()"),
-        {"id": assoc_id, "name": name or ""})
+        "INSERT INTO marketing_associations (id, name, short_code) VALUES (:id, :name, :short) "
+        "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "
+        "short_code = COALESCE(marketing_associations.short_code, EXCLUDED.short_code), "
+        "updated_at = NOW()"),
+        {"id": assoc_id, "name": name or "", "short": assoc_acronym(name)})
+
+
+async def set_association_shortcode(session: AsyncSession, assoc_id: str,
+                                    short: str) -> Optional[dict]:
+    """Manually set an association's short code. Blank resets it to the
+    name-derived acronym. Returns the new value, or None if not found."""
+    name = await session.scalar(text(
+        "SELECT name FROM marketing_associations WHERE id = :id"), {"id": assoc_id})
+    if name is None:
+        return None
+    code = (short or "").strip().upper() or assoc_acronym(name)
+    await session.execute(text(
+        "UPDATE marketing_associations SET short_code = :c, updated_at = NOW() WHERE id = :id"),
+        {"c": code or None, "id": assoc_id})
+    await session.commit()
+    return {"id": assoc_id, "short": code}
+
+
+async def shortcode_association_names(session: AsyncSession, text_q: str) -> list[str]:
+    """Association names whose short code matches the text (e.g. 'wastca' → 'West
+    Australian Suburban Turf Cricket Association'). Powers shortcode search in the
+    'Association contains' filter."""
+    q = (text_q or "").strip().lower()
+    if not q:
+        return []
+    rows = (await session.execute(text(
+        "SELECT name FROM marketing_associations WHERE short_code IS NOT NULL "
+        "AND lower(short_code) LIKE :t"), {"t": f"%{q}%"})).all()
+    return [r[0] for r in rows]
+
+
+async def expand_shortcode(session: AsyncSession, kwargs: dict) -> dict:
+    """If the 'Association contains' text matches an association short code, add
+    those association names so the filter also matches by shortcode (e.g. wastca)."""
+    a = (kwargs or {}).get("association")
+    if a:
+        kwargs = dict(kwargs)
+        kwargs["association_extra"] = await shortcode_association_names(session, a)
+    return kwargs
 
 
 async def resolve_association_clubs(session: AsyncSession, assoc_id: str,

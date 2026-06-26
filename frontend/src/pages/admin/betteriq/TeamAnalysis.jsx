@@ -502,14 +502,56 @@ function Bowling({ d, seasonId, teamId }) {
   )
 }
 
+/* ── Combinations (who wins together) ───────────────────────────────────── */
+function ComboRow({ p }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-semibold text-[13.5px] truncate">{p.a} <span className="text-pb-faint font-normal">&amp;</span> {p.b}</span>
+        <span className="iq-num font-bold text-[14px]" style={{ color: p.win_pct != null && p.win_pct >= 50 ? 'var(--pb-brand)' : 'var(--pb-text)' }}>{pctTxt(p.win_pct)}</span>
+      </div>
+      <div className="text-pb-faint text-[12px] mt-0.5 iq-num">
+        {p.wins}–{p.losses}–{p.draws} from {fmtCount(p.games)} together
+        {p.lift != null && (
+          <span style={{ color: p.lift >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}> · {fmtPct(p.lift, { sign: true })} vs club</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Combinations({ data }) {
+  const best = data?.best || []
+  const worst = data?.worst || []
+  if (!best.length) return null
+  const base = data.baseline_win_pct
+  return (
+    <Card eyebrow="who wins together" title="Best combinations" right={<span className="text-pb-faint text-[12px]">win % when both play</span>}>
+      <div className="space-y-3">
+        {best.map((p, i) => <ComboRow key={`b${i}`} p={p} />)}
+      </div>
+      {worst.length > 0 && (
+        <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+          <div className="iq-eyebrow mb-2">Tougher together</div>
+          <div className="space-y-2.5">
+            {worst.map((p, i) => <ComboRow key={`w${i}`} p={p} />)}
+          </div>
+        </div>
+      )}
+      <Note>Team win % over decided games where both were in the side{base != null ? `; the club's overall win rate is ${pctTxt(base)}` : ''}. Min {data.min_games} games together. A selection signal, not proof one drives the other.</Note>
+    </Card>
+  )
+}
+
 /* ── Players tab ────────────────────────────────────────────────────────── */
 function Players({ d }) {
   const cap = d.captaincy
   const roles = d.role_ratings
   const ar = d.all_rounders
   const fld = d.fielding
+  const combos = d.combinations
   const maxRating = Math.max(1, ...((ar || []).map(a => Math.abs(a.diff || 0))))
-  const nothing = !cap?.length && !roles?.length && !ar?.length && !(fld?.fielders?.length || fld?.keepers?.length)
+  const nothing = !cap?.length && !roles?.length && !ar?.length && !(fld?.fielders?.length || fld?.keepers?.length) && !(combos?.best?.length)
 
   if (nothing) return <Card><Empty>Not enough per-player data in this period.</Empty></Card>
 
@@ -536,6 +578,8 @@ function Players({ d }) {
           <Note>Win % over decided games (draws excluded); avg score is our total in games they led. Min 3 games. Toss decisions aren't in our data.</Note>
         </Card>
       )}
+
+      {combos?.best?.length > 0 && <Combinations data={combos} />}
 
       <div className="grid gap-5 lg:grid-cols-2 items-start">
         {ar?.length > 0 && (

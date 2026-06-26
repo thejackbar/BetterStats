@@ -27,6 +27,7 @@ from app.services import iq_review
 from app.services import iq_scout
 from app.services import iq_selection
 from app.services import iq_team
+from app.services import iq_teammates
 from app.services import iq_trends
 
 # Every BetterIQ route requires the MANAGE_IQ capability.
@@ -403,6 +404,38 @@ async def trends_player_radar(
     """A 6-axis batting/bowling radar normalised so the squad average sits on the
     50 ring (values 0–100). Powers the Player-trends profile radar."""
     return await iq_radar.player_radar(db, str(club.id), player_id, season_id=season_id)
+
+
+# ─── Teammates: who a player has played alongside, and how they go together ───
+
+
+@router.get("/teammates/{player_id}")
+async def teammates(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Every player the focal player has shared a side with, most games together
+    first, with the team's record over those shared games (career)."""
+    result = await iq_teammates.teammates(db, str(club.id), player_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
+
+
+@router.get("/teammates/{player_id}/with/{teammate_id}")
+async def teammate_split(
+    player_id: str,
+    teammate_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """The focal player's batting & bowling and the team's record, split by
+    whether the teammate was also in the side (the with-vs-without comparison)."""
+    result = await iq_teammates.with_split(db, str(club.id), player_id, teammate_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player or teammate not found")
+    return result
 
 
 # ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────

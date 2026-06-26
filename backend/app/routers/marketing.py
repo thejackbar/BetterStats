@@ -67,6 +67,22 @@ async def list_associations(db: AsyncSession = Depends(get_db), _=Depends(requir
     return await cd.list_associations(db)
 
 
+class ShortcodeBody(BaseModel):
+    short_code: str
+
+
+@router.patch("/associations/{assoc_id}/shortcode")
+async def set_assoc_shortcode(assoc_id: str, body: ShortcodeBody,
+                              db: AsyncSession = Depends(get_db),
+                              _=Depends(require_super_admin)):
+    """Edit an association's (searchable) short code. Blank resets it to the
+    name-derived acronym."""
+    res = await cd.set_association_shortcode(db, assoc_id, body.short_code)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Association not found")
+    return res
+
+
 class ResolveAssocBody(BaseModel):
     id: str
     name: str
@@ -105,6 +121,9 @@ async def list_clubs(
     exclude_carnival: bool = False,
     exclude_school: bool = False,
     kind: Optional[str] = "club",
+    group_by_association: bool = False,
+    assoc_sort: str = "asc",
+    club_sort: str = "asc",
     limit: int = Query(100, le=500),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -113,13 +132,23 @@ async def list_clubs(
     stmt = select(MarketingClub).where(MarketingClub.detail_fetched_at.isnot(None))
     if kind:
         stmt = stmt.where(MarketingClub.kind == kind)
-    for cond in cd.club_filters(**_filter_kwargs(
-            q, state, association, status, postcode_from, postcode_to, contact,
-            person, exclude_junior, exclude_emailed, exclude_carnival, exclude_school,
-            associations)):
+    kw = await cd.expand_shortcode(db, _filter_kwargs(
+        q, state, association, status, postcode_from, postcode_to, contact,
+        person, exclude_junior, exclude_emailed, exclude_carnival, exclude_school,
+        associations))
+    for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    stmt = stmt.order_by(MarketingClub.name.asc()).limit(limit).offset(offset)
+
+    def _dir(col, d):
+        return col.desc() if (d or "").lower() == "desc" else col.asc()
+    order = []
+    if group_by_association:
+        # group by the primary association; unassigned clubs sort last
+        ac = func.lower(MarketingClub.association_name)
+        order.append((ac.desc() if assoc_sort.lower() == "desc" else ac.asc()).nullslast())
+    order.append(_dir(func.lower(MarketingClub.name), club_sort))
+    stmt = stmt.order_by(*order).limit(limit).offset(offset)
     clubs = (await db.execute(stmt)).scalars().all()
 
     # Fetch all contacts for this page's clubs in ONE query (was N+1, which under
@@ -208,12 +237,13 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
     the outreach org, so a BetterAdmin Comms campaign can send to them with full
     unsubscribe/suppression. Excluded and already-emailed clubs are always
     skipped."""
+    filters = await cd.expand_shortcode(db, _filter_kwargs(
+        body.q, body.state, body.association, body.status, body.postcode_from,
+        body.postcode_to, body.contact, body.person, body.exclude_junior,
+        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations))
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
-        filters=_filter_kwargs(body.q, body.state, body.association, body.status,
-                               body.postcode_from, body.postcode_to, body.contact,
-                               body.person, body.exclude_junior, body.exclude_emailed,
-                               body.exclude_carnival, body.exclude_school, body.associations))
+        filters=filters)
 
 
 class EmailedBody(BaseModel):
@@ -312,11 +342,10 @@ async def export_csv(
     _=Depends(require_super_admin),
 ):
     """CSV of the currently-filtered directory (one row per club+contact)."""
-    csv_text = await cd.clubs_to_csv(
-        db, only_with_email=only_with_email,
-        filters=_filter_kwargs(q, state, association, status, postcode_from,
-                               postcode_to, contact, person, exclude_junior, exclude_emailed,
-                               exclude_carnival, exclude_school, associations))
+    filters = await cd.expand_shortcode(db, _filter_kwargs(
+        q, state, association, status, postcode_from, postcode_to, contact, person,
+        exclude_junior, exclude_emailed, exclude_carnival, exclude_school, associations))
+    csv_text = await cd.clubs_to_csv(db, only_with_email=only_with_email, filters=filters)
     return Response(
         content=csv_text, media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=marketing_clubs.csv"})

@@ -13,8 +13,8 @@ fallback; the DB flag wins. A partial unique index keeps at most one org flagged
 The backfill flips the flag on the org the configured slug already names (if any),
 so a deployment that has set ``marketing_outreach_org_slug`` is unchanged.
 
-Revision ID: 108
-Revises: 107
+Revision ID: 109
+Revises: 108
 Create Date: 2026-06-26
 """
 from alembic import op
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 
 from app.config.settings import settings
 
-revision = '108'
-down_revision = '107'
+revision = '109'
+down_revision = '108'
 branch_labels = None
 depends_on = None
 

@@ -1860,6 +1860,9 @@ class ClubOnboardingRequest(Base):
     status = Column(Text, nullable=False, server_default="new")  # new | contacted | onboarded | closed
     source = Column(Text, nullable=False, server_default="contact_form")
     user_agent = Column(Text, nullable=True)
+    # First-party visitor id (localStorage UUID) sent by the Contact form, so an
+    # enquiry can be tied back to the anonymous browsing journey on the Usage page.
+    visitor_id = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 

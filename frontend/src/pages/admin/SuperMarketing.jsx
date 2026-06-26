@@ -39,7 +39,7 @@ function CrawlStatus({ status }) {
 
 // Searchable multi-select of associations. Selecting several filters clubs that
 // belong to ANY of them. The ✕ on the button clears all selections.
-function AssocMultiSelect({ options, selected, onChange }) {
+function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const ref = useRef(null)
@@ -48,8 +48,10 @@ function AssocMultiSelect({ options, selected, onChange }) {
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
+  const ql = q.toLowerCase()
   const filtered = options
-    .filter(o => o.name.toLowerCase().includes(q.toLowerCase())).slice(0, 300)
+    .filter(o => o.name.toLowerCase().includes(ql) || (o.short || '').toLowerCase().includes(ql))
+    .slice(0, 800)
   const toggle = (name) =>
     onChange(selected.includes(name) ? selected.filter(n => n !== name) : [...selected, name])
   return (
@@ -64,21 +66,34 @@ function AssocMultiSelect({ options, selected, onChange }) {
         <span className="text-pb-faint">▾</span>
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 w-80 max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+        <div className="absolute z-30 mt-1 w-[40rem] max-w-[92vw] max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
           <input autoFocus className={SELECT_CLS + ' w-full mb-2'} placeholder="Search associations..."
                  value={q} onChange={(e) => setQ(e.target.value)} />
           {selected.length > 0 && (
             <button type="button" className="text-[11px] text-pb-faint hover:text-pb-accent mb-1"
                     onClick={() => onChange([])}>clear selection</button>
           )}
+          <div className="text-[10px] text-pb-faint px-1 mb-1">Short code is editable — type and press Enter (blank resets to default).</div>
           {!filtered.length && <div className="text-xs text-pb-faint px-1 py-2">No matches.</div>}
           {filtered.map(o => (
-            <label key={o.name}
-                   className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
-              <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
-              <span className="flex-1 truncate" title={o.name}>{o.name}</span>
-              <span className="text-pb-faint">{o.count}</span>
-            </label>
+            <div key={o.name}
+                 className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded">
+              <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
+                <span className="truncate" title={o.name}>{o.name}</span>
+              </label>
+              {o.resolved === false
+                ? <span className="text-[10px] text-pb-faint italic shrink-0" title="Roster not fetched yet — select and click Fetch full roster">not fetched</span>
+                : <span className="text-pb-faint shrink-0">{o.count}</span>}
+              <input
+                key={`sc-${o.id}-${o.short || ''}`}
+                defaultValue={o.short || ''}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onSaveShort(o.id, e.target.value); e.target.blur() } }}
+                onBlur={(e) => { if ((e.target.value || '') !== (o.short || '')) onSaveShort(o.id, e.target.value) }}
+                title="Short code — edit and press Enter (blank resets to default)"
+                className="w-16 shrink-0 text-[10px] uppercase bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 focus:outline-none focus:border-pb-accent" />
+            </div>
           ))}
         </div>
       )}
@@ -237,6 +252,7 @@ export default function SuperMarketing() {
     exclude_carnival: false, exclude_school: false,
   })
   const [expanded, setExpanded] = useState(null)
+  const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
 
   const loadStats = useCallback(() => {
     api.mktStats().then(setStats).catch(() => {})
@@ -252,15 +268,18 @@ export default function SuperMarketing() {
 
   const loadClubs = useCallback(() => {
     setLoading(true)
-    api.mktClubs({ ...filters, limit: PAGE, offset: page * PAGE })
+    api.mktClubs({
+      ...filters, limit: PAGE, offset: page * PAGE,
+      group_by_association: view.group, assoc_sort: view.assocSort, club_sort: view.clubSort,
+    })
       .then((d) => { setClubs(d.clubs); setTotal(d.total); setError('') })
       .catch((e) => setError(e.message || 'Could not load the directory.'))
       .finally(() => setLoading(false))
-  }, [filters, page])
+  }, [filters, page, view])
 
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
-  useEffect(() => { setPage(0) }, [filters])  // back to first page when filters change
+  useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
 
   const runCrawl = async () => {
@@ -344,6 +363,13 @@ export default function SuperMarketing() {
       // Give the background resolve(s) time, then refresh the view + counts.
       setTimeout(() => { loadStats(); loadClubs(); api.mktAssociations().then(setAssocOptions).catch(() => {}) }, 60000)
     } catch (e) { setError(e.message || 'Could not start the roster fetch.') } finally { setBusy('') }
+  }
+
+  const saveAssocShort = async (id, short) => {
+    try {
+      const r = await api.mktSetAssocShortcode(id, short)
+      setAssocOptions(opts => opts.map(o => o.id === id ? { ...o, short: r.short } : o))
+    } catch (e) { setError(e.message || 'Could not update the short code.') }
   }
 
   const saveUtm = async (clubId, utm) => {
@@ -434,6 +460,7 @@ export default function SuperMarketing() {
             options={assocOptions}
             selected={filters.associations}
             onChange={(a) => setFilters(f => ({ ...f, associations: a }))}
+            onSaveShort={saveAssocShort}
           />
           {filters.associations.length > 0 && (
             <button className={BTN} disabled={busy === 'resolve'} onClick={resolveSelectedAssociations}
@@ -515,6 +542,32 @@ export default function SuperMarketing() {
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}
         {error && <div className="mb-3 text-xs text-red-300 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">{error}</div>}
 
+        <div className="flex flex-wrap items-center gap-3 mb-1">
+          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+            <input type="checkbox" checked={view.group}
+                   onChange={(e) => setView(v => ({ ...v, group: e.target.checked }))} />
+            Group by association
+          </label>
+          {view.group && (
+            <div className="flex items-center gap-1 text-xs text-pb-dim">
+              <span>Associations</span>
+              <select className={SELECT_CLS} value={view.assocSort}
+                      onChange={(e) => setView(v => ({ ...v, assocSort: e.target.value }))}>
+                <option value="asc">A → Z</option>
+                <option value="desc">Z → A</option>
+              </select>
+            </div>
+          )}
+          <div className="flex items-center gap-1 text-xs text-pb-dim">
+            <span>Clubs</span>
+            <select className={SELECT_CLS} value={view.clubSort}
+                    onChange={(e) => setView(v => ({ ...v, clubSort: e.target.value }))}>
+              <option value="asc">A → Z</option>
+              <option value="desc">Z → A</option>
+            </select>
+          </div>
+        </div>
+
         <Pager total={total} page={page} pageSize={PAGE} onPage={setPage} loading={loading} />
 
         {loading ? (
@@ -532,11 +585,23 @@ export default function SuperMarketing() {
                 </tr>
               </thead>
               <tbody>
-                {clubs.map(c => {
+                {clubs.map((c, idx) => {
                   const top = c.contacts && c.contacts[0]
                   const more = (c.contacts?.length || 0) - 1
                   const isOpen = expanded === c.id
+                  // When grouping, drop an association header row each time the
+                  // association name changes from the club above it.
+                  const groupName = c.association_name || 'Unassigned'
+                  const prevName = idx > 0 ? (clubs[idx - 1].association_name || 'Unassigned') : null
+                  const showHeader = view.group && groupName !== prevName
                   return [
+                    showHeader && (
+                      <tr key={c.id + '-h'} className="bg-pb-surface2/70 border-t-2 border-pb-accent/30">
+                        <td colSpan={5} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-pb-accent">
+                          {groupName}
+                        </td>
+                      </tr>
+                    ),
                     <tr key={c.id} className="border-t pb-hairline align-top">
                       <td className="px-3 py-2">
                         <button

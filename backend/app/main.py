@@ -279,6 +279,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_assoc_resolve "
             "ON marketing_associations(last_resolved_at)"))
+        # Migration 105: derived association short code (acronym) for shortcode search.
+        await conn.execute(text(
+            "ALTER TABLE marketing_associations ADD COLUMN IF NOT EXISTS short_code TEXT"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
@@ -526,6 +529,9 @@ async def lifespan(app: FastAPI):
         for _col in (
             "role", "founded_year", "playhq_status", "has_historical",
             "interests", "heard_about", "contact_method",
+            # First-party visitor id captured on the Contact form so an enquiry
+            # links precisely to the browsing journey behind it (Usage page).
+            "visitor_id",
         ):
             await conn.execute(text(
                 f"ALTER TABLE club_onboarding_requests ADD COLUMN IF NOT EXISTS {_col} TEXT"
@@ -641,6 +647,35 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_usage_events_country "
             "ON usage_events(country) WHERE country IS NOT NULL"
+        ))
+        # Lead-tracking columns. `visitor_id` is a first-party random UUID the
+        # SPA keeps in localStorage — a stable visitor identity that survives an
+        # IP change, so returning visitors group correctly (the IP hash alone
+        # can't). The utm_* / click_id columns carry first-touch acquisition
+        # (how the visitor first arrived: a Facebook share = fbclid, a club
+        # outreach link = a utm_code), and `traffic_source` is the bucketed
+        # source derived from them at insert time. `landing_path` is the first
+        # page they entered on. Page-view rows only; API rows leave them NULL.
+        for _col, _type in (
+            ("visitor_id", "UUID"),
+            ("utm_source", "TEXT"),
+            ("utm_medium", "TEXT"),
+            ("utm_campaign", "TEXT"),
+            ("utm_content", "TEXT"),
+            ("click_id", "TEXT"),
+            ("traffic_source", "TEXT"),
+            ("landing_path", "TEXT"),
+        ):
+            await conn.execute(text(
+                f"ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS {_col} {_type}"
+            ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_created "
+            "ON usage_events(visitor_id, created_at DESC) WHERE visitor_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_source "
+            "ON usage_events(traffic_source) WHERE traffic_source IS NOT NULL"
         ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (

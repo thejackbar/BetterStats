@@ -22,6 +22,7 @@ from app.config.settings import settings
 from app.models.db import async_session_maker
 from app.services import iq_players, iq_team, iq_trends
 from app.services.aggregations import get_player_by_opposition
+from app.services.bowling_style import bowling_class, bowling_label
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,19 @@ _SYSTEM = (
     "keeper a 'specialist batter' or judge them on runs alone; weigh their keeping.\n"
     "- Genuine bowlers and all-rounders earn their spot with wickets, so a low batting "
     "average isn't a reason to drop them.\n"
+    "Bowling sense:\n"
+    "- Every bowler's style is given (bowling_style like 'Off spin' or 'Right-arm "
+    "fast-medium', and bowling_class 'pace' or 'spin'). Describe a bowler by their real "
+    "style: never call a spinner a 'seamer', 'quick', 'third seamer' or similar, and "
+    "only call a bowler 'sharp', 'quick', 'express' or 'pacy' when their bowling_class is "
+    "'pace'. A spinner is 'crafty' or 'flighted', not 'sharp'.\n"
+    "- When asked to pick or balance a bowling group, weigh the pace/spin mix (a good "
+    "attack usually wants both), not wicket counts alone, and label each suggestion "
+    "with its real style.\n"
+    "Combinations:\n"
+    "- To judge whether two players combine well in the same side (do they play well "
+    "together / win together), use players_together — it gives the team's record when "
+    "both play vs when only one does.\n"
     "If the tools don't cover what was asked, say so plainly and point to where in "
     "BetterIQ to look (Opposition scout for an opponent, Player search for one player, "
     "Team analysis for the side)."
@@ -63,7 +77,7 @@ _SYSTEM = (
 TOOLS = [
     {
         "name": "find_players",
-        "description": "Find players in the club by name (or list the whole roster when no query). Returns each player's id, role, whether they keep wicket, their selection squad (their BetterSelect team, e.g. '1st XI'), and career matches/runs/wickets. Use this to get a player_id before calling player_detail or player_vs_club.",
+        "description": "Find players in the club by name (or list the whole roster when no query). Returns each player's id, role, whether they keep wicket, their bowling_style (e.g. 'Off spin', 'Right-arm fast-medium') and bowling_class ('pace' or 'spin'), their selection squad (their BetterSelect team, e.g. '1st XI'), and career matches/runs/wickets. Use this to get a player_id before calling player_detail or player_vs_club.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string", "description": "part of a player's name; omit to list everyone"}},
@@ -88,6 +102,18 @@ TOOLS = [
         },
     },
     {
+        "name": "players_together",
+        "description": "Two players' record AS A PAIR (all-time): the team's win/loss/draw record and win% in games BOTH of them played, how that compares to games only one of them played (the selection lift), and each player's batting & bowling output in their shared games. Use to judge whether two players combine well in the same side, or to answer 'how do X and Y go together'. Pass two player ids (or names) — get ids from find_players.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player_a": {"type": "string", "description": "first player's id or name"},
+                "player_b": {"type": "string", "description": "second player's id or name"},
+            },
+            "required": ["player_a", "player_b"],
+        },
+    },
+    {
         "name": "team_overview",
         "description": "The club's record and approach: win rate, home/away, batting-first vs chasing win rate, par first-innings score, how we win and lose, score-band win rates, batting & bowling profile, best opening partnerships and our typical opening stand. Optionally scope to one grade.",
         "input_schema": {
@@ -102,7 +128,7 @@ TOOLS = [
     },
     {
         "name": "current_squad",
-        "description": "Players who've played this season with their form (runs/average, wickets/average), their selection squad (BetterSelect team like '1st XI'/'2nd XI'), role and whether they keep wicket. Returns the list of squads present too. Use for selection questions: a player's SQUAD is which side they're picked in, and a grade and its same-numbered XI are usually the same team, so filter by squad to answer 'who's in the 2nd XI'. Optionally pass a grade name; if it matches nothing it falls back to the whole squad.",
+        "description": "Players who've played this season with their form (runs/average, wickets/average), their selection squad (BetterSelect team like '1st XI'/'2nd XI'), role, whether they keep wicket, and their bowling_style (e.g. 'Off spin') and bowling_class ('pace' or 'spin'). Returns the list of squads present too. Use for selection questions: a player's SQUAD is which side they're picked in, and a grade and its same-numbered XI are usually the same team, so filter by squad to answer 'who's in the 2nd XI'. Optionally pass a grade name; if it matches nothing it falls back to the whole squad.",
         "input_schema": {
             "type": "object",
             "properties": {"grade": {"type": "string", "description": "optional grade name (from grades)"}},
@@ -147,7 +173,8 @@ async def _tool_find_players(session, org_id, *, query=None):
     players = players[:40]
     return {"count": len(players), "players": [
         {"player_id": p["player_id"], "name": p["name"], "role": p.get("player_role"),
-         "keeper": p.get("is_keeper"), "squad": p.get("squad"),
+         "keeper": p.get("is_keeper"), "bowling_style": p.get("bowling_style"), "bowling_class": p.get("bowling_class"),
+         "squad": p.get("squad"),
          "matches": p["matches"], "runs": p["runs"], "wickets": p["wickets"], "last_year": p["last_year"]}
         for p in players
     ]}
@@ -157,17 +184,20 @@ async def _tool_player_detail(session, org_id, *, player_id):
     pid = await _resolve_pid(session, org_id, player_id)
     if not pid:
         return {"error": "No player found for that id/name. Call find_players first."}
-    # Role / keeper from the player row (cheap; so a keeper isn't read as a bat).
-    role = keeper = None
+    # Role / keeper / bowling style from the player row (cheap; so a keeper isn't
+    # read as a bat and a spinner isn't read as a seamer).
+    role = keeper = bstyle = bclass = None
     try:
         meta = (await session.execute(
-            text("SELECT player_role, skill_positions FROM players WHERE id = CAST(:pid AS UUID)"),
+            text("SELECT player_role, skill_positions, bowling_action, bowling_type FROM players WHERE id = CAST(:pid AS UUID)"),
             {"pid": pid},
         )).mappings().first()
         if meta:
             sp = meta["skill_positions"] or []
             role = meta["player_role"]
             keeper = ("WKT" in sp) or bool(role and "KEEP" in (role or "").upper())
+            bstyle = bowling_label(meta["bowling_action"], meta["bowling_type"])
+            bclass = bowling_class(meta["bowling_type"])
     except Exception:
         pass
     try:
@@ -177,6 +207,7 @@ async def _tool_player_detail(session, org_id, *, player_id):
         trend = None
     if not trend:
         return {"player_id": pid, "role": role, "keeper": keeper,
+                "bowling_style": bstyle, "bowling_class": bclass,
                 "note": "Couldn't load this player's full profile — use find_players / current_squad numbers instead."}
     deep = None
     try:
@@ -189,6 +220,7 @@ async def _tool_player_detail(session, org_id, *, player_id):
     out = {
         "name": (trend.get("player") or {}).get("name"),
         "role": role, "keeper": keeper,
+        "bowling_style": bstyle, "bowling_class": bclass,
         "verdict": trend.get("verdict"),
         "batting": {"runs": b.get("total_runs"), "average": _round(b.get("average")), "100s": b.get("hundreds"), "50s": b.get("fifties")},
         "bowling": {"wickets": bo.get("total_wickets"), "average": _round(bo.get("average")), "economy": _round(bo.get("economy"))},
@@ -225,6 +257,16 @@ async def _tool_player_vs_club(session, org_id, *, player_id, club=None):
          "wickets": r["wickets"], "bowl_avg": _round(r.get("bowling_average"))}
         for r in rows
     ]}
+
+
+async def _tool_players_together(session, org_id, *, player_a, player_b):
+    a = await _resolve_pid(session, org_id, player_a)
+    b = await _resolve_pid(session, org_id, player_b)
+    if not a or not b:
+        return {"error": "Couldn't find one of those players. Call find_players first."}
+    if a == b:
+        return {"error": "Those are the same player — pass two different players."}
+    return await iq_team.pair_synergy(session, org_id, a, b)
 
 
 async def _tool_team_overview(session, org_id, *, grade=None):
@@ -284,6 +326,7 @@ async def _tool_current_squad(session, org_id, *, grade=None):
         "squads": squads,
         "players": [
             {"name": p["name"], "squad": p.get("squad_name"), "role": p.get("role"), "keeper": p.get("is_keeper"),
+             "bowling_style": p.get("bowling_style"), "bowling_class": p.get("bowling_class"),
              "matches": p.get("matches"), "runs": p.get("runs"), "bat_avg": _round(p.get("bat_avg")),
              "wickets": p.get("wickets"), "bowl_avg": _round(p.get("bowl_avg"))}
             for p in players
@@ -301,6 +344,7 @@ _DISPATCH = {
     "find_players": _tool_find_players,
     "player_detail": _tool_player_detail,
     "player_vs_club": _tool_player_vs_club,
+    "players_together": _tool_players_together,
     "team_overview": _tool_team_overview,
     "form_movers": _tool_form_movers,
     "current_squad": _tool_current_squad,

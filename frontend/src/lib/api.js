@@ -440,6 +440,9 @@ export const api = {
   mktResolveAssociation: (id, name) =>
     request('/club-admin/marketing/associations/resolve',
       { method: 'POST', body: JSON.stringify({ id, name }) }),
+  mktSetAssocShortcode: (id, short) =>
+    request(`/club-admin/marketing/associations/${id}/shortcode`,
+      { method: 'PATCH', body: JSON.stringify({ short_code: short }) }),
   mktSetClubExcluded: (clubId, excluded) =>
     request(`/club-admin/marketing/clubs/${clubId}/excluded`,
       { method: 'PATCH', body: JSON.stringify({ excluded }) }),
@@ -567,10 +570,32 @@ export const api = {
     if (eventType) params.set('event_type', eventType)
     return request(`/club-admin/usage/by-club?${params}`)
   },
-  adminUsageVisitors: ({ days = 7, eventType = null } = {}) => {
+  adminUsageVisitors: ({ days = 7, eventType = null, anonOnly = false } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     if (eventType) params.set('event_type', eventType)
+    if (anonOnly) params.set('anon_only', 'true')
     return request(`/club-admin/usage/visitors?${params}`)
+  },
+  // Per-visitor profiles: who's on the site, where from, likely club.
+  adminUsageVisitorsList: ({ days = 1, limit = 100, anonOnly = true, intentOnly = false, sort = 'intent' } = {}) => {
+    const params = new URLSearchParams({ days: String(days), limit: String(limit), sort })
+    params.set('anon_only', anonOnly ? 'true' : 'false')
+    if (intentOnly) params.set('intent_only', 'true')
+    return request(`/club-admin/usage/visitors-list?${params}`)
+  },
+  // Single-visitor drill-down: full page journey + linked enquiry.
+  adminUsageVisitorDetail: (vkey) =>
+    request(`/club-admin/usage/visitor/${encodeURIComponent(vkey)}`),
+  // Traffic sources + UTM campaign breakdown.
+  adminUsageSources: ({ days = 7, anonOnly = true } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    params.set('anon_only', anonOnly ? 'true' : 'false')
+    return request(`/club-admin/usage/sources?${params}`)
+  },
+  // Onboarding enquiries enriched with the browsing behind each one.
+  adminUsageLeads: ({ days = 90, limit = 200 } = {}) => {
+    const params = new URLSearchParams({ days: String(days), limit: String(limit) })
+    return request(`/club-admin/usage/leads?${params}`)
   },
   // Notification centre (bell icon)
   getNotificationsCount: () => request('/club-admin/notifications/count'),
@@ -1418,6 +1443,11 @@ export const api = {
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
   iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
+  // Teammates: who a player has shared a side with (most games first), and the
+  // with-vs-without split of the focal player's output alongside one teammate.
+  iqTeammates: (playerId) => request(`/iq/teammates/${encodeURIComponent(playerId)}`),
+  iqTeammateSplit: (playerId, teammateId) =>
+    request(`/iq/teammates/${encodeURIComponent(playerId)}/with/${encodeURIComponent(teammateId)}`),
   // Manual scouting card for one of OUR players (batting/bowling intel — the
   // ball-level read CA can't give us). Mirror of the opponent player tags.
   iqPlayerScouting: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`),
