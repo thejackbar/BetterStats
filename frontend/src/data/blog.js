@@ -1,5 +1,46 @@
 export const POSTS = [
   {
+    slug: 'how-to-merge-players-in-playhq-cricket',
+    title: 'How to Merge Duplicate Players in PlayHQ Cricket',
+    date: '2026-06-21',
+    image: '/marketing/blog/merge-duplicate-players.jpg',
+    description: 'How merging duplicate players works in PlayHQ cricket, who is allowed to do it, and how BetterCricket merges a club\'s duplicate stats reversibly.',
+    readTime: '5 min read',
+    content: [
+      { type: 'p', text: `Duplicate players are one of the most common headaches in club cricket. The same person ends up with two records, a Nick and a Nicholas, and their stats split across both. If you have gone looking for how to merge them in PlayHQ, here is what you can and cannot do, and how BetterCricket handles it.` },
+      { type: 'h2', text: 'Can a club merge players in PlayHQ?' },
+      { type: 'p', text: `Usually not on your own. PlayHQ does merge duplicate participant profiles, but the tool is restricted to Super Admins within an Administration Body, which is your association rather than your club. Club and association admins are asked to contact their sporting organisation to get a merge done.` },
+      { type: 'h2', text: 'How merging works in PlayHQ' },
+      { type: 'p', text: `A Super Admin opens Participants, searches for the profile to keep, selects the duplicate, and confirms the merge. It combines registration history, statistics and transfer records onto one profile. PlayHQ is clear that the merge cannot be undone, and it can fail if too few personal details match. Players can also claim and merge their own duplicate accounts through Find My Profiles, verified by an email or text code.` },
+      { type: 'h2', text: 'Where this leaves a club statistician' },
+      { type: 'p', text: `The PlayHQ merge is built around participant accounts and registration, and it is gated behind your association. For the duplicate-player problem you actually see in your stats, a player whose career is split across two records, you are often waiting on someone else to act, and a wrong merge cannot be reversed.` },
+      { type: 'h2', text: 'How BetterCricket merges duplicate players' },
+      { type: 'p', text: `BetterCricket flags likely duplicates when it imports your club's history. A club admin reviews each pair and merges it in a click, and every innings, spell, catch and partnership moves onto one profile. It is fully reversible, so an accidental merge can be undone, and a manual merge handles name changes the scanner cannot spot, like a maiden name and a married name.` },
+      { type: 'h2', text: 'Side by side' },
+      { type: 'table', headers: ['', 'PlayHQ', 'BetterCricket'], rows: [
+        ['Who can merge', 'Super Admins at your association', 'Your own club admins'],
+        ['What it combines', 'Participant accounts and registration', 'Every innings, spell, catch and partnership'],
+        ['Reversible', 'No, it cannot be undone', 'Yes, undo any time'],
+        ['Name changes', 'Needs enough matching fields', 'Manual merge by name'],
+        ['Where the stats show', 'PlayHQ profile', 'Your public club website'],
+      ]},
+      { type: 'links', heading: 'Related', items: [
+        { label: 'Merging duplicate players in BetterCricket', href: '/blog/how-to-merge-duplicate-player-records' },
+        { label: 'BetterCricket features', href: '/features' },
+        { label: 'Pricing', href: '/pricing' },
+        { label: 'PlayHQ duplicate profile management', href: 'https://support.playhq.com/hc/en-au/articles/4406346808345-Participant-Profile-Duplicate-Management', external: true },
+        { label: 'PlayHQ', href: 'https://www.playhq.com', external: true },
+      ]},
+      { type: 'callout', text: `BetterCricket finds and merges your duplicate players when it brings your history across, and every merge can be undone. Bring your club online and we handle the first full historical sync.` },
+    ],
+    faq: [
+      { q: 'How can I merge players in PlayHQ cricket?', a: `PlayHQ merges duplicate participant profiles, but only a Super Admin within your Administration Body, which is your association, can do it. Club admins are asked to contact their organisation. The merge combines registration, statistics and transfers, and it cannot be undone.` },
+      { q: 'Can a club admin merge duplicate players in PlayHQ?', a: `Usually not directly. The duplicate-profile tool is restricted to Super Admins at the Administration Body, so club admins contact their association. Players can also merge their own duplicate accounts through Find My Profiles, verified by email or text.` },
+      { q: 'Is merging players in PlayHQ reversible?', a: `No. PlayHQ states a profile merge cannot be undone. BetterCricket's merge is reversible, so you can undo it if the wrong two records get joined.` },
+      { q: 'How does BetterCricket merge duplicate players?', a: `It flags likely duplicates when it imports your history, then a club admin merges each pair in a click. Every innings, spell, catch and partnership moves onto one profile, and the merge can be undone.` },
+    ],
+  },
+  {
     slug: 'bettercricket-vs-teamapp',
     title: 'BetterCricket vs TeamApp: Comms App or Club Platform?',
     date: '2026-06-21',
@@ -361,6 +402,8 @@ export const POSTS = [
       { q: 'Is PlayHQ a club management platform?', a: `PlayHQ is the official competition management platform used across Australian cricket. It runs registration, fixtures, scoring and results. It is not a club website, stats archive or analytics platform, so most clubs pair it with a club platform for those jobs.` },
       { q: 'How much does cricket club management software cost?', a: `It varies. BetterCricket is a flat annual rate per club: BetterStats (the Core) is $399 a year, and modules are $149 each ($249 for BetterIQ), with a discount when you bundle. The price is the same whether the club runs one team or fifty.` },
       { q: 'Do I have to stop using PlayHQ to use BetterCricket?', a: `No. You keep scoring and registering exactly as you do now. BetterCricket reads the data your club already records and adds the website, history and analytics on top, so nothing about your match day changes.` },
+      { q: 'How do I get better statistics for my cricket club?', a: `Get your full history online and keep it updating automatically. BetterCricket imports your club's complete batting, bowling and fielding history, then refreshes after every game, with leaderboards, records and player profiles.` },
+      { q: 'Where can I display all my historical cricket stats?', a: `On a public club website built from your data. BetterCricket imports a club's full history, for many clubs going back decades, and shows it as player profiles, leaderboards, records and season yearbooks that update after every game.` },
     ],
   },
   {
@@ -411,6 +454,7 @@ export const POSTS = [
       { q: 'What does BetterCricket do that PlayHQ does not?', a: `A public club website, your full historical stats and career profiles, weekly availability and team selection, match fees and member email, match-day social graphics, and opposition scouting and analytics.` },
       { q: 'Do I have to enter data twice?', a: `No. BetterCricket reads the match data your club already records, so your stats appear and update automatically with no second data entry.` },
       { q: 'How much does BetterCricket cost?', a: `A flat annual rate per club: BetterStats (the Core) is $399 a year, and modules are $149 each ($249 for BetterIQ), with a discount when you bundle. The same price covers one team or fifty.` },
+      { q: 'What is the best community cricket stats platform that is not PlayHQ but works with it?', a: `BetterCricket. It is built for community cricket stats and works on top of PlayHQ, reading your match data so your stats, history and website stay current without entering anything twice. PlayHQ stays your official competition platform.` },
     ],
   },
   {
