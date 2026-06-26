@@ -2,12 +2,11 @@ export default {
   version: 'v8.29.0',
   date: '2026-06-26',
   sortKey: '2026-06-26T14:30:00Z',
-  title: 'Usage page rebuilt around visitors and leads',
+  title: 'A live view of who’s on the site',
   items: [
-    'The Usage page is now a Visitors & Leads view. It tracks returning visitors with a stable first-party id, so the same person is recognised across visits even when their IP changes.',
-    'Every visit now records where it came from. UTM tags and ad-click ids (an fbclid is a Facebook share, a gclid is a Google click) are read from the link and bucketed into a source, and a club’s own outreach UTM code resolves back to that club.',
-    'Each anonymous visitor gets a likely club worked out from the club pages they browse, alongside their source, location and device. Click a visitor to read their full page journey.',
-    'Contact-form enquiries now link to the browsing behind them, so you can see a lead came via Facebook, read the pricing page, then got in touch. Visits to the pricing and contact pages are flagged as warm leads.',
-    'The heavier detail (charts, geography, the raw event log, signed-in users) sits in collapsible sections that stay shut until you open them. The default view is the last 24 hours of anonymous page views.',
+    'The Usage page is now a live dashboard. It shows how many visitors are on the public site right now (last 5 minutes), plus the last 30 minutes, today and the last 7 days, with page views per minute over the last half hour.',
+    'A live feed lists the pages people are viewing as it happens, with their source, location and device. It refreshes on its own every few seconds, and you can pause it.',
+    'Traffic sources and UTM links now read straight from the page URL, so a Facebook share (fbclid), a Google click, an email newsletter or any tagged link shows up, including links used in the last day.',
+    'Behind the scenes, returning visitors are tracked with a stable id that survives an IP change, and a Contact-form enquiry links back to the browsing behind it.',
   ],
 }
