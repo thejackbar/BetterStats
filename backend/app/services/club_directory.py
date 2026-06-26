@@ -778,8 +778,31 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         ))
         added += 1
     await session.commit()
+
+    # Diagnostics: how many clubs matched the directory filter, and how many of
+    # those the hard guards held back — so the UI can explain a "0 added" result
+    # (e.g. the only filtered club is already a customer or already emailed).
+    base = select(MarketingClub.id).where(MarketingClub.detail_fetched_at.isnot(None))
+    for cond in club_filters(**(filters or {})):
+        base = base.where(cond)
+
+    async def _count(*extra):
+        s = base
+        for c in extra:
+            s = s.where(c)
+        return await session.scalar(select(func.count()).select_from(s.subquery())) or 0
+
+    matched = await _count()
+    eligible = await _count(MarketingClub.excluded.is_(False),
+                            MarketingClub.emailed_at.is_(None),
+                            MarketingClub.existing_org_id.is_(None))
+
     result = {"org": org.name, "candidates": len(rows), "added": added,
-              "already_present": skipped, "already_suppressed": suppressed}
+              "already_present": skipped, "already_suppressed": suppressed,
+              "clubs_matched": matched, "clubs_eligible": eligible,
+              "skipped_customers": await _count(MarketingClub.existing_org_id.isnot(None)),
+              "skipped_emailed": await _count(MarketingClub.emailed_at.isnot(None)),
+              "skipped_excluded": await _count(MarketingClub.excluded.is_(True))}
     logger.info("export_to_comms: %s", result)
     return result
 

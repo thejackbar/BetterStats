@@ -320,7 +320,23 @@ export default function SuperMarketing() {
     setBusy('export'); setMsg('')
     try {
       const r = await api.mktExportComms({ ...filters })
-      setMsg(`Exported to ${r.org}: ${r.added} added, ${r.already_present} already there, ${r.already_suppressed} suppressed.`)
+      let m = `Exported to ${r.org}: ${r.added} added, ${r.already_present} already there, ${r.already_suppressed} suppressed.`
+      // Explain a 0-added result: the matched clubs were all held back by the
+      // export guards (customer / already emailed / excluded), or had no ticked,
+      // emailable contact.
+      if (!r.added && r.clubs_eligible === 0 && r.clubs_matched > 0) {
+        const reasons = []
+        if (r.skipped_customers) reasons.push(`${r.skipped_customers} already a customer`)
+        if (r.skipped_emailed) reasons.push(`${r.skipped_emailed} already emailed`)
+        if (r.skipped_excluded) reasons.push(`${r.skipped_excluded} excluded`)
+        m += ` None of the ${r.clubs_matched} filtered club(s) were eligible`
+        m += reasons.length ? ` (${reasons.join(', ')}).` : '.'
+        m += ' Customers, already-emailed and excluded clubs are never exported.'
+      } else if (!r.added && r.clubs_eligible > 0) {
+        m += ` ${r.clubs_eligible} club(s) were eligible but had no ticked, emailable contact —`
+        m += ' open a club and tick who to email.'
+      }
+      setMsg(m)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
