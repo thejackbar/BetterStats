@@ -904,7 +904,7 @@ async def ensure_marketing_org(
     # Not a real club: a fresh uuid (never synced against Cricket Australia) and
     # is_active False so it stays off public club listings; the super admin reaches
     # it via this context bar / the club switcher, not a login.
-    org = Organisation(id=uuid.uuid4(), name="BetterCricket", slug=slug,
+    org = Organisation(id=uuid.uuid4(), name="BetterCricket Marketing", slug=slug,
                        is_active=False, is_marketing_outreach=True)
     db.add(org)
     await db.commit()
