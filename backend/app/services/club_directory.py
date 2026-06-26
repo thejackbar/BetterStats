@@ -907,6 +907,57 @@ async def set_excluded(session: AsyncSession, club_id: str, excluded: bool) -> O
             "excluded_at": club.excluded_at.isoformat() if club.excluded_at else None}
 
 
+async def _filtered_club_ids(session: AsyncSession, filters: Optional[dict],
+                             kind: str = "club") -> list:
+    """The club ids matching the same filters the list view uses — the target set
+    for a bulk action. Materialised (not a correlated subquery) so the contact
+    EXISTS conditions in ``club_filters`` bind correctly and can be reused for the
+    comms-contact propagation."""
+    stmt = select(MarketingClub.id).where(MarketingClub.detail_fetched_at.isnot(None))
+    if kind:
+        stmt = stmt.where(MarketingClub.kind == kind)
+    for cond in club_filters(**(filters or {})):
+        stmt = stmt.where(cond)
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def bulk_mark_emailed(session: AsyncSession, emailed: bool, via: str = "manual",
+                            note: Optional[str] = None,
+                            filters: Optional[dict] = None) -> dict:
+    """Mark / unmark every club in the current filtered list as emailed."""
+    ids = await _filtered_club_ids(session, filters)
+    if not ids:
+        return {"updated": 0, "emailed": emailed}
+    now = func.now()
+    if emailed:
+        vals = {"emailed_at": now, "emailed_note": (note or None), "updated_at": now,
+                "emailed_via": via if via in ("manual", "campaign") else "manual"}
+    else:
+        vals = {"emailed_at": None, "emailed_via": None, "emailed_note": None, "updated_at": now}
+    await session.execute(update(MarketingClub).where(MarketingClub.id.in_(ids)).values(**vals))
+    await session.commit()
+    return {"updated": len(ids), "emailed": emailed}
+
+
+async def bulk_set_excluded(session: AsyncSession, excluded: bool,
+                            filters: Optional[dict] = None) -> dict:
+    """Exclude / un-exclude every club in the current filtered list, propagating to
+    any comms contacts already exported from those clubs (same as the per-club
+    toggle)."""
+    ids = await _filtered_club_ids(session, filters)
+    if not ids:
+        return {"updated": 0, "excluded": excluded}
+    now = func.now()
+    await session.execute(
+        update(MarketingClub).where(MarketingClub.id.in_(ids))
+        .values(excluded=excluded, excluded_at=(now if excluded else None), updated_at=now))
+    await session.execute(
+        update(CommsContact).where(CommsContact.marketing_club_id.in_(ids))
+        .values(excluded=excluded, excluded_at=(now if excluded else None), updated_at=now))
+    await session.commit()
+    return {"updated": len(ids), "excluded": excluded}
+
+
 async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dict]:
     """Set a club's UTM code (manual edit). Blank resets it to the name-derived
     default. Returns the new value, or None if the club isn't found."""

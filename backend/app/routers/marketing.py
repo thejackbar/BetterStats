@@ -281,6 +281,51 @@ async def set_club_excluded(club_id: str, body: ExcludedBody,
     return res
 
 
+class BulkActionBody(BaseModel):
+    value: bool  # the new emailed / excluded state to apply
+    note: Optional[str] = None
+    # The same directory filters the page shows, so the action hits exactly the
+    # currently-filtered list.
+    q: Optional[str] = None
+    state: Optional[str] = None
+    association: Optional[str] = None
+    status: Optional[str] = None
+    postcode_from: Optional[str] = None
+    postcode_to: Optional[str] = None
+    contact: Optional[str] = None
+    person: Optional[str] = None
+    exclude_junior: bool = False
+    exclude_emailed: bool = False
+    exclude_carnival: bool = False
+    exclude_school: bool = False
+    associations: Optional[List[str]] = None
+
+
+async def _bulk_filters(db: AsyncSession, body: BulkActionBody) -> dict:
+    return await cd.expand_shortcode(db, _filter_kwargs(
+        body.q, body.state, body.association, body.status, body.postcode_from,
+        body.postcode_to, body.contact, body.person, body.exclude_junior,
+        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations))
+
+
+@router.post("/clubs/bulk-emailed")
+async def bulk_mark_emailed(body: BulkActionBody, db: AsyncSession = Depends(get_db),
+                            _=Depends(require_super_admin)):
+    """Mark / unmark every club in the current filtered list as already emailed."""
+    filters = await _bulk_filters(db, body)
+    return await cd.bulk_mark_emailed(db, body.value, via="manual", note=body.note,
+                                      filters=filters)
+
+
+@router.post("/clubs/bulk-excluded")
+async def bulk_set_excluded(body: BulkActionBody, db: AsyncSession = Depends(get_db),
+                            _=Depends(require_super_admin)):
+    """Exclude / un-exclude every club in the current filtered list. Propagates to
+    any contacts already exported to BetterAdmin Comms."""
+    filters = await _bulk_filters(db, body)
+    return await cd.bulk_set_excluded(db, body.value, filters=filters)
+
+
 class UtmBody(BaseModel):
     utm: str
 
