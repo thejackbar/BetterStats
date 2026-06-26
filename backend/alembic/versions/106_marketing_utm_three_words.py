@@ -7,8 +7,8 @@ only rows whose ``utm_code`` still equals a previous AUTO value (the old
 first-word formula OR the two-word formula), so a hand-edited UTM is never
 clobbered.
 
-Revision ID: 104
-Revises: 103
+Revision ID: 106
+Revises: 105
 Create Date: 2026-06-25
 """
 import re
@@ -16,8 +16,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '104'
-down_revision = '103'
+revision = '106'
+down_revision = '105'
 branch_labels = None
 depends_on = None
 

@@ -12,15 +12,15 @@ These indexes are purely additive: they change no query results, only the plan
 the planner can choose. Created with IF NOT EXISTS so they're idempotent and
 match the mirror in the main.py lifespan.
 
-Revision ID: 103
-Revises: 102
+Revision ID: 104
+Revises: 103
 Create Date: 2026-06-25
 """
 from alembic import op
 
 
-revision = '103'
-down_revision = '102'
+revision = '104'
+down_revision = '103'
 branch_labels = None
 depends_on = None
 

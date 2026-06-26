@@ -6,8 +6,8 @@ The UTM default now uses the first ONE or TWO words before 'Cricket Club'
 whose ``utm_code`` still equals the OLD first-word formula (so a hand-edited UTM
 is never clobbered).
 
-Revision ID: 103
-Revises: 102
+Revision ID: 105
+Revises: 104
 Create Date: 2026-06-25
 """
 import re
@@ -15,8 +15,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '103'
-down_revision = '102'
+revision = '105'
+down_revision = '104'
 branch_labels = None
 depends_on = None
 
