@@ -188,6 +188,7 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
     """
     from app.auth.capabilities import effective_capabilities
     from app.auth.modules import entitlement_summary
+    from app.services.marketing_org import org_is_outreach
 
     membership_res = await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
@@ -215,6 +216,9 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         "club_id": str(eff_id) if eff_id else None,
         "club_slug": club.slug if club else None,
         "club_name": club.name if club else None,
+        # True when acting as the BetterCricket marketing-outreach org (not a real
+        # club), so the public club navbar can suppress its club links.
+        "is_marketing_org": org_is_outreach(club),
         "capabilities": caps,
         "entitlements": entitlement_summary(club, role),
         # Super-admin club-switch context. can_switch_clubs gates the UI switcher;

@@ -76,7 +76,10 @@ export default function Navbar() {
   // otherwise fall back to the last public club visited (sessionStorage) — which
   // is wrong for a super admin who has switched into another club. Reflect the
   // club they're actually managing (user.club_slug = the acted-as club).
-  const slug = (pathname.startsWith('/admin') && user?.club_slug) ? user.club_slug : urlSlug;
+  // The BetterCricket marketing-outreach org is not a real club — it has no public
+  // pages — so suppress the club nav/links and point the logo back at the admin app.
+  const marketingAdmin = pathname.startsWith('/admin') && !!user?.is_marketing_org;
+  const slug = marketingAdmin ? '' : ((pathname.startsWith('/admin') && user?.club_slug) ? user.club_slug : urlSlug);
   const { club } = useClub(slug);
 
   const [openMenu, setOpenMenu] = useState(null);
@@ -118,8 +121,8 @@ export default function Navbar() {
     setOpenMenu(key);
   };
 
-  const customLogo = club?.logo_url || null;
-  const displayName = club?.name || slug || "BetterCricket";
+  const customLogo = marketingAdmin ? null : (club?.logo_url || null);
+  const displayName = marketingAdmin ? (user?.club_name || "BetterCricket") : (club?.name || slug || "BetterCricket");
   const displayShort = displayName
     .split(" ")
     .map((w) => w[0])
@@ -169,7 +172,7 @@ export default function Navbar() {
 
           {/* Logo / club name */}
           <Link
-            to={`/${slug}`}
+            to={marketingAdmin ? '/admin' : `/${slug}`}
             className="flex items-center gap-3 mr-6 shrink-0 group"
           >
             {customLogo ? (
