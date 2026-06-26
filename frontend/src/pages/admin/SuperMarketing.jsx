@@ -49,7 +49,7 @@ function AssocMultiSelect({ options, selected, onChange }) {
     return () => document.removeEventListener('mousedown', h)
   }, [])
   const filtered = options
-    .filter(o => o.name.toLowerCase().includes(q.toLowerCase())).slice(0, 300)
+    .filter(o => o.name.toLowerCase().includes(q.toLowerCase())).slice(0, 800)
   const toggle = (name) =>
     onChange(selected.includes(name) ? selected.filter(n => n !== name) : [...selected, name])
   return (
@@ -77,7 +77,9 @@ function AssocMultiSelect({ options, selected, onChange }) {
                    className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
               <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
               <span className="flex-1 truncate" title={o.name}>{o.name}</span>
-              <span className="text-pb-faint">{o.count}</span>
+              {o.resolved === false
+                ? <span className="text-[10px] text-pb-faint italic" title="Roster not fetched yet — select and click Fetch full roster">not fetched</span>
+                : <span className="text-pb-faint">{o.count}</span>}
             </label>
           ))}
         </div>

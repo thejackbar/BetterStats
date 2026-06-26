@@ -916,8 +916,21 @@ async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dic
 
 
 async def list_associations(session: AsyncSession) -> list[dict]:
-    """Distinct associations (name + id + club count) for the multi-select filter.
-    The id is the PlayHQ routingCode (used to fetch the full roster on demand)."""
+    """All associations for the multi-select filter, from the registry (every
+    association we've discovered, ~677) — not just the ones already linked to
+    clubs. ``count`` is the linked club count (0 until that association's roster
+    has been swept), ``resolved`` says whether its roster has been fetched. The id
+    is the PlayHQ routingCode (used to fetch the roster on demand)."""
+    known = await session.scalar(text("SELECT COUNT(*) FROM marketing_associations")) or 0
+    if known:
+        rows = (await session.execute(text("""
+            SELECT id, name, club_count, (last_resolved_at IS NOT NULL) AS resolved
+            FROM marketing_associations
+            ORDER BY name
+        """))).all()
+        return [{"name": r[1], "id": r[0], "count": r[2] or 0, "resolved": bool(r[3])}
+                for r in rows]
+    # Fallback before the registry is populated: derive from linked clubs.
     rows = (await session.execute(text("""
         SELECT elem->>'name' AS name, MIN(elem->>'id') AS id, COUNT(DISTINCT mc.id) AS n
         FROM marketing_clubs mc
@@ -928,7 +941,7 @@ async def list_associations(session: AsyncSession) -> list[dict]:
         GROUP BY elem->>'name'
         ORDER BY elem->>'name'
     """))).all()
-    return [{"name": r[0], "id": r[1], "count": r[2]} for r in rows]
+    return [{"name": r[0], "id": r[1], "count": r[2], "resolved": True} for r in rows]
 
 
 # Bounds for the on-demand association-roster traversal (operator action).
