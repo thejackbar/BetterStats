@@ -466,6 +466,13 @@ export const api = {
   mktSetClubEmailed: (clubId, emailed, note) =>
     request(`/club-admin/marketing/clubs/${clubId}/emailed`,
       { method: 'PATCH', body: JSON.stringify({ emailed, note: note || null }) }),
+  // Bulk apply emailed / excluded to the current filtered list.
+  mktBulkEmailed: (value, filters = {}) =>
+    request('/club-admin/marketing/clubs/bulk-emailed',
+      { method: 'POST', body: JSON.stringify({ ...filters, value }) }),
+  mktBulkExcluded: (value, filters = {}) =>
+    request('/club-admin/marketing/clubs/bulk-excluded',
+      { method: 'POST', body: JSON.stringify({ ...filters, value }) }),
   // Image URLs (used directly in <img src>; cookie auth travels with the request)
   kpPlayerImageUrl: (klubproPlayerId, thumb = false) =>
     `${BASE}/club-admin/klubpro/images/player/${klubproPlayerId}${thumb ? '?thumb=1' : ''}`,

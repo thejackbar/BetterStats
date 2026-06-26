@@ -309,6 +309,30 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const bulkEmailed = async (value) => {
+    if (!window.confirm(
+      `${value ? 'Mark' : 'Unmark'} all ${total} club(s) in the current filtered list as `
+      + `${value ? 'emailed' : 'not emailed'}?`)) return
+    setBusy('bulk'); setMsg('')
+    try {
+      const r = await api.mktBulkEmailed(value, filters)
+      setMsg(`${r.updated} club(s) marked ${value ? 'emailed' : 'not emailed'}.`)
+      loadStats(); loadClubs()
+    } catch (e) { setError(e.message || 'Could not update.') } finally { setBusy('') }
+  }
+
+  const bulkExcluded = async (value) => {
+    if (!window.confirm(
+      `${value ? 'Exclude' : 'Include'} all ${total} club(s) in the current filtered list`
+      + `${value ? ' from outreach' : ''}?`)) return
+    setBusy('bulk'); setMsg('')
+    try {
+      const r = await api.mktBulkExcluded(value, filters)
+      setMsg(`${r.updated} club(s) ${value ? 'excluded' : 'included'}.`)
+      loadStats(); loadClubs()
+    } catch (e) { setError(e.message || 'Could not update.') } finally { setBusy('') }
+  }
+
   const toggleContact = async (clubId, contactId, selected) => {
     // optimistic — update the contact in place, refresh the stat tile after
     setClubs(cs => cs.map(c => c.id !== clubId ? c : {
@@ -535,8 +559,23 @@ export default function SuperMarketing() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2 mb-1">
+          <span className="text-[11px] text-pb-faint">Bulk on filtered list ({total}):</span>
+          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(true)}>
+            Mark all emailed
+          </button>
+          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(false)}>
+            Unmark all emailed
+          </button>
+          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkExcluded(true)}>
+            Exclude all
+          </button>
+          <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkExcluded(false)}>
+            Include all
+          </button>
+        </div>
         <div className="text-[11px] text-pb-faint mb-3">
-          Download CSV and Export to BetterAdmin Comms act on this filtered list.
+          Download CSV, Export to BetterAdmin Comms and the bulk actions all act on this filtered list.
         </div>
 
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}
