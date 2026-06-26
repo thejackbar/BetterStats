@@ -146,6 +146,12 @@ class Organisation(Base):
     comms_from_name = Column(Text, nullable=True)
     comms_reply_to = Column(Text, nullable=True)
     comms_sender_footer = Column(Text, nullable=True)
+    # ─── BetterComms: BetterCricket marketing-outreach designation (migration
+    # 108) ─── which org runs BetterCricket's own Clubs Directory campaigns. A
+    # super admin flags it from the BetterComms UI (no env change); the
+    # marketing_outreach_org_slug setting is a fallback. At most one org is true
+    # (partial unique index uq_org_marketing_outreach).
+    is_marketing_outreach = Column(Boolean, nullable=False, server_default="false", default=False)
     # ─── Front-end Website (Core, migration 070) ─────────────────────────────
     # The full public club website that can replace a club's existing site:
     # news, editable pages, honour rolls, committee and photo galleries, all

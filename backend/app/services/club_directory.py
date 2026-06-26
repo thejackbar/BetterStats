@@ -57,6 +57,7 @@ from app.models.db import (
     MarketingClub, MarketingClubContact, Organisation, CommsContact,
 )
 from app.services import playhq_directory_client as phq
+from app.services.marketing_org import get_outreach_org
 
 logger = logging.getLogger(__name__)
 
@@ -626,14 +627,12 @@ async def _resolve_outreach_org(session: AsyncSession, organisation_id: Optional
         org = await session.get(Organisation, organisation_id)
         if org:
             return org
-    if settings.marketing_outreach_org_slug:
-        org = await session.scalar(
-            select(Organisation).where(Organisation.slug == settings.marketing_outreach_org_slug))
-        if org:
-            return org
+    org = await get_outreach_org(session)
+    if org:
+        return org
     raise ValueError(
-        "No outreach org. Pass organisation_id or set marketing_outreach_org_slug "
-        "to a platform org that owns the BetterComms campaigns.")
+        "No outreach org. Designate one in BetterComms, pass organisation_id, or "
+        "set marketing_outreach_org_slug to a platform org that owns the campaigns.")
 
 
 def _assoc_names(club: MarketingClub) -> list[str]:

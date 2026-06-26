@@ -1072,6 +1072,18 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_sender_footer TEXT"
         ))
+        # BetterComms marketing-outreach designation (migration 108): which org
+        # runs BetterCricket's own Clubs Directory campaigns. A super admin flags
+        # it from the UI (no env/redeploy); the marketing_outreach_org_slug
+        # setting stays a fallback. Partial unique index ⇒ at most one flagged.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "is_marketing_outreach BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_org_marketing_outreach "
+            "ON organisations (is_marketing_outreach) WHERE is_marketing_outreach"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS comms_contacts (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

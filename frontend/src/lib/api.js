@@ -1503,6 +1503,10 @@ export const api = {
   commsGetSettings: () => request('/club-admin/comms/settings'),
   commsSetSettings: (data) =>
     request('/club-admin/comms/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // Super-admin: club vs BetterCricket marketing-outreach context.
+  commsGetContext: () => request('/club-admin/comms/context'),
+  commsSetMarketingOrg: (organisationId) =>
+    request('/club-admin/comms/marketing-org', { method: 'POST', body: JSON.stringify({ organisation_id: organisationId }) }),
 
   // BetterFantasyCricket (admin surface)
   fantasyConfig: () => request('/club-admin/fantasy/config'),
