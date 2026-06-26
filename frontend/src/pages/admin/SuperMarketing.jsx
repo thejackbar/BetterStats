@@ -252,6 +252,7 @@ export default function SuperMarketing() {
     exclude_carnival: false, exclude_school: false,
   })
   const [expanded, setExpanded] = useState(null)
+  const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
 
   const loadStats = useCallback(() => {
     api.mktStats().then(setStats).catch(() => {})
@@ -267,15 +268,18 @@ export default function SuperMarketing() {
 
   const loadClubs = useCallback(() => {
     setLoading(true)
-    api.mktClubs({ ...filters, limit: PAGE, offset: page * PAGE })
+    api.mktClubs({
+      ...filters, limit: PAGE, offset: page * PAGE,
+      group_by_association: view.group, assoc_sort: view.assocSort, club_sort: view.clubSort,
+    })
       .then((d) => { setClubs(d.clubs); setTotal(d.total); setError('') })
       .catch((e) => setError(e.message || 'Could not load the directory.'))
       .finally(() => setLoading(false))
-  }, [filters, page])
+  }, [filters, page, view])
 
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
-  useEffect(() => { setPage(0) }, [filters])  // back to first page when filters change
+  useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
 
   const runCrawl = async () => {
@@ -538,6 +542,32 @@ export default function SuperMarketing() {
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}
         {error && <div className="mb-3 text-xs text-red-300 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">{error}</div>}
 
+        <div className="flex flex-wrap items-center gap-3 mb-1">
+          <label className="flex items-center gap-1.5 text-xs text-pb-dim">
+            <input type="checkbox" checked={view.group}
+                   onChange={(e) => setView(v => ({ ...v, group: e.target.checked }))} />
+            Group by association
+          </label>
+          {view.group && (
+            <div className="flex items-center gap-1 text-xs text-pb-dim">
+              <span>Associations</span>
+              <select className={SELECT_CLS} value={view.assocSort}
+                      onChange={(e) => setView(v => ({ ...v, assocSort: e.target.value }))}>
+                <option value="asc">A → Z</option>
+                <option value="desc">Z → A</option>
+              </select>
+            </div>
+          )}
+          <div className="flex items-center gap-1 text-xs text-pb-dim">
+            <span>Clubs</span>
+            <select className={SELECT_CLS} value={view.clubSort}
+                    onChange={(e) => setView(v => ({ ...v, clubSort: e.target.value }))}>
+              <option value="asc">A → Z</option>
+              <option value="desc">Z → A</option>
+            </select>
+          </div>
+        </div>
+
         <Pager total={total} page={page} pageSize={PAGE} onPage={setPage} loading={loading} />
 
         {loading ? (
@@ -555,11 +585,23 @@ export default function SuperMarketing() {
                 </tr>
               </thead>
               <tbody>
-                {clubs.map(c => {
+                {clubs.map((c, idx) => {
                   const top = c.contacts && c.contacts[0]
                   const more = (c.contacts?.length || 0) - 1
                   const isOpen = expanded === c.id
+                  // When grouping, drop an association header row each time the
+                  // association name changes from the club above it.
+                  const groupName = c.association_name || 'Unassigned'
+                  const prevName = idx > 0 ? (clubs[idx - 1].association_name || 'Unassigned') : null
+                  const showHeader = view.group && groupName !== prevName
                   return [
+                    showHeader && (
+                      <tr key={c.id + '-h'} className="bg-pb-surface2/70 border-t-2 border-pb-accent/30">
+                        <td colSpan={5} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-pb-accent">
+                          {groupName}
+                        </td>
+                      </tr>
+                    ),
                     <tr key={c.id} className="border-t pb-hairline align-top">
                       <td className="px-3 py-2">
                         <button
