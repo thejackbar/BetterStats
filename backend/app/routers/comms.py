@@ -195,30 +195,57 @@ def _apply_utm(html: str, utm: dict) -> str:
     return _HREF_RE.sub(repl, html)
 
 
-def _footer_block(footer: str, unsub_url: str) -> str:
+def _unsub_sentence_html(club_name: str, unsub_url: str, marketing: bool) -> str:
+    """The mandatory unsubscribe sentence with the word 'unsubscribe' as the link.
+    Marketing (BetterCricket Clubs Directory) and a club's own member email get
+    different wording."""
+    club = html_lib.escape(club_name or "your club")
+    link = (f'<a href="{unsub_url}" style="color:#6b7280;text-decoration:underline;">'
+            'unsubscribe</a>')
+    if marketing:
+        return (f"You are receiving this email because you are listed as a committee "
+                f"member or club officer for {club}. If you no longer wish to receive "
+                f"emails from BetterCricket, you can {link} at any time.")
+    return (f"You are receiving this email because you are a member or associate of "
+            f"{club}. If you no longer wish to receive emails from {club}, you can "
+            f"{link} at any time.")
+
+
+def _unsub_sentence_text(club_name: str, unsub_url: str, marketing: bool) -> str:
+    club = club_name or "your club"
+    if marketing:
+        return (f"You are receiving this email because you are listed as a committee "
+                f"member or club officer for {club}. If you no longer wish to receive "
+                f"emails from BetterCricket, you can unsubscribe at any time: {unsub_url}")
+    return (f"You are receiving this email because you are a member or associate of {club}. "
+            f"If you no longer wish to receive emails from {club}, you can unsubscribe at "
+            f"any time: {unsub_url}")
+
+
+def _footer_block(footer: str, unsub_url: str, club_name: str, marketing: bool) -> str:
     """The mandatory sender-id + unsubscribe footer, injected into a full-HTML
     template before </body>. Inherits the email's font so it adopts its style; the
     unsubscribe link can never be removed by the author (Spam Act 2003)."""
     safe_footer = html_lib.escape(footer).replace("\n", "<br>") if footer else ""
+    prefix = f"{safe_footer}<br>" if safe_footer else ""
+    sentence = _unsub_sentence_html(club_name, unsub_url, marketing)
     return (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="margin-top:24px;"><tr><td align="center" '
         'style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
         'font-size:12px;line-height:1.5;font-family:inherit;text-align:center;">'
-        f'{safe_footer}<br>'
-        f'<a href="{unsub_url}" style="color:#6b7280;text-decoration:underline;">'
-        'Unsubscribe</a> from these emails.</td></tr></table>'
+        f'{prefix}{sentence}</td></tr></table>'
     )
 
 
-def _inject_footer(full_html: str, footer: str, unsub_url: str) -> str:
-    block = _footer_block(footer, unsub_url)
+def _inject_footer(full_html: str, footer: str, unsub_url: str, club_name: str, marketing: bool) -> str:
+    block = _footer_block(footer, unsub_url, club_name, marketing)
     if re.search(r"</body>", full_html, flags=re.I):
         return re.sub(r"</body>", block + "</body>", full_html, count=1, flags=re.I)
     return full_html + block
 
 
-def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str) -> str:
+def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str, club_name: str) -> str:
     accent = org.accent_color or "#243352"
     name = html_lib.escape(org.name or "Our Club")
     logo = (
@@ -236,7 +263,7 @@ def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str) -> st
   <tr><td style="padding:28px;color:#1f2937;font-size:15px;line-height:1.6;">{inner}</td></tr>
   <tr><td style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">
     {safe_footer}<br>
-    <a href="{unsub_url}" style="color:#6b7280;text-decoration:underline;">Unsubscribe</a> from these emails.
+    {_unsub_sentence_html(club_name, unsub_url, org_is_outreach(org))}
   </td></tr>
 </table>
 </td></tr></table></body></html>"""
@@ -303,18 +330,21 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
         ctx.update(extra_vars)
     subject = _merge(subject or "", ctx)
     apply_utm = org_is_outreach(org)  # UTM is a BetterCricket-marketing-only feature
+    club_name = ctx.get("club") or org.name or ""
+    unsub_text = _unsub_sentence_text(club_name, unsub_url, apply_utm)
+    text_tail = f"\n\n—\n{footer}\n{unsub_text}" if footer else f"\n\n—\n{unsub_text}"
     if _is_full_doc(body_html):
         merged = _merge(body_html or "", ctx)
         if apply_utm:
             merged = _apply_utm(merged, utm)
-        html = _inject_footer(merged, footer, unsub_url)
-        text = _html_to_text(merged) + f"\n\n—\n{footer}\nUnsubscribe: {unsub_url}"
+        html = _inject_footer(merged, footer, unsub_url, club_name, apply_utm)
+        text = _html_to_text(merged) + text_tail
     else:
         inner = _merge(_body_to_html(body_html or ""), ctx)
         if apply_utm:
             inner = _apply_utm(inner, utm)
-        html = _wrap_html(org, inner, footer, unsub_url)
-        text = _html_to_text(inner) + f"\n\n—\n{footer}\nUnsubscribe: {unsub_url}"
+        html = _wrap_html(org, inner, footer, unsub_url, club_name)
+        text = _html_to_text(inner) + text_tail
     return subject, html, text
 
 
@@ -1601,7 +1631,11 @@ async def preview_template(
     footer injected), so the editor can show a true preview."""
     _, _, _, footer = _sender(club)
     unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
+    sample = ({"club": "Sample Cricket Club", "association": "Sample Association",
+               "utm_code": "sample-cricket-club", "state": "WA",
+               "website": "https://example.com"} if org_is_outreach(club) else None)
     _, html, _ = _render_parts(
         club, subject="", body_html=data.html or "", utm=data.utm or {},
-        email="sample@example.com", name="Sam Example", unsub_url=unsub, footer=footer)
+        email="sample@example.com", name="Sam Example", unsub_url=unsub, footer=footer,
+        extra_vars=sample)
     return {"html": html}
