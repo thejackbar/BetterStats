@@ -209,7 +209,7 @@ export default function CommsCompose() {
                 className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline font-sans text-sm mb-2" />
             )}
             <div className="text-pb-faintest text-xs mb-5">
-              Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club_name}}'}</code>.
+              Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club}}'}</code>.
             </div>
 
             <div className="pb-card p-4 mb-4">

@@ -184,12 +184,16 @@ outbound link at render, but only when the org is the marketing-outreach org
 (`org_is_outreach`), so a club's own member email never gets UTM tags. The tags
 feed the Usage/visitors analytics, which already read UTM params.
 
-*Merge variables*: `{{first_name}}`, `{{name}}`, `{{email}}`, `{{club_name}}` (sender)
-and `{{unsubscribe_url}}` resolve for every send. For a BetterCricket Clubs
-Directory contact, four more resolve per recipient from the linked `marketing_clubs`
-row — `{{club}}` (the prospect club's name), `{{association}}`, `{{utm_code}}` (its
-unique tracking code) and `{{state}}` — built by `_marketing_vars` and threaded
-through `_render` via `extra_vars`. The catalogue is `MERGE_VARIABLES` (served by
+*Merge variables*: `{{first_name}}`, `{{name}}`, `{{email}}`, `{{club}}` and
+`{{unsubscribe_url}}` resolve for every send. `{{club}}` is the single club
+variable — the recipient's club: it defaults to the sending org's name (a club
+emailing its own members) and is overridden with the prospect club's name for a
+BetterCricket Clubs Directory contact. (`{{club_name}}` still resolves to the
+sending org as a silent back-compat alias but is no longer advertised.) For a
+directory contact, `{{association}}`, `{{utm_code}}` (its unique tracking code),
+`{{state}}` and `{{website}}` also resolve per recipient from the linked
+`marketing_clubs` row — built by `_marketing_vars` and threaded through `_render`
+via `extra_vars`. The catalogue is `MERGE_VARIABLES` (served by
 `GET /merge-variables`, marketing-only ones flagged). The Templates editor lists
 them (click to copy), and a contact's detail view (`GET /contacts/{id}`) shows the
 resolved value of each variable for that person. Next: template versioning, and a

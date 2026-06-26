@@ -10,7 +10,7 @@ const STARTER = `<!doctype html>
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:10px;overflow:hidden;">
           <tr><td style="padding:28px;color:#1f2937;font-size:15px;line-height:1.6;">
             <h1 style="margin:0 0 12px;font-size:20px;">Hi {{first_name}},</h1>
-            <p>Write your message here. You can use {{club_name}} and other variables.</p>
+            <p>Write your message here. You can use {{club}} and other variables.</p>
             <p><a href="https://betterat.cricket" style="display:inline-block;background:#243352;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;">A button</a></p>
           </td></tr>
         </table>

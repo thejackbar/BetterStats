@@ -267,9 +267,8 @@ MERGE_VARIABLES = [
     {"name": "first_name", "desc": "Recipient's first name", "marketing_only": False},
     {"name": "name", "desc": "Recipient's full name", "marketing_only": False},
     {"name": "email", "desc": "Recipient's email address", "marketing_only": False},
-    {"name": "club_name", "desc": "The sending club's name", "marketing_only": False},
+    {"name": "club", "desc": "The recipient's club name", "marketing_only": False},
     {"name": "unsubscribe_url", "desc": "One-click unsubscribe link (also added to the footer automatically)", "marketing_only": False},
-    {"name": "club", "desc": "The recipient club's name (from the Clubs Directory)", "marketing_only": True},
     {"name": "association", "desc": "The recipient club's primary association", "marketing_only": True},
     {"name": "utm_code", "desc": "The recipient club's unique UTM code, for link tracking", "marketing_only": True},
     {"name": "state", "desc": "The recipient club's state", "marketing_only": True},
@@ -286,17 +285,22 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     ctx = {
         "first_name": _first_name(name, email),
         "name": (name or "").strip() or _first_name(name, email),
-        "club_name": org.name or "",
         "email": email,
+        # {{club}} is the single club variable: the recipient's club. Defaults to
+        # the sending org's name (a club emailing its own members), and is
+        # overridden below with the directory club for a BetterCricket contact.
+        "club": org.name or "",
+        # {{club_name}} is kept as a silent back-compat alias (no longer advertised)
+        # so older templates that used it still resolve.
+        "club_name": org.name or "",
         # Lets a template invite unsubscribe inline in the body/subject as well as
         # the automatic footer, e.g. "…or [unsubscribe]({{unsubscribe_url}})".
         "unsubscribe_url": unsub_url,
     }
     if extra_vars:
-        # Per-recipient directory vars (club / association / utm_code …). Never
-        # overrides a core key.
-        for k, v in extra_vars.items():
-            ctx.setdefault(k, v)
+        # Per-recipient directory vars (club / association / utm_code …) override
+        # the defaults (e.g. {{club}} → the prospect club's name).
+        ctx.update(extra_vars)
     subject = _merge(subject or "", ctx)
     apply_utm = org_is_outreach(org)  # UTM is a BetterCricket-marketing-only feature
     if _is_full_doc(body_html):
@@ -1139,10 +1143,15 @@ async def get_contact(
         "first_name": _first_name(c.name, c.email),
         "name": (c.name or "").strip() or _first_name(c.name, c.email),
         "email": c.email,
-        "club_name": club.name or "",
-        **mvars,
-        "unsubscribe_url": "(unique per recipient, added automatically)",
+        # {{club}} = the recipient's club (directory club if linked, else this org).
+        "club": mvars.get("club") or (club.name or ""),
     }
+    # The association/utm_code/state/website set only applies to BetterCricket
+    # directory outreach, so only surface them in that context.
+    if org_is_outreach(club):
+        for k in ("association", "utm_code", "state", "website"):
+            variables[k] = mvars.get(k, "")
+    variables["unsubscribe_url"] = "(unique per recipient, added automatically)"
     return {
         "id": str(c.id), "email": c.email, "name": c.name, "source": c.source,
         "subscribed": c.subscribed, "bounced": c.bounced,
