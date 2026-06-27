@@ -261,6 +261,15 @@ async def lifespan(app: FastAPI):
         # Migration 101: per-club editable UTM code (defaulted from the name).
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS utm_code TEXT"))
+        # Sales-pipeline state (super-admin set in the Clubs Directory): which
+        # modules a prospect is trialing / has requested a trial for, and its
+        # demo follow-on state. Powers the directory-aware segment filters.
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS trial_modules JSONB NOT NULL DEFAULT '[]'"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS requested_trial_modules JSONB NOT NULL DEFAULT '[]'"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS demo_status TEXT"))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))

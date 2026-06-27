@@ -2152,6 +2152,12 @@ class MarketingClub(Base):
     excluded_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # Editable outreach UTM code (default: first word of name + "-cricket-club").
     utm_code = Column(Text, nullable=True)
+    # Sales-pipeline state, set by a super admin in the Clubs Directory (no
+    # automated source). Module keys are core/select/socials/admin/iq/fantasy.
+    trial_modules = Column(JSONB, nullable=False, server_default="[]", default=list)
+    requested_trial_modules = Column(JSONB, nullable=False, server_default="[]", default=list)
+    # Demo follow-on state: NULL/'' = no demo; else in_trial | trial_expired | customer.
+    demo_status = Column(Text, nullable=True)
     detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)

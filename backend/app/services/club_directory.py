@@ -980,6 +980,50 @@ async def set_excluded(session: AsyncSession, club_id: str, excluded: bool) -> O
             "excluded_at": club.excluded_at.isoformat() if club.excluded_at else None}
 
 
+# Sales-pipeline module keys a super admin can flag a prospect against.
+SALES_MODULE_KEYS = ("core", "select", "socials", "admin", "iq", "fantasy")
+DEMO_STATUSES = ("in_trial", "trial_expired", "customer")
+
+
+def _clean_modules(values) -> list:
+    if not isinstance(values, list):
+        return []
+    seen, out = set(), []
+    for v in values:
+        k = str(v).strip().lower()
+        if k in SALES_MODULE_KEYS and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+async def set_sales_state(session: AsyncSession, club_id: str, *,
+                          trial_modules=None, requested_trial_modules=None,
+                          demo_status=...) -> Optional[dict]:
+    """Set a prospect club's sales-pipeline state (super-admin maintained, no
+    automated source). Only the fields passed are changed. Returns the new state,
+    or None if the club isn't found."""
+    club = await session.get(MarketingClub, club_id)
+    if club is None:
+        return None
+    if trial_modules is not None:
+        club.trial_modules = _clean_modules(trial_modules)
+    if requested_trial_modules is not None:
+        club.requested_trial_modules = _clean_modules(requested_trial_modules)
+    if demo_status is not ...:
+        ds = (str(demo_status).strip().lower() if demo_status else "") or None
+        club.demo_status = ds if ds in DEMO_STATUSES else None
+    club.updated_at = func.now()
+    await session.commit()
+    await session.refresh(club)
+    return {
+        "id": str(club.id),
+        "trial_modules": club.trial_modules or [],
+        "requested_trial_modules": club.requested_trial_modules or [],
+        "demo_status": club.demo_status,
+    }
+
+
 async def _filtered_club_ids(session: AsyncSession, filters: Optional[dict],
                              kind: str = "club") -> list:
     """The club ids matching the same filters the list view uses — the target set

@@ -45,33 +45,58 @@ SPECIAL_FIELDS = {"availability"}
 # the club sits (its state, association, our outreach pipeline status, and whether
 # the club is already a customer). All read data we already hold — no new tracking.
 DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
-DIR_CLUB_FIELDS = {"club_state", "association", "directory_status", "customer_status", "visited_page"}
+# Multi-value (the rule value is a list of keys; match = ANY).
+DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page"}
+DIR_CLUB_FIELDS = {"club_state", "association", "directory_status", "customer_status",
+                   "is_trialing", "requested_trial", "had_demo", "visited_page"}
 DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS
 # Directory fields that need the linked MarketingClub joined in (visited_page
-# correlates a usage_events row on marketing_clubs.utm_code).
-_DIR_MC_FIELDS = {"club_state", "association", "directory_status", "customer_status", "visited_page"}
+# correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
+# fields read marketing_clubs columns).
+_DIR_MC_FIELDS = {"club_state", "association", "directory_status", "customer_status",
+                  "is_trialing", "requested_trial", "had_demo", "visited_page"}
 
-# Tracked public pages a prospect can be matched on. A BetterCricket outreach
-# email tags its links with the club's utm_code as ?utm_id=…, captured into
-# usage_events.utm_id, so a visit maps back to the club. Value → path filter;
-# "any" matches a visit to any page.
+# Tracked public pages a prospect can be matched on (key → path filter). A
+# BetterCricket outreach email tags its links with the club's utm_code as
+# ?utm_id=…, captured into usage_events.utm_id, so a visit maps back to the club.
 _VISIT_PATH_SQL = {
-    "pricing": "split_part(ue.path, '?', 1) ~* '^/pricing(/|$)'",
+    "stats": "split_part(ue.path, '?', 1) ~* '^/modules/betterstats(/|$)'",
+    "select": "split_part(ue.path, '?', 1) ~* '^/modules/betterselect(/|$)'",
+    "socials": "split_part(ue.path, '?', 1) ~* '^/modules/bettersocials(/|$)'",
+    "admin": "split_part(ue.path, '?', 1) ~* '^/modules/betteradmin(/|$)'",
     "betteriq": "split_part(ue.path, '?', 1) ~* '^/modules/betteriq(/|$)'",
+    "fantasy": "split_part(ue.path, '?', 1) ~* '^/modules/betterfantasy(/|$)'",
+    "pricing": "split_part(ue.path, '?', 1) ~* '^/pricing(/|$)'",
+    "compare": "split_part(ue.path, '?', 1) ~* '^/compare(/|$)'",
+    "about": "split_part(ue.path, '?', 1) ~* '^/about(/|$)'",
+    "faq": "split_part(ue.path, '?', 1) ~* '^/faq(/|$)'",
+    "contact": "split_part(ue.path, '?', 1) ~* '^/contact(/|$)'",
 }
+_DEMO_STATUSES = ("in_trial", "trial_expired", "customer")
+
+
+def _as_list(val):
+    """A rule value that may be a list, a single scalar, or a comma string."""
+    if isinstance(val, (list, tuple)):
+        return [str(v).strip() for v in val if str(v).strip()]
+    s = str(val or "").strip()
+    if not s:
+        return []
+    return [p.strip() for p in s.split(",") if p.strip()]
 
 
 def _visited_clause(val):
     """Correlated EXISTS over usage_events for a visit attributable to this
-    contact's club. Safe SQL: the page filter comes from a fixed map and the club
-    code is referenced as a column, never interpolated."""
+    contact's club, matching ANY of the selected pages. Safe SQL: page filters
+    come from a fixed map and the club code is a column, never interpolated."""
+    pages = _as_list(val)
     where = ["ue.utm_id = marketing_clubs.utm_code", "ue.utm_id IS NOT NULL",
              "ue.event_type = 'page_view'"]
-    if val and val != "any":
-        frag = _VISIT_PATH_SQL.get(val)
-        if not frag:
+    if pages and "any" not in pages:
+        frags = [_VISIT_PATH_SQL[p] for p in pages if p in _VISIT_PATH_SQL]
+        if not frags:
             return None
-        where.append(frag)
+        where.append("(" + " OR ".join(frags) + ")")
     return text("EXISTS (SELECT 1 FROM usage_events ue WHERE " + " AND ".join(where) + ")")
 
 ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
@@ -169,7 +194,16 @@ def _directory_condition(rule: dict, cust):
     if field == "directory_status":
         return MarketingClub.status == str(val) if val else None
     if field == "visited_page":
-        return _visited_clause(str(val)) if val else None
+        return _visited_clause(val)
+    if field == "is_trialing":
+        keys = _as_list(val)
+        return or_(*[MarketingClub.trial_modules.contains([k]) for k in keys]) if keys else None
+    if field == "requested_trial":
+        keys = _as_list(val)
+        return or_(*[MarketingClub.requested_trial_modules.contains([k]) for k in keys]) if keys else None
+    if field == "had_demo":
+        states = [s for s in _as_list(val) if s in _DEMO_STATUSES]
+        return MarketingClub.demo_status.in_(states) if states else None
     if field == "customer_status":
         if val == "none":
             return MarketingClub.existing_org_id.is_(None)

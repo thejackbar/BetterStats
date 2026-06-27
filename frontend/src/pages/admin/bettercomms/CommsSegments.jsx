@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
@@ -12,6 +12,11 @@ import { AudiencePanel } from './audience'
 const STAT_OPS = [['gte', 'at least'], ['lte', 'at most']]
 const IS_OP = [['eq', 'is']]
 const YESNO = [['yes', 'yes'], ['no', 'no']]
+// The six modules a prospect can trial / request, by entitlement key.
+const MODULE_OPTS = [
+  ['core', 'BetterStats'], ['select', 'BetterSelect'], ['socials', 'BetterSocials'],
+  ['admin', 'BetterAdmin'], ['iq', 'BetterIQ'], ['fantasy', 'BetterFantasyCricket'],
+]
 
 // The club / player field set — a normal club's members and their cricket data.
 const CLUB_FIELD_DEFS = {
@@ -48,8 +53,19 @@ const DIRECTORY_FIELD_DEFS = {
   clicked: { label: 'Clicked an email link', input: 'select', ops: IS_OP, options: YESNO },
   enquired: { label: 'Sent a Contact Us enquiry', input: 'select', ops: IS_OP, options: YESNO },
   visited_page: {
-    label: 'Visited a page', input: 'select', ops: IS_OP,
-    options: [['pricing', 'the pricing page'], ['betteriq', 'the BetterIQ page'], ['any', 'any page']],
+    label: 'Visited a page', input: 'multi', ops: [['eq', 'is any of']],
+    options: [
+      ['stats', 'BetterStats page'], ['select', 'BetterSelect page'], ['socials', 'BetterSocials page'],
+      ['admin', 'BetterAdmin page'], ['betteriq', 'BetterIQ page'], ['fantasy', 'BetterFantasyCricket page'],
+      ['pricing', 'Pricing page'], ['compare', 'Compare page'], ['about', 'About page'],
+      ['faq', 'FAQ page'], ['contact', 'Contact Us page'], ['any', 'Any page'],
+    ],
+  },
+  is_trialing: { label: 'Is trialing module', input: 'multi', ops: [['eq', 'is any of']], options: MODULE_OPTS },
+  requested_trial: { label: 'Requested a trial', input: 'multi', ops: [['eq', 'is any of']], options: MODULE_OPTS },
+  had_demo: {
+    label: 'Had a demo', input: 'multi', ops: [['eq', 'is any of']],
+    options: [['in_trial', 'In a trial'], ['trial_expired', 'Trial has expired'], ['customer', 'Is now a customer']],
   },
   customer_status: {
     label: 'Customer status', input: 'select', ops: IS_OP,
@@ -83,6 +99,46 @@ function optionsFor(def, opts) {
   return []
 }
 
+// Multi-select rule value: pick one or more [value, label] options. The rule
+// value is stored as an array of the chosen value keys.
+function MultiSelectValues({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const k = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', h)
+    document.addEventListener('keydown', k)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
+  }, [])
+  const sel = Array.isArray(selected) ? selected : []
+  const toggle = (v) => onChange(sel.includes(v) ? sel.filter(x => x !== v) : [...sel, v])
+  const labels = options.filter(([v]) => sel.includes(v)).map(([, l]) => l)
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm max-w-[240px]">
+        <span className="truncate">{labels.length ? labels.join(', ') : 'choose…'}</span>
+        {sel.length > 0 && (
+          <span role="button" title="Clear" className="text-pb-faint hover:text-pb-red"
+            onClick={(e) => { e.stopPropagation(); onChange([]) }}>✕</span>
+        )}
+        <span className="text-pb-faint">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-60 max-h-72 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+          {options.map(([v, l]) => (
+            <label key={v} className="flex items-center gap-2 px-1 py-0.5 text-sm text-pb-text hover:bg-pb-surface rounded cursor-pointer">
+              <input type="checkbox" className="accent-pb-accent" checked={sel.includes(v)} onChange={() => toggle(v)} />
+              <span className="truncate">{l}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RuleRow({ rule, defs, opts, onChange, onRemove }) {
   const def = defs[rule.field] || defs[Object.keys(defs)[0]]
   const keys = Object.keys(defs)
@@ -100,7 +156,11 @@ function RuleRow({ rule, defs, opts, onChange, onRemove }) {
         className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
         {def.ops.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
-      {def.input === 'select' ? (
+      {def.input === 'multi' ? (
+        <MultiSelectValues options={optionsFor(def, opts)}
+          selected={Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : [])}
+          onChange={(vals) => onChange({ ...rule, value: vals })} />
+      ) : def.input === 'select' ? (
         <select value={rule.value} onChange={e => onChange({ ...rule, value: e.target.value })}
           className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm max-w-[200px]">
           <option value="">choose…</option>

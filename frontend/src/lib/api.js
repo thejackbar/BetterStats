@@ -449,6 +449,9 @@ export const api = {
   mktSetClubUtm: (clubId, utm) =>
     request(`/club-admin/marketing/clubs/${clubId}/utm`,
       { method: 'PATCH', body: JSON.stringify({ utm }) }),
+  mktSetClubSales: (clubId, body) =>
+    request(`/club-admin/marketing/clubs/${clubId}/sales`,
+      { method: 'PATCH', body: JSON.stringify(body) }),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
