@@ -2,74 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
-
-// Fields a contact can be searched on (contains, OR across all of them).
-const SEARCH_FIELDS = ['name', 'email', 'club', 'association', 'utm_code', 'state', 'website']
-// The directory facets we offer as multi-select filters.
-const FACETS = [
-  { key: 'club', label: 'Club' },
-  { key: 'association', label: 'Association' },
-  { key: 'utm_code', label: 'UTM code' },
-  { key: 'state', label: 'State' },
-]
-
-function matchesQuery(c, q) {
-  if (!q) return true
-  return SEARCH_FIELDS.some(f => (c[f] || '').toLowerCase().includes(q))
-}
-function matchesFilters(c, filters) {
-  return FACETS.every(f => {
-    const sel = filters[f.key]
-    return !sel.length || sel.includes(c[f.key] || '')
-  })
-}
-
-// Searchable multi-select dropdown (mirrors the Club Directory association picker).
-function MultiSelect({ label, options, selected, onChange }) {
-  const [open, setOpen] = useState(false)
-  const [q, setQ] = useState('')
-  const ref = useRef(null)
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    const k = (e) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', h)
-    document.addEventListener('keydown', k)
-    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
-  }, [])
-  const ql = q.toLowerCase()
-  const filtered = options.filter(o => o.toLowerCase().includes(ql)).slice(0, 800)
-  const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v])
-  return (
-    <div className="relative" ref={ref}>
-      <button type="button"
-        className="flex items-center gap-1.5 bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent"
-        onClick={() => setOpen(o => !o)}>
-        <span>{selected.length ? `${label} (${selected.length})` : label}</span>
-        {selected.length > 0 && (
-          <span role="button" title="Clear" className="text-pb-faint hover:text-pb-red"
-            onClick={(e) => { e.stopPropagation(); onChange([]) }}>✕</span>
-        )}
-        <span className="text-pb-faint">▾</span>
-      </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-72 max-w-[92vw] max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search ${label.toLowerCase()}…`}
-            className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent mb-2" />
-          {selected.length > 0 && (
-            <button type="button" className="text-[11px] text-pb-faint hover:text-pb-accent mb-1" onClick={() => onChange([])}>clear selection</button>
-          )}
-          {!filtered.length && <div className="text-xs text-pb-faint px-1 py-2">No options.</div>}
-          {filtered.map(o => (
-            <label key={o} className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
-              <input type="checkbox" className="accent-pb-accent" checked={selected.includes(o)} onChange={() => toggle(o)} />
-              <span className="truncate" title={o}>{o}</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect } from './audience'
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -173,11 +106,7 @@ function ListDetail({ list, lists, onChanged }) {
   // A fresh list resets the working selection.
   useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }) }, [list.id])
 
-  const facetOptions = useMemo(() => {
-    const opts = { club: new Set(), association: new Set(), utm_code: new Set(), state: new Set() }
-    for (const c of contacts || []) for (const f of FACETS) { if (c[f.key]) opts[f.key].add(c[f.key]) }
-    return Object.fromEntries(FACETS.map(f => [f.key, [...opts[f.key]].sort((a, b) => a.localeCompare(b))]))
-  }, [contacts])
+  const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
 
   const q = query.trim().toLowerCase()
   const visible = useMemo(() =>

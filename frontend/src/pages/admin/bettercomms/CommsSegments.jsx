@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { ContactDetailModal } from './CommsContacts'
+import { AudiencePanel } from './audience'
 
 // Whitelisted segment fields (mirrors services/comms_segments.py). Each rule is
 // {field, op, value}; rules are ANDed. Stat / role / availability fields read the
@@ -8,17 +10,21 @@ import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 // `optionsKey` is set pull their dropdown values from /segments/options (the
 // club's real roles / teams), so we never guess vocab.
 const STAT_OPS = [['gte', 'at least'], ['lte', 'at most']]
-const FIELD_DEFS = {
+const IS_OP = [['eq', 'is']]
+const YESNO = [['yes', 'yes'], ['no', 'no']]
+
+// The club / player field set — a normal club's members and their cricket data.
+const CLUB_FIELD_DEFS = {
   tag: { label: 'Has tag', input: 'text', ops: [['has', 'is']] },
   source: {
-    label: 'Source', input: 'select', ops: [['eq', 'is']],
+    label: 'Source', input: 'select', ops: IS_OP,
     options: [['player', 'A player'], ['member', 'A fee member'], ['import', 'Imported'], ['manual', 'Added manually']],
   },
-  role: { label: 'Player role', input: 'select', ops: [['eq', 'is']], optionsKey: 'roles' },
-  gender: { label: 'Gender', input: 'select', ops: [['eq', 'is']], optionsKey: 'genders' },
-  squad_team: { label: 'Squad / team', input: 'select', ops: [['eq', 'is']], optionsKey: 'teams' },
+  role: { label: 'Player role', input: 'select', ops: IS_OP, optionsKey: 'roles' },
+  gender: { label: 'Gender', input: 'select', ops: IS_OP, optionsKey: 'genders' },
+  squad_team: { label: 'Squad / team', input: 'select', ops: IS_OP, optionsKey: 'teams' },
   availability: {
-    label: 'Availability', input: 'select', ops: [['eq', 'is']],
+    label: 'Availability', input: 'select', ops: IS_OP,
     options: [['available', 'available for an upcoming game'], ['not_set', 'no availability set']],
   },
   matches_this_season: { label: 'Matches this season', input: 'number', ops: STAT_OPS },
@@ -29,32 +35,62 @@ const FIELD_DEFS = {
   hundreds_this_season: { label: 'Hundreds this season', input: 'number', ops: STAT_OPS },
   five_wickets_this_season: { label: '5-wicket hauls this season', input: 'number', ops: STAT_OPS },
 }
-const FIELD_KEYS = Object.keys(FIELD_DEFS)
 
-function newRule() {
-  return { field: 'tag', op: 'has', value: '' }
+// The directory field set — a prospect club / its officer and what they've done.
+// Only offered in the BetterCricket Clubs Directory comms context. Each reads data
+// we already hold (exports, sent/open/click events, enquiries, club + customer
+// status), so a segment can target who HAS or HASN'T done something today.
+const DIRECTORY_FIELD_DEFS = {
+  tag: { label: 'Has tag', input: 'text', ops: [['has', 'is']] },
+  exported: { label: 'Exported from directory', input: 'select', ops: IS_OP, options: YESNO },
+  emailed: { label: 'Emailed via BetterComms', input: 'select', ops: IS_OP, options: YESNO },
+  opened: { label: 'Opened an email', input: 'select', ops: IS_OP, options: YESNO },
+  clicked: { label: 'Clicked an email link', input: 'select', ops: IS_OP, options: YESNO },
+  enquired: { label: 'Sent a Contact Us enquiry', input: 'select', ops: IS_OP, options: YESNO },
+  customer_status: {
+    label: 'Customer status', input: 'select', ops: IS_OP,
+    options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],
+  },
+  directory_status: {
+    label: 'Directory status', input: 'select', ops: IS_OP,
+    options: [['new', 'new'], ['enriched', 'enriched'], ['contacted', 'contacted'], ['onboarded', 'onboarded'], ['suppressed', 'suppressed']],
+  },
+  club_state: { label: 'Club state', input: 'select', ops: IS_OP, optionsKey: 'states' },
+  association: { label: 'Association', input: 'select', ops: IS_OP, optionsKey: 'associations' },
 }
 
-// Resolve a field's dropdown options from the fetched club options.
+function defsFor(opts) {
+  return opts?.context === 'directory' ? DIRECTORY_FIELD_DEFS : CLUB_FIELD_DEFS
+}
+
+function newRule(defs) {
+  const first = Object.keys(defs)[0]
+  return { field: first, op: defs[first].ops[0][0], value: '' }
+}
+
+// Resolve a field's dropdown options from the fetched club/directory options.
 function optionsFor(def, opts) {
   if (def.options) return def.options
   if (def.optionsKey === 'roles') return (opts.roles || []).map(r => [r, r])
   if (def.optionsKey === 'genders') return opts.genders || []
   if (def.optionsKey === 'teams') return (opts.teams || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'states') return (opts.states || []).map(s => [s, s])
+  if (def.optionsKey === 'associations') return (opts.associations || []).map(a => [a, a])
   return []
 }
 
-function RuleRow({ rule, opts, onChange, onRemove }) {
-  const def = FIELD_DEFS[rule.field] || FIELD_DEFS.tag
+function RuleRow({ rule, defs, opts, onChange, onRemove }) {
+  const def = defs[rule.field] || defs[Object.keys(defs)[0]]
+  const keys = Object.keys(defs)
   return (
     <div className="flex flex-wrap items-center gap-2 py-1.5">
       <select value={rule.field}
         onChange={e => {
-          const nd = FIELD_DEFS[e.target.value]
+          const nd = defs[e.target.value]
           onChange({ field: e.target.value, op: nd.ops[0][0], value: '' })
         }}
         className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
-        {FIELD_KEYS.map(k => <option key={k} value={k}>{FIELD_DEFS[k].label}</option>)}
+        {keys.map(k => <option key={k} value={k}>{defs[k].label}</option>)}
       </select>
       <select value={rule.op} onChange={e => onChange({ ...rule, op: e.target.value })}
         className="px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
@@ -78,13 +114,19 @@ function RuleRow({ rule, opts, onChange, onRemove }) {
 }
 
 function Editor({ initial, opts, onSaved, onCancel, onDeleted }) {
+  const defs = defsFor(opts)
   const [name, setName] = useState(initial?.name || '')
-  const [rules, setRules] = useState(initial?.definition?.rules?.length ? initial.definition.rules : [newRule()])
+  const [rules, setRules] = useState(initial?.definition?.rules?.length ? initial.definition.rules : [newRule(defs)])
   const [count, setCount] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [showAudience, setShowAudience] = useState(false)
+  const [audience, setAudience] = useState(null)
+  const [audienceLoading, setAudienceLoading] = useState(false)
+  const [detailId, setDetailId] = useState(null)
 
   const definition = { match: 'all', rules: rules.filter(r => String(r.value).trim() !== '') }
+  const defKey = JSON.stringify(rules)
 
   useEffect(() => {
     let live = true
@@ -92,7 +134,20 @@ function Editor({ initial, opts, onSaved, onCancel, onDeleted }) {
       api.commsPreviewSegment(definition).then(r => { if (live) setCount(r.count) }).catch(() => { if (live) setCount(null) })
     }, 350)
     return () => { live = false; clearTimeout(t) }
-  }, [JSON.stringify(rules)]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [defKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the audience preview is open, resolve the full matching set (debounced).
+  useEffect(() => {
+    if (!showAudience) return
+    let live = true
+    setAudienceLoading(true)
+    const t = setTimeout(() => {
+      api.commsResolveSegment(definition)
+        .then(r => { if (live) { setAudience(r); setAudienceLoading(false) } })
+        .catch(() => { if (live) { setAudience({ count: 0, contacts: [] }); setAudienceLoading(false) } })
+    }, 400)
+    return () => { live = false; clearTimeout(t) }
+  }, [defKey, showAudience]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (!name.trim()) { setErr('Give the segment a name.'); return }
@@ -119,20 +174,28 @@ function Editor({ initial, opts, onSaved, onCancel, onDeleted }) {
       <div className="text-pb-faintest text-xs mb-1">Match contacts where ALL of these are true:</div>
       <div className="mb-2">
         {rules.map((r, i) => (
-          <RuleRow key={i} rule={r} opts={opts}
+          <RuleRow key={i} rule={r} defs={defs} opts={opts}
             onChange={nr => setRules(rs => rs.map((x, j) => j === i ? nr : x))}
             onRemove={() => setRules(rs => rs.length > 1 ? rs.filter((_, j) => j !== i) : rs)} />
         ))}
       </div>
-      <button onClick={() => setRules(rs => [...rs, newRule()])}
+      <button onClick={() => setRules(rs => [...rs, newRule(defs)])}
         className="text-xs text-pb-faint hover:text-pb-text mb-3">+ Add condition</button>
 
       <div className="flex items-center justify-between gap-3 pt-3 pb-hairline-t">
-        <div className="text-sm text-pb-text">
-          {count == null ? <span className="text-pb-faint">Counting…</span>
-            : <><span className="font-medium" style={{ color: 'var(--pb-accent)' }}>{count}</span> matching contact{count === 1 ? '' : 's'}</>}
+        <div className="text-sm text-pb-text flex items-center gap-3">
+          <span>
+            {count == null ? <span className="text-pb-faint">Counting…</span>
+              : <><span className="font-medium" style={{ color: 'var(--pb-accent)' }}>{count}</span> matching contact{count === 1 ? '' : 's'}</>}
+          </span>
+          <button onClick={() => setShowAudience(s => !s)} className="text-xs text-pb-faint hover:text-pb-accent">
+            {showAudience ? 'Hide audience' : 'Preview audience'}
+          </button>
         </div>
         <div className="flex items-center gap-2">
+          {initial?.id && (
+            <a href={api.commsSegmentExportCsvUrl(initial.id)} className="text-sm text-pb-faint hover:text-pb-text px-2" title="Export this segment's current audience to CSV">Export CSV</a>
+          )}
           {initial?.id && <button onClick={remove} disabled={busy} className="text-sm text-pb-faint hover:text-pb-red px-2">Delete</button>}
           <button onClick={onCancel} className="text-sm text-pb-faint hover:text-pb-text px-2">Cancel</button>
           <button onClick={save} disabled={busy}
@@ -142,13 +205,23 @@ function Editor({ initial, opts, onSaved, onCancel, onDeleted }) {
         </div>
       </div>
       {err && <div className="text-pb-red text-xs mt-2">{err}</div>}
+
+      {showAudience && (
+        <div className="mt-4 pt-4 pb-hairline-t">
+          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mb-3">Audience preview</div>
+          <AudiencePanel contacts={audience?.contacts || []} total={audience?.count}
+            loading={audienceLoading} csvName={name || 'segment'} onRowClick={setDetailId} />
+        </div>
+      )}
+
+      {detailId && <ContactDetailModal id={detailId} onClose={() => setDetailId(null)} onSaved={() => {}} />}
     </div>
   )
 }
 
 export default function CommsSegments() {
   const [segments, setSegments] = useState(null)
-  const [opts, setOpts] = useState({ roles: [], genders: [], teams: [] })
+  const [opts, setOpts] = useState({ context: 'club', roles: [], genders: [], teams: [] })
   const [editing, setEditing] = useState(null)
   const [error, setError] = useState('')
 
@@ -162,6 +235,8 @@ export default function CommsSegments() {
 
   const onSaved = () => { setEditing(null); load() }
   const onDeleted = () => { setEditing(null); load() }
+
+  const isDirectory = opts.context === 'directory'
 
   return (
     <BetterCommsLayout
@@ -177,8 +252,9 @@ export default function CommsSegments() {
 
       <div className="text-pb-faintest text-sm mb-4 max-w-2xl">
         A segment is a saved filter that re-runs every time you send, so it always reflects who fits today.
-        Mix contact tags with this season's cricket data, like "played at least 5 matches", "in the women's squad",
-        or "available for an upcoming game".
+        {isDirectory
+          ? ' Target prospect clubs by what they\'ve done, like "emailed but not opened", "sent a Contact Us enquiry", or "not a customer yet".'
+          : ' Mix contact tags with this season\'s cricket data, like "played at least 5 matches", "in the women\'s squad", or "available for an upcoming game".'}
       </div>
 
       {editing ? (
@@ -188,7 +264,9 @@ export default function CommsSegments() {
       ) : segments.length === 0 ? (
         <div className="pb-card p-8 text-center">
           <div className="text-pb-text font-medium mb-1">No segments yet</div>
-          <div className="text-pb-faint text-sm mb-4">Build a reusable audience from tags and cricket stats.</div>
+          <div className="text-pb-faint text-sm mb-4">
+            {isDirectory ? 'Build a reusable audience from directory activity and club status.' : 'Build a reusable audience from tags and cricket stats.'}
+          </div>
           <button onClick={() => setEditing({})}
             className="px-4 py-2 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
             + New segment
@@ -197,14 +275,17 @@ export default function CommsSegments() {
       ) : (
         <div className="pb-card overflow-hidden">
           {segments.map((s, i) => (
-            <button key={s.id} onClick={() => setEditing(s)}
-              className={`w-full text-left flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <div className="min-w-0">
+            <div key={s.id}
+              className={`flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
+              <button onClick={() => setEditing(s)} className="min-w-0 text-left flex-1">
                 <div className="text-pb-text text-sm truncate">{s.name}</div>
                 <div className="text-pb-faintest text-xs mt-0.5">{(s.definition?.rules || []).length} condition{(s.definition?.rules || []).length === 1 ? '' : 's'}</div>
+              </button>
+              <div className="flex items-center gap-3 shrink-0">
+                <a href={api.commsSegmentExportCsvUrl(s.id)} className="text-pb-faint text-xs hover:text-pb-text" title="Export this segment's current audience to CSV">Export CSV</a>
+                <button onClick={() => setEditing(s)} className="text-pb-faint text-xs hover:text-pb-text">Edit →</button>
               </div>
-              <span className="text-pb-faint text-xs shrink-0">Edit →</span>
-            </button>
+            </div>
           ))}
         </div>
       )}

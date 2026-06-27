@@ -1509,19 +1509,88 @@ async def preview_segment(
     }
 
 
+@router.post("/segments/resolve")
+async def resolve_segment(
+    data: SegmentIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The full matching audience for a definition, enriched with each contact's
+    Clubs Directory fields — powers the searchable/filterable audience preview and
+    its CSV export. Capped for safety; the count is exact."""
+    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
+    rows = contacts[:5000]
+    mc_map = await _mc_map(db, rows)
+    return {
+        "count": len(contacts),
+        "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
+    }
+
+
+@router.get("/segments/{segment_id}/export.csv")
+async def export_segment_csv(
+    segment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a saved segment's current audience as CSV — same columns as the
+    Lists export. The segment re-evaluates on each download, so it always reflects
+    who fits today."""
+    seg = await _segment_or_404(db, club, segment_id)
+    contacts = await comms_segments.resolve_contacts(db, club, seg.definition or {})
+    mc_map = await _mc_map(db, contacts)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Name", "Email", "Club", "Association", "UTM code", "State",
+                "Website", "Subscribed"])
+    for c in contacts:
+        d = _dir_fields(c, mc_map.get(c.marketing_club_id))
+        w.writerow([
+            c.name or "", c.email or "", d["club"], d["association"],
+            d["utm_code"], d["state"], d["website"],
+            "yes" if c.subscribed else "no",
+        ])
+    fname = f"{_csv_safe_filename(seg.name)}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.get("/segments/options")
 async def segment_options(
     _: User = _require,
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Option lists for the segment rule builder, so role / squad dropdowns use the
-    club's real values instead of guessed vocab."""
+    """Option lists for the segment rule builder, so dropdowns use real values
+    instead of guessed vocab. In the BetterCricket Clubs Directory context this
+    returns the directory option lists (states, associations) and flags the
+    builder to offer the directory field set instead of the club/player one."""
+    if org_is_outreach(club):
+        states = [s for (s,) in (await db.execute(
+            select(MarketingClub.state)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id, MarketingClub.state.isnot(None))
+            .distinct().order_by(MarketingClub.state)
+        )).all() if s]
+        assocs = [a for (a,) in (await db.execute(
+            select(MarketingClub.association_name)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id, MarketingClub.association_name.isnot(None))
+            .distinct().order_by(MarketingClub.association_name)
+        )).all() if a]
+        return {"context": "directory", "states": states, "associations": assocs}
+
     teams = (await db.execute(
         select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))
         .order_by(Team.name)
     )).scalars().all()
     return {
+        "context": "club",
         "roles": ["Batter", "Bowler", "All Rounder", "Wicketkeeper", "Wicketkeeper-Batter"],
         "genders": [["male", "Male"], ["female", "Female"]],
         "teams": [{"id": str(t.id), "name": t.name} for t in teams],
