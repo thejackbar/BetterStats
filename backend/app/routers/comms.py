@@ -269,8 +269,8 @@ def _footer_block(footer: str, unsub_url: str, club_name: str, marketing: bool) 
     sentence = _unsub_sentence_html(club_name, unsub_url, marketing)
     return (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="margin-top:24px;"><tr><td align="center" '
-        'style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
+        'style="margin-top:8px;"><tr><td align="center" '
+        'style="padding:14px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
         'font-size:12px;line-height:1.5;font-family:inherit;text-align:center;">'
         f'{prefix}{sentence}</td></tr></table>'
     )
