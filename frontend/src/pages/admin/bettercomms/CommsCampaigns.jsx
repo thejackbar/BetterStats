@@ -87,6 +87,11 @@ export default function CommsCampaigns() {
                 className={`w-full text-left flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
                 <div className="min-w-0">
                   <div className="text-pb-text text-sm truncate">{c.subject || <span className="text-pb-faintest italic">(no subject)</span>}</div>
+                  {c.utm_campaign && (
+                    <div className="text-[11px] font-mono mt-0.5 truncate" title={`utm_campaign=${c.utm_campaign}`}>
+                      <span className="text-pb-faintest">utm_campaign=</span><span className="text-pb-faint">{c.utm_campaign}</span>
+                    </div>
+                  )}
                   <div className="text-pb-faintest text-xs mt-0.5">
                     {c.status === 'sent' && c.sent_at ? `Sent ${fmtDate(c.sent_at)}` : `Created ${fmtDate(c.created_at)}`}
                     {(c.status === 'sent' || c.status === 'error') && st.recipients != null && (

@@ -83,10 +83,20 @@ def _contact_out(c: CommsContact) -> dict:
     }
 
 
+def _utm_campaign(c: CommsCampaign) -> str:
+    """A URL-safe campaign identifier for UTM tracking, derived from the subject
+    plus a short slice of the id. Readable enough to recognise the email by, and
+    unique even when two emails share a subject. Used both for display in the
+    Emails list and (later) for tagging links in the sent email."""
+    base = re.sub(r"[^a-z0-9]+", "-", (c.subject or "").strip().lower()).strip("-") or "email"
+    return f"{base}-{str(c.id)[:8]}"
+
+
 def _campaign_out(c: CommsCampaign) -> dict:
     return {
         "id": str(c.id),
         "subject": c.subject,
+        "utm_campaign": _utm_campaign(c),
         "preheader": c.preheader,
         "body_html": c.body_html,
         "audience": c.audience or {},
