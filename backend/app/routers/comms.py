@@ -203,11 +203,18 @@ def _is_full_doc(html: str) -> bool:
     return "<html" in low or "<body" in low
 
 
-def _apply_utm(html: str, utm: dict) -> str:
+def _apply_utm(html: str, utm: dict, utm_code: Optional[str] = None) -> str:
     """Append the campaign's UTM tags to every outbound http(s) link, leaving the
     unsubscribe link, mailto/tel, anchors and already-tagged links alone. Only the
-    BetterCricket marketing-outreach org uses this (see _render_parts)."""
+    BetterCricket marketing-outreach org uses this (see _render_parts).
+
+    When ``utm_code`` is given (the recipient club's per-club code) it is added as
+    ``utm_id`` so a later anonymous site visit from this link can be tied back to
+    the club — that's what powers the "visited the pricing page" segment."""
     params = [(k, str(v).strip()) for k in _UTM_KEYS if (v := (utm or {}).get(k)) and str(v).strip()]
+    code = str(utm_code or "").strip()
+    if code:
+        params.append(("utm_id", code))
     if not params:
         return html
     qs = "&".join(f"{k}={quote(v, safe='')}" for k, v in params)
@@ -426,16 +433,17 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     club_name = ctx.get("club") or org.name or ""
     unsub_text = _unsub_sentence_text(club_name, unsub_url, apply_utm)
     text_tail = f"\n\n—\n{footer}\n{unsub_text}" if footer else f"\n\n—\n{unsub_text}"
+    link_code = str(ctx.get("utm_code") or "").strip() if apply_utm else ""
     if _is_full_doc(body_html):
         merged = _merge(body_html or "", ctx)
         if apply_utm:
-            merged = _apply_utm(merged, utm)
+            merged = _apply_utm(merged, utm, link_code)
         html = _inject_footer(merged, footer, unsub_url, club_name, apply_utm)
         text = _html_to_text(merged) + text_tail
     else:
         inner = _merge(_body_to_html(body_html or ""), ctx)
         if apply_utm:
-            inner = _apply_utm(inner, utm)
+            inner = _apply_utm(inner, utm, link_code)
         html = _wrap_html(org, inner, footer, unsub_url, club_name)
         text = _html_to_text(inner) + text_tail
     return subject, html, text

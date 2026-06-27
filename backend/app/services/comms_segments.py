@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, func, exists, or_
+from sqlalchemy import select, func, exists, or_, text
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,10 +45,34 @@ SPECIAL_FIELDS = {"availability"}
 # the club sits (its state, association, our outreach pipeline status, and whether
 # the club is already a customer). All read data we already hold — no new tracking.
 DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
-DIR_CLUB_FIELDS = {"club_state", "association", "directory_status", "customer_status"}
+DIR_CLUB_FIELDS = {"club_state", "association", "directory_status", "customer_status", "visited_page"}
 DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS
-# Directory fields that need the linked MarketingClub joined in.
-_DIR_MC_FIELDS = {"club_state", "association", "directory_status", "customer_status"}
+# Directory fields that need the linked MarketingClub joined in (visited_page
+# correlates a usage_events row on marketing_clubs.utm_code).
+_DIR_MC_FIELDS = {"club_state", "association", "directory_status", "customer_status", "visited_page"}
+
+# Tracked public pages a prospect can be matched on. A BetterCricket outreach
+# email tags its links with the club's utm_code as ?utm_id=…, captured into
+# usage_events.utm_id, so a visit maps back to the club. Value → path filter;
+# "any" matches a visit to any page.
+_VISIT_PATH_SQL = {
+    "pricing": "split_part(ue.path, '?', 1) ~* '^/pricing(/|$)'",
+    "betteriq": "split_part(ue.path, '?', 1) ~* '^/modules/betteriq(/|$)'",
+}
+
+
+def _visited_clause(val):
+    """Correlated EXISTS over usage_events for a visit attributable to this
+    contact's club. Safe SQL: the page filter comes from a fixed map and the club
+    code is referenced as a column, never interpolated."""
+    where = ["ue.utm_id = marketing_clubs.utm_code", "ue.utm_id IS NOT NULL",
+             "ue.event_type = 'page_view'"]
+    if val and val != "any":
+        frag = _VISIT_PATH_SQL.get(val)
+        if not frag:
+            return None
+        where.append(frag)
+    return text("EXISTS (SELECT 1 FROM usage_events ue WHERE " + " AND ".join(where) + ")")
 
 ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
 
@@ -144,6 +168,8 @@ def _directory_condition(rule: dict, cust):
         return MarketingClub.association_name == str(val) if val else None
     if field == "directory_status":
         return MarketingClub.status == str(val) if val else None
+    if field == "visited_page":
+        return _visited_clause(str(val)) if val else None
     if field == "customer_status":
         if val == "none":
             return MarketingClub.existing_org_id.is_(None)

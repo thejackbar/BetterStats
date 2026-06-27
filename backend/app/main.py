@@ -665,6 +665,11 @@ async def lifespan(app: FastAPI):
             ("utm_medium", "TEXT"),
             ("utm_campaign", "TEXT"),
             ("utm_content", "TEXT"),
+            # utm_id carries a BetterCricket outreach email's per-club code (the
+            # marketing_clubs.utm_code), so an anonymous visit from that email's
+            # link can be tied back to the club for behavioural segments
+            # ("visited the pricing page").
+            ("utm_id", "TEXT"),
             ("click_id", "TEXT"),
             ("traffic_source", "TEXT"),
             ("landing_path", "TEXT"),
@@ -675,6 +680,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_created "
             "ON usage_events(visitor_id, created_at DESC) WHERE visitor_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_utm_id "
+            "ON usage_events(utm_id) WHERE utm_id IS NOT NULL"
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_usage_events_source "

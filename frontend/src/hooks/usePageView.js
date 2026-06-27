@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { getVisitorId, getAttribution } from '../lib/visitor'
+import { getVisitorId, getAttribution, getLinkCode } from '../lib/visitor'
 
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -35,6 +35,7 @@ export function usePageView() {
       utm_medium: attr.utm_medium || null,
       utm_campaign: attr.utm_campaign || null,
       utm_content: attr.utm_content || null,
+      utm_id: getLinkCode(),
       click_id: attr.click_id || null,
       click_source: attr.click_source || null,
       landing_referrer: attr.landing_referrer || null,

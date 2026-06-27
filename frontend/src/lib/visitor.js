@@ -13,6 +13,7 @@
 
 const VISITOR_KEY = 'bs_visitor_id'
 const ATTR_KEY = 'bs_attr'
+const LINK_CODE_KEY = 'bs_link_code'
 
 function uuid() {
   try {
@@ -82,6 +83,28 @@ function parseAcquisition() {
     click_id: clickId,
     click_source: clickSource,
     has_signal: !!(utmSource || clickId),
+  }
+}
+
+// The per-club outreach code (utm_id) from a BetterCricket email link, captured
+// for the rest of the browser session. A marketing email tags its links with the
+// recipient club's utm_code as ?utm_id=…; we remember it so every page the
+// visitor then browses (not just the one they landed on) is attributable to that
+// club. Session-scoped on purpose: a later organic visit shouldn't inherit it.
+export function getLinkCode() {
+  let current = null
+  try {
+    current = new URLSearchParams(window.location.search || '').get('utm_id')
+  } catch (_) { /* ignore */ }
+  if (current) current = current.slice(0, 200)
+  try {
+    if (current) {
+      sessionStorage.setItem(LINK_CODE_KEY, current)
+      return current
+    }
+    return sessionStorage.getItem(LINK_CODE_KEY) || null
+  } catch (_) {
+    return current
   }
 }
 

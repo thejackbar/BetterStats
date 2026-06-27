@@ -47,6 +47,10 @@ const DIRECTORY_FIELD_DEFS = {
   opened: { label: 'Opened an email', input: 'select', ops: IS_OP, options: YESNO },
   clicked: { label: 'Clicked an email link', input: 'select', ops: IS_OP, options: YESNO },
   enquired: { label: 'Sent a Contact Us enquiry', input: 'select', ops: IS_OP, options: YESNO },
+  visited_page: {
+    label: 'Visited a page', input: 'select', ops: IS_OP,
+    options: [['pricing', 'the pricing page'], ['betteriq', 'the BetterIQ page'], ['any', 'any page']],
+  },
   customer_status: {
     label: 'Customer status', input: 'select', ops: IS_OP,
     options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],

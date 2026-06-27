@@ -330,6 +330,7 @@ class PageViewIn(BaseModel):
     utm_medium: Optional[str] = None
     utm_campaign: Optional[str] = None
     utm_content: Optional[str] = None
+    utm_id: Optional[str] = None
     click_id: Optional[str] = None
     click_source: Optional[str] = None
     landing_referrer: Optional[str] = None
@@ -357,6 +358,7 @@ async def post_event(payload: PageViewIn, request: Request):
         utm_medium=payload.utm_medium,
         utm_campaign=payload.utm_campaign,
         utm_content=payload.utm_content,
+        utm_id=payload.utm_id,
         click_id=payload.click_id,
         click_source=payload.click_source,
         landing_referrer=payload.landing_referrer,
