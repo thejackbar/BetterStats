@@ -235,7 +235,12 @@ function ListDetail({ list, lists, onChanged }) {
 
   return (
     <div className="pb-card p-4">
-      <div className="text-sm text-pb-text font-medium mb-3">{list.name}</div>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="text-sm text-pb-text font-medium">{list.name}</div>
+        <a href={api.commsListExportCsvUrl(list.id)}
+          className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent shrink-0"
+          title="Export this list to CSV">Export CSV</a>
+      </div>
 
       {/* Search + filters */}
       <input value={query} onChange={e => setQuery(e.target.value)}
@@ -353,6 +358,7 @@ function ListRow({ l, selected, onToggle, onDelete, onRenamed, first }) {
       {!editing && (
         <div className="flex items-center gap-3 shrink-0">
           <button onClick={() => setEditing(true)} className="text-pb-faint text-xs hover:text-pb-text">Rename</button>
+          <a href={api.commsListExportCsvUrl(l.id)} className="text-pb-faint text-xs hover:text-pb-text" title="Export this list to CSV">Export CSV</a>
           <button onClick={() => onToggle(l)} className="text-pb-faint text-xs hover:text-pb-text">{selected ? 'Close' : 'Manage'}</button>
           <button onClick={() => onDelete(l)} className="text-pb-faint text-xs hover:text-pb-red">Delete</button>
         </div>

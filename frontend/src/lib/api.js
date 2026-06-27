@@ -1558,6 +1558,7 @@ export const api = {
     request(`/club-admin/comms/lists/${id}/members/remove`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
   commsCopyListMembers: (contactIds, listIds) =>
     request('/club-admin/comms/lists/members/copy', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds, list_ids: listIds }) }),
+  commsListExportCsvUrl: (id) => `${BASE}/club-admin/comms/lists/${id}/export.csv`,
   // Email templates (Phase 3).
   commsListTemplates: () => request('/club-admin/comms/templates'),
   commsGetTemplate: (id) => request(`/club-admin/comms/templates/${id}`),

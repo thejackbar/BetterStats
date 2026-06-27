@@ -20,7 +20,9 @@ no login, and every send skips unsubscribed / bounced contacts.
 from __future__ import annotations
 
 import asyncio
+import csv
 import html as html_lib
+import io
 import logging
 import re
 import uuid
@@ -28,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_, text, update, exists
@@ -1635,6 +1637,49 @@ async def list_members(
     )).scalars().all()
     mc_map = await _mc_map(db, rows)
     return [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows]
+
+
+def _csv_safe_filename(name: str) -> str:
+    """A tame ASCII filename for the Content-Disposition header."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "list").strip()).strip("-")
+    return (slug or "list").lower()
+
+
+@router.get("/lists/{list_id}/export.csv")
+async def export_list_csv(
+    list_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a list's contacts as CSV — one row per member, with the contact's
+    own fields plus the Clubs Directory fields it resolves to."""
+    lst = await _list_or_404(db, club, list_id)
+    rows = (await db.execute(
+        select(CommsContact)
+        .join(CommsListMember, CommsListMember.contact_id == CommsContact.id)
+        .where(CommsListMember.list_id == lst.id)
+        .order_by(CommsContact.name.nullslast(), CommsContact.email)
+    )).scalars().all()
+    mc_map = await _mc_map(db, rows)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Name", "Email", "Club", "Association", "UTM code", "State",
+                "Website", "Subscribed"])
+    for c in rows:
+        d = _dir_fields(c, mc_map.get(c.marketing_club_id))
+        w.writerow([
+            c.name or "", c.email or "", d["club"], d["association"],
+            d["utm_code"], d["state"], d["website"],
+            "yes" if c.subscribed else "no",
+        ])
+    fname = f"{_csv_safe_filename(lst.name)}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 class ListMembersIn(BaseModel):
