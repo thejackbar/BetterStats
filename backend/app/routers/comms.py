@@ -78,7 +78,33 @@ def _first_name(name: Optional[str], email: str) -> str:
     return (email.split("@", 1)[0] or "there").replace(".", " ").split()[0].title()
 
 
-def _contact_out(c: CommsContact) -> dict:
+def _dir_fields(c: CommsContact, mc: "Optional[MarketingClub]") -> dict:
+    """The five Clubs Directory fields resolved for one contact: a per-contact
+    merge_vars override wins, then the linked directory club. Blank for an ordinary
+    (non-directory) contact. Used so the Lists editor can search and filter on
+    club / association / utm_code / state / website."""
+    mv = _marketing_vars(mc)
+    ov = c.merge_vars or {}
+
+    def pick(key):
+        v = ov.get(key)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+        return mv.get(key, "") or ""
+
+    return {k: pick(k) for k in ("club", "association", "utm_code", "state", "website")}
+
+
+async def _mc_map(db: AsyncSession, contacts) -> dict:
+    """Batch-load the MarketingClub for a set of contacts, keyed by id."""
+    ids = {c.marketing_club_id for c in contacts if c.marketing_club_id}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(MarketingClub).where(MarketingClub.id.in_(ids)))).scalars().all()
+    return {m.id: m for m in rows}
+
+
+def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None) -> dict:
     return {
         "id": str(c.id),
         "email": c.email,
@@ -88,6 +114,7 @@ def _contact_out(c: CommsContact) -> dict:
         "bounced": c.bounced,
         "excluded": c.excluded,
         "player_id": str(c.player_id) if c.player_id else None,
+        **_dir_fields(c, mc),
     }
 
 
@@ -522,13 +549,22 @@ async def list_contacts(
     stmt = select(CommsContact).where(CommsContact.organisation_id == club.id)
     if query.strip():
         like = f"%{query.strip().lower()}%"
-        stmt = stmt.where(or_(
+        # Match the contact's own fields plus its linked Clubs Directory fields
+        # (club / association / utm_code / state / website) — an OR across all of
+        # them, so a search finds a contact by any one.
+        stmt = stmt.outerjoin(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id).where(or_(
             func.lower(CommsContact.email).like(like),
             func.lower(func.coalesce(CommsContact.name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.association_name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.utm_code, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.state, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.website_url, "")).like(like),
         ))
     if subscribed is not None:
         stmt = stmt.where(CommsContact.subscribed.is_(subscribed))
-    rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(2000))).scalars().all()
+    rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(5000))).scalars().all()
+    mc_map = await _mc_map(db, rows)
 
     counts = (await db.execute(
         select(
@@ -542,7 +578,7 @@ async def list_contacts(
         ).where(CommsContact.organisation_id == club.id)
     )).one()
     return {
-        "contacts": [_contact_out(c) for c in rows],
+        "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
         "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2],
                     "bounced": counts[3], "excluded": counts[4]},
     }
@@ -1597,7 +1633,8 @@ async def list_members(
         .where(CommsListMember.list_id == uuid.UUID(list_id))
         .order_by(CommsContact.email)
     )).scalars().all()
-    return [{"id": str(c.id), "email": c.email, "name": c.name} for c in rows]
+    mc_map = await _mc_map(db, rows)
+    return [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows]
 
 
 class ListMembersIn(BaseModel):
@@ -1651,6 +1688,83 @@ async def remove_list_member(
             CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
     await db.commit()
     return {"status": "ok", "count": await _list_count(db, lst.id)}
+
+
+def _uuid_set(raw_ids) -> set:
+    out = set()
+    for raw in (raw_ids or []):
+        try:
+            out.add(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+@router.post("/lists/{list_id}/members/remove")
+async def remove_list_members(
+    list_id: str,
+    data: ListMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove several contacts from a list in one call (group remove)."""
+    lst = await _list_or_404(db, club, list_id)
+    cids = _uuid_set(data.contact_ids)
+    removed = 0
+    if cids:
+        res = await db.execute(
+            CommsListMember.__table__.delete().where(
+                CommsListMember.list_id == lst.id,
+                CommsListMember.contact_id.in_(cids)))
+        removed = res.rowcount or 0
+        await db.commit()
+    return {"status": "ok", "removed": removed, "count": await _list_count(db, lst.id)}
+
+
+class CopyMembersIn(BaseModel):
+    contact_ids: list[str] = []
+    list_ids: list[str] = []
+
+
+@router.post("/lists/members/copy")
+async def copy_list_members(
+    data: CopyMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Copy a set of contacts into one or more target lists (group copy). Only the
+    club's own contacts and lists are touched; existing memberships are left alone."""
+    cids = _uuid_set(data.contact_ids)
+    target_ids = _uuid_set(data.list_ids)
+    if not cids or not target_ids:
+        return {"results": []}
+    # Keep only contacts that belong to this club.
+    valid_cids = set((await db.execute(
+        select(CommsContact.id).where(
+            CommsContact.organisation_id == club.id, CommsContact.id.in_(cids))
+    )).scalars().all())
+    results = []
+    for lid in target_ids:
+        lst = await db.get(CommsList, lid)
+        if not lst or lst.organisation_id != club.id:
+            continue
+        existing = set((await db.execute(
+            select(CommsListMember.contact_id).where(
+                CommsListMember.list_id == lst.id,
+                CommsListMember.contact_id.in_(valid_cids))
+        )).scalars().all())
+        added = 0
+        for cid in valid_cids:
+            if cid in existing:
+                continue
+            db.add(CommsListMember(list_id=lst.id, contact_id=cid))
+            added += 1
+        await db.commit()
+        results.append({"list_id": str(lst.id), "name": lst.name,
+                        "added": added, "count": await _list_count(db, lst.id)})
+    return {"results": results}
 
 
 # ─── Email templates (Phase 3) ───────────────────────────────────────────────
