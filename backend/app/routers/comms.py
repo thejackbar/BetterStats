@@ -264,7 +264,8 @@ def _footer_block(footer: str, unsub_url: str, club_name: str, marketing: bool) 
     template before </body>. Inherits the email's font so it adopts its style; the
     unsubscribe link can never be removed by the author (Spam Act 2003)."""
     safe_footer = html_lib.escape(footer).replace("\n", "<br>") if footer else ""
-    prefix = f"{safe_footer}<br>" if safe_footer else ""
+    # A blank line between the sender-id block and the unsubscribe sentence.
+    prefix = f"{safe_footer}<br><br>" if safe_footer else ""
     sentence = _unsub_sentence_html(club_name, unsub_url, marketing)
     return (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
@@ -299,7 +300,7 @@ def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str, club_
   <tr><td style="background:{accent};padding:18px 28px;">{logo}</td></tr>
   <tr><td style="padding:28px;color:#1f2937;font-size:15px;line-height:1.6;">{inner}</td></tr>
   <tr><td style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">
-    {safe_footer}<br>
+    {safe_footer}<br><br>
     {_unsub_sentence_html(club_name, unsub_url, org_is_outreach(org))}
   </td></tr>
 </table>
