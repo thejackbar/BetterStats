@@ -363,7 +363,7 @@ function ModulesTeaser() {
             </p>
           </div>
         </Reveal>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {MODULES_MARKETING.map((m, i) => (
             <Reveal key={m.slug} delay={(i % 4) * 70} className="h-full">
               <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">

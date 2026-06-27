@@ -212,6 +212,34 @@ export const MODULES_MARKETING = [
       { src: '/marketing/modules/betteriq-team-batting-analysis.jpg', caption: 'Team batting analysis' },
     ],
   },
+  {
+    slug: 'betterfantasy',
+    key: 'fantasy',
+    name: 'BetterFantasy',
+    tier: TIER.BEST,
+    icon: '★',
+    accent: BRAND.fantasy.accent,
+    logo: BRAND.fantasy.logo,
+    audience: 'For players & supporters',
+    tagline: 'Run a club fantasy league off your own match data.',
+    summary:
+      'BetterFantasy turns your club’s real results into a season-long fantasy competition. Members draft a squad from your actual players, earn points from real batting, bowling and fielding, and climb a live leaderboard, all scored automatically from the data you already sync.',
+    highlights: [
+      'Draft a squad from your real players',
+      'Points from real match performances',
+      'A live, season-long leaderboard',
+      'Scored automatically from your data',
+    ],
+    features: [
+      { title: 'Draft your dream XI', desc: 'Members pick a fantasy squad from your club’s actual players, with a budget and positions to balance.' },
+      { title: 'Real-data scoring', desc: 'Fantasy points come straight from real batting, bowling and fielding in your synced scorecards. No manual scoring.' },
+      { title: 'Live leaderboard', desc: 'A season-long ladder that updates after every round, with weekly winners and biggest movers.' },
+      { title: 'Mini-leagues', desc: 'Run private leagues for teams, age groups or a group of mates, alongside the club-wide competition.' },
+      { title: 'Transfers & captains', desc: 'Weekly transfers and a captain pick that doubles points, to keep members coming back each round.' },
+      { title: 'Built on your stats', desc: 'Nothing extra to score. If a game is in BetterStats, it counts in BetterFantasy.' },
+    ],
+    note: 'BetterFantasy reads the same synced scorecards as the rest of Better Cricket, so there is nothing extra to enter.',
+  },
 ]
 
 export function moduleBySlug(slug) {

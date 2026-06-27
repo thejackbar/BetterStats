@@ -27,10 +27,11 @@ export const PRICED_MODULES = [
   { key: 'socials', name: 'BetterSocials', price: 100, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
   { key: 'admin',   name: 'BetterAdmin',   price: 100, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and merch (coming soon)' },
   { key: 'iq',      name: 'BetterIQ',      price: 200, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
+  { key: 'fantasy', name: 'BetterFantasy', price: 100, icon: '★', accent: BRAND.fantasy.accent, logo: BRAND.fantasy.logo, blurb: 'A season-long club fantasy league off your real match data' },
 ]
 
-// Bundle discount on the whole price: pick any 2 or 3 modules for 5% off, all 4
-// for 10%. (2 or 3 modules take the 5% band; the full set takes 10%.)
+// Bundle discount on the whole price: pick any 2 or 3 modules for 5% off, four
+// or more for 10%. (2 to 3 modules take the 5% band; 4+ takes 10%.)
 export function discountRate(moduleCount) {
   if (moduleCount >= 4) return 0.10
   if (moduleCount >= 2) return 0.05
@@ -48,7 +49,7 @@ export function priceFor(selectedKeys = []) {
 }
 
 // The everything price (Core + every module), for headline copy.
-export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 810
+export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 900
 
 // ── Competitor stack ─────────────────────────────────────────────────────────
 // What a club would otherwise pay to match Better Cricket's scope, using each
@@ -65,7 +66,7 @@ export const COMPETITOR_STACK = [
 ]
 
 export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1904
-export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 1094
+export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 1004
 
 // Better Cricket loads your full history at no extra cost. The closest cricket
 // rival (ClubStats) charges a one-off historical-import fee on top of the

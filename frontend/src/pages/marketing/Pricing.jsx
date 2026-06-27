@@ -83,12 +83,12 @@ function PriceList() {
             <p className="pill-neutral inline-flex mb-5">The building blocks</p>
             <h2 className="font-display font-bold text-3xl md:text-5xl mb-3 tracking-tight">One Core, then your modules.</h2>
             <p className="text-pb-dim max-w-xl mx-auto">
-              Annual prices, AUD. Add any two modules for 5% off, or all four for 10% (the full set comes to ${ALL_IN}).
+              Annual prices, AUD. Add any two modules for 5% off, or the full set for 10% (everything comes to ${ALL_IN}).
             </p>
           </div>
         </Reveal>
         <Reveal>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {items.map((m) => (
               <div key={m.key} className={`surface p-5 text-center ${m.key === 'core' ? 'border-accent/40' : ''}`}>
                 {m.logo
@@ -184,7 +184,7 @@ function ReplacesStack() {
                   <span className="text-sm text-pb-faint">/ year</span>
                 </div>
                 <p className="text-sm text-pb-dim mt-3 max-w-xs mx-auto">
-                  BetterStats and all four modules, one login, fed by your own cricket data. Your full history loaded, with no import fee and no retyping.
+                  BetterStats and every module, one login, fed by your own cricket data. Your full history loaded, with no import fee and no retyping.
                 </p>
               </div>
               <div className="mt-4 rounded-xl bg-accent/10 border border-accent/30 px-5 py-4 text-center">
@@ -209,7 +209,7 @@ function ReplacesStack() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
-    { q: 'How much does it cost?', a: "BetterStats is $400 a year and includes your public stats site. BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or all four for 10%, which brings BetterStats plus every module to $810 a year." },
+    { q: 'How much does it cost?', a: "BetterStats is $400 a year and includes your public stats site. BetterSelect, BetterSocials, BetterAdmin and BetterFantasy are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or the full set for 10%, which brings BetterStats plus every module to $900 a year." },
     { q: 'Does the price change based on club size?', a: "No. Every price is a flat rate per club. One team or fifty teams, juniors and seniors, men's and women's, the price is the same. There's no per-team, per-player or per-grade pricing." },
     { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
     { q: 'Monthly or annual?', a: "Better Cricket is an annual licence, billed once a year." },
