@@ -1353,6 +1353,8 @@ _RESOLVED_VISITS = (
     "     WHERE a.utm_value = ue.utm_id AND a.marketing_club_id IS NOT NULL LIMIT 1), "
     "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
     "     WHERE a.utm_value = ue.utm_source AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+    f"  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+    f"     WHERE a.utm_value = {_PATH_CODE} AND a.marketing_club_id IS NOT NULL LIMIT 1), "
     "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = ue.utm_id LIMIT 1), "
     "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = ue.utm_source LIMIT 1), "
     f"  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = {_PATH_CODE} "
@@ -1375,9 +1377,12 @@ def _visit_exists_sql(mc: str = "marketing_clubs") -> str:
         "                                    AND ua_i.marketing_club_id IS NOT NULL "
         "LEFT JOIN marketing_utm_aliases ua_s ON ua_s.utm_value = ue.utm_source "
         "                                    AND ua_s.marketing_club_id IS NOT NULL "
+        f"LEFT JOIN marketing_utm_aliases ua_p ON ua_p.utm_value = {_PATH_CODE} "
+        "                                    AND ua_p.marketing_club_id IS NOT NULL "
         "WHERE ue.event_type = 'page_view' AND ("
         f"ue.utm_id = {mc}.utm_code OR ue.utm_source = {mc}.utm_code "
         f"OR ua_i.marketing_club_id = {mc}.id OR ua_s.marketing_club_id = {mc}.id "
+        f"OR ua_p.marketing_club_id = {mc}.id "
         f"OR ({_PATH_CODE} <> '' AND {_PATH_CODE} = {mc}.utm_code) "
         f"OR ({_PATH_CODE} <> '' AND EXISTS (SELECT 1 FROM organisations o "
         f"     WHERE o.id = {mc}.existing_org_id AND o.slug = {_PATH_CODE}))))"
@@ -1449,21 +1454,34 @@ async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> 
 
 
 async def list_utm_values(session: AsyncSession) -> list:
-    """Every raw UTM value seen on a site visit (from utm_source or utm_id), with
-    its view count and how it currently resolves: 'auto' (equals a club's
-    utm_code), 'mapped' (a manual alias → club), 'ignored' (alias marked not-a-
-    club) or 'unmatched'. Drives the manual UTM-matching panel."""
+    """Every value a visit can be attributed by — utm_source, utm_id, or a
+    club-looking page slug it landed on — with its view count, where it appeared
+    (``sources``) and how it currently resolves: 'auto' (equals a club's utm_code
+    or an onboarded club's public slug), 'mapped' (a manual alias → club),
+    'ignored' (alias marked not-a-club) or 'unmatched'. Drives the manual
+    UTM-matching panel, so a slug like 'willetton-cricket-club' that matches no
+    club can be mapped to the right one by hand."""
+    seg = "split_part(split_part(ue.path, '?', 1), '/', 2)"
     rows = (await session.execute(text(
-        "SELECT val, SUM(n) AS views FROM ("
-        "  SELECT ue.utm_source AS val, COUNT(*) n FROM usage_events ue "
+        "SELECT val, source, SUM(n) AS views FROM ("
+        "  SELECT ue.utm_source AS val, 'utm' AS source, COUNT(*) n FROM usage_events ue "
         "  WHERE ue.event_type='page_view' AND ue.utm_source IS NOT NULL "
         "  AND ue.utm_source <> '' GROUP BY 1 "
         "  UNION ALL "
-        "  SELECT ue.utm_id AS val, COUNT(*) n FROM usage_events ue "
+        "  SELECT ue.utm_id AS val, 'utm' AS source, COUNT(*) n FROM usage_events ue "
         "  WHERE ue.event_type='page_view' AND ue.utm_id IS NOT NULL "
         "  AND ue.utm_id <> '' GROUP BY 1 "
-        ") t GROUP BY val ORDER BY views DESC LIMIT 500"))).all()
-    values = [r.val for r in rows]
+        "  UNION ALL "
+        f"  SELECT {seg} AS val, 'path' AS source, COUNT(*) n FROM usage_events ue "
+        f"  WHERE ue.event_type='page_view' AND {seg} ~* 'cricket|club' GROUP BY 1 "
+        ") t GROUP BY val, source"))).all()
+    # Collapse to one row per value, summing views and collecting the sources.
+    by_val: dict = {}
+    for r in rows:
+        e = by_val.setdefault(r.val, {"views": 0, "sources": set()})
+        e["views"] += int(r.views or 0)
+        e["sources"].add(r.source)
+    values = list(by_val.keys())
     if not values:
         return []
     aliases = {a.utm_value: a for a in (await session.execute(text(
@@ -1471,24 +1489,30 @@ async def list_utm_values(session: AsyncSession) -> list:
         "FROM marketing_utm_aliases a "
         "LEFT JOIN marketing_clubs mc ON mc.id = a.marketing_club_id "
         "WHERE a.utm_value = ANY(:vals)"), {"vals": values})).all()}
+    # Auto matches: a value equals a club's utm_code OR an onboarded club's slug.
     direct = {d.utm_code: d for d in (await session.execute(
         select(MarketingClub.utm_code, MarketingClub.id, MarketingClub.name)
         .where(MarketingClub.utm_code.in_(values)))).all()}
+    slugs = {s.slug: s for s in (await session.execute(text(
+        "SELECT o.slug, mc.id, mc.name FROM marketing_clubs mc "
+        "JOIN organisations o ON o.id = mc.existing_org_id "
+        "WHERE o.slug = ANY(:vals)"), {"vals": values})).all()}
     out = []
-    for r in rows:
-        val, views = r.val, int(r.views or 0)
+    for val, e in by_val.items():
         a = aliases.get(val)
-        d = direct.get(val)
+        auto = direct.get(val) or slugs.get(val)
         if a is not None and a.club_id:
             status, club = "mapped", {"id": a.club_id, "name": a.club_name}
         elif a is not None:
             status, club = "ignored", None
-        elif d is not None:
-            status, club = "auto", {"id": str(d.id), "name": d.name}
+        elif auto is not None:
+            status, club = "auto", {"id": str(auto.id), "name": auto.name}
         else:
             status, club = "unmatched", None
-        out.append({"utm_value": val, "views": views, "status": status, "club": club})
-    return out
+        out.append({"utm_value": val, "views": e["views"],
+                    "sources": sorted(e["sources"]), "status": status, "club": club})
+    out.sort(key=lambda x: x["views"], reverse=True)
+    return out[:500]
 
 
 async def set_utm_alias(session: AsyncSession, utm_value: str,
