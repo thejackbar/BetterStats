@@ -15,6 +15,14 @@ const CARD = 'rounded-xl border pb-hairline bg-pb-surface2/40 px-3 py-2.5 mb-2.5
 const SECTION = 'text-[11px] uppercase tracking-wide text-pb-faint font-semibold'
 const FIELD_LABEL = 'block text-[10px] uppercase tracking-wide text-pb-faint mb-0.5'
 
+// Short, local date/time so a visit's recency reads at a glance.
+function fmtWhen(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 // A labelled filter cell — keeps every control on a tidy grid with its caption.
 function Field({ label, children, className = '' }) {
   return (
@@ -206,6 +214,58 @@ function SalesEditor({ club, onSave }) {
   )
 }
 
+// The usage breadcrumbs for one club, lazy-loaded when its row is expanded.
+// Shows who visited the public site from a link tagged with the club's UTM code.
+function VisitsPanel({ clubId, summary }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.mktClubVisits(clubId)
+      .then((d) => { if (alive) setData(d) })
+      .catch(() => { if (alive) setData(null) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [clubId])
+
+  const views = data?.views ?? summary?.views ?? 0
+  return (
+    <div className="pt-2 mt-1 border-t pb-hairline">
+      <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1">
+        Site visits via this UTM
+      </div>
+      {loading && !data ? (
+        <div className="text-pb-faint">Loading visits…</div>
+      ) : !views ? (
+        <div className="text-pb-faint">No site visits tracked from this club's UTM yet.</div>
+      ) : (
+        <div className="space-y-1.5 text-pb-dim">
+          <div>
+            <span className="text-violet-300 font-medium">{views}</span> view(s) from{' '}
+            <span className="text-violet-300 font-medium">{data.visitors}</span> visitor(s)
+            {data.last_seen && <span className="text-pb-faint"> · last {fmtWhen(data.last_seen)}</span>}
+            {data.first_seen && <span className="text-pb-faint"> · first {fmtWhen(data.first_seen)}</span>}
+          </div>
+          {Array.isArray(data.pages) && data.pages.length > 0 && (
+            <div>
+              <div className="text-pb-faint text-[10px] uppercase tracking-wide mb-0.5">Pages viewed</div>
+              <ul className="space-y-0.5">
+                {data.pages.slice(0, 12).map((p, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] truncate">{p.page}</span>
+                    <span className="text-pb-faint whitespace-nowrap">{p.views}×</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, onSaveUtm, onSaveSales }) {
   const contacts = club.contacts || []
   const assocs = club.associations
@@ -308,6 +368,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
             </button>
           </div>
           {onSaveSales && <SalesEditor key={club.id} club={club} onSave={onSaveSales} />}
+          <VisitsPanel clubId={club.id} summary={club.visits} />
         </div>
       </div>
     </div>
@@ -330,7 +391,7 @@ export default function SuperMarketing() {
     q: '', state: '', association: '', associations: [], postcode_from: '', postcode_to: '',
     contact: '', person: '', exclude_junior: false, exclude_emailed: false,
     exclude_carnival: false, exclude_school: false,
-    exclude_exported: false, exclude_suppressed: false,
+    exclude_exported: false, exclude_suppressed: false, visited: false,
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
@@ -544,6 +605,7 @@ export default function SuperMarketing() {
             <Stat label="To email" value={stats.selected_contacts} />
             <Stat label="With email" value={stats.clubs_with_email} />
             <Stat label="Emailed" value={stats.emailed} />
+            <Stat label="Visited site" value={stats.visited} />
             <Stat label="Assoc. linked" value={stats.associations_fetched} />
             <Stat label="Assoc. pending" value={stats.associations_pending} />
             <Stat label="Associations" value={stats.distinct_associations} />
@@ -582,13 +644,15 @@ export default function SuperMarketing() {
             {(filters.q || filters.association || filters.associations.length || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
               || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
-              || filters.exclude_school || filters.exclude_exported || filters.exclude_suppressed) && (
+              || filters.exclude_school || filters.exclude_exported || filters.exclude_suppressed
+              || filters.visited) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                   postcode_from: '', postcode_to: '', contact: '',
                                                   person: '', exclude_junior: false, exclude_emailed: false,
                                                   exclude_carnival: false, exclude_school: false,
-                                                  exclude_exported: false, exclude_suppressed: false })}>
+                                                  exclude_exported: false, exclude_suppressed: false,
+                                                  visited: false })}>
                 Clear all
               </button>
             )}
@@ -696,6 +760,15 @@ export default function SuperMarketing() {
               <input type="checkbox" checked={filters.exclude_suppressed}
                      onChange={(e) => setFilters(f => ({ ...f, exclude_suppressed: e.target.checked }))} />
               Suppressed
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 mt-2.5 pt-2.5 border-t pb-hairline">
+            <span className="text-[10px] uppercase tracking-wide text-pb-faint">Show only</span>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
+                   title="Only clubs where someone has visited the public site from a link tagged with the club's UTM code">
+              <input type="checkbox" checked={filters.visited}
+                     onChange={(e) => setFilters(f => ({ ...f, visited: e.target.checked }))} />
+              Visited the site (via their UTM)
             </label>
           </div>
         </section>
@@ -820,6 +893,13 @@ export default function SuperMarketing() {
                           {c.excluded && (
                             <span className="text-[10px] text-red-300 border border-red-500/40 rounded px-1"
                                   title="Excluded from all outreach">excluded</span>
+                          )}
+                          {c.visits && (
+                            <span className="text-[10px] text-violet-300 border border-violet-500/40 bg-violet-500/10 rounded px-1"
+                                  title={`${c.visits.views} view(s) from ${c.visits.visitors} visitor(s)`
+                                    + (c.visits.last_seen ? ` · last ${fmtWhen(c.visits.last_seen)}` : '')}>
+                              visited{c.visits.views > 1 ? ` ×${c.visits.views}` : ''}
+                            </span>
                           )}
                           {exportedCount > 0 && (
                             <span className="text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1"

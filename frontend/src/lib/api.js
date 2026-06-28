@@ -449,6 +449,8 @@ export const api = {
   mktSetClubUtm: (clubId, utm) =>
     request(`/club-admin/marketing/clubs/${clubId}/utm`,
       { method: 'PATCH', body: JSON.stringify({ utm }) }),
+  mktClubVisits: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/visits`),
   mktSetClubSales: (clubId, body) =>
     request(`/club-admin/marketing/clubs/${clubId}/sales`,
       { method: 'PATCH', body: JSON.stringify(body) }),
