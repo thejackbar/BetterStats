@@ -172,10 +172,9 @@ async def list_clubs(
         for ct in rows:
             contacts_by_club.setdefault(ct.marketing_club_id, []).append(ct)
 
-    # Site visits attributable to each club via its UTM code (usage breadcrumbs),
-    # fetched for the whole page in one query and matched on the same code we show.
-    codes_by_club = {c.id: (c.utm_code or cd._default_utm(c.name)) for c in clubs}
-    visit_stats = await cd.club_visit_stats(db, list(codes_by_club.values()))
+    # Site visits attributable to each club (usage breadcrumbs, resolved through
+    # utm_code + manual aliases), fetched for the whole page in one query.
+    visit_stats = await cd.club_visit_stats(db, [c.id for c in clubs])
 
     out = []
     for c in clubs:
@@ -191,7 +190,7 @@ async def list_clubs(
             "emailed_via": c.emailed_via, "emailed_note": c.emailed_note,
             "excluded": c.excluded,
             "utm_code": c.utm_code or cd._default_utm(c.name),
-            "visits": visit_stats.get(codes_by_club[c.id]),
+            "visits": visit_stats.get(str(c.id)),
             "trial_modules": c.trial_modules or [],
             "requested_trial_modules": c.requested_trial_modules or [],
             "demo_status": c.demo_status,
@@ -373,12 +372,37 @@ async def set_club_utm(club_id: str, body: UtmBody, db: AsyncSession = Depends(g
 async def club_visits(club_id: str, db: AsyncSession = Depends(get_db),
                       _=Depends(require_super_admin)):
     """The usage breadcrumbs for one club: who visited the public site from a link
-    tagged with the club's UTM code — totals, pages viewed and recent visits."""
+    tagged with the club's UTM code (or a mapped alias) — totals, pages viewed and
+    recent visits."""
     club = await db.get(MarketingClub, club_id)
     if club is None:
         raise HTTPException(status_code=404, detail="Club not found")
-    code = club.utm_code or cd._default_utm(club.name)
-    return await cd.club_visit_detail(db, code)
+    return await cd.club_visit_detail(db, club.id)
+
+
+@router.get("/utm-values")
+async def utm_values(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """Every raw UTM value seen on a site visit, with how it currently resolves —
+    so a super admin can map the unmatched ones (e.g. 'executive' → Leederville)
+    or mark noise ('meta', 'chatgpt.com') as ignored."""
+    return await cd.list_utm_values(db)
+
+
+class UtmAliasBody(BaseModel):
+    utm_value: str
+    marketing_club_id: Optional[str] = None
+    ignore: bool = False
+
+
+@router.put("/utm-aliases")
+async def set_utm_alias(body: UtmAliasBody, db: AsyncSession = Depends(get_db),
+                        _=Depends(require_super_admin)):
+    """Map a UTM value to a club, mark it ignored, or clear it (no club + not
+    ignored removes the mapping)."""
+    res = await cd.set_utm_alias(db, body.utm_value, body.marketing_club_id, body.ignore)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Unknown club or empty UTM value")
+    return res
 
 
 class SalesBody(BaseModel):

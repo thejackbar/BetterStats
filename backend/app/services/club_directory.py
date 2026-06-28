@@ -697,13 +697,10 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                                     C.email.isnot(None), C.subscribed.is_(True)))
     if visited:
         # Only clubs where someone has visited the public site from a link tagged
-        # with this club's UTM code (an outreach email tags links with
-        # ?utm_id=<utm_code>, captured into usage_events.utm_id). Safe SQL: the
-        # club code is a column, never interpolated. Mirrors comms_segments.
-        conds.append(text(
-            "EXISTS (SELECT 1 FROM usage_events ue "
-            "WHERE ue.utm_id = marketing_clubs.utm_code AND ue.utm_id IS NOT NULL "
-            "AND ue.event_type = 'page_view')"))
+        # with this club's UTM code — resolved through utm_code matches AND manual
+        # aliases (see the note above club_visit_stats). Safe SQL: only fixed table
+        # names, never client input.
+        conds.append(text(_visit_exists_sql("marketing_clubs")))
     if person:
         p = f"%{person.lower()}%"
         conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
@@ -1323,31 +1320,64 @@ async def sweep_association_rosters(session: AsyncSession, limit: int = 1,
 
 
 # ─── Usage breadcrumbs → directory (visits via a club's UTM) ─────────────────
-# An outreach email tags every link with the recipient club's UTM code as
-# ?utm_id=<utm_code>, which the SPA's page-view beacon captures into
-# usage_events.utm_id. So a row in usage_events whose utm_id equals a club's
-# utm_code is a site visit attributable to that club — that's the breadcrumb we
-# surface and filter on here. Counting distinct visitors falls back to ip_hash
-# when an anonymous prospect has no first-party visitor_id.
-_VISITOR_KEY = "COALESCE(ue.visitor_id::text, ue.ip_hash)"
+# An outreach email tags its links with the recipient club's UTM code so a later
+# anonymous site visit can be tied back to the club. A visit is attributed to a
+# club through THREE routes, in order:
+#   1. a manual alias (marketing_utm_aliases) mapping the raw value an operator
+#      saw to a club — needed because a campaign's utm_source isn't always the
+#      club's code (utm_source='executive' was Leederville);
+#   2. the value equals the club's own utm_code, in utm_id or utm_source;
+# An exact code match (…-cricket-club) is safe — an organic utm_source like
+# "facebook" never equals one. Aliases with a NULL club are "ignored" (ad/
+# referrer noise like 'meta') and never attribute. Counting distinct visitors
+# falls back to ip_hash when an anonymous prospect has no first-party visitor_id.
+#
+# Every visit-attribution query is built on this single resolution: each
+# page_view gets a `cid` (the marketing_clubs.id it resolves to, or NULL).
+_RESOLVED_VISITS = (
+    "SELECT COALESCE(ai.marketing_club_id, asrc.marketing_club_id, mi.id, ms.id)::text AS cid, "
+    "       COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, "
+    "       ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
+    "FROM usage_events ue "
+    "LEFT JOIN marketing_utm_aliases ai   ON ai.utm_value   = ue.utm_id "
+    "                                    AND ai.marketing_club_id   IS NOT NULL "
+    "LEFT JOIN marketing_utm_aliases asrc ON asrc.utm_value = ue.utm_source "
+    "                                    AND asrc.marketing_club_id IS NOT NULL "
+    "LEFT JOIN marketing_clubs mi ON mi.utm_code = ue.utm_id "
+    "LEFT JOIN marketing_clubs ms ON ms.utm_code = ue.utm_source "
+    "WHERE ue.event_type = 'page_view'"
+)
+
+# The correlated form, for an EXISTS against an outer `marketing_clubs` row —
+# used by the directory list filter and the dashboard count. ``{mc}`` is the
+# outer table/alias name.
+def _visit_exists_sql(mc: str = "marketing_clubs") -> str:
+    return (
+        "EXISTS (SELECT 1 FROM usage_events ue "
+        "LEFT JOIN marketing_utm_aliases ua_i ON ua_i.utm_value = ue.utm_id "
+        "                                    AND ua_i.marketing_club_id IS NOT NULL "
+        "LEFT JOIN marketing_utm_aliases ua_s ON ua_s.utm_value = ue.utm_source "
+        "                                    AND ua_s.marketing_club_id IS NOT NULL "
+        "WHERE ue.event_type = 'page_view' AND ("
+        f"ue.utm_id = {mc}.utm_code OR ue.utm_source = {mc}.utm_code "
+        f"OR ua_i.marketing_club_id = {mc}.id OR ua_s.marketing_club_id = {mc}.id))"
+    )
 
 
-async def club_visit_stats(session: AsyncSession, utm_codes: list) -> dict:
-    """Summarise site visits for a page of clubs in ONE query, keyed by utm_code.
-    Returns ``{utm_code: {views, visitors, last_seen}}`` for codes with any visit,
+async def club_visit_stats(session: AsyncSession, club_ids: list) -> dict:
+    """Summarise site visits for a page of clubs in ONE query, keyed by club id.
+    Returns ``{club_id: {views, visitors, last_seen}}`` for clubs with any visit,
     so the directory list can show a 'visited' badge without an N+1."""
-    codes = sorted({c for c in (utm_codes or []) if c})
-    if not codes:
+    ids = sorted({str(c) for c in (club_ids or []) if c})
+    if not ids:
         return {}
     rows = (await session.execute(text(
-        f"SELECT ue.utm_id AS code, COUNT(*) AS views, "
-        f"       COUNT(DISTINCT {_VISITOR_KEY}) AS visitors, "
-        f"       MAX(ue.created_at) AS last_seen "
-        f"FROM usage_events ue "
-        f"WHERE ue.event_type = 'page_view' AND ue.utm_id = ANY(:codes) "
-        f"GROUP BY ue.utm_id"), {"codes": codes})).all()
+        "SELECT v.cid AS cid, COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors, "
+        "       MAX(v.created_at) AS last_seen "
+        f"FROM ({_RESOLVED_VISITS}) v "
+        "WHERE v.cid = ANY(:ids) GROUP BY v.cid"), {"ids": ids})).all()
     return {
-        r.code: {
+        r.cid: {
             "views": int(r.views or 0),
             "visitors": int(r.visitors or 0),
             "last_seen": r.last_seen.isoformat() if r.last_seen else None,
@@ -1356,40 +1386,33 @@ async def club_visit_stats(session: AsyncSession, utm_codes: list) -> dict:
     }
 
 
-async def club_visit_detail(session: AsyncSession, utm_code: Optional[str],
-                            limit: int = 50) -> dict:
-    """Full breadcrumb trail for one club's UTM code: overall totals, the pages
-    they viewed (top first) and the most-recent visits. Powers the expanded-row
-    'visited the site' panel on the directory."""
-    code = (utm_code or "").strip()
-    empty = {"utm_code": code, "views": 0, "visitors": 0,
+async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> dict:
+    """Full breadcrumb trail for one club: overall totals, the pages they viewed
+    (top first) and the most-recent visits. Resolves visits through the alias map
+    the same way the list does. Powers the expanded-row 'visited the site' panel."""
+    cid = str(club_id or "").strip()
+    empty = {"club_id": cid, "views": 0, "visitors": 0,
              "first_seen": None, "last_seen": None, "pages": [], "recent": []}
-    if not code:
+    if not cid:
         return empty
+    base = f"FROM ({_RESOLVED_VISITS}) v WHERE v.cid = :cid"
     summary = (await session.execute(text(
-        f"SELECT COUNT(*) AS views, "
-        f"       COUNT(DISTINCT {_VISITOR_KEY}) AS visitors, "
-        f"       MIN(ue.created_at) AS first_seen, MAX(ue.created_at) AS last_seen "
-        f"FROM usage_events ue "
-        f"WHERE ue.event_type = 'page_view' AND ue.utm_id = :code"),
-        {"code": code})).one()
+        "SELECT COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors, "
+        f"MIN(v.created_at) AS first_seen, MAX(v.created_at) AS last_seen {base}"),
+        {"cid": cid})).one()
     if not summary.views:
         return empty
     pages = (await session.execute(text(
-        "SELECT split_part(ue.path, '?', 1) AS page, COUNT(*) AS views, "
-        "       MAX(ue.created_at) AS last_seen "
-        "FROM usage_events ue "
-        "WHERE ue.event_type = 'page_view' AND ue.utm_id = :code "
+        "SELECT split_part(v.path, '?', 1) AS page, COUNT(*) AS views, "
+        f"MAX(v.created_at) AS last_seen {base} "
         "GROUP BY 1 ORDER BY views DESC, last_seen DESC LIMIT 30"),
-        {"code": code})).all()
+        {"cid": cid})).all()
     recent = (await session.execute(text(
-        "SELECT ue.path, ue.created_at, ue.traffic_source, ue.country, ue.city "
-        "FROM usage_events ue "
-        "WHERE ue.event_type = 'page_view' AND ue.utm_id = :code "
-        "ORDER BY ue.created_at DESC LIMIT :lim"),
-        {"code": code, "lim": max(1, min(int(limit or 50), 200))})).all()
+        f"SELECT v.path, v.created_at, v.traffic_source, v.country, v.city {base} "
+        "ORDER BY v.created_at DESC LIMIT :lim"),
+        {"cid": cid, "lim": max(1, min(int(limit or 50), 200))})).all()
     return {
-        "utm_code": code,
+        "club_id": cid,
         "views": int(summary.views or 0),
         "visitors": int(summary.visitors or 0),
         "first_seen": summary.first_seen.isoformat() if summary.first_seen else None,
@@ -1403,6 +1426,82 @@ async def club_visit_detail(session: AsyncSession, utm_code: Optional[str],
                     "country": r.country, "city": r.city}
                    for r in recent],
     }
+
+
+async def list_utm_values(session: AsyncSession) -> list:
+    """Every raw UTM value seen on a site visit (from utm_source or utm_id), with
+    its view count and how it currently resolves: 'auto' (equals a club's
+    utm_code), 'mapped' (a manual alias → club), 'ignored' (alias marked not-a-
+    club) or 'unmatched'. Drives the manual UTM-matching panel."""
+    rows = (await session.execute(text(
+        "SELECT val, SUM(n) AS views FROM ("
+        "  SELECT ue.utm_source AS val, COUNT(*) n FROM usage_events ue "
+        "  WHERE ue.event_type='page_view' AND ue.utm_source IS NOT NULL "
+        "  AND ue.utm_source <> '' GROUP BY 1 "
+        "  UNION ALL "
+        "  SELECT ue.utm_id AS val, COUNT(*) n FROM usage_events ue "
+        "  WHERE ue.event_type='page_view' AND ue.utm_id IS NOT NULL "
+        "  AND ue.utm_id <> '' GROUP BY 1 "
+        ") t GROUP BY val ORDER BY views DESC LIMIT 500"))).all()
+    values = [r.val for r in rows]
+    if not values:
+        return []
+    aliases = {a.utm_value: a for a in (await session.execute(text(
+        "SELECT a.utm_value, a.marketing_club_id::text AS club_id, mc.name AS club_name "
+        "FROM marketing_utm_aliases a "
+        "LEFT JOIN marketing_clubs mc ON mc.id = a.marketing_club_id "
+        "WHERE a.utm_value = ANY(:vals)"), {"vals": values})).all()}
+    direct = {d.utm_code: d for d in (await session.execute(
+        select(MarketingClub.utm_code, MarketingClub.id, MarketingClub.name)
+        .where(MarketingClub.utm_code.in_(values)))).all()}
+    out = []
+    for r in rows:
+        val, views = r.val, int(r.views or 0)
+        a = aliases.get(val)
+        d = direct.get(val)
+        if a is not None and a.club_id:
+            status, club = "mapped", {"id": a.club_id, "name": a.club_name}
+        elif a is not None:
+            status, club = "ignored", None
+        elif d is not None:
+            status, club = "auto", {"id": str(d.id), "name": d.name}
+        else:
+            status, club = "unmatched", None
+        out.append({"utm_value": val, "views": views, "status": status, "club": club})
+    return out
+
+
+async def set_utm_alias(session: AsyncSession, utm_value: str,
+                        marketing_club_id: Optional[str], ignore: bool = False) -> Optional[dict]:
+    """Map a raw UTM value to a club, mark it ignored (NULL club), or clear it.
+    ``ignore`` wins; then a club id maps; with neither the alias is removed (the
+    value falls back to its auto/unmatched state)."""
+    val = (utm_value or "").strip()
+    if not val:
+        return None
+    if not ignore and not marketing_club_id:
+        await session.execute(text("DELETE FROM marketing_utm_aliases WHERE utm_value = :v"),
+                              {"v": val})
+        await session.commit()
+        return {"utm_value": val, "status": "unmatched", "club": None}
+    club_id = None
+    club_name = None
+    if not ignore and marketing_club_id:
+        try:
+            club = await session.get(MarketingClub, uuid.UUID(str(marketing_club_id)))
+        except (ValueError, AttributeError):
+            club = None
+        if club is None:
+            return None
+        club_id, club_name = str(club.id), club.name
+    await session.execute(text(
+        "INSERT INTO marketing_utm_aliases (utm_value, marketing_club_id) "
+        "VALUES (:v, CAST(:c AS uuid)) "
+        "ON CONFLICT (utm_value) DO UPDATE SET marketing_club_id = CAST(:c AS uuid), "
+        "updated_at = NOW()"), {"v": val, "c": club_id})
+    await session.commit()
+    return {"utm_value": val, "status": "ignored" if ignore else "mapped",
+            "club": ({"id": club_id, "name": club_name} if club_id else None)}
 
 
 async def directory_stats(session: AsyncSession) -> dict:
@@ -1424,9 +1523,7 @@ async def directory_stats(session: AsyncSession) -> dict:
     emailed = await session.scalar(
         select(func.count(MarketingClub.id)).where(MarketingClub.emailed_at.isnot(None))) or 0
     visited = await session.scalar(text(
-        "SELECT COUNT(*) FROM marketing_clubs mc WHERE EXISTS ("
-        "SELECT 1 FROM usage_events ue WHERE ue.utm_id = mc.utm_code "
-        "AND ue.utm_id IS NOT NULL AND ue.event_type = 'page_view')")) or 0
+        "SELECT COUNT(*) FROM marketing_clubs mc WHERE " + _visit_exists_sql("mc"))) or 0
     distinct_assoc = await session.scalar(
         select(func.count(func.distinct(MarketingClub.association_guid)))
         .where(MarketingClub.association_guid.isnot(None))) or 0
