@@ -312,6 +312,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_utm_alias_club "
             "ON marketing_utm_aliases(marketing_club_id)"))
+        # Speeds the visit→club resolution (per-page_view utm_code lookups).
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_utm_code "
+            "ON marketing_clubs(utm_code)"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of

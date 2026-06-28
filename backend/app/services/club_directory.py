@@ -1320,32 +1320,43 @@ async def sweep_association_rosters(session: AsyncSession, limit: int = 1,
 
 
 # ─── Usage breadcrumbs → directory (visits via a club's UTM) ─────────────────
-# An outreach email tags its links with the recipient club's UTM code so a later
-# anonymous site visit can be tied back to the club. A visit is attributed to a
-# club through THREE routes, in order:
+# An outreach email ties a later anonymous site visit back to the recipient club
+# through FOUR routes, in priority order:
 #   1. a manual alias (marketing_utm_aliases) mapping the raw value an operator
 #      saw to a club — needed because a campaign's utm_source isn't always the
 #      club's code (utm_source='executive' was Leederville);
 #   2. the value equals the club's own utm_code, in utm_id or utm_source;
+#   3. the visit LANDED ON the club's own page — its first path segment equals the
+#      club's utm_code (e.g. /gosnells-cricket-club?utm_source=camsawatzky, where
+#      the UTM is the rep's name, not the club). The path is the reliable signal.
 # An exact code match (…-cricket-club) is safe — an organic utm_source like
-# "facebook" never equals one. Aliases with a NULL club are "ignored" (ad/
-# referrer noise like 'meta') and never attribute. Counting distinct visitors
-# falls back to ip_hash when an anonymous prospect has no first-party visitor_id.
+# "facebook", or a route like /pricing, never equals one. Aliases with a NULL club
+# are "ignored" (ad/referrer noise like 'meta') and never attribute. Counting
+# distinct visitors falls back to ip_hash when there's no first-party visitor_id.
 #
 # Every visit-attribution query is built on this single resolution: each
-# page_view gets a `cid` (the marketing_clubs.id it resolves to, or NULL).
+# page_view gets a `cid` (the marketing_clubs.id it resolves to, or NULL). The
+# first path segment is split_part(split_part(path,'?',1),'/',2) — the homepage
+# yields '' and never matches a (non-empty) utm_code.
+_PATH_CODE = "split_part(split_part(ue.path, '?', 1), '/', 2)"
+# Resolve each page_view to ONE club id via correlated subqueries (each LIMIT 1),
+# not LEFT JOINs — marketing_clubs.utm_code isn't unique (the default formula can
+# collide), so a join could multiply the row and over-count visits. Subqueries
+# pick a single club per route and COALESCE applies the priority order.
 _RESOLVED_VISITS = (
-    "SELECT COALESCE(ai.marketing_club_id, asrc.marketing_club_id, mi.id, ms.id)::text AS cid, "
-    "       COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, "
-    "       ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
-    "FROM usage_events ue "
-    "LEFT JOIN marketing_utm_aliases ai   ON ai.utm_value   = ue.utm_id "
-    "                                    AND ai.marketing_club_id   IS NOT NULL "
-    "LEFT JOIN marketing_utm_aliases asrc ON asrc.utm_value = ue.utm_source "
-    "                                    AND asrc.marketing_club_id IS NOT NULL "
-    "LEFT JOIN marketing_clubs mi ON mi.utm_code = ue.utm_id "
-    "LEFT JOIN marketing_clubs ms ON ms.utm_code = ue.utm_source "
-    "WHERE ue.event_type = 'page_view'"
+    "SELECT COALESCE("
+    "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+    "     WHERE a.utm_value = ue.utm_id AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+    "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+    "     WHERE a.utm_value = ue.utm_source AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+    "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = ue.utm_id LIMIT 1), "
+    "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = ue.utm_source LIMIT 1), "
+    f"  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = {_PATH_CODE} "
+    f"     AND {_PATH_CODE} <> '' LIMIT 1)"
+    ")::text AS cid, "
+    "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, "
+    "ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
+    "FROM usage_events ue WHERE ue.event_type = 'page_view'"
 )
 
 # The correlated form, for an EXISTS against an outer `marketing_clubs` row —
@@ -1360,7 +1371,8 @@ def _visit_exists_sql(mc: str = "marketing_clubs") -> str:
         "                                    AND ua_s.marketing_club_id IS NOT NULL "
         "WHERE ue.event_type = 'page_view' AND ("
         f"ue.utm_id = {mc}.utm_code OR ue.utm_source = {mc}.utm_code "
-        f"OR ua_i.marketing_club_id = {mc}.id OR ua_s.marketing_club_id = {mc}.id))"
+        f"OR ua_i.marketing_club_id = {mc}.id OR ua_s.marketing_club_id = {mc}.id "
+        f"OR ({_PATH_CODE} <> '' AND {_PATH_CODE} = {mc}.utm_code)))"
     )
 
 

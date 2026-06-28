@@ -39,8 +39,13 @@ def upgrade() -> None:
     )
     op.create_index('idx_marketing_utm_alias_club', 'marketing_utm_aliases',
                     ['marketing_club_id'])
+    # Speeds the visit→club resolution (per-page_view utm_code lookups).
+    op.create_index('idx_marketing_clubs_utm_code', 'marketing_clubs', ['utm_code'],
+                    if_not_exists=True)
 
 
 def downgrade() -> None:
+    op.drop_index('idx_marketing_clubs_utm_code', table_name='marketing_clubs',
+                  if_exists=True)
     op.drop_index('idx_marketing_utm_alias_club', table_name='marketing_utm_aliases')
     op.drop_table('marketing_utm_aliases')
