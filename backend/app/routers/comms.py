@@ -48,7 +48,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
-from app.services.email_service import EmailMessage, get_email_provider, provider_status
+from app.services.email_service import EmailMessage, get_email_provider, provider_status, email_is_live
 
 logger = logging.getLogger(__name__)
 
@@ -1134,6 +1134,72 @@ async def update_settings(
         org.comms_sender_footer = data.sender_footer.strip() or None
     await db.commit()
     return {"status": "ok"}
+
+
+class TestEmailIn(BaseModel):
+    email: str
+
+
+@router.post("/test-email")
+async def send_test_email(
+    data: TestEmailIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a one-off test email to an address, in the current club/context, via the
+    active provider. The way a club admin (or super admin) checks the setup works."""
+    email = _norm_email(data.email)
+    if not email:
+        raise HTTPException(status_code=422, detail="A valid email is required")
+    from_name, from_email, reply_to, footer = _sender(club)
+    unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
+    body = ("<p>This is a test email from BetterComms.</p>"
+            "<p>If you can read this, sending is working for "
+            f"<strong>{html_lib.escape(club.name or 'your club')}</strong>.</p>")
+    subject, html, text = _render_parts(
+        club, subject="BetterComms test email", body_html=body, utm={},
+        email=email, name=None, unsub_url=unsub, footer=footer)
+    msg = EmailMessage(
+        to_email=email, subject=f"[TEST] {subject}", html=html, text=text,
+        from_email=from_email, from_name=from_name, reply_to=reply_to,
+        headers={"List-Unsubscribe": f"<{unsub}>",
+                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"},
+        configuration_set=(settings.ses_configuration_set or None))
+    res = await get_email_provider().send(msg)
+    if not res.ok:
+        raise HTTPException(status_code=502, detail=f"Test send failed: {res.error}")
+    live = get_email_provider().name != "console"
+    return {"status": "ok", "live": live, "provider": get_email_provider().name,
+            "from_address": from_email}
+
+
+@router.get("/ses-status")
+async def ses_status(
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Non-secret SES / provider status for the super-admin panel. Credentials live
+    in server config and are never returned — only whether they're configured."""
+    s = settings
+    return {
+        "provider": (s.email_provider or "console").strip().lower(),
+        "live": email_is_live(),
+        "from_address": s.email_from_address,
+        "ses": {
+            "region": s.ses_region,
+            "access_key_configured": bool((s.ses_access_key_id or "").strip()
+                                          and (s.ses_secret_access_key or "").strip()),
+            "club_domain": s.ses_club_domain,
+            "marketing_domain": s.ses_marketing_domain,
+            "configuration_set": (s.ses_configuration_set or "").strip() or None,
+            "configuration_set_transactional": (s.ses_configuration_set_transactional or "").strip() or None,
+            "sns_signature_verification": bool(s.ses_sns_verify_signatures),
+            "event_webhook_token_set": bool((s.ses_event_token or "").strip()),
+        },
+        # Tenant-per-club provisioning is not built yet (design only).
+        "tenants_enabled": False,
+    }
 
 
 # ─── Context: club vs BetterCricket marketing (super admin) ──────────────────

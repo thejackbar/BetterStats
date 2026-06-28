@@ -127,6 +127,14 @@ AWS account
 - One verified domain per silo, one SES tenant per club, so reputation is isolated
   and a bad actor pauses only their own tenant. Per-club From local-parts need no
   per-club AWS admin (domain verification covers every local-part).
+- **Operability UI**: a super admin sees a read-only **Amazon SES status** panel on
+  Comms Settings (`GET /club-admin/comms/ses-status`: region, verified domains,
+  configuration sets, signature-verification, event-token, tenant status) — AWS
+  credentials stay in server env and are never returned, only whether they're set.
+  Any comms admin can **send a test email** (`POST /club-admin/comms/test-email`)
+  and set a **no-reply** reply-to. **Still not built**: SES tenant provisioning
+  (`CreateTenant` on onboarding, a `ses_tenant` per club, passing the tenant at
+  send) — `tenants_enabled` is False until then.
 - Per-message events (bounce, complaint, delivery, reject, delay) come back via a
   configuration-set SNS destination to our webhook. Tenant reputation / auto-pause
   events come via EventBridge (not wired in Phase 1).

@@ -16,6 +16,9 @@ export default function CommsSettings() {
   const [msg, setMsg] = useState(null)
   const [saving, setSaving] = useState(false)
   const [suppressions, setSuppressions] = useState(null)
+  const [ses, setSes] = useState(null)            // super-admin SES status (null = not loaded / not super)
+  const [testEmail, setTestEmail] = useState('')
+  const [testBusy, setTestBusy] = useState(false)
 
   useEffect(() => {
     api.commsGetSettings().then(d => {
@@ -25,7 +28,21 @@ export default function CommsSettings() {
       setFooter(d.sender_footer || '')
     }).catch(e => setMsg({ kind: 'error', text: e.message }))
     api.commsListSuppressions().then(setSuppressions).catch(() => setSuppressions([]))
+    // Super-admin only; a 403 for club admins just leaves the panel hidden.
+    api.commsSesStatus().then(setSes).catch(() => setSes(null))
   }, [])
+
+  const sendTest = async () => {
+    if (!testEmail.trim()) { setMsg({ kind: 'error', text: 'Enter an email to send the test to.' }); return }
+    setTestBusy(true); setMsg(null)
+    try {
+      const r = await api.commsSendTestEmail(testEmail.trim())
+      setMsg({ kind: 'ok', text: r.live ? `Test sent to ${testEmail.trim()} via ${r.provider}.` : 'Test rendered (preview mode — not delivered until a provider is connected).' })
+    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
+    finally { setTestBusy(false) }
+  }
+
+  const noReply = (replyTo || '').toLowerCase().startsWith('noreply@')
 
   const unsuppress = async (email) => {
     setMsg(null)
@@ -78,16 +95,52 @@ export default function CommsSettings() {
           )}
         </div>
 
+        {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
+        {ses && (
+          <div className="pb-card p-4 mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm text-pb-text font-medium">Amazon SES (platform)</div>
+              <span className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${ses.ses?.access_key_configured ? 'text-green-500 border-green-500/40' : 'text-amber-500 border-amber-500/40'}`}>
+                {ses.ses?.access_key_configured ? 'Connected' : 'Not configured'}
+              </span>
+            </div>
+            <div className="text-pb-faintest text-xs mb-3 leading-relaxed">
+              AWS credentials live in server config and are never shown here. This is read-only status. To change them, update the server <code className="text-pb-faint">SES_*</code> environment values.
+            </div>
+            {[
+              ['Active provider', ses.provider],
+              ['Region', ses.ses?.region],
+              ['Club sending domain', ses.ses?.club_domain],
+              ['Marketing sending domain', ses.ses?.marketing_domain],
+              ['Campaign configuration set', ses.ses?.configuration_set || 'not set'],
+              ['Transactional configuration set', ses.ses?.configuration_set_transactional || 'not set'],
+              ['SNS signature verification', ses.ses?.sns_signature_verification ? 'on' : 'off'],
+              ['Event webhook token', ses.ses?.event_webhook_token_set ? 'set' : 'not set'],
+              ['Per-club tenants', ses.tenants_enabled ? 'enabled' : 'not built yet'],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3 py-0.5 text-sm">
+                <span className="text-pb-faint">{k}</span>
+                <span className="text-pb-text truncate">{String(v ?? '—')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Sender identity */}
         <div className="pb-card p-4 mb-4">
           <div className="text-sm text-pb-text font-medium mb-3">Sender</div>
           <label className="block text-xs text-pb-faint mb-1">From name</label>
           <input value={fromName} onChange={e => setFromName(e.target.value)} placeholder={s.from_name}
             className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-3" />
+          <label className="flex items-center gap-2 mb-2 text-xs text-pb-faint cursor-pointer">
+            <input type="checkbox" checked={noReply}
+              onChange={e => setReplyTo(e.target.checked ? 'noreply@betteradmin-comms.work' : '')} />
+            No-reply address (replies are not monitored)
+          </label>
           <label className="block text-xs text-pb-faint mb-1">Reply-to email</label>
           <input value={replyTo} onChange={e => setReplyTo(e.target.value)} placeholder="committee@yourclub.org.au" type="email"
             className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-          <div className="text-pb-faintest text-xs mt-1">Replies go here. Defaults to your club contact email.</div>
+          <div className="text-pb-faintest text-xs mt-1">Replies go here. Defaults to your club contact email. Tick no-reply to send from an unmonitored address.</div>
         </div>
 
         {/* Compliance footer */}
@@ -109,6 +162,21 @@ export default function CommsSettings() {
             {saving ? 'Saving…' : 'Save settings'}
           </button>
           <span className="text-pb-faintest text-xs">{s.subscribed_contacts} subscribed contact{s.subscribed_contacts === 1 ? '' : 's'}</span>
+        </div>
+
+        {/* Send a test email */}
+        <div className="pb-card p-4 mt-4">
+          <div className="text-sm text-pb-text font-medium mb-1">Send a test email</div>
+          <div className="text-pb-faintest text-xs mb-3">Checks the connection by sending a test to an address you choose, using the current sender settings. Save your changes first.</div>
+          <div className="flex gap-2">
+            <input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="you@example.com" type="email"
+              className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+            <button onClick={sendTest} disabled={testBusy}
+              className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
+              {testBusy ? 'Sending…' : 'Send test'}
+            </button>
+          </div>
+          {!p.live && <div className="text-pb-faintest text-xs mt-2">Preview mode — the test is rendered but not delivered until a provider is connected.</div>}
         </div>
 
         {/* Deliverability — blocked addresses (Phase 1) */}
