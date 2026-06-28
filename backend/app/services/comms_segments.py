@@ -94,15 +94,24 @@ def _visited_clause(val):
     so a visit matches on either. Safe SQL: page filters come from a fixed map and
     the club code is a column, never interpolated."""
     pages = _as_list(val)
-    where = ["(ue.utm_id = marketing_clubs.utm_code "
-             "OR ue.utm_source = marketing_clubs.utm_code)",
-             "ue.event_type = 'page_view'"]
+    extra = ""
     if pages and "any" not in pages:
         frags = [_VISIT_PATH_SQL[p] for p in pages if p in _VISIT_PATH_SQL]
         if not frags:
             return None
-        where.append("(" + " OR ".join(frags) + ")")
-    return text("EXISTS (SELECT 1 FROM usage_events ue WHERE " + " AND ".join(where) + ")")
+        extra = " AND (" + " OR ".join(frags) + ")"
+    # A visit resolves to the club via its utm_code (in utm_id or utm_source) OR a
+    # manual alias (marketing_utm_aliases) an operator mapped to the club.
+    return text(
+        "EXISTS (SELECT 1 FROM usage_events ue "
+        "LEFT JOIN marketing_utm_aliases ua_i ON ua_i.utm_value = ue.utm_id "
+        "                                    AND ua_i.marketing_club_id IS NOT NULL "
+        "LEFT JOIN marketing_utm_aliases ua_s ON ua_s.utm_value = ue.utm_source "
+        "                                    AND ua_s.marketing_club_id IS NOT NULL "
+        "WHERE ue.event_type = 'page_view' AND ("
+        "ue.utm_id = marketing_clubs.utm_code OR ue.utm_source = marketing_clubs.utm_code "
+        "OR ua_i.marketing_club_id = marketing_clubs.id "
+        "OR ua_s.marketing_club_id = marketing_clubs.id)" + extra + ")")
 
 ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
 

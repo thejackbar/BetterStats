@@ -451,6 +451,9 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ utm }) }),
   mktClubVisits: (clubId) =>
     request(`/club-admin/marketing/clubs/${clubId}/visits`),
+  mktUtmValues: () => request('/club-admin/marketing/utm-values'),
+  mktSetUtmAlias: (body) =>
+    request('/club-admin/marketing/utm-aliases', { method: 'PUT', body: JSON.stringify(body) }),
   mktSetClubSales: (clubId, body) =>
     request(`/club-admin/marketing/clubs/${clubId}/sales`,
       { method: 'PATCH', body: JSON.stringify(body) }),

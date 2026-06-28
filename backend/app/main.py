@@ -294,6 +294,24 @@ async def lifespan(app: FastAPI):
         # Migration 105: derived association short code (acronym) for shortcode search.
         await conn.execute(text(
             "ALTER TABLE marketing_associations ADD COLUMN IF NOT EXISTS short_code TEXT"))
+        # Migration 117: manual UTM → club mapping for the Clubs Directory visit
+        # breadcrumbs. A campaign's utm_source isn't always the club's utm_code
+        # (e.g. utm_source='executive' for Leederville), so an operator maps the
+        # raw value to a club here. marketing_club_id NULL = explicitly ignored
+        # (ad/referrer noise like 'meta', 'chatgpt.com').
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS marketing_utm_aliases (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                utm_value TEXT NOT NULL UNIQUE,
+                marketing_club_id UUID REFERENCES marketing_clubs(id) ON DELETE CASCADE,
+                note TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_utm_alias_club "
+            "ON marketing_utm_aliases(marketing_club_id)"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of

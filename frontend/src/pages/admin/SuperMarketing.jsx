@@ -375,6 +375,166 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
   )
 }
 
+// Typeahead over the marketing directory, for mapping a UTM value to a club.
+function ClubPicker({ onPick, placeholder = 'Search club to map…' }) {
+  const [q, setQ] = useState('')
+  const [opts, setOpts] = useState([])
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!q.trim()) { setOpts([]); setOpen(false); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.mktClubs({ q, limit: 8 })
+        .then(d => { if (alive) { setOpts(d.clubs || []); setOpen(true) } })
+        .catch(() => {})
+    }, 250)
+    return () => { alive = false; clearTimeout(t) }
+  }, [q])
+  return (
+    <div className="relative inline-block">
+      <input className={SELECT_CLS + ' w-52'} placeholder={placeholder} value={q}
+             onChange={e => setQ(e.target.value)} />
+      {open && opts.length > 0 && (
+        <div className="absolute z-30 mt-1 w-72 max-h-56 overflow-auto rounded border pb-hairline bg-pb-surface2 shadow-lg">
+          {opts.map(o => (
+            <button key={o.id}
+                    className="block w-full text-left px-2 py-1 text-xs text-pb-text hover:bg-pb-accent/15"
+                    onClick={() => { setOpen(false); setQ(''); onPick(o) }}>
+              {o.name} <span className="text-pb-faint font-mono">{o.utm_code}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const UTM_STATUS = {
+  auto:      { label: 'auto',      cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' },
+  mapped:    { label: 'mapped',    cls: 'text-violet-300 border-violet-500/40 bg-violet-500/10' },
+  ignored:   { label: 'ignored',   cls: 'text-pb-faint border-pb-hairline' },
+  unmatched: { label: 'unmatched', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' },
+}
+
+// List every raw UTM value seen on a visit and let a super admin map the
+// unmatched ones to a club (or mark noise as ignored). A campaign's utm_source
+// isn't always the club's code, so exact matching can't catch everything.
+function UtmMatchPanel() {
+  const [rows, setRows] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('unmatched')
+  const [busy, setBusy] = useState('')
+
+  const load = useCallback(() => {
+    setLoading(true)
+    api.mktUtmValues().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+  }, [])
+  useEffect(() => { if (open && rows === null) load() }, [open, rows, load])
+
+  const apply = async (utm_value, body) => {
+    setBusy(utm_value)
+    try {
+      const res = await api.mktSetUtmAlias({ utm_value, ...body })
+      setRows(rs => rs.map(r => r.utm_value === utm_value
+        ? { ...r, status: res.status, club: res.club } : r))
+    } catch (_) { /* ignore — row stays as-is */ } finally { setBusy('') }
+  }
+
+  const all = rows || []
+  const counts = all.reduce((m, r) => ({ ...m, [r.status]: (m[r.status] || 0) + 1 }), {})
+  const shown = filter === 'all' ? all : all.filter(r => r.status === filter)
+
+  return (
+    <section className={CARD}>
+      <button className="flex items-center justify-between w-full"
+              onClick={() => setOpen(o => !o)}>
+        <span className={SECTION}>
+          UTM matching{counts.unmatched ? ` · ${counts.unmatched} unmatched` : ''}
+        </span>
+        <span className="text-pb-faint text-xs">{open ? '▾ hide' : '▸ show'}</span>
+      </button>
+      {open && (
+        <div className="mt-2">
+          <p className="text-[11px] text-pb-faint mb-2">
+            Each value a visit arrived with (utm_source or utm_id). Map the ones that
+            belong to a club but don't match its code, and ignore the noise.
+          </p>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            {['unmatched', 'mapped', 'ignored', 'auto', 'all'].map(k => (
+              <button key={k}
+                      className={'text-[11px] px-2 py-0.5 rounded border ' + (filter === k
+                        ? 'border-pb-accent text-pb-accent' : 'pb-hairline text-pb-dim hover:text-pb-text')}
+                      onClick={() => setFilter(k)}>
+                {k}{k !== 'all' && counts[k] ? ` (${counts[k]})` : ''}
+              </button>
+            ))}
+            <button className="text-[11px] text-pb-faint hover:text-pb-accent ml-auto" onClick={load}>
+              Refresh
+            </button>
+          </div>
+          {loading && rows === null ? (
+            <div className="text-xs text-pb-dim">Loading…</div>
+          ) : !shown.length ? (
+            <div className="text-xs text-pb-faint">Nothing here.</div>
+          ) : (
+            <div className="overflow-x-auto rounded border pb-hairline">
+              <table className="w-full text-xs">
+                <thead className="bg-pb-surface2 text-pb-faint uppercase tracking-wide">
+                  <tr>
+                    <th className="text-left px-3 py-2">UTM value</th>
+                    <th className="text-left px-3 py-2">Views</th>
+                    <th className="text-left px-3 py-2">Status</th>
+                    <th className="text-left px-3 py-2">Club / action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map(r => {
+                    const st = UTM_STATUS[r.status] || UTM_STATUS.unmatched
+                    const working = busy === r.utm_value
+                    return (
+                      <tr key={r.utm_value} className="border-t pb-hairline align-top">
+                        <td className="px-3 py-2 font-mono text-pb-text break-all">{r.utm_value}</td>
+                        <td className="px-3 py-2 text-pb-dim">{r.views}</td>
+                        <td className="px-3 py-2">
+                          <span className={'text-[10px] border rounded px-1 ' + st.cls}>{st.label}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {r.club && <span className="text-pb-text">{r.club.name}</span>}
+                            {working ? <span className="text-pb-faint">…</span> : (
+                              <>
+                                <ClubPicker onPick={(o) => apply(r.utm_value, { marketing_club_id: o.id })}
+                                            placeholder={r.club ? 'Change club…' : 'Map to club…'} />
+                                {r.status !== 'ignored' && (
+                                  <button className="text-[11px] px-2 py-0.5 rounded border pb-hairline text-pb-dim hover:text-pb-text"
+                                          onClick={() => apply(r.utm_value, { ignore: true })}>
+                                    Ignore
+                                  </button>
+                                )}
+                                {(r.status === 'mapped' || r.status === 'ignored') && (
+                                  <button className="text-[11px] px-2 py-0.5 rounded border pb-hairline text-pb-dim hover:text-pb-text"
+                                          onClick={() => apply(r.utm_value, {})}>
+                                    Clear
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function SuperMarketing() {
   const [stats, setStats] = useState(null)
   const [status, setStatus] = useState(null)
@@ -807,6 +967,8 @@ export default function SuperMarketing() {
             </button>
           </div>
         </section>
+
+        <UtmMatchPanel />
 
         {msg && <div className="mb-3 text-xs text-accent border border-accent/40 bg-accent/10 rounded px-3 py-2">{msg}</div>}
         {error && <div className="mb-3 text-xs text-red-300 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">{error}</div>}
