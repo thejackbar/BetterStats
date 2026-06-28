@@ -114,7 +114,10 @@ def _visited_clause(val):
         "ue.utm_id = marketing_clubs.utm_code OR ue.utm_source = marketing_clubs.utm_code "
         "OR ua_i.marketing_club_id = marketing_clubs.id "
         "OR ua_s.marketing_club_id = marketing_clubs.id "
-        f"OR ({path_code} <> '' AND {path_code} = marketing_clubs.utm_code))" + extra + ")")
+        f"OR ({path_code} <> '' AND {path_code} = marketing_clubs.utm_code) "
+        f"OR ({path_code} <> '' AND EXISTS (SELECT 1 FROM organisations o "
+        f"     WHERE o.id = marketing_clubs.existing_org_id AND o.slug = {path_code})))"
+        + extra + ")")
 
 ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
 
