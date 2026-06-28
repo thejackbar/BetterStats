@@ -10,6 +10,7 @@ import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
 import ScrollToTop from './components/ScrollToTop'
 import FaviconManager from './components/FaviconManager'
+import PaidVisitorCTA from './components/PaidVisitorCTA'
 import { usePageView } from './hooks/usePageView'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes
@@ -190,6 +191,7 @@ export default function App() {
       <div className="min-h-screen bg-pb-bg">
         <ScrollToTop />
         <PageViewBeacon />
+        <PaidVisitorCTA />
         <FaviconManager />
         <ConditionalNavbar />
         <Suspense fallback={<PageLoader />}>
