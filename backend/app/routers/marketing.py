@@ -49,7 +49,7 @@ async def crawl_control(body: CrawlControlBody, db: AsyncSession = Depends(get_d
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
                    person=None, exclude_junior=False, exclude_emailed=False,
                    exclude_carnival=False, exclude_school=False, associations=None,
-                   exclude_exported=False, exclude_suppressed=False):
+                   exclude_exported=False, exclude_suppressed=False, visited=False):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
@@ -60,6 +60,7 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
         "exclude_carnival": bool(exclude_carnival), "exclude_school": bool(exclude_school),
         "exclude_exported": bool(exclude_exported),
         "exclude_suppressed": bool(exclude_suppressed),
+        "visited": bool(visited),
         "associations": [a for a in (associations or []) if a],
     }
 
@@ -125,6 +126,7 @@ async def list_clubs(
     exclude_school: bool = False,
     exclude_exported: bool = False,
     exclude_suppressed: bool = False,
+    visited: bool = False,
     kind: Optional[str] = "club",
     group_by_association: bool = False,
     assoc_sort: str = "asc",
@@ -140,7 +142,8 @@ async def list_clubs(
     kw = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact,
         person, exclude_junior, exclude_emailed, exclude_carnival, exclude_school,
-        associations, exclude_exported=exclude_exported, exclude_suppressed=exclude_suppressed))
+        associations, exclude_exported=exclude_exported,
+        exclude_suppressed=exclude_suppressed, visited=visited))
     for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
@@ -169,6 +172,11 @@ async def list_clubs(
         for ct in rows:
             contacts_by_club.setdefault(ct.marketing_club_id, []).append(ct)
 
+    # Site visits attributable to each club via its UTM code (usage breadcrumbs),
+    # fetched for the whole page in one query and matched on the same code we show.
+    codes_by_club = {c.id: (c.utm_code or cd._default_utm(c.name)) for c in clubs}
+    visit_stats = await cd.club_visit_stats(db, list(codes_by_club.values()))
+
     out = []
     for c in clubs:
         out.append({
@@ -183,6 +191,7 @@ async def list_clubs(
             "emailed_via": c.emailed_via, "emailed_note": c.emailed_note,
             "excluded": c.excluded,
             "utm_code": c.utm_code or cd._default_utm(c.name),
+            "visits": visit_stats.get(codes_by_club[c.id]),
             "trial_modules": c.trial_modules or [],
             "requested_trial_modules": c.requested_trial_modules or [],
             "demo_status": c.demo_status,
@@ -235,6 +244,7 @@ class ExportBody(BaseModel):
     exclude_school: bool = False
     exclude_exported: bool = False
     exclude_suppressed: bool = False
+    visited: bool = False
     associations: Optional[List[str]] = None
     # Default True: only push contacts a super admin ticked for outreach. Set
     # False to export every subscribed, emailable contact regardless of selection.
@@ -252,7 +262,8 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
         body.q, body.state, body.association, body.status, body.postcode_from,
         body.postcode_to, body.contact, body.person, body.exclude_junior,
         body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
-        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed))
+        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
+        visited=body.visited))
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
         filters=filters)
@@ -312,6 +323,7 @@ class BulkActionBody(BaseModel):
     exclude_school: bool = False
     exclude_exported: bool = False
     exclude_suppressed: bool = False
+    visited: bool = False
     associations: Optional[List[str]] = None
 
 
@@ -320,7 +332,8 @@ async def _bulk_filters(db: AsyncSession, body: BulkActionBody) -> dict:
         body.q, body.state, body.association, body.status, body.postcode_from,
         body.postcode_to, body.contact, body.person, body.exclude_junior,
         body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
-        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed))
+        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
+        visited=body.visited))
 
 
 @router.post("/clubs/bulk-emailed")
@@ -354,6 +367,18 @@ async def set_club_utm(club_id: str, body: UtmBody, db: AsyncSession = Depends(g
     if res is None:
         raise HTTPException(status_code=404, detail="Club not found")
     return res
+
+
+@router.get("/clubs/{club_id}/visits")
+async def club_visits(club_id: str, db: AsyncSession = Depends(get_db),
+                      _=Depends(require_super_admin)):
+    """The usage breadcrumbs for one club: who visited the public site from a link
+    tagged with the club's UTM code — totals, pages viewed and recent visits."""
+    club = await db.get(MarketingClub, club_id)
+    if club is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    code = club.utm_code or cd._default_utm(club.name)
+    return await cd.club_visit_detail(db, code)
 
 
 class SalesBody(BaseModel):
@@ -422,6 +447,7 @@ async def export_csv(
     exclude_school: bool = False,
     exclude_exported: bool = False,
     exclude_suppressed: bool = False,
+    visited: bool = False,
     associations: Optional[List[str]] = Query(None),
     only_with_email: bool = True,
     db: AsyncSession = Depends(get_db),
@@ -431,7 +457,8 @@ async def export_csv(
     filters = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact, person,
         exclude_junior, exclude_emailed, exclude_carnival, exclude_school, associations,
-        exclude_exported=exclude_exported, exclude_suppressed=exclude_suppressed))
+        exclude_exported=exclude_exported, exclude_suppressed=exclude_suppressed,
+        visited=visited))
     csv_text = await cd.clubs_to_csv(db, only_with_email=only_with_email, filters=filters)
     return Response(
         content=csv_text, media_type="text/csv",
