@@ -43,8 +43,17 @@ class LineupSlot(BaseModel):
     is_wicket_keeper: bool = False
 
 
+class Demotion(BaseModel):
+    """A bumped player cascading down into a called-up player's vacated slot in
+    a lower-grade, same-date fixture."""
+    player_id: str
+    fixture_id: str
+    batting_order: Optional[int] = None
+
+
 class LineupSet(BaseModel):
     players: list[LineupSlot]
+    demotions: list[Demotion] = []
 
 
 class TeamSizeSet(BaseModel):
@@ -391,6 +400,51 @@ async def set_selection(
                     text("DELETE FROM fixture_lineups WHERE fixture_id = :fid AND player_id = :pid"),
                     {"fid": other_fid, "pid": pid},
                 )
+
+            # Cascade: a player bumped out of THIS XI by a call-up drops into the
+            # team below, taking the called-up player's now-vacant slot. The board
+            # sends these as demotions; we only honour a demotion into a fixture we
+            # just vacated a call-up from (which is, by construction, an owned,
+            # same-date, strictly-lower-grade XI) and never for a player who's
+            # still named in this XI.
+            if body.demotions and call_ups:
+                vacated = {str(fid) for _, fid in call_ups}
+                parsed: list[tuple[uuid.UUID, uuid.UUID, Optional[int]]] = []
+                demo_pids: set[uuid.UUID] = set()
+                for d in body.demotions:
+                    try:
+                        d_pid = uuid.UUID(d.player_id)
+                        d_fid = uuid.UUID(d.fixture_id)
+                    except (ValueError, AttributeError, TypeError):
+                        continue
+                    if d_pid in seen or str(d_fid) not in vacated:
+                        continue
+                    demo_pids.add(d_pid)
+                    parsed.append((d_pid, d_fid, d.batting_order))
+                if demo_pids:
+                    own2 = await db.execute(
+                        select(Player.id).where(
+                            Player.organisation_id == club.id,
+                            Player.id.in_(demo_pids),
+                        )
+                    )
+                    owned_demo = {r[0] for r in own2.fetchall()}
+                    for d_pid, d_fid, d_bo in parsed:
+                        if d_pid not in owned_demo:
+                            continue
+                        await db.execute(
+                            text("DELETE FROM fixture_lineups WHERE fixture_id = :fid AND player_id = :pid"),
+                            {"fid": d_fid, "pid": d_pid},
+                        )
+                        db.add(FixtureLineup(
+                            fixture_id=d_fid,
+                            player_id=d_pid,
+                            organisation_id=club.id,
+                            batting_order=d_bo,
+                            is_captain=False,
+                            is_wicket_keeper=False,
+                            selected_by=user.id,
+                        ))
 
     # Replace: clear existing rows, insert the new set.
     await db.execute(
