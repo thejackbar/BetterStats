@@ -6,21 +6,30 @@ import { useLocation, Link } from 'react-router-dom'
 // a club's public site (e.g. /applecross) to the request-access form, without
 // ever showing to a club's own members browsing organically.
 //
-// Trigger: ANY UTM parameter on the landing URL. Marketing, ad, email and
-// social links all carry at least one utm_* tag, so this catches every tagged
-// visit — not only paid Meta traffic. Once seen in a session it sticks (stored
+// Trigger: ANY utm parameter on the landing URL. We match any query key that
+// starts with "utm" (case-insensitive) — so the standard utm_source/medium/
+// campaign/content/term/id tags AND a bare ?utm=… all count. Marketing, ad,
+// email and social links all carry at least one, so this catches every tagged
+// visit, not only paid Meta traffic. Once seen in a session it sticks (stored
 // in sessionStorage) so the banner follows the visitor as they browse on.
 
-const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id']
 const VISITOR_KEY = 'bc:utmVisitor'
 const QUERY_KEY = 'bc:utmQuery'
 const DISMISS_KEY = 'bc:utmCtaDismissed'
 
+function hasUtmParam(search) {
+  try {
+    const params = new URLSearchParams(search)
+    for (const key of params.keys()) {
+      if (key.toLowerCase().startsWith('utm')) return true
+    }
+  } catch { /* ignore */ }
+  return false
+}
+
 function isUtmVisitor() {
   try {
-    const params = new URLSearchParams(window.location.search)
-    const taggedNow = UTM_KEYS.some((k) => params.get(k))
-    if (taggedNow) {
+    if (hasUtmParam(window.location.search)) {
       sessionStorage.setItem(VISITOR_KEY, '1')
       if (!sessionStorage.getItem(QUERY_KEY)) {
         sessionStorage.setItem(QUERY_KEY, window.location.search || '')
@@ -29,12 +38,7 @@ function isUtmVisitor() {
     return sessionStorage.getItem(VISITOR_KEY) === '1'
   } catch {
     // Storage blocked (private mode): fall back to checking the current URL only.
-    try {
-      const params = new URLSearchParams(window.location.search)
-      return UTM_KEYS.some((k) => params.get(k))
-    } catch {
-      return false
-    }
+    return hasUtmParam(window.location.search)
   }
 }
 
