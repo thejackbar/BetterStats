@@ -110,11 +110,17 @@ def _visited_clause(val):
         "                                    AND ua_i.marketing_club_id IS NOT NULL "
         "LEFT JOIN marketing_utm_aliases ua_s ON ua_s.utm_value = ue.utm_source "
         "                                    AND ua_s.marketing_club_id IS NOT NULL "
+        f"LEFT JOIN marketing_utm_aliases ua_p ON ua_p.utm_value = {path_code} "
+        "                                    AND ua_p.marketing_club_id IS NOT NULL "
         "WHERE ue.event_type = 'page_view' AND ("
         "ue.utm_id = marketing_clubs.utm_code OR ue.utm_source = marketing_clubs.utm_code "
         "OR ua_i.marketing_club_id = marketing_clubs.id "
         "OR ua_s.marketing_club_id = marketing_clubs.id "
-        f"OR ({path_code} <> '' AND {path_code} = marketing_clubs.utm_code))" + extra + ")")
+        "OR ua_p.marketing_club_id = marketing_clubs.id "
+        f"OR ({path_code} <> '' AND {path_code} = marketing_clubs.utm_code) "
+        f"OR ({path_code} <> '' AND EXISTS (SELECT 1 FROM organisations o "
+        f"     WHERE o.id = marketing_clubs.existing_org_id AND o.slug = {path_code})))"
+        + extra + ")")
 
 ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
 

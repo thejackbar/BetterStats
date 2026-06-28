@@ -457,8 +457,10 @@ function UtmMatchPanel() {
       {open && (
         <div className="mt-2">
           <p className="text-[11px] text-pb-faint mb-2">
-            Each value a visit arrived with (utm_source or utm_id). Map the ones that
-            belong to a club but don't match its code, and ignore the noise.
+            Each value a visit can be matched by — a utm_source / utm_id tag, or a
+            club-looking page slug it landed on. Map the ones that belong to a club
+            but don't match its code (e.g. a generic "willetton-cricket-club"), and
+            ignore the noise.
           </p>
           <div className="flex flex-wrap items-center gap-2 mb-2">
             {['unmatched', 'mapped', 'ignored', 'auto', 'all'].map(k => (
@@ -494,7 +496,14 @@ function UtmMatchPanel() {
                     const working = busy === r.utm_value
                     return (
                       <tr key={r.utm_value} className="border-t pb-hairline align-top">
-                        <td className="px-3 py-2 font-mono text-pb-text break-all">{r.utm_value}</td>
+                        <td className="px-3 py-2 font-mono text-pb-text break-all">
+                          {r.utm_value}
+                          {r.sources?.length > 0 && (
+                            <span className="ml-1.5 text-[9px] font-sans text-pb-faint uppercase tracking-wide">
+                              {r.sources.join(' · ')}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-pb-dim">{r.views}</td>
                         <td className="px-3 py-2">
                           <span className={'text-[10px] border rounded px-1 ' + st.cls}>{st.label}</span>
