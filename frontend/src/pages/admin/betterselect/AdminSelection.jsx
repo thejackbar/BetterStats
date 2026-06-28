@@ -190,6 +190,10 @@ export default function AdminSelection() {
   const [copied, setCopied] = useState(false)
   const [allFixtures, setAllFixtures] = useState([])
   const [prevXI, setPrevXI] = useState(null)
+  // Pending cascades: displacedPlayerId → { fixture_id, batting_order, callupId }.
+  // When a call-up bumps a regular out of this XI, that regular drops into the
+  // team below (the called-up player's vacated slot) on save.
+  const [demotions, setDemotions] = useState({})
   const [view, setView] = useState(() => {
     const v = localStorage.getItem('bs-view'); return v === 'sheet' || v === 'rail' ? v : 'rail'
   })
@@ -210,6 +214,7 @@ export default function AdminSelection() {
         setWkId(lineup.find((l) => l.is_wicket_keeper)?.player_id ?? null)
         setFormat(size)
         setFocus(init.findIndex((x) => x == null))
+        setDemotions({})
         setDirty(false)
       })
       .catch((e) => { toast.error(e.message); setData({ pool: [], lineup: [], fixture: null }) })
@@ -348,6 +353,17 @@ export default function AdminSelection() {
     setSlots((prev) => prev.map(() => null)); setCapId(null); setWkId(null); setFocus(0); markDirty()
   }
 
+  // The lower-grade XI a call-up would come from (its fixture + the player's
+  // slot there), so a bumped regular can take that slot. clash_blocks=false means
+  // every clashing XI is strictly lower grade, so any clash_detail entry is a
+  // valid call-up source; prefer the closest grade below this one.
+  const callUpSource = useCallback((p) => {
+    if (!p || p.clash_blocks || !(p.clash?.length > 0)) return null
+    const cands = (p.clash_detail || []).filter((d) => d && d.fixture_id)
+    if (!cands.length) return null
+    return cands.slice().sort((a, b) => (a.seq ?? 999) - (b.seq ?? 999))[0]
+  }, [])
+
   // Drop semantics shared by both views.
   const onDrop = (tgt, item) => {
     if (!canEdit) return
@@ -355,9 +371,18 @@ export default function AdminSelection() {
       if (item.kind === 'pool') {
         const p = item.player
         if (p.clash_blocks) return
+        const displacedId = slots[tgt.idx]   // who held the slot before this drop
         if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
         else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
         placeInSlot(tgt.idx, p.id)
+        // Cascade: a call-up that bumps a regular sends that regular down to the
+        // team below, into the called-up player's vacated slot.
+        const src = callUpSource(p)
+        if (src && displacedId && displacedId !== p.id) {
+          setDemotions((m) => ({ ...m, [displacedId]: { fixture_id: src.fixture_id, batting_order: src.batting_order, callupId: p.id } }))
+          const dn = poolById[displacedId]?.display_name || 'Player'
+          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${p.display_name}'s place — saved together`)
+        }
       } else if (item.kind === 'slot') swapSlots(item.idx, tgt.idx)
     } else if (tgt.kind === 'pool' && item.kind === 'slot') {
       removeAt(item.idx)
@@ -433,7 +458,12 @@ export default function AdminSelection() {
     setSaving(true)
     try {
       const players = filled.map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === capId, is_wicket_keeper: id === wkId }))
-      const r = await api.bsSetSelection(fixtureId, players)
+      // Only cascade a demotion when the displaced player really left this XI AND
+      // the call-up that bumped them is still named (so the lower slot is freed).
+      const demoList = Object.entries(demotions)
+        .filter(([displacedId, d]) => !filled.includes(displacedId) && filled.includes(d.callupId))
+        .map(([displacedId, d]) => ({ player_id: displacedId, fixture_id: d.fixture_id, batting_order: d.batting_order }))
+      const r = await api.bsSetSelection(fixtureId, players, demoList)
       toast.success(`Saved ${r.count} player${r.count === 1 ? '' : 's'}`)
       setDirty(false)
       load()

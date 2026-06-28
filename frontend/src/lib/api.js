@@ -1319,8 +1319,8 @@ export const api = {
   // ─── BetterSelect: Selection (lineups) ──────────────────
   bsSelectionOverview: () => request('/selection/overview'),
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
-  bsSetSelection: (fixtureId, players) =>
-    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players }) }),
+  bsSetSelection: (fixtureId, players, demotions = []) =>
+    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
   bsSetDefaultTeamSize: (size) =>
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").

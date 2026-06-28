@@ -319,10 +319,15 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # THIS fixture outranks it (a higher grade can call the player up) or not.
     clash: dict[str, list] = {}
     clash_seqs: dict[str, list] = {}
+    # Per clashing XI, the fixture id + this player's batting slot there, so the
+    # board can cascade a bumped player down into a called-up player's vacated
+    # slot in the lower team (see routers/selection save).
+    clash_detail: dict[str, list] = {}
     if fx.played_on:
         cl_res = await db.execute(
             text(
-                "SELECT fl.player_id, COALESCE(t.name, f.label, f.opponent_name) AS where_, t.sequence AS seq "
+                "SELECT fl.player_id, COALESCE(t.name, f.label, f.opponent_name) AS where_, t.sequence AS seq, "
+                "fl.fixture_id AS fid, fl.batting_order AS bo "
                 "FROM fixture_lineups fl "
                 "JOIN fixtures f ON fl.fixture_id = f.id "
                 "LEFT JOIN teams t ON f.team_id = t.id "
@@ -331,9 +336,15 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             ),
             {"org": club.id, "fid": fx.id, "d": fx.played_on},
         )
-        for pid, where_, seq in cl_res.fetchall():
+        for pid, where_, seq, other_fid, bo in cl_res.fetchall():
             clash.setdefault(str(pid), []).append(where_ or "another fixture")
             clash_seqs.setdefault(str(pid), []).append(seq)
+            clash_detail.setdefault(str(pid), []).append({
+                "fixture_id": str(other_fid),
+                "team_name": where_ or "another fixture",
+                "seq": seq,
+                "batting_order": bo,
+            })
 
     pl_res = await db.execute(
         select(Player).where(Player.organisation_id == club.id, Player.is_player.is_(True))
@@ -426,6 +437,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "is_current": not manual_inactive and not dormant,
             "selected": pid in lineup,
             "clash": clash.get(pid, []),
+            "clash_detail": clash_detail.get(pid, []),
             "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
             "squad_match": squad_match,
             "tier": tier,
