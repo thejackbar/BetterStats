@@ -100,8 +100,10 @@ def _visited_clause(val):
         if not frags:
             return None
         extra = " AND (" + " OR ".join(frags) + ")"
-    # A visit resolves to the club via its utm_code (in utm_id or utm_source) OR a
-    # manual alias (marketing_utm_aliases) an operator mapped to the club.
+    # A visit resolves to the club via its utm_code (in utm_id or utm_source), a
+    # manual alias (marketing_utm_aliases) an operator mapped to the club, OR by
+    # landing on the club's own page (first path segment == utm_code).
+    path_code = "split_part(split_part(ue.path, '?', 1), '/', 2)"
     return text(
         "EXISTS (SELECT 1 FROM usage_events ue "
         "LEFT JOIN marketing_utm_aliases ua_i ON ua_i.utm_value = ue.utm_id "
@@ -111,7 +113,8 @@ def _visited_clause(val):
         "WHERE ue.event_type = 'page_view' AND ("
         "ue.utm_id = marketing_clubs.utm_code OR ue.utm_source = marketing_clubs.utm_code "
         "OR ua_i.marketing_club_id = marketing_clubs.id "
-        "OR ua_s.marketing_club_id = marketing_clubs.id)" + extra + ")")
+        "OR ua_s.marketing_club_id = marketing_clubs.id "
+        f"OR ({path_code} <> '' AND {path_code} = marketing_clubs.utm_code))" + extra + ")")
 
 ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
 
