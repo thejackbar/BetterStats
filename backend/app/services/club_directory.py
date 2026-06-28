@@ -697,13 +697,13 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                                     C.email.isnot(None), C.subscribed.is_(True)))
     if visited:
         # Only clubs where someone has visited the public site from a link tagged
-        # with this club's UTM code (an outreach email tags links with
-        # ?utm_id=<utm_code>, captured into usage_events.utm_id). Safe SQL: the
-        # club code is a column, never interpolated. Mirrors comms_segments.
+        # with this club's UTM code — the code lands in usage_events.utm_id OR
+        # usage_events.utm_source (see the note above club_visit_stats). Safe SQL:
+        # the club code is a column, never interpolated. Mirrors comms_segments.
         conds.append(text(
-            "EXISTS (SELECT 1 FROM usage_events ue "
-            "WHERE ue.utm_id = marketing_clubs.utm_code AND ue.utm_id IS NOT NULL "
-            "AND ue.event_type = 'page_view')"))
+            "EXISTS (SELECT 1 FROM usage_events ue WHERE ue.event_type = 'page_view' "
+            "AND (ue.utm_id = marketing_clubs.utm_code "
+            "OR ue.utm_source = marketing_clubs.utm_code))"))
     if person:
         p = f"%{person.lower()}%"
         conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
@@ -1323,13 +1323,21 @@ async def sweep_association_rosters(session: AsyncSession, limit: int = 1,
 
 
 # ─── Usage breadcrumbs → directory (visits via a club's UTM) ─────────────────
-# An outreach email tags every link with the recipient club's UTM code as
-# ?utm_id=<utm_code>, which the SPA's page-view beacon captures into
-# usage_events.utm_id. So a row in usage_events whose utm_id equals a club's
-# utm_code is a site visit attributable to that club — that's the breadcrumb we
-# surface and filter on here. Counting distinct visitors falls back to ip_hash
-# when an anonymous prospect has no first-party visitor_id.
+# An outreach email tags its links with the recipient club's UTM code so a later
+# anonymous site visit can be tied back to the club. The code can land in either
+# of two columns depending on how the campaign tagged the link: utm_id (the
+# auto-appended ?utm_id=<utm_code>) OR utm_source (when the campaign sets
+# utm_source={{utm_code}}, which is how outreach has been sent in practice, e.g.
+# ?utm_source=pinjarra-cricket-club&utm_medium=email). So a visit is attributable
+# to a club when the club's utm_code matches EITHER column. An exact match on a
+# club code (…-cricket-club) is safe — an organic utm_source like "facebook"
+# never equals one. Counting distinct visitors falls back to ip_hash when an
+# anonymous prospect has no first-party visitor_id.
 _VISITOR_KEY = "COALESCE(ue.visitor_id::text, ue.ip_hash)"
+# A visit row matches a single bound club code (:code).
+_VISIT_MATCH_ONE = "(ue.utm_id = :code OR ue.utm_source = :code)"
+# …and the column the matched code came from (utm_id wins when both are set).
+_VISIT_CODE_OF = "COALESCE(NULLIF(ue.utm_id, ''), ue.utm_source)"
 
 
 async def club_visit_stats(session: AsyncSession, utm_codes: list) -> dict:
@@ -1340,12 +1348,14 @@ async def club_visit_stats(session: AsyncSession, utm_codes: list) -> dict:
     if not codes:
         return {}
     rows = (await session.execute(text(
-        f"SELECT ue.utm_id AS code, COUNT(*) AS views, "
+        f"SELECT CASE WHEN ue.utm_id = ANY(:codes) THEN ue.utm_id ELSE ue.utm_source END AS code, "
+        f"       COUNT(*) AS views, "
         f"       COUNT(DISTINCT {_VISITOR_KEY}) AS visitors, "
         f"       MAX(ue.created_at) AS last_seen "
         f"FROM usage_events ue "
-        f"WHERE ue.event_type = 'page_view' AND ue.utm_id = ANY(:codes) "
-        f"GROUP BY ue.utm_id"), {"codes": codes})).all()
+        f"WHERE ue.event_type = 'page_view' "
+        f"AND (ue.utm_id = ANY(:codes) OR ue.utm_source = ANY(:codes)) "
+        f"GROUP BY 1"), {"codes": codes})).all()
     return {
         r.code: {
             "views": int(r.views or 0),
@@ -1371,7 +1381,7 @@ async def club_visit_detail(session: AsyncSession, utm_code: Optional[str],
         f"       COUNT(DISTINCT {_VISITOR_KEY}) AS visitors, "
         f"       MIN(ue.created_at) AS first_seen, MAX(ue.created_at) AS last_seen "
         f"FROM usage_events ue "
-        f"WHERE ue.event_type = 'page_view' AND ue.utm_id = :code"),
+        f"WHERE ue.event_type = 'page_view' AND {_VISIT_MATCH_ONE}"),
         {"code": code})).one()
     if not summary.views:
         return empty
@@ -1379,13 +1389,13 @@ async def club_visit_detail(session: AsyncSession, utm_code: Optional[str],
         "SELECT split_part(ue.path, '?', 1) AS page, COUNT(*) AS views, "
         "       MAX(ue.created_at) AS last_seen "
         "FROM usage_events ue "
-        "WHERE ue.event_type = 'page_view' AND ue.utm_id = :code "
+        f"WHERE ue.event_type = 'page_view' AND {_VISIT_MATCH_ONE} "
         "GROUP BY 1 ORDER BY views DESC, last_seen DESC LIMIT 30"),
         {"code": code})).all()
     recent = (await session.execute(text(
         "SELECT ue.path, ue.created_at, ue.traffic_source, ue.country, ue.city "
         "FROM usage_events ue "
-        "WHERE ue.event_type = 'page_view' AND ue.utm_id = :code "
+        f"WHERE ue.event_type = 'page_view' AND {_VISIT_MATCH_ONE} "
         "ORDER BY ue.created_at DESC LIMIT :lim"),
         {"code": code, "lim": max(1, min(int(limit or 50), 200))})).all()
     return {
@@ -1425,8 +1435,8 @@ async def directory_stats(session: AsyncSession) -> dict:
         select(func.count(MarketingClub.id)).where(MarketingClub.emailed_at.isnot(None))) or 0
     visited = await session.scalar(text(
         "SELECT COUNT(*) FROM marketing_clubs mc WHERE EXISTS ("
-        "SELECT 1 FROM usage_events ue WHERE ue.utm_id = mc.utm_code "
-        "AND ue.utm_id IS NOT NULL AND ue.event_type = 'page_view')")) or 0
+        "SELECT 1 FROM usage_events ue WHERE ue.event_type = 'page_view' "
+        "AND (ue.utm_id = mc.utm_code OR ue.utm_source = mc.utm_code))")) or 0
     distinct_assoc = await session.scalar(
         select(func.count(func.distinct(MarketingClub.association_guid)))
         .where(MarketingClub.association_guid.isnot(None))) or 0

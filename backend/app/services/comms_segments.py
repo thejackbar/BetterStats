@@ -57,8 +57,9 @@ _DIR_MC_FIELDS = {"club_state", "association", "directory_status", "customer_sta
                   "is_trialing", "requested_trial", "had_demo", "visited_page"}
 
 # Tracked public pages a prospect can be matched on (key → path filter). A
-# BetterCricket outreach email tags its links with the club's utm_code as
-# ?utm_id=…, captured into usage_events.utm_id, so a visit maps back to the club.
+# BetterCricket outreach email tags its links with the club's utm_code (as
+# ?utm_id=… or ?utm_source=…), captured into usage_events.utm_id / utm_source,
+# so a visit maps back to the club.
 _VISIT_PATH_SQL = {
     "stats": "split_part(ue.path, '?', 1) ~* '^/modules/betterstats(/|$)'",
     "select": "split_part(ue.path, '?', 1) ~* '^/modules/betterselect(/|$)'",
@@ -87,10 +88,14 @@ def _as_list(val):
 
 def _visited_clause(val):
     """Correlated EXISTS over usage_events for a visit attributable to this
-    contact's club, matching ANY of the selected pages. Safe SQL: page filters
-    come from a fixed map and the club code is a column, never interpolated."""
+    contact's club, matching ANY of the selected pages. The club's UTM code lands
+    in usage_events.utm_id OR usage_events.utm_source depending on how the campaign
+    tagged the link (utm_source={{utm_code}} is how outreach is sent in practice),
+    so a visit matches on either. Safe SQL: page filters come from a fixed map and
+    the club code is a column, never interpolated."""
     pages = _as_list(val)
-    where = ["ue.utm_id = marketing_clubs.utm_code", "ue.utm_id IS NOT NULL",
+    where = ["(ue.utm_id = marketing_clubs.utm_code "
+             "OR ue.utm_source = marketing_clubs.utm_code)",
              "ue.event_type = 'page_view'"]
     if pages and "any" not in pages:
         frags = [_VISIT_PATH_SQL[p] for p in pages if p in _VISIT_PATH_SQL]
