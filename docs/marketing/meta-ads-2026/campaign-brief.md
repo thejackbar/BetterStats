@@ -246,19 +246,51 @@ questions for a free demo."
 
 ## 5. Creative assets
 
-Three ready-to-export concepts are in `./creative/` (SVG source plus a 1:1 PNG
-preview). They use the exact brand palette: green `#16C784` to blue `#3B82F6`
-gradient, navy `#0A0D14`, amber `#F5B542`, violet `#A855F7`. Display font is
-Barlow Condensed / Geist (already the site's display stack).
+All creative is in `./creative/`, in the exact brand palette: green `#16C784` to
+blue `#3B82F6` gradient, navy `#0A0D14`, amber `#F5B324`, violet `#A855F7`. Two
+families to A/B test against each other.
+
+### Family 1 — Launch-poster style (primary, recommended)
+
+This is the same visual language as the in-app "[Club] is now on BetterCricket"
+announcement poster (`frontend/src/social/launch-templates.jsx`): Anton display
+headline, confetti, halftone texture, a recreated club dashboard, a featured
+player, top batters/bowlers, the "Powered by the Better modules" band and the
+white footer CTA bar. The only change from the announcement is the message: these
+ads recruit clubs not yet signed up ("Big news for your club, get it all on
+BetterCricket, book a free demo") rather than announcing a club already on it.
+
+| File | Ratio | Use |
+|------|-------|-----|
+| `04-clubs-launch-poster-1x1` | 1:1 (1080×1080) | Feed, Campaign A |
+| `05-clubs-launch-poster-4x5` | 4:5 (1080×1350) | Feed (more height, adds price + testimonial), Campaign A |
+| `06-clubs-launch-poster-9x16` | 9:16 (1080×1920) | Stories / Reels, Campaign A & C |
+
+Each has an editable `.html` source beside the `.png`. Built as HTML so the
+dashboard, featured player, top performers, club name, logo and colours are all
+swappable. To re-export: render the `.html` with the headless-Chromium command
+used here (loads Google Fonts, screenshot slightly taller, crop to the target
+size).
+
+**Generic vs real-club**: the poster currently shows an aspirational "Your Cricket
+Club" mock so any prospect sees themselves in it. A real-club render (e.g.
+Applecross's actual stats, players and crest) is a stronger proof point and is a
+near drop-in swap of the panel data. Worth running both, the generic for broad
+reach, the real club for credibility.
+
+### Family 2 — Minimalist concepts
+
+Cleaner, type-led cards. Lighter to read at small sizes, good as the A/B
+challenger to the poster style.
 
 | File | Ratio | Use |
 |------|-------|-----|
 | `01-clubs-square-history.svg` | 1:1 (1080×1080) | Feed, Campaign A |
-| `02-clubs-portrait-oneplatform.svg` | 4:5 (1080×1350) | Feed (takes more height), Campaign A |
+| `02-clubs-portrait-oneplatform.svg` | 4:5 (1080×1350) | Feed, Campaign A |
 | `03-players-story-statcard.svg` | 9:16 (1080×1920) | Stories / Reels, Campaign C & D |
 
-To export a PNG at any size, open the SVG and "Save as PNG", or run it through the
-headless-Chromium command used to make the previews here.
+To export any SVG to PNG, "Save as PNG" or use the headless-Chromium command used
+for the previews here.
 
 ### Use the real screenshots too
 

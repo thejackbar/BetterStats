@@ -1,0 +1,187 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Permanent+Marker&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:#0a0d14}
+  .poster{
+    width:1080px;height:1350px;position:relative;overflow:hidden;
+    background:linear-gradient(120deg,#0a0d14 36%,#06140f 100%);
+    color:#fff;font-family:'Inter',sans-serif;display:flex;flex-direction:column;padding:40px;
+  }
+  .anton{font-family:'Anton',sans-serif;font-weight:400}
+  .mono{font-family:'JetBrains Mono',monospace}
+  .marker{font-family:'Permanent Marker',cursive}
+  .glow{position:absolute;top:-180px;right:-160px;width:520px;height:520px;border-radius:50%;
+    background:radial-gradient(circle,#16c78440 0%,transparent 70%);pointer-events:none}
+  .glow2{position:absolute;bottom:-200px;left:-160px;width:480px;height:480px;border-radius:50%;
+    background:radial-gradient(circle,#3b82f633 0%,transparent 70%);pointer-events:none}
+  .halftone{position:absolute;inset:0;pointer-events:none;opacity:.06;
+    background-image:radial-gradient(#fff 1.4px,transparent 1.5px);background-size:16px 16px}
+  .stripes{position:absolute;inset:0;pointer-events:none;opacity:.04;
+    background:repeating-linear-gradient(-32deg,#fff 0 2px,transparent 2px 26px)}
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.16;mix-blend-mode:overlay}
+  .flake{position:absolute;width:26px;height:11px;border-radius:2px;opacity:.85}
+  .panel{background:#ffffff0d;border:1px solid #ffffff1f;border-radius:14px;padding:16px;
+    box-shadow:0 18px 40px rgba(0,0,0,.35)}
+  .statcell{flex:1;text-align:center;min-width:0;padding:0 4px}
+  .statval{line-height:1;letter-spacing:.5px}
+  .statlbl{font-size:10px;letter-spacing:1.5px;opacity:.6;margin-top:5px;text-transform:uppercase}
+  .navdot{width:9px;height:9px;border-radius:50%}
+  .modtile{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;
+    font-family:'Anton';font-size:20px;color:#06231a}
+</style></head>
+<body>
+<div class="poster">
+  <div class="glow"></div><div class="glow2"></div>
+  <div class="halftone"></div><div class="stripes"></div>
+  <svg class="grain" xmlns="http://www.w3.org/2000/svg"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>
+
+  <!-- confetti -->
+  <div class="flake" style="left:60px;top:230px;background:#16c784;transform:rotate(18deg)"></div>
+  <div class="flake" style="left:120px;top:88px;background:#3b82f6;transform:rotate(-32deg)"></div>
+  <div class="flake" style="left:300px;top:60px;background:#f5b324;transform:rotate(20deg)"></div>
+  <div class="flake" style="left:760px;top:70px;background:#3b82f6;transform:rotate(-18deg)"></div>
+  <div class="flake" style="left:900px;top:150px;background:#16c784;transform:rotate(28deg)"></div>
+  <div class="flake" style="left:990px;top:300px;background:#f5b324;transform:rotate(-24deg)"></div>
+  <div class="flake" style="left:560px;top:40px;background:#a855f7;transform:rotate(14deg)"></div>
+  <div class="flake" style="left:30px;top:430px;background:#f5b324;transform:rotate(-20deg)"></div>
+
+  <!-- header -->
+  <div style="position:relative;display:flex;align-items:center;gap:18px;margin-bottom:8px">
+    <div style="width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,#16c784,#3b82f6);display:grid;place-items:center" class="anton">
+      <span style="font-size:34px;color:#06231a">BC</span>
+    </div>
+    <div style="width:2px;height:48px;background:#ffffff26"></div>
+    <div style="font-size:30px;font-weight:700">Better<span style="color:#16c784">Cricket</span></div>
+  </div>
+
+  <!-- main -->
+  <div style="position:relative;display:flex;gap:28px;flex:1;min-height:0">
+    <!-- left -->
+    <div style="width:452px;display:flex;flex-direction:column;min-height:0">
+      <div class="anton" style="font-size:62px;line-height:.9;letter-spacing:.5px;transform:rotate(-2deg);transform-origin:left">BIG NEWS</div>
+      <div class="anton" style="font-size:62px;line-height:.9;color:#16c784;margin-top:6px;transform:rotate(-2deg);transform-origin:left">FOR YOUR<br>CLUB</div>
+      <div class="anton" style="font-size:26px;opacity:.9;margin-top:12px;letter-spacing:1px">GET IT ALL ON</div>
+      <div class="anton" style="font-size:50px;letter-spacing:.5px;line-height:.95;margin-top:2px">
+        <span style="color:#16c784">BETTER</span><span>CRICKET</span></div>
+      <p style="font-size:16px;line-height:1.45;opacity:.78;margin-top:10px">Your full history online, your own club website, and the tools to run every part of the season. Built by club cricketers.</p>
+
+      <div style="margin-top:18px;display:flex;align-items:center;gap:12px;background:#16c7841a;border:1px solid #16c78455;border-radius:12px;padding:12px 16px">
+        <div class="anton" style="font-size:34px;color:#16c784;line-height:1">$399</div>
+        <div style="font-size:13px;line-height:1.3;opacity:.85">a year for the Core.<br>Full history imported, free.</div>
+      </div>
+      <div style="margin-top:16px;background:#ffffff0a;border:1px solid #ffffff1f;border-left:3px solid #16c784;border-radius:12px;padding:14px 16px">
+        <div style="font-size:15px;line-height:1.45;opacity:.9">&ldquo;It's made pretty much every spreadsheet we had redundant, and we had a lot.&rdquo;</div>
+        <div style="font-size:12px;opacity:.6;margin-top:8px">Tristram Fletcher · Secretary, Applecross CC</div>
+      </div>
+      <div style="margin-top:20px;display:flex;flex-direction:column;gap:13px;padding-top:0">
+        <div style="display:flex;gap:14px;align-items:flex-start">
+          <div style="flex-shrink:0;width:46px;height:46px;border-radius:12px;background:#16c7841f;border:1px solid #16c78466;display:grid;place-items:center">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#16c784" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></div>
+          <div><div class="anton" style="font-size:21px;letter-spacing:.5px">MORE STATS, MORE INSIGHT</div>
+          <div style="font-size:14px;opacity:.72;line-height:1.3">Decades of history, imported for you.</div></div></div>
+        <div style="display:flex;gap:14px;align-items:flex-start">
+          <div style="flex-shrink:0;width:46px;height:46px;border-radius:12px;background:#3b82f61f;border:1px solid #3b82f666;display:grid;place-items:center">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.6"/><path d="M18.5 20c0-2.5-1-4-3-4.7"/></svg></div>
+          <div><div class="anton" style="font-size:21px;letter-spacing:.5px">ONE CLUB, ONE PLACE</div>
+          <div style="font-size:14px;opacity:.72;line-height:1.3">Stats, site, selection and admin together.</div></div></div>
+        <div style="display:flex;gap:14px;align-items:flex-start">
+          <div style="flex-shrink:0;width:46px;height:46px;border-radius:12px;background:#f5b3241f;border:1px solid #f5b32466;display:grid;place-items:center">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#f5b324" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12.5l2.5 2.5L16 9"/></svg></div>
+          <div><div class="anton" style="font-size:21px;letter-spacing:.5px">LIVE IN UNDER AN HOUR</div>
+          <div style="font-size:14px;opacity:.72;line-height:1.3">We build a free demo on your data.</div></div></div>
+      </div>
+    </div>
+
+    <!-- right -->
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:12px;min-height:0;position:relative">
+      <div class="marker" style="position:absolute;top:-8px;right:2px;transform:rotate(-6deg);z-index:2;font-size:15px;color:#16c784;text-shadow:0 1px 0 #0a0d14">Free demo on your data!</div>
+
+      <!-- dashboard -->
+      <div class="panel">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #ffffff14">
+          <span class="navdot" style="background:#16c784;opacity:.85"></span>
+          <span class="navdot" style="background:#f5b324;opacity:.7"></span>
+          <span class="navdot" style="background:#3b82f6;opacity:.7"></span>
+          <span style="margin-left:6px;font-size:11px;opacity:.5;letter-spacing:.5px">Home · Players · Stats · Games · Yearbook</span>
+          <span style="margin-left:auto;font-size:10px;letter-spacing:1px;opacity:.6;border:1px solid #ffffff33;border-radius:4px;padding:2px 7px">LIVE</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <div style="width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,#16c784,#3b82f6)"></div>
+          <div style="font-weight:700;font-size:18px">Your Cricket Club</div>
+        </div>
+        <div style="display:flex;align-items:stretch">
+          <div class="statcell"><div class="anton statval" style="font-size:27px">312</div><div class="statlbl">Played</div></div>
+          <div class="statcell"><div class="anton statval" style="font-size:27px">84,120</div><div class="statlbl">Runs</div></div>
+          <div class="statcell"><div class="anton statval" style="font-size:27px">3,140</div><div class="statlbl">Wickets</div></div>
+          <div class="statcell"><div class="anton statval" style="font-size:27px">196</div><div class="statlbl">Players</div></div>
+          <div class="statcell"><div class="anton statval" style="font-size:30px;color:#16c784">58%</div><div class="statlbl">Win Rate</div></div>
+        </div>
+      </div>
+
+      <!-- featured -->
+      <div class="panel" style="display:flex;gap:14px;align-items:center">
+        <div style="width:76px;height:76px;border-radius:50%;flex-shrink:0;background:#16c78422;border:2px solid #16c784;display:grid;place-items:center" class="anton"><span style="font-size:30px;color:#16c784">JB</span></div>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:10px;letter-spacing:1.5px;opacity:.55;text-transform:uppercase">Featured player</div>
+          <div class="anton" style="font-size:24px;letter-spacing:.5px;margin-top:2px">J. BARENDSE</div>
+          <div style="display:flex;gap:18px;margin-top:8px">
+            <div><span class="anton" style="font-size:22px;color:#16c784">4,196</span><span style="font-size:12px;opacity:.65;margin-left:5px">runs</span></div>
+            <div><span class="anton" style="font-size:22px;color:#3b82f6">168</span><span style="font-size:12px;opacity:.65;margin-left:5px">wkts</span></div>
+            <div><span class="anton" style="font-size:22px;color:#f5b324">93</span><span style="font-size:12px;opacity:.65;margin-left:5px">ct</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- top performers -->
+      <div class="panel" style="min-height:0">
+        <div style="display:flex;gap:22px">
+          <div style="flex:1;min-width:0">
+            <div class="anton" style="font-size:17px;color:#16c784;letter-spacing:1px;margin-bottom:8px">TOP BATTERS</div>
+            <div class="row" style="display:flex;align-items:center;gap:8px;padding:5px 0"><span class="anton" style="font-size:12px;opacity:.5;width:14px">1</span><div style="flex:1"><div style="font-size:13px;font-weight:600">A. Cecchi</div></div><span class="anton" style="font-size:17px;color:#16c784">6,841</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">2</span><div style="flex:1"><div style="font-size:13px;font-weight:600">J. Barendse</div></div><span class="anton" style="font-size:17px;color:#16c784">4,196</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">3</span><div style="flex:1"><div style="font-size:13px;font-weight:600">R. Patel</div></div><span class="anton" style="font-size:17px;color:#16c784">3,902</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">4</span><div style="flex:1"><div style="font-size:13px;font-weight:600">S. Nguyen</div></div><span class="anton" style="font-size:17px;color:#16c784">3,517</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">5</span><div style="flex:1"><div style="font-size:13px;font-weight:600">D. Okafor</div></div><span class="anton" style="font-size:17px;color:#16c784">3,188</span></div>
+          </div>
+          <div style="width:1px;background:#ffffff14"></div>
+          <div style="flex:1;min-width:0">
+            <div class="anton" style="font-size:17px;color:#16c784;letter-spacing:1px;margin-bottom:8px">TOP BOWLERS</div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0"><span class="anton" style="font-size:12px;opacity:.5;width:14px">1</span><div style="flex:1"><div style="font-size:13px;font-weight:600">A. Ricci</div></div><span class="anton" style="font-size:17px;color:#16c784">412</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">2</span><div style="flex:1"><div style="font-size:13px;font-weight:600">M. Watt</div></div><span class="anton" style="font-size:17px;color:#16c784">318</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">3</span><div style="flex:1"><div style="font-size:13px;font-weight:600">C. Eadon-Clarke</div></div><span class="anton" style="font-size:17px;color:#16c784">274</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">4</span><div style="flex:1"><div style="font-size:13px;font-weight:600">H. Suzuki</div></div><span class="anton" style="font-size:17px;color:#16c784">241</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #ffffff12"><span class="anton" style="font-size:12px;opacity:.5;width:14px">5</span><div style="flex:1"><div style="font-size:13px;font-weight:600">L. Brennan</div></div><span class="anton" style="font-size:17px;color:#16c784">209</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- modules band -->
+  <div style="position:relative;margin-top:10px">
+    <div class="anton" style="text-align:center;font-size:18px;letter-spacing:2px;opacity:.9;margin-bottom:8px">POWERED BY THE <span style="color:#16c784">BETTER</span> MODULES</div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px"><div class="modtile" style="background:#16c784">◆</div><div style="font-weight:700;font-size:12px">BetterStats</div><div style="font-size:10px;opacity:.62;line-height:1.25">Stats, ladders & history.</div></div>
+      <div style="flex:1;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px"><div class="modtile" style="background:#3b82f6">◎</div><div style="font-weight:700;font-size:12px">BetterSelect</div><div style="font-size:10px;opacity:.62;line-height:1.25">Availability & selection.</div></div>
+      <div style="flex:1;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px"><div class="modtile" style="background:#ec4899">◈</div><div style="font-weight:700;font-size:12px">BetterSocials</div><div style="font-size:10px;opacity:.62;line-height:1.25">Website & match-day posts.</div></div>
+      <div style="flex:1;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px"><div class="modtile" style="background:#f59e0b">⬢</div><div style="font-weight:700;font-size:12px">BetterAdmin</div><div style="font-size:10px;opacity:.62;line-height:1.25">Fees, emails & merch.</div></div>
+      <div style="flex:1;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px"><div class="modtile" style="background:#a855f7">◇</div><div style="font-weight:700;font-size:12px">BetterIQ</div><div style="font-size:10px;opacity:.62;line-height:1.25">Analytics & scouting.</div></div>
+    </div>
+  </div>
+
+  <!-- footer CTA -->
+  <div style="position:relative;margin-top:10px;display:flex;align-items:center;gap:14px;background:#fff;border-radius:12px;padding:11px 16px">
+    <div style="width:36px;height:36px;border-radius:50%;background:#0a0d14;display:grid;place-items:center;flex-shrink:0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16c784" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+    </div>
+    <div>
+      <div class="anton" style="font-size:21px;letter-spacing:1px;color:#0a0d14;line-height:1">EXPLORE. ENGAGE. GROW.</div>
+      <div style="font-size:12px;color:#16a06a;font-weight:700;letter-spacing:.5px;margin-top:2px">BOOK A FREE DEMO TODAY</div>
+    </div>
+    <div class="mono" style="margin-left:auto;font-size:17px;font-weight:700;color:#0a0d14;background:#16c78426;padding:7px 14px;border-radius:8px">betterat.cricket</div>
+  </div>
+</div>
+</body></html>
