@@ -318,8 +318,8 @@ export default function AdminSelection() {
     // up from a lower one (clash_blocks=false) — then the pick is allowed and
     // they're dropped from the lower XI when we save.
     if (p.clash_blocks) { toast.error(`${p.display_name} is already picked for ${p.clash.join(', ')} that day`); return }
-    if (p.availability === 'UNAVAILABLE') return
     if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+    else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
     setSlots((prev) => {
       const next = [...prev]
       const existing = next.indexOf(p.id)
@@ -354,8 +354,9 @@ export default function AdminSelection() {
     if (tgt.kind === 'slot') {
       if (item.kind === 'pool') {
         const p = item.player
-        if (p.clash_blocks || p.availability === 'UNAVAILABLE') return
+        if (p.clash_blocks) return
         if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+        else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
         placeInSlot(tgt.idx, p.id)
       } else if (item.kind === 'slot') swapSlots(item.idx, tgt.idx)
     } else if (tgt.kind === 'pool' && item.kind === 'slot') {
