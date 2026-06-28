@@ -161,6 +161,7 @@ async def record_event(
     utm_medium: Optional[str] = None,
     utm_campaign: Optional[str] = None,
     utm_content: Optional[str] = None,
+    utm_id: Optional[str] = None,
     click_id: Optional[str] = None,
     click_source: Optional[str] = None,
     landing_referrer: Optional[str] = None,
@@ -196,14 +197,14 @@ async def record_event(
                         user_id, org_id, ip_hash, user_agent, referer,
                         country, region, city, metadata,
                         visitor_id, utm_source, utm_medium, utm_campaign,
-                        utm_content, click_id, traffic_source, landing_path
+                        utm_content, utm_id, click_id, traffic_source, landing_path
                     ) VALUES (
                         :event_type, :method, :path, :route, :status, :duration_ms,
                         :user_id, :org_id, :ip_hash, :user_agent, :referer,
                         :country, :region, :city,
                         CAST(:metadata AS JSONB),
                         :visitor_id, :utm_source, :utm_medium, :utm_campaign,
-                        :utm_content, :click_id, :traffic_source, :landing_path
+                        :utm_content, :utm_id, :click_id, :traffic_source, :landing_path
                     )
                     RETURNING id
                     """
@@ -229,6 +230,7 @@ async def record_event(
                     "utm_medium": (utm_medium or "")[:120] or None,
                     "utm_campaign": (utm_campaign or "")[:200] or None,
                     "utm_content": (utm_content or "")[:200] or None,
+                    "utm_id": (utm_id or "")[:200] or None,
                     "click_id": (click_id or "")[:300] or None,
                     "traffic_source": traffic_source,
                     "landing_path": (landing_path or "")[:500] or None,

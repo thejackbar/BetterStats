@@ -19,12 +19,48 @@ const STARTER = `<!doctype html>
   </body>
 </html>`
 
+// macOS TextEdit (and some editors) save "Rich Text" as RTF even when the file
+// is named .html — the bytes start with {\rtf and wrap the real HTML in RTF
+// control words, which is what was corrupting the import. These two helpers
+// detect that and recover the plain-text HTML the file was meant to hold.
+function looksLikeRtf(s) {
+  return /^\s*\{\\rtf/i.test(s)
+}
+function rtfToText(rtf) {
+  let s = rtf
+  // Drop the RTF header destinations (font + colour tables and other \* groups).
+  s = s.replace(/\{\\fonttbl[^{}]*\}/gi, '')
+  s = s.replace(/\{\\colortbl[^{}]*\}/gi, '')
+  s = s.replace(/\{\\\*[^{}]*\}/g, '')
+  // Protect the three literal escapes before stripping control words.
+  s = s.replace(/\\\\/g, '').replace(/\\\{/g, '').replace(/\\\}/g, '')
+  // Hex (\'xx) and unicode (\uN) escapes → the character they stand for.
+  s = s.replace(/\\'([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  s = s.replace(/\\u(-?\d+)\s?\??/g, (_, n) => {
+    let code = parseInt(n, 10); if (code < 0) code += 65536
+    return String.fromCharCode(code)
+  })
+  // Paragraph / line breaks → newline; \pard (paragraph reset) is not a break.
+  s = s.replace(/\\pard?\b ?/g, (m) => (m.indexOf('pard') >= 0 ? '' : '\n'))
+  s = s.replace(/\\line\b ?/g, '\n')
+  // A backslash at the end of a wrapped source line is also a line break.
+  s = s.replace(/\\\r?\n/g, '\n')
+  // Strip any remaining control words and their single trailing space.
+  s = s.replace(/\\[a-zA-Z]+-?\d* ?/g, '')
+  // Remaining braces are RTF group delimiters (literal braces were protected).
+  s = s.replace(/[{}]/g, '')
+  // Restore the protected literals.
+  s = s.replace(//g, '\\').replace(//g, '{').replace(//g, '}')
+  return s.trim()
+}
+
 function Editor({ initial, onSaved, onCancel, onDeleted }) {
   const [name, setName] = useState(initial?.name || '')
   const [html, setHtml] = useState(initial?.html ?? STARTER)
   const [preview, setPreview] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
   const [vars, setVars] = useState({ is_marketing: false, variables: [] })
   const [copied, setCopied] = useState('')
   const fileRef = useRef(null)
@@ -49,7 +85,21 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
     const f = e.target.files?.[0]
     if (!f) return
     const reader = new FileReader()
-    reader.onload = () => setHtml(String(reader.result || ''))
+    reader.onload = () => {
+      let content = String(reader.result || '')
+      setErr(''); setNotice('')
+      if (looksLikeRtf(content)) {
+        const recovered = rtfToText(content)
+        if (/<html|<!doctype|<body|<table|<div/i.test(recovered)) {
+          content = recovered
+          setNotice('That file was Rich Text (RTF), not HTML — TextEdit does this even when the file ends in .html. I recovered the HTML; check the preview. To avoid it, in TextEdit pick Format → Make Plain Text before saving, or save from a code editor.')
+        } else {
+          setErr('That file is Rich Text (RTF), not HTML, and I could not recover usable HTML from it. In TextEdit choose Format → Make Plain Text and save again, or use a plain-text / code editor.')
+          return
+        }
+      }
+      setHtml(content)
+    }
     reader.readAsText(f)
     e.target.value = '' // allow re-importing the same file
   }
@@ -77,7 +127,7 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Template name"
           className="flex-1 min-w-[200px] px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-        <input ref={fileRef} type="file" accept=".html,text/html" onChange={importFile} className="hidden" />
+        <input ref={fileRef} type="file" accept=".html,.htm,.rtf,text/html,text/rtf" onChange={importFile} className="hidden" />
         <button onClick={() => fileRef.current?.click()} className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2">Import .html</button>
         {initial?.id && <button onClick={remove} disabled={busy} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-red">Delete</button>}
         <button onClick={onCancel} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-text">Cancel</button>
@@ -87,6 +137,7 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
         </button>
       </div>
       {err && <div className="text-pb-red text-xs mb-2">{err}</div>}
+      {notice && <div className="text-pb-amber text-xs mb-2">{notice}</div>}
 
       <div className="pb-card p-3 mb-3">
         <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">Merge variables — click to copy</div>

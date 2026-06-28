@@ -148,7 +148,65 @@ function Pager({ total, page, pageSize, onPage, loading }) {
 
 // Everything collected for one club — all stored contacts, every association it
 // plays in, address and ids. Driven entirely by the /clubs payload (no extra fetch).
-function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, onSaveUtm }) {
+// The six modules a prospect can trial / request (entitlement key → label).
+const SALES_MODULES = [
+  ['core', 'BetterStats'], ['select', 'BetterSelect'], ['socials', 'BetterSocials'],
+  ['admin', 'BetterAdmin'], ['iq', 'BetterIQ'], ['fantasy', 'BetterFantasyCricket'],
+]
+const DEMO_OPTS = [['', 'no demo'], ['in_trial', 'demo → in a trial'],
+  ['trial_expired', 'demo → trial expired'], ['customer', 'demo → now a customer']]
+
+// Super-admin-maintained sales-pipeline state for one prospect club (no
+// automated source). Feeds the directory-aware BetterComms segment filters.
+function SalesEditor({ club, onSave }) {
+  const [trial, setTrial] = useState(club.trial_modules || [])
+  const [requested, setRequested] = useState(club.requested_trial_modules || [])
+  const [demo, setDemo] = useState(club.demo_status || '')
+  const [busy, setBusy] = useState(false)
+  const toggle = (list, set, k) => set(list.includes(k) ? list.filter(x => x !== k) : [...list, k])
+  const arrEq = (a, b) => a.length === b.length && a.every(x => b.includes(x))
+  const dirty = !arrEq(trial, club.trial_modules || []) ||
+    !arrEq(requested, club.requested_trial_modules || []) || demo !== (club.demo_status || '')
+  const save = async () => {
+    setBusy(true)
+    try {
+      await onSave(club.id, {
+        trial_modules: trial, requested_trial_modules: requested,
+        demo_status: demo || null, set_demo: true,
+      })
+    } finally { setBusy(false) }
+  }
+  const ModuleRow = ({ label, list, set }) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="text-pb-faint w-28 shrink-0">{label}</span>
+      {SALES_MODULES.map(([k, l]) => (
+        <label key={k} className="flex items-center gap-1 cursor-pointer text-pb-dim hover:text-pb-text">
+          <input type="checkbox" className="accent-pb-accent" checked={list.includes(k)} onChange={() => toggle(list, set, k)} />
+          {l}
+        </label>
+      ))}
+    </div>
+  )
+  return (
+    <div className="pt-2 mt-1 pb-hairline-t space-y-1.5">
+      <div className="text-[11px] uppercase tracking-wide text-pb-faint">Sales pipeline (manual)</div>
+      <ModuleRow label="Trialing" list={trial} set={setTrial} />
+      <ModuleRow label="Requested trial" list={requested} set={setRequested} />
+      <div className="flex items-center gap-2">
+        <span className="text-pb-faint w-28 shrink-0">Demo</span>
+        <select value={demo} onChange={e => setDemo(e.target.value)} className={SELECT_CLS}>
+          {DEMO_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button disabled={busy || !dirty} onClick={save}
+          className="px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent disabled:opacity-40">
+          {busy ? '...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, onSaveUtm, onSaveSales }) {
   const contacts = club.contacts || []
   const assocs = club.associations
   const [utm, setUtm] = useState(club.utm_code || '')
@@ -249,6 +307,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
               {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
             </button>
           </div>
+          {onSaveSales && <SalesEditor key={club.id} club={club} onSave={onSaveSales} />}
         </div>
       </div>
     </div>
@@ -440,6 +499,19 @@ export default function SuperMarketing() {
       setClubs(cs => cs.map(c => c.id === clubId ? { ...c, utm_code: r.utm_code } : c))
       setMsg(`UTM updated to ${r.utm_code}`)
     } catch (e) { setError(e.message || 'Could not update the UTM.') }
+  }
+
+  const saveSales = async (clubId, body) => {
+    try {
+      const r = await api.mktSetClubSales(clubId, body)
+      setClubs(cs => cs.map(c => c.id === clubId ? {
+        ...c,
+        trial_modules: r.trial_modules,
+        requested_trial_modules: r.requested_trial_modules,
+        demo_status: r.demo_status,
+      } : c))
+      setMsg('Sales state saved.')
+    } catch (e) { setError(e.message || 'Could not save the sales state.') }
   }
 
   const syncSuppressions = async () => {
@@ -796,7 +868,7 @@ export default function SuperMarketing() {
                           <ClubDetail club={c} onToggleContact={toggleContact}
                                       onToggleEmailed={toggleEmailed}
                                       onToggleExcluded={toggleExcluded}
-                                      onSaveUtm={saveUtm} />
+                                      onSaveUtm={saveUtm} onSaveSales={saveSales} />
                         </td>
                       </tr>
                     ),

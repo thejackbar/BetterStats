@@ -449,6 +449,9 @@ export const api = {
   mktSetClubUtm: (clubId, utm) =>
     request(`/club-admin/marketing/clubs/${clubId}/utm`,
       { method: 'PATCH', body: JSON.stringify({ utm }) }),
+  mktSetClubSales: (clubId, body) =>
+    request(`/club-admin/marketing/clubs/${clubId}/sales`,
+      { method: 'PATCH', body: JSON.stringify(body) }),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
@@ -1546,6 +1549,9 @@ export const api = {
   commsDeleteSegment: (id) => request(`/club-admin/comms/segments/${id}`, { method: 'DELETE' }),
   commsPreviewSegment: (definition) =>
     request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
+  commsResolveSegment: (definition) =>
+    request('/club-admin/comms/segments/resolve', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
+  commsSegmentExportCsvUrl: (id) => `${BASE}/club-admin/comms/segments/${id}/export.csv`,
   commsSegmentOptions: () => request('/club-admin/comms/segments/options'),
   // Static lists (Phase 2): curated sets of contacts.
   commsListLists: () => request('/club-admin/comms/lists'),
@@ -1557,6 +1563,11 @@ export const api = {
     request(`/club-admin/comms/lists/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
   commsRemoveListMember: (id, contactId) =>
     request(`/club-admin/comms/lists/${id}/members/${contactId}`, { method: 'DELETE' }),
+  commsRemoveListMembers: (id, contactIds) =>
+    request(`/club-admin/comms/lists/${id}/members/remove`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  commsCopyListMembers: (contactIds, listIds) =>
+    request('/club-admin/comms/lists/members/copy', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds, list_ids: listIds }) }),
+  commsListExportCsvUrl: (id) => `${BASE}/club-admin/comms/lists/${id}/export.csv`,
   // Email templates (Phase 3).
   commsListTemplates: () => request('/club-admin/comms/templates'),
   commsGetTemplate: (id) => request(`/club-admin/comms/templates/${id}`),

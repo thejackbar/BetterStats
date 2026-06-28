@@ -183,6 +183,9 @@ async def list_clubs(
             "emailed_via": c.emailed_via, "emailed_note": c.emailed_note,
             "excluded": c.excluded,
             "utm_code": c.utm_code or cd._default_utm(c.name),
+            "trial_modules": c.trial_modules or [],
+            "requested_trial_modules": c.requested_trial_modules or [],
+            "demo_status": c.demo_status,
             "contacts": [{
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
@@ -348,6 +351,30 @@ async def set_club_utm(club_id: str, body: UtmBody, db: AsyncSession = Depends(g
     """Manually edit a club's UTM code. A blank value resets it to the
     name-derived default (first word + '-cricket-club')."""
     res = await cd.set_utm(db, club_id, body.utm)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return res
+
+
+class SalesBody(BaseModel):
+    trial_modules: Optional[list[str]] = None
+    requested_trial_modules: Optional[list[str]] = None
+    demo_status: Optional[str] = None
+    set_demo: bool = False  # send true to apply demo_status (incl. clearing it)
+
+
+@router.patch("/clubs/{club_id}/sales")
+async def set_club_sales(club_id: str, body: SalesBody, db: AsyncSession = Depends(get_db),
+                         _=Depends(require_super_admin)):
+    """Set a prospect's sales-pipeline state: which modules it's trialing / has
+    requested a trial for, and its demo follow-on state. Only fields supplied are
+    changed (demo_status only when set_demo is true, so it can be cleared)."""
+    res = await cd.set_sales_state(
+        db, club_id,
+        trial_modules=body.trial_modules,
+        requested_trial_modules=body.requested_trial_modules,
+        demo_status=(body.demo_status if body.set_demo else ...),
+    )
     if res is None:
         raise HTTPException(status_code=404, detail="Club not found")
     return res

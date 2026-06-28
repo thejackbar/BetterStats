@@ -20,7 +20,9 @@ no login, and every send skips unsubscribed / bounced contacts.
 from __future__ import annotations
 
 import asyncio
+import csv
 import html as html_lib
+import io
 import logging
 import re
 import uuid
@@ -28,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_, text, update, exists
@@ -78,7 +80,33 @@ def _first_name(name: Optional[str], email: str) -> str:
     return (email.split("@", 1)[0] or "there").replace(".", " ").split()[0].title()
 
 
-def _contact_out(c: CommsContact) -> dict:
+def _dir_fields(c: CommsContact, mc: "Optional[MarketingClub]") -> dict:
+    """The five Clubs Directory fields resolved for one contact: a per-contact
+    merge_vars override wins, then the linked directory club. Blank for an ordinary
+    (non-directory) contact. Used so the Lists editor can search and filter on
+    club / association / utm_code / state / website."""
+    mv = _marketing_vars(mc)
+    ov = c.merge_vars or {}
+
+    def pick(key):
+        v = ov.get(key)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+        return mv.get(key, "") or ""
+
+    return {k: pick(k) for k in ("club", "association", "utm_code", "state", "website")}
+
+
+async def _mc_map(db: AsyncSession, contacts) -> dict:
+    """Batch-load the MarketingClub for a set of contacts, keyed by id."""
+    ids = {c.marketing_club_id for c in contacts if c.marketing_club_id}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(MarketingClub).where(MarketingClub.id.in_(ids)))).scalars().all()
+    return {m.id: m for m in rows}
+
+
+def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None) -> dict:
     return {
         "id": str(c.id),
         "email": c.email,
@@ -88,6 +116,7 @@ def _contact_out(c: CommsContact) -> dict:
         "bounced": c.bounced,
         "excluded": c.excluded,
         "player_id": str(c.player_id) if c.player_id else None,
+        **_dir_fields(c, mc),
     }
 
 
@@ -174,11 +203,18 @@ def _is_full_doc(html: str) -> bool:
     return "<html" in low or "<body" in low
 
 
-def _apply_utm(html: str, utm: dict) -> str:
+def _apply_utm(html: str, utm: dict, utm_code: Optional[str] = None) -> str:
     """Append the campaign's UTM tags to every outbound http(s) link, leaving the
     unsubscribe link, mailto/tel, anchors and already-tagged links alone. Only the
-    BetterCricket marketing-outreach org uses this (see _render_parts)."""
+    BetterCricket marketing-outreach org uses this (see _render_parts).
+
+    When ``utm_code`` is given (the recipient club's per-club code) it is added as
+    ``utm_id`` so a later anonymous site visit from this link can be tied back to
+    the club — that's what powers the "visited the pricing page" segment."""
     params = [(k, str(v).strip()) for k in _UTM_KEYS if (v := (utm or {}).get(k)) and str(v).strip()]
+    code = str(utm_code or "").strip()
+    if code:
+        params.append(("utm_id", code))
     if not params:
         return html
     qs = "&".join(f"{k}={quote(v, safe='')}" for k, v in params)
@@ -228,12 +264,13 @@ def _footer_block(footer: str, unsub_url: str, club_name: str, marketing: bool) 
     template before </body>. Inherits the email's font so it adopts its style; the
     unsubscribe link can never be removed by the author (Spam Act 2003)."""
     safe_footer = html_lib.escape(footer).replace("\n", "<br>") if footer else ""
-    prefix = f"{safe_footer}<br>" if safe_footer else ""
+    # A blank line between the sender-id block and the unsubscribe sentence.
+    prefix = f"{safe_footer}<br><br>" if safe_footer else ""
     sentence = _unsub_sentence_html(club_name, unsub_url, marketing)
     return (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="margin-top:24px;"><tr><td align="center" '
-        'style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
+        'style="margin-top:8px;"><tr><td align="center" '
+        'style="padding:14px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
         'font-size:12px;line-height:1.5;font-family:inherit;text-align:center;">'
         f'{prefix}{sentence}</td></tr></table>'
     )
@@ -263,7 +300,7 @@ def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str, club_
   <tr><td style="background:{accent};padding:18px 28px;">{logo}</td></tr>
   <tr><td style="padding:28px;color:#1f2937;font-size:15px;line-height:1.6;">{inner}</td></tr>
   <tr><td style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">
-    {safe_footer}<br>
+    {safe_footer}<br><br>
     {_unsub_sentence_html(club_name, unsub_url, org_is_outreach(org))}
   </td></tr>
 </table>
@@ -397,16 +434,17 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     club_name = ctx.get("club") or org.name or ""
     unsub_text = _unsub_sentence_text(club_name, unsub_url, apply_utm)
     text_tail = f"\n\n—\n{footer}\n{unsub_text}" if footer else f"\n\n—\n{unsub_text}"
+    link_code = str(ctx.get("utm_code") or "").strip() if apply_utm else ""
     if _is_full_doc(body_html):
         merged = _merge(body_html or "", ctx)
         if apply_utm:
-            merged = _apply_utm(merged, utm)
+            merged = _apply_utm(merged, utm, link_code)
         html = _inject_footer(merged, footer, unsub_url, club_name, apply_utm)
         text = _html_to_text(merged) + text_tail
     else:
         inner = _merge(_body_to_html(body_html or ""), ctx)
         if apply_utm:
-            inner = _apply_utm(inner, utm)
+            inner = _apply_utm(inner, utm, link_code)
         html = _wrap_html(org, inner, footer, unsub_url, club_name)
         text = _html_to_text(inner) + text_tail
     return subject, html, text
@@ -522,13 +560,22 @@ async def list_contacts(
     stmt = select(CommsContact).where(CommsContact.organisation_id == club.id)
     if query.strip():
         like = f"%{query.strip().lower()}%"
-        stmt = stmt.where(or_(
+        # Match the contact's own fields plus its linked Clubs Directory fields
+        # (club / association / utm_code / state / website) — an OR across all of
+        # them, so a search finds a contact by any one.
+        stmt = stmt.outerjoin(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id).where(or_(
             func.lower(CommsContact.email).like(like),
             func.lower(func.coalesce(CommsContact.name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.association_name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.utm_code, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.state, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.website_url, "")).like(like),
         ))
     if subscribed is not None:
         stmt = stmt.where(CommsContact.subscribed.is_(subscribed))
-    rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(2000))).scalars().all()
+    rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(5000))).scalars().all()
+    mc_map = await _mc_map(db, rows)
 
     counts = (await db.execute(
         select(
@@ -542,7 +589,7 @@ async def list_contacts(
         ).where(CommsContact.organisation_id == club.id)
     )).one()
     return {
-        "contacts": [_contact_out(c) for c in rows],
+        "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
         "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2],
                     "bounced": counts[3], "excluded": counts[4]},
     }
@@ -1537,19 +1584,88 @@ async def preview_segment(
     }
 
 
+@router.post("/segments/resolve")
+async def resolve_segment(
+    data: SegmentIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The full matching audience for a definition, enriched with each contact's
+    Clubs Directory fields — powers the searchable/filterable audience preview and
+    its CSV export. Capped for safety; the count is exact."""
+    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
+    rows = contacts[:5000]
+    mc_map = await _mc_map(db, rows)
+    return {
+        "count": len(contacts),
+        "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
+    }
+
+
+@router.get("/segments/{segment_id}/export.csv")
+async def export_segment_csv(
+    segment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a saved segment's current audience as CSV — same columns as the
+    Lists export. The segment re-evaluates on each download, so it always reflects
+    who fits today."""
+    seg = await _segment_or_404(db, club, segment_id)
+    contacts = await comms_segments.resolve_contacts(db, club, seg.definition or {})
+    mc_map = await _mc_map(db, contacts)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Name", "Email", "Club", "Association", "UTM code", "State",
+                "Website", "Subscribed"])
+    for c in contacts:
+        d = _dir_fields(c, mc_map.get(c.marketing_club_id))
+        w.writerow([
+            c.name or "", c.email or "", d["club"], d["association"],
+            d["utm_code"], d["state"], d["website"],
+            "yes" if c.subscribed else "no",
+        ])
+    fname = f"{_csv_safe_filename(seg.name)}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.get("/segments/options")
 async def segment_options(
     _: User = _require,
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Option lists for the segment rule builder, so role / squad dropdowns use the
-    club's real values instead of guessed vocab."""
+    """Option lists for the segment rule builder, so dropdowns use real values
+    instead of guessed vocab. In the BetterCricket Clubs Directory context this
+    returns the directory option lists (states, associations) and flags the
+    builder to offer the directory field set instead of the club/player one."""
+    if org_is_outreach(club):
+        states = [s for (s,) in (await db.execute(
+            select(MarketingClub.state)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id, MarketingClub.state.isnot(None))
+            .distinct().order_by(MarketingClub.state)
+        )).all() if s]
+        assocs = [a for (a,) in (await db.execute(
+            select(MarketingClub.association_name)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id, MarketingClub.association_name.isnot(None))
+            .distinct().order_by(MarketingClub.association_name)
+        )).all() if a]
+        return {"context": "directory", "states": states, "associations": assocs}
+
     teams = (await db.execute(
         select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))
         .order_by(Team.name)
     )).scalars().all()
     return {
+        "context": "club",
         "roles": ["Batter", "Bowler", "All Rounder", "Wicketkeeper", "Wicketkeeper-Batter"],
         "genders": [["male", "Male"], ["female", "Female"]],
         "teams": [{"id": str(t.id), "name": t.name} for t in teams],
@@ -1663,7 +1779,51 @@ async def list_members(
         .where(CommsListMember.list_id == uuid.UUID(list_id))
         .order_by(CommsContact.email)
     )).scalars().all()
-    return [{"id": str(c.id), "email": c.email, "name": c.name} for c in rows]
+    mc_map = await _mc_map(db, rows)
+    return [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows]
+
+
+def _csv_safe_filename(name: str) -> str:
+    """A tame ASCII filename for the Content-Disposition header."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "list").strip()).strip("-")
+    return (slug or "list").lower()
+
+
+@router.get("/lists/{list_id}/export.csv")
+async def export_list_csv(
+    list_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a list's contacts as CSV — one row per member, with the contact's
+    own fields plus the Clubs Directory fields it resolves to."""
+    lst = await _list_or_404(db, club, list_id)
+    rows = (await db.execute(
+        select(CommsContact)
+        .join(CommsListMember, CommsListMember.contact_id == CommsContact.id)
+        .where(CommsListMember.list_id == lst.id)
+        .order_by(CommsContact.name.nullslast(), CommsContact.email)
+    )).scalars().all()
+    mc_map = await _mc_map(db, rows)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Name", "Email", "Club", "Association", "UTM code", "State",
+                "Website", "Subscribed"])
+    for c in rows:
+        d = _dir_fields(c, mc_map.get(c.marketing_club_id))
+        w.writerow([
+            c.name or "", c.email or "", d["club"], d["association"],
+            d["utm_code"], d["state"], d["website"],
+            "yes" if c.subscribed else "no",
+        ])
+    fname = f"{_csv_safe_filename(lst.name)}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 class ListMembersIn(BaseModel):
@@ -1717,6 +1877,83 @@ async def remove_list_member(
             CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
     await db.commit()
     return {"status": "ok", "count": await _list_count(db, lst.id)}
+
+
+def _uuid_set(raw_ids) -> set:
+    out = set()
+    for raw in (raw_ids or []):
+        try:
+            out.add(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+@router.post("/lists/{list_id}/members/remove")
+async def remove_list_members(
+    list_id: str,
+    data: ListMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove several contacts from a list in one call (group remove)."""
+    lst = await _list_or_404(db, club, list_id)
+    cids = _uuid_set(data.contact_ids)
+    removed = 0
+    if cids:
+        res = await db.execute(
+            CommsListMember.__table__.delete().where(
+                CommsListMember.list_id == lst.id,
+                CommsListMember.contact_id.in_(cids)))
+        removed = res.rowcount or 0
+        await db.commit()
+    return {"status": "ok", "removed": removed, "count": await _list_count(db, lst.id)}
+
+
+class CopyMembersIn(BaseModel):
+    contact_ids: list[str] = []
+    list_ids: list[str] = []
+
+
+@router.post("/lists/members/copy")
+async def copy_list_members(
+    data: CopyMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Copy a set of contacts into one or more target lists (group copy). Only the
+    club's own contacts and lists are touched; existing memberships are left alone."""
+    cids = _uuid_set(data.contact_ids)
+    target_ids = _uuid_set(data.list_ids)
+    if not cids or not target_ids:
+        return {"results": []}
+    # Keep only contacts that belong to this club.
+    valid_cids = set((await db.execute(
+        select(CommsContact.id).where(
+            CommsContact.organisation_id == club.id, CommsContact.id.in_(cids))
+    )).scalars().all())
+    results = []
+    for lid in target_ids:
+        lst = await db.get(CommsList, lid)
+        if not lst or lst.organisation_id != club.id:
+            continue
+        existing = set((await db.execute(
+            select(CommsListMember.contact_id).where(
+                CommsListMember.list_id == lst.id,
+                CommsListMember.contact_id.in_(valid_cids))
+        )).scalars().all())
+        added = 0
+        for cid in valid_cids:
+            if cid in existing:
+                continue
+            db.add(CommsListMember(list_id=lst.id, contact_id=cid))
+            added += 1
+        await db.commit()
+        results.append({"list_id": str(lst.id), "name": lst.name,
+                        "added": added, "count": await _list_count(db, lst.id)})
+    return {"results": results}
 
 
 # ─── Email templates (Phase 3) ───────────────────────────────────────────────
