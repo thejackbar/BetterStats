@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
-import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect } from './audience'
+import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle } from './audience'
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -61,6 +61,7 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
           <span className="text-pb-faintest text-[11px] ml-2 truncate">{[c.club, c.state].filter(Boolean).join(' · ')}</span>
         )}
       </button>
+      {c.suppressed && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5 shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded">supp</span>}
       {action}
     </div>
   )
@@ -88,6 +89,7 @@ function ListDetail({ list, lists, onChanged }) {
   const [contacts, setContacts] = useState(null)
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState({ club: [], association: [], utm_code: [], state: [] })
+  const [supp, setSupp] = useState('all')
   const [selected, setSelected] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [detailId, setDetailId] = useState(null)
@@ -104,14 +106,14 @@ function ListDetail({ list, lists, onChanged }) {
   useEffect(() => { loadMembers() }, [loadMembers])
   useEffect(() => { loadContacts() }, [loadContacts])
   // A fresh list resets the working selection.
-  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }) }, [list.id])
+  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }); setSupp('all') }, [list.id])
 
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
 
   const q = query.trim().toLowerCase()
   const visible = useMemo(() =>
-    (contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters)),
-    [contacts, q, filters])
+    (contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesSuppressed(c, supp)),
+    [contacts, q, filters, supp])
   const mids = memberIds || new Set()
   const shownMembers = visible.filter(c => mids.has(c.id))
   const candidates = visible.filter(c => !mids.has(c.id))
@@ -160,7 +162,7 @@ function ListDetail({ list, lists, onChanged }) {
 
   const selectAllFiltered = () => setMany(visible.map(c => c.id), true)
   const clearSelection = () => setSelected(new Set())
-  const activeFilters = FACETS.some(f => filters[f.key].length) || !!q
+  const activeFilters = FACETS.some(f => filters[f.key].length) || !!q || supp !== 'all'
 
   return (
     <div className="pb-card p-4">
@@ -180,8 +182,9 @@ function ListDetail({ list, lists, onChanged }) {
           <MultiSelect key={f.key} label={f.label} options={facetOptions[f.key]}
             selected={filters[f.key]} onChange={(v) => setFilters(s => ({ ...s, [f.key]: v }))} />
         ))}
+        <SuppressedToggle value={supp} onChange={setSupp} />
         {activeFilters && (
-          <button onClick={() => { setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }) }}
+          <button onClick={() => { setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }); setSupp('all') }}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
         )}
         <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>

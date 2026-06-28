@@ -27,6 +27,29 @@ export function matchesFilters(c, filters) {
 export function emptyFilters() {
   return { club: [], association: [], utm_code: [], state: [] }
 }
+
+// Suppressed is a derived boolean the backend sets on a contact when its address
+// is globally suppressed (bounce / complaint / unsubscribe) or excluded by
+// BetterCricket. Mode is 'all' | 'active' | 'suppressed'.
+export function matchesSuppressed(c, mode) {
+  if (mode === 'suppressed') return !!c.suppressed
+  if (mode === 'active') return !c.suppressed
+  return true
+}
+export function SuppressedToggle({ value, onChange }) {
+  const opts = [['all', 'All'], ['active', 'Active'], ['suppressed', 'Suppressed']]
+  return (
+    <div className="inline-flex rounded border pb-hairline overflow-hidden shrink-0">
+      {opts.map(([v, label], i) => (
+        <button key={v} type="button" onClick={() => onChange(v)}
+          className={`px-2.5 py-1.5 text-xs ${i > 0 ? 'pb-hairline-l' : ''} ${value === v ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
+          style={value === v ? { background: 'var(--pb-accent)' } : undefined}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
 export function facetOptionsFrom(contacts) {
   const opts = { club: new Set(), association: new Set(), utm_code: new Set(), state: new Set() }
   for (const c of contacts || []) for (const f of FACETS) { if (c[f.key]) opts[f.key].add(c[f.key]) }

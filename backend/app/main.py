@@ -1308,6 +1308,9 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_comms_templates_org ON comms_templates(organisation_id)"))
         await conn.execute(text(
             "ALTER TABLE comms_campaigns ADD COLUMN IF NOT EXISTS utm JSONB NOT NULL DEFAULT '{}'"))
+        await conn.execute(text(
+            "ALTER TABLE comms_campaigns ADD COLUMN IF NOT EXISTS template_id UUID "
+            "REFERENCES comms_templates(id) ON DELETE SET NULL"))
         # KlubPro → BetterStats migration (migration 072) — sponsor contact
         # columns + audit/rollback bookkeeping. Idempotent defensive creates so
         # the API boots even if alembic hasn't run yet (mirrors the blocks above).

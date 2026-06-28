@@ -106,7 +106,9 @@ async def _mc_map(db: AsyncSession, contacts) -> dict:
     return {m.id: m for m in rows}
 
 
-def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None) -> dict:
+def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
+                 suppressed: bool = False) -> dict:
+    complained = bool(getattr(c, "complained", False))
     return {
         "id": str(c.id),
         "email": c.email,
@@ -114,10 +116,37 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None) -> dict:
         "source": c.source,
         "subscribed": c.subscribed,
         "bounced": c.bounced,
+        "complained": complained,
         "excluded": c.excluded,
+        # True if the address can't receive a send: bounced / complaint / admin
+        # exclusion, or on the global suppression list (passed in by the caller).
+        "suppressed": bool(c.bounced or complained or c.excluded or suppressed),
         "player_id": str(c.player_id) if c.player_id else None,
         **_dir_fields(c, mc),
     }
+
+
+_VAR_TOKEN_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+_UTM_LABELS = {"utm_source": "Source", "utm_medium": "Medium", "utm_campaign": "Campaign"}
+
+
+def campaign_warnings(subject: str, body_html: str, utm: dict) -> list[str]:
+    """Consistency checks between a template's {{variables}} and the email's UTM
+    section. Org-independent (uses the full known-variable set) so it can run on a
+    stored campaign for the list as well as live in the editor.
+
+    (a) any {{var}} that isn't a known merge variable won't be replaced; and
+    (b) if the template substitutes {{utm_source|medium|campaign}} but the matching
+        UTM-section value is blank, the link gets an empty tag.
+    """
+    known = {v["name"] for v in MERGE_VARIABLES} | {"club_name"}
+    used = set(_VAR_TOKEN_RE.findall(f"{subject or ''} {body_html or ''}"))
+    warnings = [f"Unknown variable {{{{{v}}}}} — it won't be replaced." for v in sorted(used - known)]
+    u = utm or {}
+    for key, label in _UTM_LABELS.items():
+        if key in used and not str(u.get(key) or "").strip():
+            warnings.append(f"Template uses {{{{{key}}}}} but no {label} is set in UTM link tracking.")
+    return warnings
 
 
 def _campaign_out(c: CommsCampaign) -> dict:
@@ -128,6 +157,8 @@ def _campaign_out(c: CommsCampaign) -> dict:
         "body_html": c.body_html,
         "audience": c.audience or {},
         "utm": c.utm or {},
+        "template_id": str(c.template_id) if c.template_id else None,
+        "warnings": campaign_warnings(c.subject, c.body_html, c.utm or {}),
         "status": c.status,
         "stats": c.stats or {},
         "error": c.error,
@@ -576,6 +607,14 @@ async def list_contacts(
         stmt = stmt.where(CommsContact.subscribed.is_(subscribed))
     rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(5000))).scalars().all()
     mc_map = await _mc_map(db, rows)
+    # Which of these addresses are on the global suppression list (one lookup).
+    emails = [c.email.lower() for c in rows if c.email]
+    supp_emails = set()
+    if emails:
+        supp_emails = set((await db.execute(
+            select(func.lower(EmailSuppression.email)).where(
+                func.lower(EmailSuppression.email).in_(emails))
+        )).scalars().all())
 
     counts = (await db.execute(
         select(
@@ -589,7 +628,8 @@ async def list_contacts(
         ).where(CommsContact.organisation_id == club.id)
     )).one()
     return {
-        "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
+        "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id),
+                                  suppressed=(c.email or "").lower() in supp_emails) for c in rows],
         "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2],
                     "bounced": counts[3], "excluded": counts[4]},
     }
@@ -876,6 +916,16 @@ class CampaignIn(BaseModel):
     body_html: str = ""
     audience: Optional[dict] = None
     utm: Optional[dict] = None
+    template_id: Optional[str] = None
+
+
+def _parse_template_id(raw: Optional[str]):
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return None
 
 
 @router.post("/campaigns")
@@ -892,6 +942,7 @@ async def create_campaign(
         body_html=data.body_html or "",
         audience=data.audience or {"type": "all"},
         utm=data.utm or {},
+        template_id=_parse_template_id(data.template_id),
         status="draft",
         created_by=user.id,
         stats={},
@@ -930,6 +981,8 @@ async def update_campaign(
         c.audience = data.audience
     if data.utm is not None:
         c.utm = data.utm
+    if data.template_id is not None:
+        c.template_id = _parse_template_id(data.template_id)
     c.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return _campaign_out(c)

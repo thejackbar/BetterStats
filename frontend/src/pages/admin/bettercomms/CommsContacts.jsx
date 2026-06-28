@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle } from './audience'
 
 function Stat({ label, value, tone }) {
   return (
@@ -14,6 +15,8 @@ function Stat({ label, value, tone }) {
 export default function CommsContacts() {
   const [data, setData] = useState({ contacts: [], summary: {} })
   const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState(emptyFilters)
+  const [supp, setSupp] = useState('all')
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState('')
@@ -23,18 +26,22 @@ export default function CommsContacts() {
   const [newName, setNewName] = useState('')
   const [detailId, setDetailId] = useState(null)
 
-  const reload = useCallback(async (q = query) => {
-    const d = await api.commsListContacts({ query: q })
+  // Load the full contact set once; search, directory facets and the suppressed
+  // filter all run client-side (same model as Lists), so the facet options
+  // reflect the whole audience rather than the current search.
+  const reload = useCallback(async () => {
+    const d = await api.commsListContacts({})
     setData(d)
-  }, [query])
+  }, [])
 
-  useEffect(() => { reload('').catch(e => setMsg({ kind: 'error', text: e.message })).finally(() => setLoading(false)) }, [])
+  useEffect(() => { reload().catch(e => setMsg({ kind: 'error', text: e.message })).finally(() => setLoading(false)) }, [reload])
 
-  // refetch on search (debounced)
-  useEffect(() => {
-    const t = setTimeout(() => { reload(query).catch(() => {}) }, 250)
-    return () => clearTimeout(t)
-  }, [query, reload])
+  const facetOptions = useMemo(() => facetOptionsFrom(data.contacts), [data.contacts])
+  const q = query.trim().toLowerCase()
+  const visible = useMemo(() =>
+    (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesSuppressed(c, supp)),
+    [data.contacts, q, filters, supp])
+  const activeFilters = !!q || FACETS.some(f => filters[f.key].length) || supp !== 'all'
 
   const run = async (key, fn, okText) => {
     setBusy(key); setMsg(null)
@@ -120,8 +127,21 @@ export default function CommsContacts() {
         )}
       </div>
 
-      <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search contacts…"
-        className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-3" />
+      <input value={query} onChange={e => setQuery(e.target.value)}
+        placeholder="Search name, email, club, association, UTM code, state or website…"
+        className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (
+          <MultiSelect key={f.key} label={f.label} options={facetOptions[f.key]}
+            selected={filters[f.key]} onChange={(v) => setFilters(s => ({ ...s, [f.key]: v }))} />
+        ))}
+        <SuppressedToggle value={supp} onChange={setSupp} />
+        {activeFilters && (
+          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setSupp('all') }}
+            className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
+        )}
+        <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>
+      </div>
 
       {loading ? (
         <div className="text-pb-faint text-sm">Loading…</div>
@@ -129,9 +149,11 @@ export default function CommsContacts() {
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
           No contacts yet. Use <strong className="text-pb-text">Sync from club</strong> to pull emails already on file, or add/import above.
         </div>
+      ) : visible.length === 0 ? (
+        <div className="pb-card p-8 text-center text-pb-faint text-sm">No contacts match your search.</div>
       ) : (
         <div className="pb-card overflow-hidden">
-          {data.contacts.map((c, i) => (
+          {visible.map((c, i) => (
             <div key={c.id} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
               <button onClick={() => setDetailId(c.id)} className="min-w-0 text-left hover:opacity-80" title="View details & merge variables">
                 <div className="text-pb-text text-sm truncate">{c.name || c.email}</div>
@@ -140,7 +162,9 @@ export default function CommsContacts() {
               <div className="flex items-center gap-2 shrink-0">
                 <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">{c.source}</span>
                 {c.bounced && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">bounced</span>}
+                {c.complained && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">complaint</span>}
                 {c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Excluded from outreach by BetterCricket">excluded</span>}
+                {c.suppressed && !c.bounced && !c.complained && !c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Globally suppressed">supp</span>}
                 <button onClick={() => toggleSub(c)} disabled={busy === `t${c.id}`}
                   className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 disabled:opacity-50 ${
                     c.subscribed ? 'text-green-500 border-green-500/40' : 'text-pb-faint border-pb-faint/30'}`}>

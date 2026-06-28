@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
@@ -30,6 +30,8 @@ export default function CommsCompose() {
   const [segments, setSegments] = useState([])
   const [lists, setLists] = useState([])
   const [templates, setTemplates] = useState([])
+  const [templateId, setTemplateId] = useState('')
+  const [knownVars, setKnownVars] = useState(null) // Set of valid merge-variable names
   const [utm, setUtm] = useState({})
   const [isMarketing, setIsMarketing] = useState(false)
   const [preview, setPreview] = useState(null) // { total, index, html, subject, contact }
@@ -49,6 +51,7 @@ export default function CommsCompose() {
     setBody(c.body_html || '')
     setAudience(c.audience && c.audience.type ? c.audience : { type: 'all' })
     setUtm(c.utm || {})
+    setTemplateId(c.template_id || '')
     return c
   }, [id])
 
@@ -62,6 +65,11 @@ export default function CommsCompose() {
     api.commsListSegments().then(setSegments).catch(() => {})
     api.commsListLists().then(setLists).catch(() => {})
     api.commsListTemplates().then(setTemplates).catch(() => {})
+    api.commsMergeVariables().then(v => {
+      const names = new Set((v.variables || []).map(x => x.name))
+      names.add('club_name')
+      setKnownVars(names)
+    }).catch(() => {})
     api.commsGetContext().then(c => setIsMarketing(!!c?.current?.is_marketing)).catch(() => {})
     api.commsGetSettings().then(s => setLive(!!s?.provider?.live)).catch(() => {})
     return () => clearInterval(pollRef.current)
@@ -85,10 +93,29 @@ export default function CommsCompose() {
   }
 
   const save = async () => {
-    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience, utm })
+    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience, utm, template_id: templateId || null })
     setCampaign(c)
     return c
   }
+
+  // Consistency warnings, mirrored from the backend campaign_warnings() so the
+  // editor and the Emails list agree: {{vars}} that aren't known merge variables,
+  // and substituted UTM variables with no value set in UTM link tracking.
+  const warnings = useMemo(() => {
+    if (!knownVars) return campaign?.warnings || []
+    const re = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
+    const used = new Set()
+    let m
+    while ((m = re.exec(`${subject || ''} ${body || ''}`)) !== null) used.add(m[1])
+    const out = [...used].filter(v => !knownVars.has(v)).sort()
+      .map(v => `Unknown variable {{${v}}} — it won't be replaced.`)
+    for (const [key, label] of [['utm_source', 'Source'], ['utm_medium', 'Medium'], ['utm_campaign', 'Campaign']]) {
+      if (used.has(key) && !String(utm[key] || '').trim()) {
+        out.push(`Template uses {{${key}}} but no ${label} is set in UTM link tracking.`)
+      }
+    }
+    return out
+  }, [knownVars, subject, body, utm, campaign])
 
   // Render the email exactly as a real recipient in the audience will see it.
   // Saves the draft first so the server renders current content.
@@ -110,9 +137,14 @@ export default function CommsCompose() {
     finally { setPreviewBusy(false) }
   }
 
-  const loadTemplate = async (tid) => {
+  // Pick a template from the dropdown. Selecting the one that's already assigned
+  // is a no-op (no spurious replace prompt); switching to a different one warns
+  // only when there's existing content to overwrite.
+  const onPickTemplate = async (tid) => {
+    if (tid === templateId) return
+    if (tid && body.trim() && !window.confirm('Replace the current message with this template?')) return
+    setTemplateId(tid)
     if (!tid) return
-    if (body.trim() && !window.confirm('Replace the current message with this template?')) return
     try {
       const t = await api.commsGetTemplate(tid)
       setBody(t.html || '')
@@ -201,10 +233,10 @@ export default function CommsCompose() {
 
             {templates.length > 0 && (
               <div className="mb-3">
-                <label className="block text-xs text-pb-faint mb-1">Start from a template</label>
-                <select defaultValue="" onChange={e => { loadTemplate(e.target.value); e.target.value = '' }}
+                <label className="block text-xs text-pb-faint mb-1">Template</label>
+                <select value={templateId} onChange={e => onPickTemplate(e.target.value)}
                   className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
-                  <option value="">Choose a template…</option>
+                  <option value="">No template — write from scratch</option>
                   {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </div>
@@ -220,9 +252,18 @@ export default function CommsCompose() {
             <textarea value={body} onChange={e => setBody(e.target.value)} rows={10}
               placeholder={'Hi {{first_name}},\n\nWrite your message here…'}
               className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline font-sans text-sm mb-2" />
-            <div className="text-pb-faintest text-xs mb-5">
+            <div className="text-pb-faintest text-xs mb-3">
               Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club}}'}</code>.
             </div>
+
+            {warnings.length > 0 && (
+              <div className="pb-card p-3 mb-5 border-l-2 border-amber-500/50">
+                <div className="text-amber-500 text-xs font-medium mb-1">Check these before sending</div>
+                <ul className="text-pb-faint text-xs space-y-0.5 list-disc pl-4">
+                  {warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
 
             <div className="pb-card p-4 mb-4">
               <div className="text-sm text-pb-text mb-2">Audience</div>

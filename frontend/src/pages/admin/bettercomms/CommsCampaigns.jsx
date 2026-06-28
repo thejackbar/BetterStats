@@ -98,6 +98,11 @@ export default function CommsCampaigns() {
                       <> · {st.sent || 0}/{st.recipients} delivered{st.failed ? ` · ${st.failed} failed` : ''}</>
                     )}
                   </div>
+                  {c.warnings?.length > 0 && (
+                    <div className="text-amber-500 text-[11px] mt-0.5 truncate" title={c.warnings.join('\n')}>
+                      ⚠ {c.warnings.length} consistency warning{c.warnings.length === 1 ? '' : 's'}
+                    </div>
+                  )}
                 </div>
                 <span className={`shrink-0 font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${STATUS_STYLE[c.status] || STATUS_STYLE.draft}`}>
                   {c.status}

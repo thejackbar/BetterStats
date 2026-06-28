@@ -1941,6 +1941,9 @@ class CommsCampaign(Base):
     # for the BetterCricket marketing-outreach org — a club's own member email
     # never gets UTM tagging. Keys: utm_source / utm_medium / utm_campaign / ...
     utm = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    # The template this email was started from (migration 116) — origin link only,
+    # copy-on-use still applies. SET NULL so deleting a template keeps the campaign.
+    template_id = Column(UUID(as_uuid=True), ForeignKey("comms_templates.id", ondelete="SET NULL"), nullable=True)
     status = Column(Text, nullable=False, server_default="draft")  # draft | sending | sent | error
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
