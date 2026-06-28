@@ -145,12 +145,13 @@ function SlotControls({ vm, id, idx }) {
 /* ══ Dual rail ══════════════════════════════════════════════════════════════ */
 function DualCard({ p, kind, idx, vm, drag }) {
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
-  const unavail = p.availability === 'UNAVAILABLE'
   const clash = p.clash?.length > 0
   // A call-up (higher grade taking a player from a lower XI) stays pickable;
-  // only a same/higher-grade clash blocks.
+  // only a same/higher-grade clash blocks. An "unavailable" player is NOT
+  // blocked — the coach can still pick them (with a warning); they stay shown
+  // in full with the red availability marker rather than greyed out.
   const callUp = clash && !p.clash_blocks
-  const blocked = unavail || (clash && p.clash_blocks)
+  const blocked = clash && p.clash_blocks
   const dragItem = kind === 'pool' ? { kind: 'pool', player: p } : { kind: 'slot', idx, player: p }
   const interactive = vm.canEdit && !blocked
   return (
@@ -316,10 +317,10 @@ function SheetRow({ i, id, vm, drag }) {
 
 function TrayCard({ p, vm, drag }) {
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
-  const unavail = p.availability === 'UNAVAILABLE'
   const clash = p.clash?.length > 0
   const callUp = clash && !p.clash_blocks
-  const blocked = unavail || (clash && p.clash_blocks)
+  // Unavailable players stay pickable (see DualCard) — only a hard clash blocks.
+  const blocked = clash && p.clash_blocks
   const interactive = vm.canEdit && !blocked
   return (
     <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border border-pb-hairline bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}

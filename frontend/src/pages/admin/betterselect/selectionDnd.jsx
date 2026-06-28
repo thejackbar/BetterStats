@@ -36,7 +36,9 @@ export function DnD({ onDrop, children }) {
       if (!r.item) return
       const dx = e.clientX - r.startX, dy = e.clientY - r.startY
       if (!r.active && Math.hypot(dx, dy) < 6) return
-      if (!r.active) { r.active = true; r.didDrag = true }
+      // Once a real drag starts, suppress text selection so sweeping the cursor
+      // across the board doesn't highlight every row's text under the pointer.
+      if (!r.active) { r.active = true; r.didDrag = true; document.body.style.userSelect = 'none' }
       if (e.cancelable) e.preventDefault()
       const t = hit(e.clientX, e.clientY)
       setHover(t ? t.key : null)
@@ -47,6 +49,7 @@ export function DnD({ onDrop, children }) {
       if (!r.item) return
       if (r.active) { const t = hit(e.clientX, e.clientY); if (t) onDropRef.current(t, r.item) }
       r.item = null; r.active = false
+      document.body.style.userSelect = ''
       setDrag(null); setHover(null)
     }
     window.addEventListener('pointermove', move, { passive: false })
@@ -56,6 +59,7 @@ export function DnD({ onDrop, children }) {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
+      document.body.style.userSelect = ''
     }
   }, [])
 
