@@ -232,6 +232,25 @@
       gtag('config', 'G-T44P68BC88');
     </script>
 
+    <!-- Meta Pixel (Facebook/Instagram) -->
+    <!-- Dataset/Pixel ID 1317878090534903 (BetterCricket Web) from Meta Events Manager. -->
+    <!-- Fires PageView on every route. The Lead conversion fires from the
+         /contact form submit (see Contact.jsx). The <noscript> <img> fallback
+         is deliberately omitted — Vite's HTML5 parser rejects it inside <head>. -->
+    <script>
+      !function(f,b,e,v,n,t,s)
+      {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+      n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+      if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+      n.queue=[];t=b.createElement(e);t.async=!0;
+      t.src=v;s=b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t,s)}(window, document,'script',
+      'https://connect.facebook.net/en_US/fbevents.js');
+      fbq('init', '1317878090534903');
+      fbq('track', 'PageView');
+    </script>
+    <!-- End Meta Pixel -->
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

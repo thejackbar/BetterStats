@@ -173,6 +173,15 @@ function ContactForm() {
       const data = await res.json()
       if (res.ok && data.ok !== false) {
         setStatus('success')
+        // Meta Pixel: a completed request-access form is our key conversion.
+        if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+          window.fbq('track', 'Lead', {
+            content_name: 'Request access',
+            content_category: 'club_enquiry',
+            value: 399,
+            currency: 'AUD',
+          })
+        }
       } else {
         setStatus('error')
       }
