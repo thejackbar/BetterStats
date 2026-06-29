@@ -177,9 +177,9 @@ def _person_values(ct: MarketingClubContact, company_twenty_id: Optional[str],
         vals["phones"] = ph
     if ct.role:
         vals["jobTitle"] = ct.role          # the raw role into Twenty's standard Job title
-    src = (ct.source or "").upper()
-    if src in ("API", "WEBSITE", "MANUAL"):
-        vals["contactSource"] = src
+    # contactSource is deliberately NOT set here: the directory export is not a real
+    # contact source. It's set to "No Contact Source" once on creation (create_extra
+    # in the people loop) and then left alone, so it stays an operator-editable field.
     return _clean(vals)
 
 
@@ -436,7 +436,8 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                 dedup = ("emails.primaryEmail", email) if email else None
                                 pid, pact = await _upsert(session, http, "person", bc_id, "people",
                                                           "bcContactId", {**pvals, "companyId": ctid},
-                                                          dedup=dedup)
+                                                          dedup=dedup,
+                                                          create_extra={"contactSource": "NO_CONTACT_SOURCE"})
                                 stats["people_" + pact] += 1
                                 logger.info("twenty export:   officer %s -> %s id=%s",
                                             bc_id, pact, pid)
