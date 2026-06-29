@@ -285,13 +285,18 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
 
 
 async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
-                  create_extra=None, dedup=None):
+                  create_extra=None, dedup=None, known_id=None):
     """Create-or-update a Twenty record, keyed on the local link table first, then
     the external-key field as a dedupe fallback. ``create_extra`` is merged only on
     creation (not on update), so fields an operator may edit in Twenty (e.g. a
     membership's isPrimary) are set once and never overwritten. The content hash is
-    computed on ``values`` only, so create_extra never forces an update. Returns
-    (twenty_id, action)."""
+    computed on ``values`` only, so create_extra never forces an update.
+
+    ``known_id`` is a Twenty record id we already know maps to this entity (e.g. a
+    shared Person resolved by email from our OWN link table). We can't trust Twenty's
+    email filter to find a duplicate (it doesn't match on this version), so the local
+    map is the reliable adopt target — used both as a direct adopt and to recover from
+    a duplicate-create 400. Returns (twenty_id, action)."""
     h = _hash(values)
     link_row = await _link_get(session, entity_type, bc_id)
     if link_row:
@@ -311,25 +316,22 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
     # duplicate. Adopt the existing record instead of failing the create.
     if not existing and dedup:
         existing = await client.find_by(http, plural, dedup[0], dedup[1])
-    if existing and existing.get("id"):
-        tid = existing["id"]
-        if await client.update(http, plural, tid, values) is not None:
-            await _link_put(session, entity_type, bc_id, tid, h)
-            return tid, "adopted"
+    adopt_id = (existing or {}).get("id") or known_id
+    if adopt_id:
+        if await client.update(http, plural, adopt_id, values) is not None:
+            await _link_put(session, entity_type, bc_id, adopt_id, h)
+            return adopt_id, "adopted"
     try:
         rec = await client.create(http, plural, {**values, **(create_extra or {})})
     except TwentyApiError as e:
-        # Twenty enforces uniqueness on some fields (notably a Person's email). If the
-        # create collided on a value our find_by missed (e.g. a record stored with
-        # different case), re-find by the dedupe key and adopt it rather than dropping
-        # the record. This is what stops a shared officer silently vanishing.
-        if dedup and "duplicate" in str(e).lower():
-            existing = await client.find_by(http, plural, dedup[0], dedup[1])
-            if existing and existing.get("id"):
-                tid = existing["id"]
-                if await client.update(http, plural, tid, values) is not None:
-                    await _link_put(session, entity_type, bc_id, tid, h)
-                    return tid, "adopted"
+        # Twenty enforces uniqueness on some fields (notably a Person's email). On a
+        # duplicate collision, adopt the record we already know is the duplicate
+        # (known_id from our local email map) rather than dropping the officer. This
+        # is what stops a shared officer silently vanishing.
+        if known_id and "duplicate" in str(e).lower():
+            if await client.update(http, plural, known_id, values) is not None:
+                await _link_put(session, entity_type, bc_id, known_id, h)
+                return known_id, "adopted"
         raise
     tid = rec["id"]
     await _link_put(session, entity_type, bc_id, tid, h)
@@ -446,12 +448,19 @@ async def update_person_by_email(email: str, fields: dict) -> None:
     raises into the caller — used from public/webhook paths that must not break."""
     if not client.configured or not email or not fields:
         return
+    email = email.strip().lower()
     try:
+        # Prefer our own email -> Person map (Twenty's email filter is unreliable on
+        # this version); fall back to the filter for anyone not yet in the map.
+        async with async_session_maker() as session:
+            row = await _link_get(session, "person_email", email)
+        tid = row[0] if row else None
         async with httpx.AsyncClient() as http:
-            person = await client.find_by(http, "people", "emails.primaryEmail",
-                                          email.strip().lower())
-            if person and person.get("id"):
-                await client.update(http, "people", person["id"], fields)
+            if not tid:
+                person = await client.find_by(http, "people", "emails.primaryEmail", email)
+                tid = person.get("id") if person else None
+            if tid:
+                await client.update(http, "people", tid, fields)
     except Exception:  # noqa: BLE001 - never let a CRM error affect the caller
         logger.exception("twenty update_person_by_email failed for %s", email)
 
@@ -546,14 +555,25 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                             try:
                                 email = (off["person"].get("emails") or {}).get("primaryEmail")
                                 dedup = ("emails.primaryEmail", email) if email else None
+                                # Resolve a shared officer by email from OUR link table
+                                # (Twenty's email filter is unreliable on this version),
+                                # so the second club adopts the first club's Person rather
+                                # than hitting the duplicate-email wall.
+                                known = await _link_get(session, "person_email", email) if email else None
+                                known_id = known[0] if known else None
                                 # The Person is identity-only; its native company + first
                                 # role are set once via create_extra so a shared officer is
                                 # never stolen onto a later club.
                                 pid, pact = await _upsert(session, http, "person", bc_id, "people",
                                                           "bcContactId", off["person"], dedup=dedup,
+                                                          known_id=known_id,
                                                           create_extra={**off["create_extra"],
                                                                         "companyId": ctid})
                                 stats["people_" + pact] += 1
+                                # Remember email -> Person so later clubs (this run or a
+                                # future one) can adopt without Twenty's email filter.
+                                if email:
+                                    await _link_put(session, "person_email", email, pid, "")
                                 # The personClub membership is what makes this officer show
                                 # under THIS club (with this club's role), shared or not.
                                 _, ract = await _upsert(session, http, "officer_role", bc_id,
