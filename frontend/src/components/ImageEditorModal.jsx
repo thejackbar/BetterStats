@@ -38,6 +38,7 @@ export default function ImageEditorModal({
   const [keying, setKeying] = useState(false)
   const [showColourKey, setShowColourKey] = useState(false)
   const [tolerance, setTolerance] = useState(48)
+  const [keyMode, setKeyMode] = useState('edges') // 'edges' | 'all'
   const [applying, setApplying] = useState(false)
   const ownedBlobUrlRef = useRef(null) // the originally-loaded source (base for colour keying)
   const derivedUrlRef = useRef(null)   // a processed result (AI cut-out or colour key)
@@ -139,16 +140,18 @@ export default function ImageEditorModal({
     }
   }, [srcUrl, setDerived])
 
-  // Colour keying — flood-fills the background colour out from the edges.
-  // Built for logos sitting on a solid or near-solid background, where the AI
-  // cut-out leaves a haze because there's no photographic subject to lock onto.
-  // Always runs on the original image so the tolerance slider isn't cumulative.
-  const runColourKey = useCallback(async (tol) => {
+  // Colour keying — clears the background colour, built for logos sitting on a
+  // solid or near-solid background where the AI cut-out leaves a haze (no
+  // photographic subject to lock onto). 'edges' floods inward from the border
+  // (safe: keeps logo internals that share the background colour); 'all' matches
+  // the colour everywhere, so it also clears pockets the logo fences off from
+  // the edge. Always runs on the original so the tolerance slider isn't cumulative.
+  const runColourKey = useCallback(async (tol, mode) => {
     const base = ownedBlobUrlRef.current
     if (!base) return
     setKeying(true)
     try {
-      const blob = await keyOutBackgroundColour(base, tol)
+      const blob = await keyOutBackgroundColour(base, tol, mode)
       setDerived(blob)
     } catch (err) {
       setLoadError(err.message || 'Colour keying failed')
@@ -160,9 +163,14 @@ export default function ImageEditorModal({
   const handleColourKeyToggle = useCallback(() => {
     setShowColourKey((on) => {
       const next = !on
-      if (next) runColourKey(tolerance)
+      if (next) runColourKey(tolerance, keyMode)
       return next
     })
+  }, [runColourKey, tolerance, keyMode])
+
+  const handleKeyModeChange = useCallback((mode) => {
+    setKeyMode(mode)
+    runColourKey(tolerance, mode)
   }, [runColourKey, tolerance])
 
   const handleApply = useCallback(async () => {
@@ -293,6 +301,25 @@ export default function ImageEditorModal({
 
           {allowBackgroundRemoval && showColourKey && (
             <div className="mt-3 rounded border pb-hairline bg-pb-surface2 px-4 py-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <span className="font-mono text-[10px] tracking-wide2 text-pb-text">Reach</span>
+                <div className="flex rounded border pb-hairline overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => handleKeyModeChange('edges')}
+                    disabled={keying || removingBg || applying}
+                    title="Clears background connected to the edges. Keeps logo internals."
+                    className={`px-3 py-1 font-mono text-[10px] tracking-wide2 transition disabled:opacity-40 ${keyMode === 'edges' ? 'bg-pb-accent text-white' : 'text-pb-faint hover:text-pb-text'}`}
+                  >Edges</button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeyModeChange('all')}
+                    disabled={keying || removingBg || applying}
+                    title="Clears the background colour everywhere, including pockets between the logo and text."
+                    className={`px-3 py-1 font-mono text-[10px] tracking-wide2 transition disabled:opacity-40 ${keyMode === 'all' ? 'bg-pb-accent text-white' : 'text-pb-faint hover:text-pb-text'}`}
+                  >Everywhere</button>
+                </div>
+              </div>
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="bg-tolerance" className="font-mono text-[10px] tracking-wide2 text-pb-text">
                   Colour match strength
@@ -303,19 +330,19 @@ export default function ImageEditorModal({
                 id="bg-tolerance"
                 type="range"
                 min={8}
-                max={140}
+                max={200}
                 step={1}
                 value={tolerance}
                 disabled={keying || removingBg || applying}
                 onChange={(e) => setTolerance(Number(e.target.value))}
-                onMouseUp={(e) => runColourKey(Number(e.target.value))}
-                onTouchEnd={(e) => runColourKey(Number(e.target.value))}
-                onKeyUp={(e) => runColourKey(Number(e.target.value))}
+                onMouseUp={(e) => runColourKey(Number(e.target.value), keyMode)}
+                onTouchEnd={(e) => runColourKey(Number(e.target.value), keyMode)}
+                onKeyUp={(e) => runColourKey(Number(e.target.value), keyMode)}
                 className="w-full mt-2 accent-pb-accent"
               />
               <p className="mt-2 font-mono text-[10px] leading-relaxed text-pb-faint">
-                Removes the background colour outward from the edges. Drag up if the background
-                is still showing, down if it's eating into the logo.
+                Clears the background colour. Drag up if it's still showing, down if it eats into
+                the logo. If pockets near the text won't clear, switch Reach to "Everywhere".
               </p>
             </div>
           )}
@@ -341,12 +368,16 @@ export default function ImageEditorModal({
 }
 
 // Colour-key the background out of a logo. Samples the background colour from
-// the four corners, then flood-fills from every edge pixel, clearing anything
-// within `tolerance` of that colour. Flood-fill (rather than a global match)
-// keeps logo internals that happen to share the background colour. A feather
-// band just past the tolerance softens anti-aliased edges so there's no jaggy
-// halo. Returns a PNG blob.
-async function keyOutBackgroundColour(url, tolerance) {
+// the four corners, then clears anything within `tolerance` of that colour. A
+// feather band just past the tolerance softens anti-aliased edges so there's no
+// jaggy halo. Returns a PNG blob.
+//
+// mode 'edges' (default): flood-fill from the border only, so logo internals
+//   that happen to share the background colour are kept. Safe but leaves pockets
+//   the logo fences off from the edge.
+// mode 'all': match the colour at every pixel, clearing those fenced-off pockets
+//   too. More thorough; can nibble dark parts of the logo at high tolerance.
+async function keyOutBackgroundColour(url, tolerance, mode = 'edges') {
   const img = await new Promise((resolve, reject) => {
     const im = new Image()
     im.crossOrigin = 'anonymous'
@@ -378,40 +409,49 @@ async function keyOutBackgroundColour(url, tolerance) {
   const feather = tol * 1.6
   const feather2 = feather * feather
 
-  const visited = new Uint8Array(w * h)
-  const stack = []
-
-  const consider = (x, y) => {
-    if (x < 0 || y < 0 || x >= w || y >= h) return
-    const i = y * w + x
-    if (visited[i]) return
-    visited[i] = 1
-    const o = i * 4
+  // Apply the tolerance/feather test to one pixel. Returns true if it's full
+  // background (alpha cleared), so the flood fill knows to keep spreading.
+  const clearPixel = (o) => {
     const dr = px[o] - br
     const dg = px[o + 1] - bg
     const db = px[o + 2] - bb
     const dist2 = dr * dr + dg * dg + db * db
     if (dist2 <= tol2) {
-      px[o + 3] = 0 // fully background → transparent, keep flooding through it
-      stack.push(i)
-    } else if (dist2 <= feather2) {
+      px[o + 3] = 0 // fully background → transparent
+      return true
+    }
+    if (dist2 <= feather2) {
       // Edge band: scale alpha by how far into the band the pixel sits so the
-      // cut-out feathers instead of leaving a hard ring. Don't flood past it.
+      // cut-out feathers instead of leaving a hard ring.
       const t = (Math.sqrt(dist2) - tol) / (feather - tol)
       px[o + 3] = Math.round(px[o + 3] * t)
     }
+    return false
   }
 
-  for (let x = 0; x < w; x++) { consider(x, 0); consider(x, h - 1) }
-  for (let y = 0; y < h; y++) { consider(0, y); consider(w - 1, y) }
-  while (stack.length) {
-    const i = stack.pop()
-    const x = i % w
-    const y = (i - x) / w
-    consider(x + 1, y)
-    consider(x - 1, y)
-    consider(x, y + 1)
-    consider(x, y - 1)
+  if (mode === 'all') {
+    for (let i = 0; i < w * h; i++) clearPixel(i * 4)
+  } else {
+    const visited = new Uint8Array(w * h)
+    const stack = []
+    const consider = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return
+      const i = y * w + x
+      if (visited[i]) return
+      visited[i] = 1
+      if (clearPixel(i * 4)) stack.push(i) // only flood through full background
+    }
+    for (let x = 0; x < w; x++) { consider(x, 0); consider(x, h - 1) }
+    for (let y = 0; y < h; y++) { consider(0, y); consider(w - 1, y) }
+    while (stack.length) {
+      const i = stack.pop()
+      const x = i % w
+      const y = (i - x) / w
+      consider(x + 1, y)
+      consider(x - 1, y)
+      consider(x, y + 1)
+      consider(x, y - 1)
+    }
   }
 
   ctx.putImageData(image, 0, 0)
