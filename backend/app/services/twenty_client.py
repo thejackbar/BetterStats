@@ -73,9 +73,14 @@ class TwentyClient:
         return _record(r.json())
 
     async def update(self, http: httpx.AsyncClient, plural: str, record_id: str,
-                     values: dict) -> dict:
+                     values: dict):
+        """PATCH a record. Returns the updated record, or None if it no longer
+        exists in Twenty (404) — e.g. an operator deleted it — so the caller can
+        drop the stale link and re-create instead of failing."""
         r = await http.patch(f"{self.base}/rest/{plural}/{record_id}",
                              headers=self._headers, json=values, timeout=30)
+        if r.status_code == 404:
+            return None
         r.raise_for_status()
         return _record(r.json())
 

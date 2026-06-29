@@ -23,7 +23,8 @@ import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import MarketingClub, MarketingClubContact, async_session_maker
+from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
+                           async_session_maker)
 from app.services.club_directory import club_filters
 from app.services.twenty_client import client, currency, full_name, link, phone
 
@@ -101,11 +102,30 @@ def _role(role: Optional[str]) -> str:
     return "OTHER"
 
 
-def _company_values(club: MarketingClub) -> dict:
+# Public annual pricing (frontend/src/data/pricing.js): Core $399 + BetterSelect /
+# BetterSocials / BetterAdmin $149 each + BetterIQ $249, with a bundle discount by
+# priced-module count. BetterAdmin is the fees+comms+merch umbrella.
+def _arr(module_overrides) -> float:
+    keys = {str(k).lower() for k in (module_overrides or [])}
+    total, priced = 399.0, 0
+    if "select" in keys:
+        total += 149; priced += 1
+    if "socials" in keys:
+        total += 149; priced += 1
+    if keys & {"fees", "comms", "merch"}:
+        total += 149; priced += 1          # BetterAdmin umbrella, charged once
+    if "iq" in keys:
+        total += 249; priced += 1
+    return total - {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}.get(priced, 146)
+
+
+def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -> dict:
     # Association membership is a separate many-to-many via the clubAssociation
     # junction (see _sync_memberships); the company carries only a denormalised
-    # primary-association name for quick display.
-    return _clean({
+    # primary-association name for quick display. Customer-side fields (paid
+    # modules, subscription, renewal, billing, ARR) come from the linked
+    # Organisation when the club is already onboarded.
+    vals = {
         "name": club.name,
         "bcClubId": club.grassroots_guid,
         "lifecycleStage": _lifecycle(club),
@@ -120,8 +140,18 @@ def _company_values(club: MarketingClub) -> dict:
         "utmCode": club.utm_code,
         "dataSource": "PLAYHQ",
         "publicProfileUrl": link(club.website_url),
+        "existingKpCustomer": "YES" if club.existing_org_id else "NO",
         "lastSyncedAt": _now_iso(),
-    })
+    }
+    if org is not None:
+        vals["subscriptionStatus"] = (org.subscription_status or "").upper() or None
+        vals["paidModules"] = _modules(org.module_overrides)
+        vals["arr"] = currency(_arr(org.module_overrides))
+        if org.billing_cycle:
+            vals["billingCycle"] = org.billing_cycle.upper()
+        if org.renewal_date:
+            vals["renewalDate"] = org.renewal_date.isoformat() + "T00:00:00Z"
+    return _clean(vals)
 
 
 def _person_values(ct: MarketingClubContact, company_twenty_id: Optional[str],
@@ -199,15 +229,17 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
         tid, old_hash = link_row
         if old_hash == h:
             return tid, "unchanged"
-        await client.update(http, plural, tid, values)
-        await _link_put(session, entity_type, bc_id, tid, h)
-        return tid, "updated"
+        updated = await client.update(http, plural, tid, values)
+        if updated is not None:
+            await _link_put(session, entity_type, bc_id, tid, h)
+            return tid, "updated"
+        # stale link: the record was deleted in Twenty — fall through to recreate.
     existing = await client.find_by(http, plural, ext_field, bc_id) if ext_field else None
     if existing and existing.get("id"):
         tid = existing["id"]
-        await client.update(http, plural, tid, values)
-        await _link_put(session, entity_type, bc_id, tid, h)
-        return tid, "adopted"
+        if await client.update(http, plural, tid, values) is not None:
+            await _link_put(session, entity_type, bc_id, tid, h)
+            return tid, "adopted"
     rec = await client.create(http, plural, {**values, **(create_extra or {})})
     tid = rec["id"]
     await _link_put(session, entity_type, bc_id, tid, h)
@@ -358,6 +390,8 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
             # touched after this point, so commits/rollbacks below are safe.
             snapshots = []
             for club in clubs:
+                org = (await session.get(Organisation, club.existing_org_id)
+                       if club.existing_org_id else None)
                 cq = select(MarketingClubContact).where(
                     MarketingClubContact.marketing_club_id == club.id)
                 if selected_only:
@@ -366,7 +400,7 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                 snapshots.append({
                     "guid": club.grassroots_guid,
                     "name": club.name,
-                    "company": _company_values(club),
+                    "company": _company_values(club, org),
                     "assocs": _club_assocs(club),
                     "people": [(str(ct.id), _person_values(ct, None, club.country))
                                for ct in _scoped(contacts, contact_scope)],
