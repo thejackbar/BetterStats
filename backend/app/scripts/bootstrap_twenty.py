@@ -89,6 +89,13 @@ OBJECTS = [
     dict(nameSingular="clubAssociation", namePlural="clubAssociations",
          labelSingular="Membership", labelPlural="Memberships", icon="IconUsersGroup",
          description="A club's membership of an association (club <-> association link)"),
+    # Junction for the many-to-many between people and clubs. Twenty enforces one
+    # Person per email, so a shared officer (same email across clubs) is one Person;
+    # this junction is how they show under EVERY club they serve, each row carrying
+    # that officer's role at that club. One row per club-officer post.
+    dict(nameSingular="personClub", namePlural="personClubs",
+         labelSingular="Officer role", labelPlural="Officer roles", icon="IconUserCheck",
+         description="An officer's role at a club (person <-> club link)"),
 ]
 
 # (object nameSingular, field name, label, type, options-or-None)
@@ -111,7 +118,9 @@ FIELDS = [
     ("company", "renewalDate", "Renewal date", "DATE_TIME", None),
     ("company", "billingCycle", "Billing cycle", "SELECT", _options(["Monthly", "Annual"])),
     ("company", "arr", "ARR", "CURRENCY", None),
-    ("company", "primaryAssociation", "Primary association", "TEXT", None),
+    # primaryAssociation (TEXT) dropped — the clubAssociation junction's isPrimary
+    # flag carries this, so the denormalised field was redundant. Delete the old
+    # field in Twenty (Settings > Data model > Company) to tidy up; harmless if left.
     ("company", "clubKind", "Club kind", "SELECT",
      _options(["Club", "Association", "Carnival", "School", "Junior"])),
     ("company", "postcode", "Postcode", "TEXT", None),
@@ -157,6 +166,14 @@ FIELDS = [
     ("association", "clubCount", "Club count", "NUMBER", None),
     # ---- Membership (clubAssociation junction) ----
     ("clubAssociation", "isPrimary", "Is primary", "BOOLEAN", None),
+    # ---- Officer role (personClub junction) ----
+    ("personClub", "bcContactId", "BC Contact Id", "TEXT", None),
+    ("personClub", "clubRole", "Club role", "SELECT",
+     _options(["President", "Vice President", "Secretary", "Treasurer", "Registrar",
+               "Coordinator", "Club contact", "Sponsor", "Other"])),
+    ("personClub", "roleTitle", "Role title", "TEXT", None),
+    ("personClub", "roleRank", "Role rank", "NUMBER", None),
+    ("personClub", "outreachSelected", "Outreach selected", "BOOLEAN", None),
     # ---- Touchpoint ----
     ("touchpoint", "touchpointType", "Type", "SELECT",
      _options(["Email sent", "Email delivered", "Email opened", "Email clicked",
@@ -182,6 +199,14 @@ FIELDS = [
     ("bcEmail", "complaints", "Complaints", "NUMBER", None),
 ]
 
+# Friendlier display labels for the two standard objects. The API names stay
+# company / person (and the REST endpoints companies / people), so only what the UI
+# shows changes. (nameSingular, labelSingular, labelPlural)
+RELABEL = [
+    ("company", "Club", "Clubs"),
+    ("person", "Contact", "Contacts"),
+]
+
 # Opportunity pipeline stages (rewrite the built-in 'stage' SELECT options).
 PIPELINE = ["Target", "Contacted", "Engaged", "Trial", "Proposal", "Won", "Lost / Dormant"]
 
@@ -197,6 +222,11 @@ RELATIONS = [
     # two views — a company's "Memberships" and an association's "Member clubs".
     ("clubAssociation", "company", "Club", "company", "MANY_TO_ONE", "Memberships"),
     ("clubAssociation", "association", "Association", "association", "MANY_TO_ONE", "Member clubs"),
+    # Many-to-many between people and clubs via the personClub junction: one row per
+    # officer-at-a-club. Inverse lists give a club's "Officer roles" and a person's
+    # "Club roles", so a shared officer is reachable from every club they serve.
+    ("personClub", "person", "Officer", "person", "MANY_TO_ONE", "Club roles"),
+    ("personClub", "company", "Club", "company", "MANY_TO_ONE", "Officer roles"),
 ]
 
 
@@ -224,6 +254,20 @@ def main():
     st, objs = _api("GET", "/rest/metadata/objects")
     by_name = {o["nameSingular"]: o for o in objs["data"]}
     field_names = {n: {f["name"] for f in o.get("fields", [])} for n, o in by_name.items()}
+
+    # 1b. friendlier display labels on the standard objects (Company -> Clubs,
+    # Person -> Contacts). isLabelSyncedWithName=False so the label sticks.
+    for nameSingular, ls, lp in RELABEL:
+        o = by_name.get(nameSingular)
+        if not o:
+            continue
+        if o.get("labelSingular") == ls and o.get("labelPlural") == lp:
+            print(f"label   skip    {nameSingular} ({ls}/{lp})")
+            continue
+        s, r = _api("PATCH", f"/rest/metadata/objects/{o['id']}",
+                    {"labelSingular": ls, "labelPlural": lp, "isLabelSyncedWithName": False})
+        print(f"label   {'ok' if s in (200, 201) else 'ERR ' + str(s):<7} "
+              f"{nameSingular} -> {ls}/{lp} {('' if s in (200, 201) else json.dumps(r)[:200])}")
 
     # 2. fields
     created = skipped = errored = 0

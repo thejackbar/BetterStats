@@ -26,8 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
 from app.services.club_directory import club_filters
-from app.services.twenty_client import (client, currency, emails_value, full_name,
-                                        link, phone)
+from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
+                                        full_name, link, phone)
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +157,11 @@ async def _engagement(session, club: MarketingClub) -> dict:
 
 def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -> dict:
     # Association membership is a separate many-to-many via the clubAssociation
-    # junction (see _sync_memberships); the company carries only a denormalised
-    # primary-association name for quick display. Customer-side fields (paid
-    # modules, subscription, renewal, billing, ARR) come from the linked
-    # Organisation when the club is already onboarded.
+    # junction (see _sync_memberships), each membership carrying an isPrimary flag —
+    # so the primary association is recoverable from the relations and the company
+    # holds no denormalised association field. Customer-side fields (paid modules,
+    # subscription, renewal, billing, ARR) come from the linked Organisation when
+    # the club is already onboarded.
     vals = {
         "name": club.name,
         "bcClubId": club.grassroots_guid,
@@ -168,7 +169,6 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
         "subscriptionStatus": _sub_status(club),
         "trialModules": _modules(club.trial_modules),
         "interestedModules": _modules(club.requested_trial_modules),
-        "primaryAssociation": club.association_name,
         "clubKind": _club_kind(club.name),
         "clubState": club.state,
         "country": club.country,
@@ -190,19 +190,18 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
     return _clean(vals)
 
 
-def _person_values(ct: MarketingClubContact, company_twenty_id: Optional[str],
-                   club_country: Optional[str] = None) -> dict:
+def _person_values(ct: MarketingClubContact, club_country: Optional[str] = None) -> dict:
+    """The Person's STABLE IDENTITY only — safe to PATCH on every export, even for an
+    officer who serves several clubs. Twenty enforces one Person per email, so a
+    shared officer is a single Person; their per-club role/company live on the
+    personClub junction (_officer_role_values), never here, so re-exporting from a
+    second club can't overwrite the first club's role or steal the person to it."""
     vals = {
         "name": full_name(ct.full_name),
-        "bcContactId": str(ct.id),
-        "clubRole": _role(ct.role),
-        "roleRank": ct.role_rank,
         "subscribed": bool(ct.subscribed),
         "bounced": bool(ct.bounced),
-        "outreachSelected": bool(ct.outreach_selected),
         "namedEmail": bool(ct.full_name and ct.email),
         "country": club_country,        # an officer inherits their club's country
-        "companyId": company_twenty_id,
     }
     ev = emails_value(ct.email)
     if ev:
@@ -210,11 +209,41 @@ def _person_values(ct: MarketingClubContact, company_twenty_id: Optional[str],
     ph = phone(ct.mobile)
     if ph:
         vals["phones"] = ph
+    return _clean(vals)
+
+
+def _person_create_extra(ct: MarketingClubContact) -> dict:
+    """Fields written ONCE, when the Person is first created by its introducing club:
+    the native company + that club's role, plus the default contact source. Set-once
+    (create_extra, never on update) so a later export from another club never steals
+    the person onto itself — the full per-club picture is the personClub junction.
+    ``companyId`` is injected at IO time once the club's Company id is known."""
+    extra = {
+        "bcContactId": str(ct.id),
+        "clubRole": _role(ct.role),
+        "roleRank": ct.role_rank,
+        "outreachSelected": bool(ct.outreach_selected),
+        # The directory export is not a real contact source — seed it to "No Contact
+        # Source" and leave it operator-editable; real contact events set it later.
+        "contactSource": "NO_CONTACT_SOURCE",
+    }
     if ct.role:
-        vals["jobTitle"] = ct.role          # the raw role into Twenty's standard Job title
-    # contactSource is deliberately NOT set here: the directory export is not a real
-    # contact source. It's set to "No Contact Source" once on creation (create_extra
-    # in the people loop) and then left alone, so it stays an operator-editable field.
+        extra["jobTitle"] = ct.role          # the raw role into Twenty's standard Job title
+    return _clean(extra)
+
+
+def _officer_role_values(ct: MarketingClubContact, club_name: str) -> dict:
+    """One personClub membership: this officer's role AT this club. Always PATCHed
+    (kept fresh per club), so a shared officer shows under EVERY club they serve with
+    the right role. ``personId`` / ``companyId`` are injected at IO time."""
+    vals = {
+        "name": f"{ct.full_name or 'Officer'} — {club_name}",
+        "bcContactId": str(ct.id),
+        "clubRole": _role(ct.role),
+        "roleTitle": ct.role or None,
+        "roleRank": ct.role_rank,
+        "outreachSelected": bool(ct.outreach_selected),
+    }
     return _clean(vals)
 
 
@@ -285,7 +314,21 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
         if await client.update(http, plural, tid, values) is not None:
             await _link_put(session, entity_type, bc_id, tid, h)
             return tid, "adopted"
-    rec = await client.create(http, plural, {**values, **(create_extra or {})})
+    try:
+        rec = await client.create(http, plural, {**values, **(create_extra or {})})
+    except TwentyApiError as e:
+        # Twenty enforces uniqueness on some fields (notably a Person's email). If the
+        # create collided on a value our find_by missed (e.g. a record stored with
+        # different case), re-find by the dedupe key and adopt it rather than dropping
+        # the record. This is what stops a shared officer silently vanishing.
+        if dedup and "duplicate" in str(e).lower():
+            existing = await client.find_by(http, plural, dedup[0], dedup[1])
+            if existing and existing.get("id"):
+                tid = existing["id"]
+                if await client.update(http, plural, tid, values) is not None:
+                    await _link_put(session, entity_type, bc_id, tid, h)
+                    return tid, "adopted"
+        raise
     tid = rec["id"]
     await _link_put(session, entity_type, bc_id, tid, h)
     return tid, "created"
@@ -468,13 +511,18 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                 contacts = (await session.execute(cq)).scalars().all()
                 company = {**_company_values(club, org),
                            **(await _engagement(session, club))}
+                people = [{
+                    "bc_id": str(ct.id),
+                    "person": _person_values(ct, club.country),
+                    "create_extra": _person_create_extra(ct),
+                    "role": _officer_role_values(ct, club.name),
+                } for ct in _scoped(contacts, contact_scope)]
                 snapshots.append({
                     "guid": club.grassroots_guid,
                     "name": club.name,
                     "company": company,
                     "assocs": _club_assocs(club),
-                    "people": [(str(ct.id), _person_values(ct, None, club.country))
-                               for ct in _scoped(contacts, contact_scope)],
+                    "people": people,
                 })
 
             logger.info("twenty export: %d club snapshot(s); officer counts: %s",
@@ -491,17 +539,28 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                     snap["name"], cact, ctid, len(snap["people"]))
                         await _sync_memberships(session, http, snap["guid"], snap["name"],
                                                 snap["assocs"], ctid, assoc_cache, stats)
-                        for bc_id, pvals in snap["people"]:
+                        for off in snap["people"]:
+                            bc_id = off["bc_id"]
                             try:
-                                email = (pvals.get("emails") or {}).get("primaryEmail")
+                                email = (off["person"].get("emails") or {}).get("primaryEmail")
                                 dedup = ("emails.primaryEmail", email) if email else None
+                                # The Person is identity-only; its native company + first
+                                # role are set once via create_extra so a shared officer is
+                                # never stolen onto a later club.
                                 pid, pact = await _upsert(session, http, "person", bc_id, "people",
-                                                          "bcContactId", {**pvals, "companyId": ctid},
-                                                          dedup=dedup,
-                                                          create_extra={"contactSource": "NO_CONTACT_SOURCE"})
+                                                          "bcContactId", off["person"], dedup=dedup,
+                                                          create_extra={**off["create_extra"],
+                                                                        "companyId": ctid})
                                 stats["people_" + pact] += 1
-                                logger.info("twenty export:   officer %s -> %s id=%s",
-                                            bc_id, pact, pid)
+                                # The personClub membership is what makes this officer show
+                                # under THIS club (with this club's role), shared or not.
+                                _, ract = await _upsert(session, http, "officer_role", bc_id,
+                                                        "personClubs", "bcContactId",
+                                                        {**off["role"], "personId": pid,
+                                                         "companyId": ctid})
+                                stats["officer_roles_" + ract] += 1
+                                logger.info("twenty export:   officer %s -> %s id=%s (role %s)",
+                                            bc_id, pact, pid, ract)
                             except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
                                 stats["people_errored"] += 1
                                 logger.exception("twenty export: officer %s failed", bc_id)

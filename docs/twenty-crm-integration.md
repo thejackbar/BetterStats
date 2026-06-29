@@ -102,8 +102,7 @@ Twenty Company already has name, domain, address, employees, linkedin, etc. Add:
 | `renewalDate` | DATE | `organisations.renewal_date` |
 | `billingCycle` | SELECT | monthly, annual |
 | `arr` | CURRENCY | annual value (derived from modules held) |
-| `primaryAssociationLink` | RELATION (many-to-one → Association) | the club's primary association; inverse `clubs` gives "all clubs in an association". Twenty's metadata API has no native many-to-many, so multi-association membership (a club in several) is a follow-up via a junction object |
-| `primaryAssociation` | TEXT | `marketing_clubs.association_name` (denormalised for quick display/group-by) |
+| association membership | via the `clubAssociation` junction object (Company ←→ Association, many-to-many), each membership carrying `isPrimary` | Twenty's metadata API has no native many-to-many, so a club in several associations is modelled as one junction row per membership; the primary one is flagged `isPrimary`. No denormalised `primaryAssociation` field — it's recoverable from the relations |
 | `clubKind` | SELECT | club, association, carnival, school, junior (drives the directory exclude filters) |
 | `postcode` | TEXT | `marketing_clubs.postcode` (enables the postcode-range filter) |
 | `state` | SELECT | NSW, VIC, WA, … (`marketing_clubs.state`) |
@@ -201,13 +200,47 @@ associations) and each club's `associations` payload.
 | `clubs` | RELATION (many-to-many → Company) | every club in the association |
 
 This makes **"all clubs in an association"** a native related-records view on the
-Association record (the `clubs` inverse of `Company.primaryAssociationLink`), and
-lets you filter People by their club's association.
+Association record (its "Member clubs" inverse of the `clubAssociation` junction),
+and lets you filter People by their club's association.
 
-**Build status:** objects, all 58 custom fields, the pipeline stages, and the
-relations above are created by `backend/app/scripts/bootstrap_twenty.py` (idempotent;
-run with `TWENTY_API_URL` + `TWENTY_API_KEY` set). It has been run against the live
-workspace, so the model exists. Re-run it after editing the spec to add new fields.
+### 3.8 Person ↔ Club junction (shared officers)
+
+Twenty enforces **one Person per email address** (a hard 400 on a duplicate). Club
+committees overlap, so the same person is often an officer at several clubs under one
+email — they can only ever be **one** Person record. To still show that officer under
+**every** club they serve, Company ↔ Person is modelled many-to-many via a
+`personClub` junction (mirrors `clubAssociation`): one row per officer-at-a-club,
+carrying that club's `clubRole` / `roleTitle` / `roleRank` / `outreachSelected`.
+
+- The **Person** holds identity only (name, email, phone, country, subscribed,
+  bounced) — always safe to refresh. Its native `company` + first role are set
+  **once** (create-time), by the club that first introduced them, so a later export
+  from a second club never steals the person onto itself.
+- Each club's **`personClub`** row (inverse lists: a club's "Officer roles", a
+  person's "Club roles") is what makes the shared officer appear under that club with
+  the right role. Single-club officers get exactly one row (harmless).
+- The export is **duplicate-safe**: if a create still collides on email (e.g. a record
+  stored with different case that the lookup missed), `_upsert` re-finds by email and
+  adopts instead of dropping the officer. This closes the silent-drop where a shared
+  officer simply never landed.
+
+### 3.9 Display labels and the junctions in the UI
+
+The two standard objects are relabelled for the cricket domain — **Company → "Clubs",
+Person → "Contacts"** — by a relabel pass in `bootstrap_twenty.py` (the API names stay
+`company`/`person`, so the REST endpoints and all sync code are unchanged). The two
+junction objects (**Memberships** = `clubAssociation`, **Officer roles** =
+`personClub`) are plumbing, not browsing targets. There is no metadata flag to hide an
+object from the sidebar (nav visibility is a per-user view preference in Twenty), so
+hide them once in the UI: open the object switcher in the left sidebar and toggle off
+Memberships and Officer roles. Their data still shows where it matters — inline on a
+Club ("Memberships", "Officer roles") and on a Contact ("Club roles").
+
+**Build status:** objects, all custom fields, the pipeline stages, the relabels and
+the relations above are created by `backend/app/scripts/bootstrap_twenty.py`
+(idempotent; run with `TWENTY_API_URL` + `TWENTY_API_KEY` set). It has been run against
+the live workspace, so the model exists. Re-run it after editing the spec to add new
+fields, relabels or the `personClub` junction.
 
 ### 3.8 Email (Campaign) custom object — optional, recommended
 
@@ -256,8 +289,8 @@ in Twenty (and so a Twenty filter can drive a BetterComms List, §9.4):
 
 - **People by Club** — already native: open a Company to see its officers. Plus a
   global People view grouped by Company.
-- **Clubs by Association** — native on the Association record; plus a Companies view
-  grouped by `primaryAssociation`.
+- **Clubs by Association** — native on the Association record ("Member clubs"); the
+  primary association of a club is its `isPrimary` membership.
 - **Pipeline** — Opportunities grouped by stage (kanban).
 - **Hot prospects** — People/Companies filtered by `engagementTier = Hot` and not
   yet Customer.
