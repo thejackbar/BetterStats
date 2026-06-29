@@ -219,10 +219,19 @@ carrying that club's `clubRole` / `roleTitle` / `roleRank` / `outreachSelected`.
 - Each club's **`personClub`** row (inverse lists: a club's "Officer roles", a
   person's "Club roles") is what makes the shared officer appear under that club with
   the right role. Single-club officers get exactly one row (harmless).
-- The export is **duplicate-safe**: if a create still collides on email (e.g. a record
-  stored with different case that the lookup missed), `_upsert` re-finds by email and
-  adopts instead of dropping the officer. This closes the silent-drop where a shared
-  officer simply never landed.
+- **Matching a shared officer to their existing Contact** can't go through Twenty's
+  email filter — `emails.primaryEmail[eq]:…` does **not** match existing records on
+  this Twenty version (verified against the live instance: the export went straight to
+  a `POST /people` that 400'd with "A duplicate entry was detected"). So we keep our
+  **own** `email → Person id` index in `twenty_links` (`entity_type = 'person_email'`):
+  - **Maintained incrementally** — every person upsert records its own email→id. This
+    is the steady state and costs nothing extra per export (O(officers in the run)).
+  - **Seeded once** by `_prewarm_person_emails` (paginates `GET /people` via
+    `client.list_page`), guarded by a `_meta/person_email_backfilled` marker so it runs
+    a single time to index contacts that pre-date the map, then **never on the hot path
+    of routine exports**. `force=True` re-seeds after bulk manual edits in Twenty.
+  - `_upsert` adopts the indexed `known_id` both directly and to recover from a
+    duplicate-create 400, so a shared officer is never silently dropped.
 
 ### 3.9 Display labels and the junctions in the UI
 

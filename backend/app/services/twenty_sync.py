@@ -284,23 +284,30 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
         {"e": entity_type, "b": bc_id, "t": twenty_id, "h": content_hash})
 
 
-async def _prewarm_person_emails(session, http) -> int:
-    """List every Person already in Twenty and (re)build the email -> Person id map in
-    twenty_links. Twenty's email filter doesn't reliably match an existing record on
-    this version, so to adopt a shared officer's duplicate we keep our OWN complete
-    index — and it must cover people created by ANY earlier export or by hand, not just
-    those re-processed in this run. Best-effort: on any failure we just fall back to
-    the per-run map. Returns how many email->id entries were indexed."""
+async def _prewarm_person_emails(session, http, force: bool = False) -> int:
+    """ONE-TIME backfill of the email -> Person id map in twenty_links. The map is the
+    permanent index used to adopt a shared officer (Twenty's own email filter doesn't
+    reliably match an existing record on this version); it is maintained INCREMENTALLY
+    on every person upsert, so the steady state costs nothing extra per export. This
+    full scan only exists to seed contacts that already lived in Twenty before the map
+    existed — so it runs once (guarded by a marker) and then never again, never on the
+    hot path of routine exports. Best-effort. Returns how many entries were indexed.
+
+    Pass ``force=True`` to re-seed (e.g. after bulk manual edits in Twenty)."""
+    if not force and await _link_get(session, "_meta", "person_email_backfilled"):
+        return 0
     cursor, seen = None, 0
+    completed = False
     for _ in range(200):  # cap 200 pages * 60 = 12k people
         try:
             payload = await client.list_page(http, "people", limit=60, starting_after=cursor)
         except Exception:  # noqa: BLE001
-            logger.exception("twenty prewarm: listing people failed; using per-run map only")
+            logger.exception("twenty prewarm: listing people failed; will retry next export")
             break
         data = payload.get("data") if isinstance(payload, dict) else None
         people = data.get("people") if isinstance(data, dict) else (data if isinstance(data, list) else None)
         if not people:
+            completed = True
             break
         for p in people:
             pid = p.get("id")
@@ -312,16 +319,24 @@ async def _prewarm_person_emails(session, http) -> int:
         cursor = page.get("endCursor")
         # Stop on the last page. Fall back to the last record's id as a cursor if the
         # payload doesn't carry pageInfo but the page was full.
-        if page.get("hasNextPage") is False or not people:
+        if page.get("hasNextPage") is False:
+            completed = True
             break
         if not cursor:
             if len(people) < 60:
+                completed = True
                 break
             cursor = people[-1].get("id")
             if not cursor:
+                completed = True
                 break
+    # Mark done only on a clean full pass, so a mid-scan failure retries next time
+    # instead of leaving the map half-seeded forever.
+    if completed:
+        await _link_put(session, "_meta", "person_email_backfilled", "1", "")
     await session.commit()
-    logger.info("twenty prewarm: indexed %d existing contact email(s)", seen)
+    logger.info("twenty prewarm: indexed %d existing contact email(s)%s",
+                seen, "" if completed else " (incomplete, will retry)")
     return seen
 
 
@@ -582,9 +597,10 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                         {s["name"]: len(s["people"]) for s in snapshots})
             assoc_cache: dict = {}
             async with httpx.AsyncClient() as http:
-                # Build a complete email -> existing-Person map first, so a shared
-                # officer is adopted no matter which earlier export created their twin
-                # (Twenty's own email filter can't be trusted to find it).
+                # One-time backfill of the email -> existing-Person map (guarded by a
+                # marker, so this is a no-op on every export after the first). The map
+                # is then maintained incrementally per person upsert, so a shared
+                # officer is always adoptable without trusting Twenty's email filter.
                 await _prewarm_person_emails(session, http)
                 for snap in snapshots:
                     try:
