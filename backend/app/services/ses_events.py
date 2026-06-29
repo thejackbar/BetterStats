@@ -30,8 +30,10 @@ from sqlalchemy import select, func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import EmailEvent, CommsContact, CommsRecipient
+from app.config.settings import settings
+from app.models.db import EmailEvent, CommsContact, CommsRecipient, CommsCampaign
 from app.services.email_suppression import add_suppression
+from app.services import twenty_sync
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +136,47 @@ async def ingest_ses_event(session: AsyncSession, event: dict) -> dict:
     for email in recipients:
         await _record(session, etype, subtype, reason, ses_message_id, email, event)
     await session.commit()
+    # Mirror the event to the CRM (best-effort, after the DB is consistent): a
+    # permanent bounce / complaint flips the Person's emailable flags; an open or
+    # click records BetterComms Email as their contact source + the campaign.
+    await _push_ses_to_twenty(session, etype, subtype, ses_message_id, recipients)
     return {"status": "ok", "event": etype, "recipients": len(recipients)}
+
+
+async def _campaign_label(session: AsyncSession, ses_message_id) -> "str | None":
+    """A human label for the campaign behind a message: its utm_campaign, else the
+    subject."""
+    if not ses_message_id:
+        return None
+    rec = await session.scalar(
+        select(CommsRecipient).where(
+            CommsRecipient.provider_message_id == ses_message_id).limit(1))
+    if not rec or not rec.campaign_id:
+        return None
+    camp = await session.get(CommsCampaign, rec.campaign_id)
+    if not camp:
+        return None
+    return (camp.utm or {}).get("utm_campaign") or camp.subject
+
+
+async def _push_ses_to_twenty(session: AsyncSession, etype, subtype, ses_message_id,
+                              recipients) -> None:
+    if not settings.twenty_configured:
+        return
+    fields: dict = {}
+    if etype == "bounce" and (subtype or "").lower() == "permanent":
+        fields = {"subscribed": False, "bounced": True}
+    elif etype == "complaint":
+        fields = {"subscribed": False}
+    elif etype in ("open", "click"):
+        fields = {"contactSource": "BETTERCOMMS_EMAIL"}
+        label = await _campaign_label(session, ses_message_id)
+        if label:
+            fields["lastCampaign"] = label
+    if not fields:
+        return
+    for email in recipients:
+        await twenty_sync.update_person_by_email(email, fields)
 
 
 async def _record(session: AsyncSession, etype: str, subtype, reason,

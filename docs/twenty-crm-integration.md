@@ -555,6 +555,31 @@ it; the Twenty `subscribed` flag is read-only intelligence for the sales team, n
 a control. Nobody re-subscribes a contact by editing Twenty. That avoids a
 two-master conflict on the one field where getting it wrong is a compliance problem.
 
+### 9.7 Contact source — the inbound-engagement channel
+
+`Person.contactSource` records **how a person has actually made contact**, set
+automatically by the channel of a real contact event, never by the export. Options:
+**No Contact Source** (default), **Website**, **Manual Email**, **BetterComms
+Email**, **Other**. Rule: **most-recent-channel-wins** — each event just writes its
+own channel (last write), and the export never touches the field after creation, so
+event-driven updates and operator edits both survive a re-sync.
+
+| Channel | Trigger | Status |
+|---|---|---|
+| **Website** | a Contact Us enquiry (`POST /public/contact`) whose email matches a Person → set `WEBSITE` (background task, best-effort) | **built** |
+| **BetterComms Email** | an SES **open or click** (`ses_events`): resolve the recipient → set `BETTERCOMMS_EMAIL` + `lastCampaign` (the campaign's `utm_campaign`, else subject) | **built** (needs SES open/click events enabled on the config set to fire) |
+| **Manual Email** | an inbound Gmail message logged on a Person | follow-up — needs a Gmail account connected (per-user in Twenty) + a workflow/poll; self-hosted Gmail sync needs reliability testing first |
+| **Other** | manual | n/a |
+
+All updates go through `twenty_sync.update_person_by_email(email, fields)` — finds
+the Person by their unique email and patches the fields; a person not in the CRM is
+a silent no-op, and a CRM error never affects the triggering public/webhook flow.
+The same helper carries the **suppression mirror** (permanent bounce / complaint →
+`subscribed=false`, `bounced=true`), so email activity and contact source land
+through one path. Scaling note: contact-source is written on every qualifying event
+(e.g. each open); a per-person/per-campaign dedupe can come later if open volume
+makes the per-event Twenty write costly.
+
 ## 10. Pre-flight hardening (do before any sync)
 
 The compose you stood up needs three fixes first:

@@ -141,6 +141,7 @@ FIELDS = [
     ("person", "namedEmail", "Named email", "BOOLEAN", None),
     ("person", "emailsReceived", "Emails received", "NUMBER", None),
     ("person", "country", "Country", "TEXT", None),
+    ("person", "lastCampaign", "Last campaign", "TEXT", None),
     # ---- Opportunity ----
     ("opportunity", "bcOpportunityKey", "BC Opportunity key", "TEXT", None),
     ("opportunity", "modulesInScope", "Modules in scope", "MULTI_SELECT", MODULE_OPTS),
