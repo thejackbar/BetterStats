@@ -110,13 +110,18 @@ class TwentyClient:
         return _record(r.json())
 
     async def list_page(self, http: httpx.AsyncClient, plural: str, limit: int = 60,
-                        starting_after: Optional[str] = None) -> dict:
+                        starting_after: Optional[str] = None,
+                        filter: Optional[str] = None) -> dict:
         """One page of records. Returns the raw JSON payload (``data.<plural>`` array
         plus ``pageInfo``), so the caller can paginate with the cursor. Used to build a
-        complete local index when a server-side filter can't be trusted."""
+        complete local index when a server-side filter can't be trusted. Pass
+        ``filter`` (e.g. ``deletedAt[is]:NOT_NULL``) to reach soft-deleted records,
+        which Twenty hides from a default list but still counts as duplicates."""
         params: dict = {"limit": limit}
         if starting_after:
             params["starting_after"] = starting_after
+        if filter:
+            params["filter"] = filter
         r = await http.get(f"{self.base}/rest/{plural}", headers=self._headers,
                            params=params, timeout=30)
         if r.status_code >= 400:

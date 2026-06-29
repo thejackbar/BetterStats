@@ -294,27 +294,18 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
         {"e": entity_type, "b": bc_id, "t": twenty_id, "h": content_hash})
 
 
-async def _prewarm_person_emails(session, http, force: bool = False) -> int:
-    """ONE-TIME backfill of the email -> Person id map in twenty_links. The map is the
-    permanent index used to adopt a shared officer (Twenty's own email filter doesn't
-    reliably match an existing record on this version); it is maintained INCREMENTALLY
-    on every person upsert, so the steady state costs nothing extra per export. This
-    full scan only exists to seed contacts that already lived in Twenty before the map
-    existed — so it runs once (guarded by a marker) and then never again, never on the
-    hot path of routine exports. Best-effort. Returns how many entries were indexed.
-
-    Pass ``force=True`` to re-seed (e.g. after bulk manual edits in Twenty)."""
-    # Marker is versioned: the v2 index also covers name (Twenty dedupes on name too),
-    # so bumping it forces a single re-scan on upgrade to add the name keys.
-    if not force and await _link_get(session, "_meta", "person_index_v2_backfilled"):
-        return 0
-    cursor, seen = None, 0
-    completed = False
+async def _index_people_pass(session, http, filter: "str | None") -> tuple:
+    """Paginate ``GET /people`` (optionally filtered, e.g. to soft-deleted records)
+    and index each into the email/name maps. Returns (count, completed) — completed is
+    False if a request errored mid-scan, so the caller doesn't prematurely mark the
+    backfill done."""
+    cursor, seen, completed = None, 0, False
     for _ in range(200):  # cap 200 pages * 60 = 12k people
         try:
-            payload = await client.list_page(http, "people", limit=60, starting_after=cursor)
+            payload = await client.list_page(http, "people", limit=60,
+                                             starting_after=cursor, filter=filter)
         except Exception:  # noqa: BLE001
-            logger.exception("twenty prewarm: listing people failed; will retry next export")
+            logger.exception("twenty prewarm: listing people (filter=%r) failed", filter)
             break
         data = payload.get("data") if isinstance(payload, dict) else None
         people = data.get("people") if isinstance(data, dict) else (data if isinstance(data, list) else None)
@@ -349,14 +340,37 @@ async def _prewarm_person_emails(session, http, force: bool = False) -> int:
             if not cursor:
                 completed = True
                 break
-    # Mark done only on a clean full pass, so a mid-scan failure retries next time
-    # instead of leaving the map half-seeded forever.
-    if completed:
-        await _link_put(session, "_meta", "person_index_v2_backfilled", "1", "")
+    return seen, completed
+
+
+async def _prewarm_person_emails(session, http, force: bool = False) -> int:
+    """ONE-TIME backfill of the email/name -> Person id map in twenty_links. The map is
+    the permanent index used to adopt a shared officer (Twenty's own email filter
+    doesn't reliably match an existing record on this version); it is maintained
+    INCREMENTALLY on every person upsert, so the steady state costs nothing extra per
+    export. This full scan only seeds contacts that already lived in Twenty before the
+    map existed — so it runs once (guarded by a marker) and then never on the hot path.
+
+    Two passes: active records, then SOFT-DELETED ones (Twenty hides those from a
+    default list but still counts them in its uniqueness check, so a stale soft-deleted
+    Contact blocks a create — indexing it lets us adopt and restore it via deletedAt
+    null). Best-effort. Returns how many entries were indexed.
+
+    Pass ``force=True`` to re-seed (e.g. after bulk manual edits in Twenty)."""
+    # Marker is versioned: v3 also covers name + soft-deleted, so bumping it forces a
+    # single re-scan on upgrade.
+    if not force and await _link_get(session, "_meta", "person_index_v3_backfilled"):
+        return 0
+    active_n, active_done = await _index_people_pass(session, http, None)
+    deleted_n, _deleted_done = await _index_people_pass(session, http, "deletedAt[is]:NOT_NULL")
+    # Mark done on a clean ACTIVE pass; the soft-deleted pass is best-effort (the filter
+    # may be unsupported), so it never blocks the marker or forces a re-scan every run.
+    if active_done:
+        await _link_put(session, "_meta", "person_index_v3_backfilled", "1", "")
     await session.commit()
-    logger.info("twenty prewarm: indexed %d existing contact(s) by email+name%s",
-                seen, "" if completed else " (incomplete, will retry)")
-    return seen
+    logger.info("twenty prewarm: indexed %d contact(s) by email+name (incl. %d soft-deleted)%s",
+                active_n + deleted_n, deleted_n, "" if active_done else " (incomplete, will retry)")
+    return active_n + deleted_n
 
 
 async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
