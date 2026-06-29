@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import MarketingClub, MarketingClubContact
 from app.services.club_directory import club_filters
-from app.services.twenty_client import client, currency, full_name, link
+from app.services.twenty_client import client, currency, full_name, link, phone
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,10 @@ def _person_values(ct: MarketingClubContact, company_twenty_id: str) -> dict:
     }
     if ct.email:
         vals["emails"] = {"primaryEmail": ct.email}
+    if ct.mobile:
+        vals["phones"] = phone(ct.mobile)
+    if ct.role:
+        vals["jobTitle"] = ct.role          # the raw role into Twenty's standard Job title
     src = (ct.source or "").upper()
     if src in ("API", "WEBSITE", "MANUAL"):
         vals["contactSource"] = src
@@ -195,11 +199,26 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values):
     return tid, "created"
 
 
+async def _assoc_extra(session, assoc_guid: Optional[str]) -> dict:
+    """Short code + linked-club count for an association, from the directory's
+    association registry (PlayHQ doesn't carry them on the club). No state column
+    exists for an association, so assocState is left unset."""
+    if not assoc_guid:
+        return {}
+    row = (await session.execute(text(
+        "SELECT short_code, club_count FROM marketing_associations WHERE id = :id"),
+        {"id": assoc_guid})).first()
+    if not row:
+        return {}
+    return {"shortCode": row[0], "clubCount": row[1]}
+
+
 async def _ensure_assoc(session, http, club, cache, stats) -> Optional[str]:
     bc_id = club.association_guid or ("name:" + club.association_name)
     if bc_id in cache:
         return cache[bc_id]
-    values = _clean({"name": club.association_name, "bcAssociationId": bc_id})
+    values = _clean({"name": club.association_name, "bcAssociationId": bc_id,
+                     **(await _assoc_extra(session, club.association_guid))})
     try:
         tid, act = await _upsert(session, http, "association", bc_id,
                                  "associations", "bcAssociationId", values)
@@ -212,48 +231,63 @@ async def _ensure_assoc(session, http, club, cache, stats) -> Optional[str]:
 
 
 async def export_to_twenty(session: AsyncSession, *, filters: Optional[dict] = None,
-                           contact_scope: str = "all",
+                           contact_scope: str = "all", selected_only: bool = True,
                            limit: Optional[int] = None) -> dict:
     """Push the filtered directory subset into Twenty. ``contact_scope`` is
-    all | named | pst (which officers to include for each matched club)."""
+    all | named | pst and ``selected_only`` (default) honours the per-officer
+    outreach tick the operator set in the directory, so de-selected officers are
+    skipped — same control as the BetterComms export. Never raises: a top-level
+    failure is logged with a traceback and returned as an ``error`` field so the
+    endpoint reports cleanly instead of 500-ing."""
     if not client.configured:
         return {"error": "Twenty is not configured. Set TWENTY_API_URL and "
                           "TWENTY_API_KEY in the server .env."}
     filters = filters or {}
-    q = select(MarketingClub).where(
-        MarketingClub.detail_fetched_at.isnot(None),
-        MarketingClub.excluded.is_(False))
-    for cond in club_filters(**filters):
-        q = q.where(cond)
-    q = q.order_by(MarketingClub.name)
-    if limit:
-        q = q.limit(limit)
-    clubs = (await session.execute(q)).scalars().all()
-
     stats: dict = defaultdict(int)
-    assoc_cache: dict = {}
     errors = 0
-    async with httpx.AsyncClient() as http:
-        for club in clubs:
-            try:
-                assoc_tid = (await _ensure_assoc(session, http, club, assoc_cache, stats)
-                             if club.association_name else None)
-                ctid, cact = await _upsert(session, http, "club", club.grassroots_guid,
-                                           "companies", "bcClubId",
-                                           _company_values(club, assoc_tid))
-                stats["clubs_" + cact] += 1
-                contacts = (await session.execute(select(MarketingClubContact).where(
-                    MarketingClubContact.marketing_club_id == club.id))).scalars().all()
-                for ct in _scoped(contacts, contact_scope):
-                    _, pact = await _upsert(session, http, "person", str(ct.id),
-                                            "people", "bcContactId",
-                                            _person_values(ct, ctid))
-                    stats["people_" + pact] += 1
-                await session.commit()
-            except Exception as e:  # noqa: BLE001 - one bad club must not abort the run
-                errors += 1
-                await session.rollback()
-                logger.warning("twenty export failed for club %s: %s", club.name, e)
-            await asyncio.sleep(0.05)  # stay polite under the 100 req/min cap
+    matched = 0
+    try:
+        q = select(MarketingClub).where(
+            MarketingClub.detail_fetched_at.isnot(None),
+            MarketingClub.excluded.is_(False),
+            MarketingClub.kind == "club")  # match the directory list (clubs, not associations)
+        for cond in club_filters(**filters):
+            q = q.where(cond)
+        q = q.order_by(MarketingClub.name)
+        if limit:
+            q = q.limit(limit)
+        clubs = (await session.execute(q)).scalars().all()
+        matched = len(clubs)
 
-    return {"matched_clubs": len(clubs), "errors": errors, **stats}
+        assoc_cache: dict = {}
+        async with httpx.AsyncClient() as http:
+            for club in clubs:
+                try:
+                    assoc_tid = (await _ensure_assoc(session, http, club, assoc_cache, stats)
+                                 if club.association_name else None)
+                    ctid, cact = await _upsert(session, http, "club", club.grassroots_guid,
+                                               "companies", "bcClubId",
+                                               _company_values(club, assoc_tid))
+                    stats["clubs_" + cact] += 1
+                    cq = select(MarketingClubContact).where(
+                        MarketingClubContact.marketing_club_id == club.id)
+                    if selected_only:
+                        cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
+                    contacts = (await session.execute(cq)).scalars().all()
+                    for ct in _scoped(contacts, contact_scope):
+                        _, pact = await _upsert(session, http, "person", str(ct.id),
+                                                "people", "bcContactId",
+                                                _person_values(ct, ctid))
+                        stats["people_" + pact] += 1
+                    await session.commit()
+                except Exception:  # noqa: BLE001 - one bad club must not abort the run
+                    errors += 1
+                    await session.rollback()
+                    logger.exception("twenty export failed for club %s", club.name)
+                await asyncio.sleep(0.05)  # stay polite under the 100 req/min cap
+    except Exception as e:  # noqa: BLE001 - never bubble a 500 to the UI
+        logger.exception("twenty export top-level failure")
+        return {"error": f"export failed: {e}", "matched_clubs": matched,
+                "errors": errors, **stats}
+
+    return {"matched_clubs": matched, "errors": errors, **stats}

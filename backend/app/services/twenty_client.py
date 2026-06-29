@@ -111,6 +111,16 @@ def link(url: Optional[str], label: Optional[str] = None) -> Optional[dict]:
     return {"primaryLinkUrl": url, "primaryLinkLabel": label or ""}
 
 
+def phone(number: Optional[str], country: str = "AU", calling: str = "+61") -> Optional[dict]:
+    if not number:
+        return None
+    n = "".join(ch for ch in str(number) if ch.isdigit() or ch == "+")
+    if not n:
+        return None
+    return {"primaryPhoneNumber": n, "primaryPhoneCountryCode": country,
+            "primaryPhoneCallingCode": calling}
+
+
 def full_name(name: Optional[str]) -> dict:
     parts = (name or "").strip().split()
     if not parts:
