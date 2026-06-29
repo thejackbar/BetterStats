@@ -788,6 +788,21 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const exportTwenty = async () => {
+    setBusy('twenty'); setMsg('')
+    try {
+      const r = await api.mktExportTwenty({ ...filters })
+      if (r.error) { setError(r.error); return }
+      const cl = (r.clubs_created || 0) + (r.clubs_updated || 0) + (r.clubs_adopted || 0)
+      const pp = (r.people_created || 0) + (r.people_updated || 0) + (r.people_adopted || 0)
+      let m = `Exported to Twenty: ${r.matched_clubs} club(s) matched, ${cl} club + ${pp} officer record(s) synced`
+      m += (r.clubs_unchanged || r.people_unchanged) ? `, ${(r.clubs_unchanged || 0) + (r.people_unchanged || 0)} unchanged` : ''
+      m += r.errors ? `. ${r.errors} club(s) errored (see logs).` : '.'
+      setMsg(m)
+      loadClubs()
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
   const bulkEmailed = async (value) => {
     if (!window.confirm(
       `${value ? 'Mark' : 'Unmark'} all ${total} club(s) in the current filtered list as `
@@ -1115,6 +1130,10 @@ export default function SuperMarketing() {
             </a>
             <button className={BTN} disabled={busy === 'export'} onClick={exportComms}>
               {busy === 'export' ? 'Exporting...' : 'Export to BetterComms'}
+            </button>
+            <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
+                    title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
+              {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
             </button>
             <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}

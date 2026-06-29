@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db, async_session_maker, MarketingClub, MarketingClubContact
 from app.routers.auth import require_super_admin
 from app.services import club_directory as cd
+from app.services import twenty_sync
 
 router = APIRouter(prefix="/club-admin/marketing", tags=["marketing"])
 
@@ -276,6 +277,49 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
         filters=filters)
+
+
+class ExportTwentyBody(BaseModel):
+    # Same directory filters the page shows, so the export acts on the currently
+    # filtered list (the targeted subset that enters the CRM).
+    q: Optional[str] = None
+    state: Optional[str] = None
+    association: Optional[str] = None
+    status: Optional[str] = None
+    postcode_from: Optional[str] = None
+    postcode_to: Optional[str] = None
+    contact: Optional[str] = None
+    person: Optional[str] = None
+    exclude_junior: bool = False
+    exclude_emailed: bool = False
+    exclude_carnival: bool = False
+    exclude_school: bool = False
+    exclude_exported: bool = False
+    exclude_suppressed: bool = False
+    visited: bool = False
+    associations: Optional[List[str]] = None
+    countries: Optional[List[str]] = None
+    # all | named | pst — which officers of each matched club to push.
+    contact_scope: str = "all"
+    # Optional cap on clubs per run (None = all matched).
+    limit: Optional[int] = None
+
+
+@router.post("/export-twenty")
+async def export_twenty(body: ExportTwentyBody, db: AsyncSession = Depends(get_db),
+                        _=Depends(require_super_admin)):
+    """Push the currently-filtered directory subset into Twenty CRM (Companies +
+    Associations + People). Idempotent — re-running upserts and skips unchanged
+    records. Excluded clubs are always skipped."""
+    filters = await cd.expand_shortcode(db, _filter_kwargs(
+        body.q, body.state, body.association, body.status, body.postcode_from,
+        body.postcode_to, body.contact, body.person, body.exclude_junior,
+        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
+        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
+        visited=body.visited, countries=body.countries))
+    scope = body.contact_scope if body.contact_scope in ("all", "named", "pst") else "all"
+    return await twenty_sync.export_to_twenty(
+        db, filters=filters, contact_scope=scope, limit=body.limit)
 
 
 class EmailedBody(BaseModel):
