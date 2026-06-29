@@ -321,7 +321,7 @@ async def export_twenty(body: ExportTwentyBody, db: AsyncSession = Depends(get_d
         visited=body.visited, countries=body.countries))
     scope = body.contact_scope if body.contact_scope in ("all", "named", "pst") else "all"
     return await twenty_sync.export_to_twenty(
-        db, filters=filters, contact_scope=scope, selected_only=body.selected_only,
+        filters=filters, contact_scope=scope, selected_only=body.selected_only,
         limit=body.limit)
 
 
