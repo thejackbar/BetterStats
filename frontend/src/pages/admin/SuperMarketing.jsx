@@ -239,11 +239,17 @@ function VisitsPanel({ clubId, summary }) {
         <div className="text-pb-faint">Loading visits…</div>
       ) : !views ? (
         <div className="text-pb-faint">No site visits tracked from this club's UTM yet.</div>
+      ) : !data ? (
+        // Summary says there's traffic but the detail fetch hasn't landed (or
+        // failed) — show the count without touching the missing detail fields.
+        <div className="text-pb-dim">
+          <span className="text-violet-300 font-medium">{views}</span> view(s) tracked.
+        </div>
       ) : (
         <div className="space-y-1.5 text-pb-dim">
           <div>
             <span className="text-violet-300 font-medium">{views}</span> view(s) from{' '}
-            <span className="text-violet-300 font-medium">{data.visitors}</span> visitor(s)
+            <span className="text-violet-300 font-medium">{data.visitors ?? 0}</span> visitor(s)
             {data.last_seen && <span className="text-pb-faint"> · last {fmtWhen(data.last_seen)}</span>}
             {data.first_seen && <span className="text-pb-faint"> · first {fmtWhen(data.first_seen)}</span>}
           </div>
@@ -266,25 +272,83 @@ function VisitsPanel({ clubId, summary }) {
   )
 }
 
-function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, onSaveUtm, onSaveSales }) {
+function ContactEditRow({ init, onSave, onCancel, busy }) {
+  const [f, setF] = useState({
+    role: init.role || '', full_name: init.full_name || '',
+    email: init.email || '', mobile: init.mobile || '',
+  })
+  const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-[11px] text-pb-text focus:outline-none focus:border-pb-accent'
+  return (
+    <tr className="align-top">
+      <td className="py-0.5 pr-2" />
+      <td className="py-0.5 pr-2"><input className={inp} placeholder="Role" value={f.role}
+        onChange={e => setF(s => ({ ...s, role: e.target.value }))} /></td>
+      <td className="py-0.5 pr-2"><input className={inp} placeholder="Name" value={f.full_name}
+        onChange={e => setF(s => ({ ...s, full_name: e.target.value }))} /></td>
+      <td className="py-0.5 pr-2"><input className={inp} placeholder="email@club.com" value={f.email}
+        onChange={e => setF(s => ({ ...s, email: e.target.value }))} /></td>
+      <td className="py-0.5 pr-2"><input className={inp} placeholder="Mobile" value={f.mobile}
+        onChange={e => setF(s => ({ ...s, mobile: e.target.value }))} /></td>
+      <td className="py-0.5 whitespace-nowrap">
+        <button disabled={busy} className="text-[11px] text-pb-accent hover:underline disabled:opacity-50"
+          onClick={() => onSave(f)}>{busy ? '...' : 'Save'}</button>
+        <button disabled={busy} className="ml-2 text-[11px] text-pb-faint hover:text-pb-text"
+          onClick={onCancel}>Cancel</button>
+      </td>
+    </tr>
+  )
+}
+
+function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, onSaveUtm, onSaveSales, onRefresh }) {
   const contacts = club.contacts || []
   const assocs = club.associations
   const [utm, setUtm] = useState(club.utm_code || '')
   const [utmBusy, setUtmBusy] = useState(false)
+  const [editId, setEditId] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const [cbusy, setCbusy] = useState(false)
+  const [cerr, setCerr] = useState('')
   const saveUtm = async () => {
     setUtmBusy(true)
     try { await onSaveUtm(club.id, utm) } finally { setUtmBusy(false) }
   }
+  const saveContact = async (id, vals) => {
+    setCbusy(true); setCerr('')
+    try { await api.mktUpdateContact(id, vals); setEditId(null); onRefresh && onRefresh() }
+    catch (e) { setCerr(e.message || 'Could not save the contact.') } finally { setCbusy(false) }
+  }
+  const createContact = async (vals) => {
+    setCbusy(true); setCerr('')
+    try { await api.mktAddContact(club.id, vals); setAdding(false); onRefresh && onRefresh() }
+    catch (e) { setCerr(e.message || 'Could not add the contact.') } finally { setCbusy(false) }
+  }
+  const removeContact = async (id) => {
+    if (!window.confirm('Remove this contact?')) return
+    setCbusy(true); setCerr('')
+    try { await api.mktDeleteContact(id); onRefresh && onRefresh() }
+    catch (e) { setCerr(e.message || 'Could not remove the contact.') } finally { setCbusy(false) }
+  }
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
-        <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1">
-          Contacts ({contacts.length}) · tick who to email
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[11px] uppercase tracking-wide text-pb-faint">
+            Contacts ({contacts.length}) · tick who to email
+          </div>
+          <button className="text-[11px] text-pb-accent hover:underline"
+                  onClick={() => { setAdding(a => !a); setEditId(null) }}>
+            {adding ? 'Cancel' : '+ Add contact'}
+          </button>
         </div>
-        {contacts.length ? (
+        {(contacts.length || adding) ? (
           <table className="w-full text-xs">
             <tbody>
               {contacts.map((ct) => {
+                if (editId === ct.id) {
+                  return <ContactEditRow key={ct.id} init={ct} busy={cbusy}
+                                         onCancel={() => setEditId(null)}
+                                         onSave={(vals) => saveContact(ct.id, vals)} />
+                }
                 const canEmail = !!ct.email && ct.subscribed
                 return (
                   <tr key={ct.id} className="align-top">
@@ -307,13 +371,23 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                         </span>
                       )}
                     </td>
-                    <td className="py-0.5 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
+                    <td className="py-0.5 pr-2 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
+                    <td className="py-0.5 whitespace-nowrap">
+                      <button className="text-[11px] text-pb-faint hover:text-pb-accent"
+                              onClick={() => { setEditId(ct.id); setAdding(false) }}>edit</button>
+                      <button className="ml-2 text-[11px] text-pb-faint hover:text-red-300"
+                              title="Remove contact" onClick={() => removeContact(ct.id)}>✕</button>
+                    </td>
                   </tr>
                 )
               })}
+              {adding && <ContactEditRow init={{}} busy={cbusy}
+                                         onCancel={() => setAdding(false)}
+                                         onSave={createContact} />}
             </tbody>
           </table>
         ) : <div className="text-pb-faint text-xs">No contacts stored.</div>}
+        {cerr && <div className="text-red-300 text-[11px] mt-1">{cerr}</div>}
       </div>
       <div className="text-xs space-y-2">
         <div>
@@ -1119,7 +1193,8 @@ export default function SuperMarketing() {
                           <ClubDetail club={c} onToggleContact={toggleContact}
                                       onToggleEmailed={toggleEmailed}
                                       onToggleExcluded={toggleExcluded}
-                                      onSaveUtm={saveUtm} onSaveSales={saveSales} />
+                                      onSaveUtm={saveUtm} onSaveSales={saveSales}
+                                      onRefresh={() => { loadClubs(); loadStats() }} />
                         </td>
                       </tr>
                     ),

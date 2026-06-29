@@ -429,22 +429,107 @@ async def set_club_sales(club_id: str, body: SalesBody, db: AsyncSession = Depen
     return res
 
 
-class ContactSelectBody(BaseModel):
-    selected: bool
+def _contact_out(ct: MarketingClubContact) -> dict:
+    return {
+        "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
+        "email": ct.email, "mobile": ct.mobile, "source": ct.source,
+        "subscribed": ct.subscribed, "selected": ct.outreach_selected,
+        "exported": ct.exported_at is not None,
+    }
+
+
+class ContactUpdateBody(BaseModel):
+    # All optional — tick/untick for outreach AND/OR edit the editable fields.
+    selected: Optional[bool] = None
+    role: Optional[str] = None
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile: Optional[str] = None
+
+
+async def _email_clashes(db, club_id, email: str, exclude_id=None) -> bool:
+    stmt = select(MarketingClubContact.id).where(
+        MarketingClubContact.marketing_club_id == club_id,
+        func.lower(MarketingClubContact.email) == email)
+    if exclude_id is not None:
+        stmt = stmt.where(MarketingClubContact.id != exclude_id)
+    return await db.scalar(stmt) is not None
 
 
 @router.patch("/contacts/{contact_id}")
-async def set_contact_selected(contact_id: str, body: ContactSelectBody,
-                               db: AsyncSession = Depends(get_db),
-                               _=Depends(require_super_admin)):
-    """Tick / untick one contact for outreach. This is how a super admin decides
-    which of a club's committee receive the BetterComms email."""
+async def update_contact(contact_id: str, body: ContactUpdateBody,
+                         db: AsyncSession = Depends(get_db),
+                         _=Depends(require_super_admin)):
+    """Tick / untick a contact for outreach and/or edit its role, name, email and
+    mobile. Email is normalised and kept unique per club."""
     contact = await db.get(MarketingClubContact, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
-    contact.outreach_selected = body.selected
+    if body.selected is not None:
+        contact.outreach_selected = body.selected
+    if body.role is not None:
+        contact.role = body.role.strip() or None
+    if body.full_name is not None:
+        contact.full_name = body.full_name.strip() or None
+    if body.mobile is not None:
+        contact.mobile = body.mobile.strip() or None
+    if body.email is not None:
+        new_email = (body.email or "").strip().lower() or None
+        if new_email != contact.email:
+            if new_email and await _email_clashes(db, contact.marketing_club_id, new_email, contact.id):
+                raise HTTPException(status_code=409,
+                                    detail="Another contact for this club already uses that email")
+            contact.email = new_email
+    contact.updated_at = func.now()
     await db.commit()
-    return {"id": contact_id, "selected": contact.outreach_selected}
+    await db.refresh(contact)
+    return _contact_out(contact)
+
+
+class ContactCreateBody(BaseModel):
+    role: Optional[str] = None
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile: Optional[str] = None
+
+
+@router.post("/clubs/{club_id}/contacts")
+async def add_contact(club_id: str, body: ContactCreateBody,
+                      db: AsyncSession = Depends(get_db),
+                      _=Depends(require_super_admin)):
+    """Add a committee contact to a club by hand (e.g. an officer PlayHQ doesn't
+    publish). Pre-ticked for outreach when it has an email."""
+    club = await db.get(MarketingClub, club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    email = (body.email or "").strip().lower() or None
+    if email and await _email_clashes(db, club.id, email):
+        raise HTTPException(status_code=409,
+                            detail="Another contact for this club already uses that email")
+    contact = MarketingClubContact(
+        marketing_club_id=club.id,
+        role=(body.role or "").strip() or None,
+        full_name=(body.full_name or "").strip() or None,
+        email=email, mobile=(body.mobile or "").strip() or None,
+        source="manual", role_rank=50, subscribed=True,
+        outreach_selected=bool(email),
+    )
+    db.add(contact)
+    await db.commit()
+    await db.refresh(contact)
+    return _contact_out(contact)
+
+
+@router.delete("/contacts/{contact_id}")
+async def delete_contact(contact_id: str, db: AsyncSession = Depends(get_db),
+                         _=Depends(require_super_admin)):
+    """Remove a contact from a club's directory record."""
+    contact = await db.get(MarketingClubContact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    await db.delete(contact)
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/sync-suppressions")

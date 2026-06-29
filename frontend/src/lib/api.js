@@ -465,6 +465,12 @@ export const api = {
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
+  mktUpdateContact: (contactId, patch) =>
+    request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  mktAddContact: (clubId, data) =>
+    request(`/club-admin/marketing/clubs/${clubId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  mktDeleteContact: (contactId) =>
+    request(`/club-admin/marketing/contacts/${contactId}`, { method: 'DELETE' }),
   mktSyncSuppressions: (orgId) =>
     request(`/club-admin/marketing/sync-suppressions${orgId ? `?organisation_id=${orgId}` : ''}`, { method: 'POST' }),
   mktExportCsvUrl: (filters = {}) => {

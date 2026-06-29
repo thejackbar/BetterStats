@@ -221,12 +221,12 @@ function LiveSection() {
   }, [])
 
   const A = data?.active
-  const recent = data?.recent || []
-  const perMinute = data?.per_minute || []
-  const pmMax = Math.max(1, ...perMinute.map(p => p.views))
-  const sources = data?.sources || []
-  const srcMax = Math.max(1, ...sources.map(s => s.visitors))
-  const utms = data?.utms || []
+  const recent = (data?.recent || []).filter(Boolean)
+  const perMinute = (data?.per_minute || []).filter(Boolean)
+  const pmMax = Math.max(1, ...perMinute.map(p => p.views || 0))
+  const sources = (data?.sources || []).filter(Boolean)
+  const srcMax = Math.max(1, ...sources.map(s => s.visitors || 0))
+  const utms = (data?.utms || []).filter(Boolean)
 
   const windows = [
     { key: 'now',   label: 'Active now',  sub: 'last 5 min', live: true },
