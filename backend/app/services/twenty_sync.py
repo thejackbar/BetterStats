@@ -23,7 +23,7 @@ import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import MarketingClub, MarketingClubContact
+from app.models.db import MarketingClub, MarketingClubContact, async_session_maker
 from app.services.club_directory import club_filters
 from app.services.twenty_client import client, currency, full_name, link, phone
 
@@ -68,13 +68,19 @@ def _club_kind(name: Optional[str]) -> str:
 
 
 def _lifecycle(club: MarketingClub) -> str:
+    # Must be one of the Company lifecycleStage options (Target / Prospect /
+    # Engaged / Trial / Customer / Churned / Suppressed). "Contacted" is an
+    # Opportunity pipeline stage, NOT a company lifecycle value, so a contacted
+    # club maps to Prospect here.
     s = (club.status or "").lower()
     if club.existing_org_id or s == "onboarded" or (club.demo_status or "") == "customer":
         return "CUSTOMER"
+    if (club.demo_status or "") == "in_trial":
+        return "TRIAL"
     if s == "suppressed" or club.excluded:
         return "SUPPRESSED"
     if s == "contacted" or club.emailed_at:
-        return "CONTACTED"
+        return "PROSPECT"
     return "TARGET"
 
 
@@ -287,23 +293,25 @@ def _club_assocs(club: MarketingClub):
     return out
 
 
-async def _sync_memberships(session, http, club, company_tid, cache, stats):
+async def _sync_memberships(session, http, club_guid, club_name, assocs, company_tid,
+                            cache, stats):
     """Upsert one clubAssociation (membership) per association the club plays in,
     so a club shows under every association and an association shows all its clubs.
-    isPrimary is set on creation only, so an operator can re-point it in Twenty."""
-    for guid, name, is_primary in _club_assocs(club):
+    isPrimary is set on creation only, so an operator can re-point it in Twenty.
+    ``assocs`` is the pre-snapshotted _club_assocs list (plain tuples)."""
+    for guid, name, is_primary in assocs:
         assoc_tid = await _ensure_assoc_by(session, http, guid, name, cache, stats)
         if not assoc_tid:
             continue
-        bc_id = f"{club.grassroots_guid}:{guid or name}"
-        values = _clean({"name": f"{club.name} — {name}",
+        bc_id = f"{club_guid}:{guid or name}"
+        values = _clean({"name": f"{club_name} — {name}",
                          "companyId": company_tid, "associationId": assoc_tid})
         _, act = await _upsert(session, http, "membership", bc_id, "clubAssociations",
                                None, values, create_extra={"isPrimary": bool(is_primary)})
         stats["memberships_" + act] += 1
 
 
-async def export_to_twenty(session: AsyncSession, *, filters: Optional[dict] = None,
+async def export_to_twenty(*, filters: Optional[dict] = None,
                            contact_scope: str = "all", selected_only: bool = True,
                            limit: Optional[int] = None) -> dict:
     """Push the filtered directory subset into Twenty. ``contact_scope`` is
@@ -311,7 +319,12 @@ async def export_to_twenty(session: AsyncSession, *, filters: Optional[dict] = N
     outreach tick the operator set in the directory, so de-selected officers are
     skipped — same control as the BetterComms export. Never raises: a top-level
     failure is logged with a traceback and returned as an ``error`` field so the
-    endpoint reports cleanly instead of 500-ing."""
+    endpoint reports cleanly instead of 500-ing.
+
+    Runs in its own session with ``expire_on_commit=False`` and snapshots all ORM
+    data into plain values BEFORE the Twenty IO loop, so the per-club commit /
+    rollback can never trigger a lazy reload of an expired ORM object mid-loop
+    (the greenlet_spawn async-IO trap)."""
     if not client.configured:
         return {"error": "Twenty is not configured. Set TWENTY_API_URL and "
                           "TWENTY_API_KEY in the server .env."}
@@ -320,43 +333,58 @@ async def export_to_twenty(session: AsyncSession, *, filters: Optional[dict] = N
     errors = 0
     matched = 0
     try:
-        q = select(MarketingClub).where(
-            MarketingClub.detail_fetched_at.isnot(None),
-            MarketingClub.excluded.is_(False),
-            MarketingClub.kind == "club")  # match the directory list (clubs, not associations)
-        for cond in club_filters(**filters):
-            q = q.where(cond)
-        q = q.order_by(MarketingClub.name)
-        if limit:
-            q = q.limit(limit)
-        clubs = (await session.execute(q)).scalars().all()
-        matched = len(clubs)
+        async with async_session_maker() as session:
+            session.sync_session.expire_on_commit = False
 
-        assoc_cache: dict = {}
-        async with httpx.AsyncClient() as http:
+            q = select(MarketingClub).where(
+                MarketingClub.detail_fetched_at.isnot(None),
+                MarketingClub.excluded.is_(False),
+                MarketingClub.kind == "club")  # match the directory list (clubs, not associations)
+            for cond in club_filters(**filters):
+                q = q.where(cond)
+            q = q.order_by(MarketingClub.name)
+            if limit:
+                q = q.limit(limit)
+            clubs = (await session.execute(q)).scalars().all()
+            matched = len(clubs)
+
+            # Snapshot everything we need to plain Python — no ORM attribute is
+            # touched after this point, so commits/rollbacks below are safe.
+            snapshots = []
             for club in clubs:
-                try:
-                    ctid, cact = await _upsert(session, http, "club", club.grassroots_guid,
-                                               "companies", "bcClubId",
-                                               _company_values(club))
-                    stats["clubs_" + cact] += 1
-                    await _sync_memberships(session, http, club, ctid, assoc_cache, stats)
-                    cq = select(MarketingClubContact).where(
-                        MarketingClubContact.marketing_club_id == club.id)
-                    if selected_only:
-                        cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
-                    contacts = (await session.execute(cq)).scalars().all()
-                    for ct in _scoped(contacts, contact_scope):
-                        _, pact = await _upsert(session, http, "person", str(ct.id),
-                                                "people", "bcContactId",
-                                                _person_values(ct, ctid))
-                        stats["people_" + pact] += 1
-                    await session.commit()
-                except Exception:  # noqa: BLE001 - one bad club must not abort the run
-                    errors += 1
-                    await session.rollback()
-                    logger.exception("twenty export failed for club %s", club.name)
-                await asyncio.sleep(0.05)  # stay polite under the 100 req/min cap
+                cq = select(MarketingClubContact).where(
+                    MarketingClubContact.marketing_club_id == club.id)
+                if selected_only:
+                    cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
+                contacts = (await session.execute(cq)).scalars().all()
+                snapshots.append({
+                    "guid": club.grassroots_guid,
+                    "name": club.name,
+                    "company": _company_values(club),
+                    "assocs": _club_assocs(club),
+                    "people": [(str(ct.id), _person_values(ct, None))
+                               for ct in _scoped(contacts, contact_scope)],
+                })
+
+            assoc_cache: dict = {}
+            async with httpx.AsyncClient() as http:
+                for snap in snapshots:
+                    try:
+                        ctid, cact = await _upsert(session, http, "club", snap["guid"],
+                                                   "companies", "bcClubId", snap["company"])
+                        stats["clubs_" + cact] += 1
+                        await _sync_memberships(session, http, snap["guid"], snap["name"],
+                                                snap["assocs"], ctid, assoc_cache, stats)
+                        for bc_id, pvals in snap["people"]:
+                            _, pact = await _upsert(session, http, "person", bc_id, "people",
+                                                    "bcContactId", {**pvals, "companyId": ctid})
+                            stats["people_" + pact] += 1
+                        await session.commit()
+                    except Exception:  # noqa: BLE001 - one bad club must not abort the run
+                        errors += 1
+                        await session.rollback()
+                        logger.exception("twenty export failed for club %s", snap["name"])
+                    await asyncio.sleep(0.05)  # stay polite under the 100 req/min cap
     except Exception as e:  # noqa: BLE001 - never bubble a 500 to the UI
         logger.exception("twenty export top-level failure")
         return {"error": f"export failed: {e}", "matched_clubs": matched,
