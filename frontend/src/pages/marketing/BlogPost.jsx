@@ -152,6 +152,18 @@ export default function BlogPost() {
         acceptedAnswer: { '@type': 'Answer', text: a },
       })),
     }] : []),
+    ...(post.howto?.length ? [{
+      '@context': 'https://schema.org',
+      '@type': 'HowTo',
+      name: post.title,
+      description: post.description,
+      step: post.howto.map((s, i) => ({
+        '@type': 'HowToStep',
+        position: i + 1,
+        name: s.name,
+        text: s.text,
+      })),
+    }] : []),
   ] : undefined
 
   usePageMeta(post ? {
