@@ -84,6 +84,11 @@ OBJECTS = [
     dict(nameSingular="bcEmail", namePlural="bcEmails", labelSingular="Email",
          labelPlural="Emails", icon="IconMail",
          description="A named BetterComms bulk email (campaign)"),
+    # Junction for the many-to-many between clubs and associations (Twenty's
+    # metadata API has no native many-to-many). One row per club-in-association.
+    dict(nameSingular="clubAssociation", namePlural="clubAssociations",
+         labelSingular="Membership", labelPlural="Memberships", icon="IconUsersGroup",
+         description="A club's membership of an association (club <-> association link)"),
 ]
 
 # (object nameSingular, field name, label, type, options-or-None)
@@ -147,6 +152,8 @@ FIELDS = [
     ("association", "shortCode", "Short code", "TEXT", None),
     ("association", "assocState", "State", "TEXT", None),
     ("association", "clubCount", "Club count", "NUMBER", None),
+    # ---- Membership (clubAssociation junction) ----
+    ("clubAssociation", "isPrimary", "Is primary", "BOOLEAN", None),
     # ---- Touchpoint ----
     ("touchpoint", "touchpointType", "Type", "SELECT",
      _options(["Email sent", "Email delivered", "Email opened", "Email clicked",
@@ -182,12 +189,11 @@ RELATIONS = [
     ("touchpoint", "person", "Officer", "person", "MANY_TO_ONE", "Touchpoints"),
     ("touchpoint", "bcEmail", "Email", "bcEmail", "MANY_TO_ONE", "Touchpoints"),
     ("bcEmail", "company", "Club", "company", "MANY_TO_ONE", "Emails"),
-    # Twenty's metadata API only supports MANY_TO_ONE / ONE_TO_MANY (no native
-    # many-to-many field), so a club links to its PRIMARY association; the inverse
-    # 'clubs' gives "all clubs in an association". Full multi-association membership
-    # (a club in several) would need a junction object — deferred.
-    ("company", "primaryAssociationLink", "Primary association", "association",
-     "MANY_TO_ONE", "Clubs"),
+    # Many-to-many between clubs and associations via the clubAssociation junction:
+    # each membership links one club and one association. The inverse lists give the
+    # two views — a company's "Memberships" and an association's "Member clubs".
+    ("clubAssociation", "company", "Club", "company", "MANY_TO_ONE", "Memberships"),
+    ("clubAssociation", "association", "Association", "association", "MANY_TO_ONE", "Member clubs"),
 ]
 
 
