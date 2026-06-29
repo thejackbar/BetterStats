@@ -94,8 +94,15 @@ class TwentyClient:
         """PATCH a record. Returns the updated record, or None if it no longer
         exists in Twenty (404) — e.g. an operator deleted it — so the caller can
         drop the stale link and re-create instead of failing."""
+        # Always clear deletedAt. Twenty soft-deletes: a record "deleted" in the UI
+        # still exists (PATCH returns 200 with deletedAt set) but is hidden from
+        # lists. Sending deletedAt=null restores it (no-op on an active record), so
+        # the export — the source of truth for the subset — un-trashes records and
+        # they reappear, instead of silently "updating" a hidden record.
+        body = dict(values)
+        body["deletedAt"] = None
         r = await http.patch(f"{self.base}/rest/{plural}/{record_id}",
-                             headers=self._headers, json=values, timeout=30)
+                             headers=self._headers, json=body, timeout=30)
         if r.status_code == 404:
             return None
         if r.status_code >= 400:
