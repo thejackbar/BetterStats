@@ -185,23 +185,25 @@ function SalesEditor({ club, onSave }) {
     } finally { setBusy(false) }
   }
   const ModuleRow = ({ label, list, set }) => (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="text-pb-faint w-28 shrink-0">{label}</span>
-      {SALES_MODULES.map(([k, l]) => (
-        <label key={k} className="flex items-center gap-1 cursor-pointer text-pb-dim hover:text-pb-text">
-          <input type="checkbox" className="accent-pb-accent" checked={list.includes(k)} onChange={() => toggle(list, set, k)} />
-          {l}
-        </label>
-      ))}
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-pb-faint mb-1">{label}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+        {SALES_MODULES.map(([k, l]) => (
+          <label key={k} className="flex items-center gap-1.5 cursor-pointer text-pb-dim hover:text-pb-text">
+            <input type="checkbox" className="accent-pb-accent shrink-0" checked={list.includes(k)} onChange={() => toggle(list, set, k)} />
+            <span className="truncate" title={l}>{l}</span>
+          </label>
+        ))}
+      </div>
     </div>
   )
   return (
-    <div className="pt-2 mt-1 pb-hairline-t space-y-1.5">
-      <div className="text-[11px] uppercase tracking-wide text-pb-faint">Sales pipeline (manual)</div>
+    <div className="pt-3 mt-1 border-t pb-hairline space-y-2.5">
+      <div className="text-[11px] uppercase tracking-wide text-pb-faint font-semibold">Sales pipeline (manual)</div>
       <ModuleRow label="Trialing" list={trial} set={setTrial} />
       <ModuleRow label="Requested trial" list={requested} set={setRequested} />
-      <div className="flex items-center gap-2">
-        <span className="text-pb-faint w-28 shrink-0">Demo</span>
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <span className="text-[10px] uppercase tracking-wide text-pb-faint">Demo</span>
         <select value={demo} onChange={e => setDemo(e.target.value)} className={SELECT_CLS}>
           {DEMO_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
