@@ -140,6 +140,7 @@ FIELDS = [
      _options(["API", "Website", "Manual"])),
     ("person", "namedEmail", "Named email", "BOOLEAN", None),
     ("person", "emailsReceived", "Emails received", "NUMBER", None),
+    ("person", "country", "Country", "TEXT", None),
     # ---- Opportunity ----
     ("opportunity", "bcOpportunityKey", "BC Opportunity key", "TEXT", None),
     ("opportunity", "modulesInScope", "Modules in scope", "MULTI_SELECT", MODULE_OPTS),
@@ -151,6 +152,7 @@ FIELDS = [
     ("association", "bcAssociationId", "BC Association Id", "TEXT", None),
     ("association", "shortCode", "Short code", "TEXT", None),
     ("association", "assocState", "State", "TEXT", None),
+    ("association", "assocCountry", "Country", "TEXT", None),
     ("association", "clubCount", "Club count", "NUMBER", None),
     # ---- Membership (clubAssociation junction) ----
     ("clubAssociation", "isPrimary", "Is primary", "BOOLEAN", None),

@@ -124,7 +124,8 @@ def _company_values(club: MarketingClub) -> dict:
     })
 
 
-def _person_values(ct: MarketingClubContact, company_twenty_id: str) -> dict:
+def _person_values(ct: MarketingClubContact, company_twenty_id: Optional[str],
+                   club_country: Optional[str] = None) -> dict:
     vals = {
         "name": full_name(ct.full_name),
         "bcContactId": str(ct.id),
@@ -134,6 +135,7 @@ def _person_values(ct: MarketingClubContact, company_twenty_id: str) -> dict:
         "bounced": bool(ct.bounced),
         "outreachSelected": bool(ct.outreach_selected),
         "namedEmail": bool(ct.full_name and ct.email),
+        "country": club_country,        # an officer inherits their club's country
         "companyId": company_twenty_id,
     }
     if ct.email:
@@ -212,25 +214,28 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
     return tid, "created"
 
 
-async def _assoc_state(session, guid: Optional[str], name: Optional[str]) -> Optional[str]:
-    """Derive an association's state from the modal state of its member clubs
-    (associations carry no state of their own). Matches members by the primary
-    association_guid or the associations JSONB array, falling back to name."""
+async def _assoc_modal(session, guid: Optional[str], name: Optional[str],
+                       col: str) -> Optional[str]:
+    """Derive an association attribute (state / country) from the modal value
+    among its member clubs (associations carry neither of their own). Matches
+    members by the primary association_guid or the associations JSONB array,
+    falling back to name. ``col`` is whitelisted, never client input."""
+    assert col in ("state", "country")
     if guid:
         row = (await session.execute(text(
-            "SELECT state FROM marketing_clubs "
-            "WHERE state IS NOT NULL AND state <> '' "
+            f"SELECT {col} FROM marketing_clubs "
+            f"WHERE {col} IS NOT NULL AND {col} <> '' "
             "AND (association_guid = :g OR associations @> CAST(:elem AS jsonb)) "
-            "GROUP BY state ORDER BY COUNT(*) DESC LIMIT 1"),
+            f"GROUP BY {col} ORDER BY COUNT(*) DESC LIMIT 1"),
             {"g": guid, "elem": json.dumps([{"id": guid}])})).first()
         if row:
             return row[0]
     if name:
         row = (await session.execute(text(
-            "SELECT state FROM marketing_clubs "
-            "WHERE state IS NOT NULL AND state <> '' "
+            f"SELECT {col} FROM marketing_clubs "
+            f"WHERE {col} IS NOT NULL AND {col} <> '' "
             "AND lower(association_name) = lower(:n) "
-            "GROUP BY state ORDER BY COUNT(*) DESC LIMIT 1"),
+            f"GROUP BY {col} ORDER BY COUNT(*) DESC LIMIT 1"),
             {"n": name})).first()
         if row:
             return row[0]
@@ -238,8 +243,8 @@ async def _assoc_state(session, guid: Optional[str], name: Optional[str]) -> Opt
 
 
 async def _assoc_extra(session, guid: Optional[str], name: Optional[str]) -> dict:
-    """Short code + linked-club count (from the association registry) + a state
-    derived from the member clubs."""
+    """Short code + linked-club count (from the association registry) + a state and
+    country derived from the member clubs."""
     extra: dict = {}
     if guid:
         row = (await session.execute(text(
@@ -248,7 +253,8 @@ async def _assoc_extra(session, guid: Optional[str], name: Optional[str]) -> dic
         if row:
             extra["shortCode"] = row[0]
             extra["clubCount"] = row[1]
-    extra["assocState"] = await _assoc_state(session, guid, name)
+    extra["assocState"] = await _assoc_modal(session, guid, name, "state")
+    extra["assocCountry"] = await _assoc_modal(session, guid, name, "country")
     return _clean(extra)
 
 
@@ -362,7 +368,7 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                     "name": club.name,
                     "company": _company_values(club),
                     "assocs": _club_assocs(club),
-                    "people": [(str(ct.id), _person_values(ct, None))
+                    "people": [(str(ct.id), _person_values(ct, None, club.country))
                                for ct in _scoped(contacts, contact_scope)],
                 })
 
