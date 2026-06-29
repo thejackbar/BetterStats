@@ -93,6 +93,21 @@ async def resolve_all_drafts():
                 logger.error(f"Draft auto-resolve failed for draft {d.id}: {e}")
 
 
+async def refresh_twenty_engagement():
+    """Recompute each exported club's engagement rollup (usage breadcrumbs move
+    daily, so the score/tier drifts even when nothing else about the club does)
+    and PATCH it onto its Twenty Company. Skipped unless Twenty is configured."""
+    if not settings.twenty_configured:
+        return
+    from app.services import twenty_sync
+    logger.info("Starting scheduled Twenty engagement refresh")
+    try:
+        stats = await twenty_sync.refresh_engagement()
+        logger.info(f"Twenty engagement refresh done: {stats}")
+    except Exception as e:
+        logger.error(f"Twenty engagement refresh failed: {e}")
+
+
 async def crawl_marketing_clubs():
     """Detail the next slice of the marketing club directory frontier. Off-peak,
     small nightly cap, opt-in (marketing_crawl_enabled). Resumable through the
@@ -159,6 +174,17 @@ def start_scheduler():
         id="daily_fantasy_settle",
         replace_existing=True,
     )
+    # BetterCricket CRM — refresh each exported club's engagement score daily
+    # (usage breadcrumbs move even when the club record doesn't). No-op when
+    # Twenty isn't configured.
+    scheduler.add_job(
+        refresh_twenty_engagement,
+        trigger="cron",
+        hour=6,
+        minute=0,
+        id="daily_twenty_engagement",
+        replace_existing=True,
+    )
     # BetterFantasyCricket — advance lapsed draft clocks every 15 minutes.
     scheduler.add_job(
         resolve_all_drafts,
@@ -189,7 +215,8 @@ def start_scheduler():
         marketing_mode = "nightly batch 02:00"
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
-                "Square 04:00, fantasy settle 05:00, draft tick /15min", marketing_mode)
+                "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
+                "draft tick /15min", marketing_mode)
 
 
 def stop_scheduler():

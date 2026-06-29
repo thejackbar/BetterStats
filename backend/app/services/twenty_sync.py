@@ -120,6 +120,41 @@ def _arr(module_overrides) -> float:
     return total - {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}.get(priced, 146)
 
 
+async def _engagement(session, club: MarketingClub) -> dict:
+    """A small per-club engagement rollup from usage_events (the breadcrumbs),
+    pushed onto the Company so the CRM can score/sort without holding raw events.
+    A club's activity is matched by its outreach UTM code (prospects) OR its org id
+    (customers/trials). Score 0-100 from recency + 30-day session frequency + a
+    trial-interest nudge; tier Cold/Warm/Hot."""
+    utm = club.utm_code
+    org = str(club.existing_org_id) if club.existing_org_id else None
+    row = (await session.execute(text("""
+        SELECT MAX(created_at) AS last_seen,
+               COUNT(DISTINCT visitor_id)
+                 FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d
+        FROM usage_events
+        WHERE (:utm IS NOT NULL AND utm_id = :utm)
+           OR (:org IS NOT NULL AND org_id::text = :org)
+    """), {"utm": utm, "org": org})).first()
+    last_seen = row[0] if row else None
+    sessions = (row[1] or 0) if row else 0
+
+    score = 0
+    if last_seen:
+        days = (datetime.datetime.now(datetime.timezone.utc) - last_seen).days
+        score += 40 if days <= 7 else 28 if days <= 30 else 14 if days <= 90 else 4
+    score += min(sessions * 6, 36)
+    if club.requested_trial_modules:
+        score += 12
+    score = min(score, 100)
+    tier = "COLD" if score < 34 else "WARM" if score < 67 else "HOT"
+
+    fields = {"engagementScore": score, "engagementTier": tier, "sessions30d": sessions}
+    if last_seen:
+        fields["lastSeenAt"] = last_seen.isoformat()
+    return fields
+
+
 def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -> dict:
     # Association membership is a separate many-to-many via the clubAssociation
     # junction (see _sync_memberships); the company carries only a denormalised
@@ -431,10 +466,12 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                 if selected_only:
                     cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
                 contacts = (await session.execute(cq)).scalars().all()
+                company = {**_company_values(club, org),
+                           **(await _engagement(session, club))}
                 snapshots.append({
                     "guid": club.grassroots_guid,
                     "name": club.name,
-                    "company": _company_values(club, org),
+                    "company": company,
                     "assocs": _club_assocs(club),
                     "people": [(str(ct.id), _person_values(ct, None, club.country))
                                for ct in _scoped(contacts, contact_scope)],
@@ -481,3 +518,52 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                 "errors": errors, **stats}
 
     return {"matched_clubs": matched, "errors": errors, **stats}
+
+
+async def refresh_engagement(limit: Optional[int] = None) -> dict:
+    """Recompute the engagement rollup (score / tier / 30-day sessions / last seen)
+    for every club already in the CRM and PATCH it onto its Company. Cheap, read-
+    only on the BetterCricket side bar the usage_events scan, so it's safe to run
+    on a schedule — the breadcrumbs move daily, the rest of a Company doesn't.
+
+    Only touches clubs we've already exported (a row in ``twenty_links``); it never
+    pulls a new club into the CRM. Never raises: failures are counted and logged."""
+    if not client.configured:
+        return {"error": "Twenty is not configured."}
+    stats: dict = defaultdict(int)
+    try:
+        async with async_session_maker() as session:
+            session.sync_session.expire_on_commit = False
+            rows = (await session.execute(text(
+                "SELECT bc_id, twenty_id FROM twenty_links WHERE entity_type = 'club' "
+                "ORDER BY last_synced_at DESC NULLS LAST"
+                + (" LIMIT :lim" if limit else "")),
+                {"lim": limit} if limit else {})).all()
+            # Map exported club guids back to their MarketingClub rows.
+            guids = [r[0] for r in rows]
+            tid_by_guid = {r[0]: r[1] for r in rows}
+            clubs = {c.grassroots_guid: c for c in (await session.execute(
+                select(MarketingClub).where(
+                    MarketingClub.grassroots_guid.in_(guids)))).scalars().all()
+            } if guids else {}
+            # Snapshot the engagement fields per company before any IO.
+            updates = []
+            for guid in guids:
+                club = clubs.get(guid)
+                if club is None:
+                    continue
+                updates.append((tid_by_guid[guid], await _engagement(session, club)))
+
+            async with httpx.AsyncClient() as http:
+                for tid, fields in updates:
+                    try:
+                        await client.update(http, "companies", tid, fields)
+                        stats["refreshed"] += 1
+                    except Exception:  # noqa: BLE001 - one bad company can't stop the rest
+                        stats["errored"] += 1
+                        logger.exception("twenty refresh_engagement failed for %s", tid)
+                    await asyncio.sleep(0.05)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("twenty refresh_engagement top-level failure")
+        return {"error": f"refresh failed: {e}", **stats}
+    return {**stats}
