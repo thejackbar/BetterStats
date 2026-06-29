@@ -137,7 +137,7 @@ FIELDS = [
     ("person", "outreachSelected", "Outreach selected", "BOOLEAN", None),
     ("person", "lastEmailedAt", "Last emailed at", "DATE_TIME", None),
     ("person", "contactSource", "Contact source", "SELECT",
-     _options(["API", "Website", "Manual"])),
+     _options(["No Contact Source", "Website", "Manual Email", "BetterComms Email", "Other"])),
     ("person", "namedEmail", "Named email", "BOOLEAN", None),
     ("person", "emailsReceived", "Emails received", "NUMBER", None),
     ("person", "country", "Country", "TEXT", None),
