@@ -219,7 +219,7 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
 
 
 async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
-                  create_extra=None):
+                  create_extra=None, dedup=None):
     """Create-or-update a Twenty record, keyed on the local link table first, then
     the external-key field as a dedupe fallback. ``create_extra`` is merged only on
     creation (not on update), so fields an operator may edit in Twenty (e.g. a
@@ -240,6 +240,11 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
             return tid, "updated"
         # stale link: the record was deleted in Twenty — fall through to recreate.
     existing = await client.find_by(http, plural, ext_field, bc_id) if ext_field else None
+    # Also look up by a Twenty-unique field (e.g. a person's email): two clubs can
+    # share an officer, and Twenty rejects a second person with the same email as a
+    # duplicate. Adopt the existing record instead of failing the create.
+    if not existing and dedup:
+        existing = await client.find_by(http, plural, dedup[0], dedup[1])
     if existing and existing.get("id"):
         tid = existing["id"]
         if await client.update(http, plural, tid, values) is not None:
@@ -427,8 +432,11 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                                 snap["assocs"], ctid, assoc_cache, stats)
                         for bc_id, pvals in snap["people"]:
                             try:
+                                email = (pvals.get("emails") or {}).get("primaryEmail")
+                                dedup = ("emails.primaryEmail", email) if email else None
                                 pid, pact = await _upsert(session, http, "person", bc_id, "people",
-                                                          "bcContactId", {**pvals, "companyId": ctid})
+                                                          "bcContactId", {**pvals, "companyId": ctid},
+                                                          dedup=dedup)
                                 stats["people_" + pact] += 1
                                 logger.info("twenty export:   officer %s -> %s id=%s",
                                             bc_id, pact, pid)
