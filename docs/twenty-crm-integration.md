@@ -20,7 +20,33 @@ BetterCricket already holds all the raw material (prospect directory, customer
 orgs, module entitlements, web/app telemetry, email campaigns). What it lacks is a
 sales workspace to act on it. Twenty is that workspace.
 
-## 2. The one architectural rule everything follows
+## 2. The two architectural rules everything follows
+
+### Rule 1 — Twenty is a curated subset, not a mirror of the directory
+
+The **Club Directory is the superset**: every club and named officer found in the
+source club databases (today PlayHQ Australia; later other countries and sources).
+A club being in the directory does **not** mean we want to sell to it. **Twenty
+holds only the subset we choose to target, track, and manage** through the sales
+and customer cycle.
+
+Membership in Twenty is opt-in, by the **same filter-then-export technique the
+directory already uses for BetterComms**. A Super User filters the directory
+(exclude juniors / carnivals / schools, pick a state or association, and so on) and
+**exports that filtered slice to Twenty**. The export upserts: it creates clubs and
+officers that aren't there yet, fills missing data on ones that are, and never
+duplicates. Re-running a broader filter later simply adds more. So:
+
+- BetterCricket directory = all clubs/people (the suspect pool).
+- Twenty = the targeted clubs/people only (prospects through customers).
+- A club enters Twenty when exported, never automatically.
+
+This also keeps Twenty small and focused: hundreds to a few thousand targeted
+clubs, not the full ~6,500 / ~20,000 directory. Every "push" below operates on the
+**exported subset**, tracked by the `twenty_links` membership ledger (§7), not on
+the whole directory.
+
+### Rule 2 — BetterCricket owns facts and telemetry, Twenty owns the pipeline
 
 **BetterCricket is the system of record for facts and telemetry. Twenty is the
 system of record for the sales pipeline and human judgement. Each pushes to the
@@ -29,8 +55,8 @@ other only what the other can't compute itself.**
 - BetterCricket → Twenty: identity, module/subscription state, and a small
   **engagement rollup** (score, last-seen, sessions, modules explored). It does
   **not** push raw `usage_events`. Raw telemetry is high volume (every page view
-  and API call) and would swamp a CRM built for ~26k records and capped at 100
-  requests/minute. BetterCricket aggregates per club and pushes the summary.
+  and API call) and would swamp the CRM. BetterCricket aggregates per club and
+  pushes the summary, only for clubs that are in the subset.
 - Twenty → BetterCricket: pipeline stage changes, owner assignment, and
   sales notes/tasks a human enters, via webhooks. BetterCricket acts on those
   (e.g. stage moves to "Trial started" so BetterCricket provisions the trial).
@@ -44,7 +70,7 @@ If we ever want raw-event history visible in Twenty, it goes as a periodic
 
 | Object | Standard/custom | Represents | Source in BetterCricket |
 |---|---|---|---|
-| **Company** | standard | A cricket club (suspect, prospect, trial, or customer) | `marketing_clubs` + `organisations` |
+| **Company** | standard | A **targeted** cricket club (prospect, trial, or customer); suspects stay in the directory | `marketing_clubs` + `organisations` |
 | **Person** | standard | A club officer / named contact | `marketing_club_contacts` + customer-org contacts |
 | **Opportunity** | standard | One sales pursuit per club; carries the pipeline stage | derived from club status |
 | **Touchpoint** | **custom (new)** | A typed correspondence/action/event (campaign sent, reply, demo, trial start, onboarding enquiry, milestone) | `comms_campaigns`/`comms_recipients`, `club_onboarding_requests`, key `usage_events` |
@@ -64,7 +90,7 @@ Twenty Company already has name, domain, address, employees, linkedin, etc. Add:
 |---|---|---|
 | `bcClubId` | TEXT (unique key) | `marketing_clubs.grassroots_guid` (stable external id) |
 | `bcOrgId` | TEXT | `organisations.id` once the club is a customer/trial |
-| `lifecycleStage` | SELECT | Suspect, Prospect, Engaged, Trial, Customer, Churned, Suppressed |
+| `lifecycleStage` | SELECT | Target, Prospect, Engaged, Trial, Customer, Churned, Suppressed (no "Suspect"; suspects stay in the directory) |
 | `subscriptionStatus` | SELECT | none, trial, active, past_due, paused, cancelled |
 | `paidModules` | MULTI_SELECT | the 7 module keys (see §3.5) |
 | `trialModules` | MULTI_SELECT | modules currently trialing |
@@ -81,6 +107,8 @@ Twenty Company already has name, domain, address, employees, linkedin, etc. Add:
 | `clubKind` | SELECT | club, association, carnival, school, junior (drives the directory exclude filters) |
 | `postcode` | TEXT | `marketing_clubs.postcode` (enables the postcode-range filter) |
 | `state` | SELECT | NSW, VIC, WA, … (`marketing_clubs.state`) |
+| `country` | SELECT | `marketing_clubs.country`; AU today, the partition for multi-country expansion |
+| `dataSource` | SELECT | playhq, play_cricket, … which source DB the club came from (roadmap; defaults playhq) |
 | `utmCode` | TEXT | `marketing_clubs.utm_code` (joins to `usage_events.utm_id`) |
 | `firstTouchSource` | SELECT | facebook, google, email, direct, … (`usage_events.traffic_source`) |
 | `existingKpCustomer` | SELECT | No, Yes, Previous (from the directory enrichment) |
@@ -110,10 +138,12 @@ Repurpose the standard Opportunity. One open Opportunity per club in the acquisi
 funnel. The pre-sale pipeline lives on `Opportunity.stage` (a SELECT we overwrite);
 post-sale lifecycle lives on `Company.subscriptionStatus` + `Company.lifecycleStage`.
 
-Pipeline stages (replace the default Opportunity stage options):
+Pipeline stages (replace the default Opportunity stage options). Note "Suspect" is
+**not** a stage: a suspect is an un-exported club still in the directory. Entry into
+Twenty is at **Target**, the moment of export.
 
-1. **Suspect** — in the directory, not yet contacted
-2. **Contacted** — outreach sent, no reply
+1. **Target** — exported to Twenty, not yet contacted
+2. **Contacted** — outreach sent (exported to BetterComms / emailed), no reply
 3. **Engaged** — replied / showed interest / active on site
 4. **Trial** — demo or trial started
 5. **Proposal** — quote / negotiation
@@ -202,6 +232,7 @@ in Twenty (and so a Twenty filter can drive a BetterComms List, §9.4):
 |---|---|
 | free-text `q` | Company name / Person name |
 | `state` | `Company.state` |
+| `country` | `Company.country` (AU-only today; the multi-country partition) |
 | `association` / `associations` (multi) | `Company.associations` relation (or the Association record) |
 | `status` | `Company.lifecycleStage` |
 | `postcode_from`/`postcode_to` | `Company.postcode` (range) |
@@ -289,7 +320,7 @@ then react (e.g. score crosses 67 → auto-create a "call this club" Task).
 
 | BetterCricket table | Feeds Twenty | Key columns used |
 |---|---|---|
-| `marketing_clubs` | Company (prospect) | grassroots_guid, name, status, association_name, state, contact_email/phone, website_url, utm_code, trial_modules, requested_trial_modules, demo_status, emailed_at/via, existing_org_id |
+| `marketing_clubs` | Company (prospect) | grassroots_guid, name, status, association_name, state, country, contact_email/phone, website_url, utm_code, trial_modules, requested_trial_modules, demo_status, emailed_at/via, existing_org_id |
 | `organisations` | Company (customer) | id, name, slug, subscription_status, module_overrides, renewal_date, billing_cycle, contact_email |
 | `marketing_club_contacts` | Person | full_name, role, role_rank, email, mobile, subscribed, bounced, outreach_selected, source |
 | `list_associations` registry + `marketing_clubs.associations` | Association object + Company↔Association relation | association id, name, short_code, state, club_count |
@@ -315,11 +346,13 @@ upsert logic). Config in settings/.env: `TWENTY_API_URL`, `TWENTY_API_KEY`,
   (rewrite Opportunity stage options)
 
 **Core client (ongoing sync):**
+- `export_to_twenty(filters, contact_scope)` → the membership action (§8.1):
+  filter the directory, upsert the matched subset, stamp `twenty_links`
 - `find_company_by_key(bcClubId)` → `GET /rest/companies?filter=bcClubId[eq]:…`
-- `upsert_company`, `upsert_person`, `upsert_opportunity`, `create_touchpoint`
-  (create or PATCH by external key)
+- `upsert_association`, `upsert_company`, `upsert_person`, `upsert_opportunity`,
+  `create_touchpoint` (create or PATCH by external key)
 - batch variants via GraphQL `createCompanies` / `createPeople` (60/batch) for the
-  initial backfill, respecting 100 req/min
+  first sizeable export, respecting 100 req/min
 
 **Webhook receiver (Twenty → BetterCricket):**
 - `POST /public/twenty/webhook` (unauthenticated route, protected by HMAC):
@@ -329,25 +362,53 @@ upsert logic). Config in settings/.env: `TWENTY_API_URL`, `TWENTY_API_KEY`,
 
 **Local mapping table** `twenty_links(entity_type, bc_id, twenty_id,
 content_hash, last_synced_at)` — maps BetterCricket rows to Twenty record ids,
-makes upserts idempotent, and (via `content_hash`) prevents echo loops.
+makes upserts idempotent, prevents echo loops (via `content_hash`), and **is the
+subset membership ledger**: a row exists only for clubs/people exported to Twenty,
+so every incremental push scopes itself to this table.
 
 ## 8. Sync workflows
 
-### 8.1 BetterCricket → Twenty (push)
+### 8.1 Export filtered directory to Twenty (how a club enters the subset)
 
-Triggers:
-- **Nightly full reconcile** (fits the existing scheduler that already runs sync
-  and the Square import). Walks all clubs, recomputes the engagement rollup,
-  upserts Company/Person/Opportunity, and creates new Touchpoints since last run.
-- **Event-driven near-real-time** for high-signal changes: new onboarding enquiry,
-  `subscription_status` change, trial start/stop, campaign sent. Enqueue an
-  immediate single-record push so the sales view is fresh.
+This is the membership action, modelled directly on `export_to_comms`. A new
+`export_to_twenty(filters, contact_scope)` in `services/twenty_sync.py`:
 
-Per-club push order (FK-safe): Company → its People → its Opportunity → new
-Touchpoints. Match on the external key (`bcClubId` / `bcContactId`); create if
-absent, PATCH if present; record the Twenty id and content hash in `twenty_links`.
+1. runs the **same `club_filters`** the directory page shows (state, association,
+   country, status, postcode, and the exclude flags for junior / carnival / school
+   / suppressed), so the operator targets exactly the slice they want,
+2. for each matched club, **upserts** its Association(s) → Company → officers
+   (People) → a Prospect-stage Opportunity, matching on the external keys
+   (`bcClubId` / `bcContactId` / `bcAssociationId`); creates what's missing, fills
+   gaps on what exists, never duplicates,
+3. records each mapping in `twenty_links`, which **is** the subset membership
+   ledger, and stamps a directory-side badge (a `twenty_synced_at` on
+   `marketing_clubs` / `marketing_club_contacts`, mirroring `exported_at`) so the
+   directory shows what's already in Twenty and won't offer it again.
 
-### 8.2 Twenty → BetterCricket (webhook write-back)
+`contact_scope` decides which officers come across. Default: **all named officers**
+of an included club (you want the full contact set to manage a sales cycle), with
+the option to apply the `named_email` / `pst` contact filters when you only want
+the key officers. Club-level exclude filters always gate which **clubs** enter;
+officer filters only narrow **who** within an included club.
+
+Re-running export with a wider filter grows the subset. Nothing is auto-onboarded.
+
+### 8.2 BetterCricket → Twenty (incremental push, subset only)
+
+Once a club is in the subset, keep it fresh. **Every push below walks the
+`twenty_links` membership, never the whole directory.**
+
+- **Nightly reconcile** (fits the existing scheduler that runs sync and the Square
+  import): for each linked club, recompute the engagement rollup, upsert
+  Company/Person/Opportunity, and create new Touchpoints since last run.
+- **Event-driven near-real-time** for high-signal changes on a linked club: new
+  onboarding enquiry, `subscription_status` change, trial start/stop, campaign
+  sent. Enqueue an immediate single-record push so the sales view is fresh.
+
+A change on a club that is **not** in the subset is ignored (it isn't a target
+yet). Per-club push order (FK-safe): Company → People → Opportunity → Touchpoints.
+
+### 8.3 Twenty → BetterCricket (webhook write-back)
 
 When a salesperson edits in Twenty:
 - `opportunity.updated` (stage change) → update `marketing_clubs.status` /
@@ -517,8 +578,8 @@ up `/srv/docker/twenty/db` before the first migration run. None of this touches 
 |---|---|---|
 | **0. Hardening** | Fix compose secrets (§10), create API key + webhook in Settings, set `TWENTY_*` env in backend | — |
 | **1. Model bootstrap** | `scripts/bootstrap_twenty.py`: Touchpoint + Association (+ optional Email) objects, all custom fields, the Company↔Association and Company↔Person relations, pipeline stages (idempotent, re-runnable) | Phase 0 |
-| **2. Backfill** | `twenty_client` + one-shot push of ~677 Associations, 6,500 Companies (with association links) and ~20,000 People, build `twenty_links` | Phase 1 |
-| **3. Incremental push** | `club_engagement` rollup + scheduled/event push of subscription, modules, score, Opportunities, Touchpoints | Phase 2 |
+| **2. Export to subset** | `twenty_client` + `export_to_twenty(filters)` (mirrors `export_to_comms`): filter the directory, upsert Associations + targeted Companies + their officers, build `twenty_links`. No mass auto-onboard | Phase 1 |
+| **3. Incremental push (subset only)** | `club_engagement` rollup + scheduled/event push of subscription, modules, score, Opportunities, Touchpoints, scoped to `twenty_links` | Phase 2 |
 | **4. Comms / SES bridge** | Hook `export_to_comms` (→ Contacted + Touchpoint) and `ses_events.ingest_ses_event` (→ per-send Touchpoints, lifecycle updates, suppression mirror to Person) (§9) | Phase 2 |
 | **5. List-from-Twenty** | `POST /club-admin/comms/list-from-twenty` + the BetterComms "Build List from a Twenty view" pull action (Trigger B), then the Twenty workflow push (Trigger A) (§9.4) | Phase 4 |
 | **6. Webhook write-back** | `POST /public/twenty/webhook` with HMAC verify + pipeline side effects | Phase 2 |
@@ -541,3 +602,10 @@ up `/srv/docker/twenty/db` before the first migration run. None of this touches 
 - **List-build trigger** — pull from BetterComms first (Trigger B, works on any
   Twenty version), then add the in-Twenty workflow button (Trigger A) once the
   workflow HTTP action is confirmed on the installed version. §9.4.
+- **Officer export scope** — default to all named officers of an exported club, or
+  only the key officers (`named_email` / `pst`)? Recommend all, so the sales view
+  is complete; narrow only when deliberately seeding a thin outreach set. §8.1.
+- **Multi-country expansion** — `country` and `dataSource` are first-class on
+  Company now so the subset partitions cleanly when non-AU sources (e.g. UK
+  Play-Cricket) come online. No model change needed then, just new directory
+  sources feeding the same export.
