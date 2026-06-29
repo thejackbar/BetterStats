@@ -44,6 +44,16 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def _name_key(first, last) -> "str | None":
+    """A normalised first+last key for matching a Contact. Twenty's Person duplicate
+    criteria includes (firstName + lastName), so a shared officer whose junior-club
+    record has a different/blank email still collides on name; this key is how we find
+    and adopt that existing Contact. Both sides derive firstName/lastName via
+    ``full_name``, so the key is consistent."""
+    key = " ".join(((first or "") + " " + (last or "")).split()).lower()
+    return key or None
+
+
 def _hash(values: dict) -> str:
     return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -294,7 +304,9 @@ async def _prewarm_person_emails(session, http, force: bool = False) -> int:
     hot path of routine exports. Best-effort. Returns how many entries were indexed.
 
     Pass ``force=True`` to re-seed (e.g. after bulk manual edits in Twenty)."""
-    if not force and await _link_get(session, "_meta", "person_email_backfilled"):
+    # Marker is versioned: the v2 index also covers name (Twenty dedupes on name too),
+    # so bumping it forces a single re-scan on upgrade to add the name keys.
+    if not force and await _link_get(session, "_meta", "person_index_v2_backfilled"):
         return 0
     cursor, seen = None, 0
     completed = False
@@ -311,9 +323,16 @@ async def _prewarm_person_emails(session, http, force: bool = False) -> int:
             break
         for p in people:
             pid = p.get("id")
+            if not pid:
+                continue
             email = ((p.get("emails") or {}).get("primaryEmail") or "").strip().lower()
-            if pid and email:
+            nm = p.get("name") or {}
+            nkey = _name_key(nm.get("firstName"), nm.get("lastName"))
+            if email:
                 await _link_put(session, "person_email", email, pid, "")
+            if nkey:
+                await _link_put(session, "person_name", nkey, pid, "")
+            if email or nkey:
                 seen += 1
         page = (payload.get("pageInfo") or {}) if isinstance(payload, dict) else {}
         cursor = page.get("endCursor")
@@ -333,9 +352,9 @@ async def _prewarm_person_emails(session, http, force: bool = False) -> int:
     # Mark done only on a clean full pass, so a mid-scan failure retries next time
     # instead of leaving the map half-seeded forever.
     if completed:
-        await _link_put(session, "_meta", "person_email_backfilled", "1", "")
+        await _link_put(session, "_meta", "person_index_v2_backfilled", "1", "")
     await session.commit()
-    logger.info("twenty prewarm: indexed %d existing contact email(s)%s",
+    logger.info("twenty prewarm: indexed %d existing contact(s) by email+name%s",
                 seen, "" if completed else " (incomplete, will retry)")
     return seen
 
@@ -616,25 +635,45 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                             try:
                                 email = (off["person"].get("emails") or {}).get("primaryEmail")
                                 dedup = ("emails.primaryEmail", email) if email else None
-                                # Resolve a shared officer by email from OUR link table
-                                # (Twenty's email filter is unreliable on this version),
-                                # so the second club adopts the first club's Person rather
-                                # than hitting the duplicate-email wall.
-                                known = await _link_get(session, "person_email", email) if email else None
-                                known_id = known[0] if known else None
+                                nm = off["person"].get("name") or {}
+                                nkey = _name_key(nm.get("firstName"), nm.get("lastName"))
+                                # Resolve a shared officer from OUR link table (Twenty's
+                                # filter is unreliable), so the second club adopts the
+                                # first club's Contact instead of hitting the duplicate
+                                # wall. Match by email first, then by name — Twenty
+                                # dedupes a Person on EITHER, and a shared officer's
+                                # junior-club record often has a different/blank email.
+                                known_id, match_by = None, None
+                                if email:
+                                    row = await _link_get(session, "person_email", email)
+                                    if row:
+                                        known_id, match_by = row[0], "email"
+                                if not known_id and nkey:
+                                    row = await _link_get(session, "person_name", nkey)
+                                    if row:
+                                        known_id, match_by = row[0], "name"
+                                # When adopting by NAME, don't overwrite the existing
+                                # Contact's canonical email with this club's (possibly
+                                # different/blank) one — drop emails from the patch.
+                                person_vals = off["person"]
+                                if match_by == "name" and "emails" in person_vals:
+                                    person_vals = {k: v for k, v in person_vals.items()
+                                                   if k != "emails"}
                                 # The Person is identity-only; its native company + first
                                 # role are set once via create_extra so a shared officer is
                                 # never stolen onto a later club.
                                 pid, pact = await _upsert(session, http, "person", bc_id, "people",
-                                                          "bcContactId", off["person"], dedup=dedup,
+                                                          "bcContactId", person_vals, dedup=dedup,
                                                           known_id=known_id,
                                                           create_extra={**off["create_extra"],
                                                                         "companyId": ctid})
                                 stats["people_" + pact] += 1
-                                # Remember email -> Person so later clubs (this run or a
-                                # future one) can adopt without Twenty's email filter.
+                                # Remember email/name -> Person so later clubs (this run or
+                                # a future one) adopt without Twenty's filter.
                                 if email:
                                     await _link_put(session, "person_email", email, pid, "")
+                                if nkey:
+                                    await _link_put(session, "person_name", nkey, pid, "")
                                 # The personClub membership is what makes this officer show
                                 # under THIS club (with this club's role), shared or not.
                                 _, ract = await _upsert(session, http, "officer_role", bc_id,
@@ -646,7 +685,10 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                             bc_id, pact, pid, ract)
                             except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
                                 stats["people_errored"] += 1
-                                logger.exception("twenty export: officer %s failed", bc_id)
+                                logger.exception(
+                                    "twenty export: officer %s failed (email=%r name=%r known_id=%r)",
+                                    bc_id, locals().get("email"), locals().get("nkey"),
+                                    locals().get("known_id"))
                         await session.commit()
                         logger.info("twenty export: committed club %r", snap["name"])
                     except Exception:  # noqa: BLE001 - one bad club must not abort the run
