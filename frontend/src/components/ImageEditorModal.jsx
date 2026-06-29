@@ -10,7 +10,9 @@ import 'cropperjs/dist/cropper.css'
 //   title                - heading shown at the top
 //   aspect               - aspect ratio number (1, 16/9, etc.) or null for free
 //   cropShape            - 'rect' (default) or 'round'  (round forces aspect=1)
-//   allowBackgroundRemoval - bool, show "Remove background" button (default true)
+//   allowBackgroundRemoval - bool, show the background-removal tools (default true):
+//                            an AI subject cut-out (photos) + a colour-key flood
+//                            fill with a tolerance slider (logos on solid backgrounds)
 //   outputType           - 'image/png' (default) or 'image/jpeg'
 //   outputName           - filename for the resulting File
 //   maxOutputSize        - max width/height of output canvas (default 1600)
@@ -33,8 +35,12 @@ export default function ImageEditorModal({
   const [srcUrl, setSrcUrl] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [removingBg, setRemovingBg] = useState(false)
+  const [keying, setKeying] = useState(false)
+  const [showColourKey, setShowColourKey] = useState(false)
+  const [tolerance, setTolerance] = useState(48)
   const [applying, setApplying] = useState(false)
-  const ownedBlobUrlRef = useRef(null)
+  const ownedBlobUrlRef = useRef(null) // the originally-loaded source (base for colour keying)
+  const derivedUrlRef = useRef(null)   // a processed result (AI cut-out or colour key)
 
   // Convert incoming source (File / Blob / URL) into a usable blob URL.
   useEffect(() => {
@@ -44,8 +50,13 @@ export default function ImageEditorModal({
       return
     }
     let cancelled = false
+    setShowColourKey(false)
 
     const cleanup = () => {
+      if (derivedUrlRef.current) {
+        URL.revokeObjectURL(derivedUrlRef.current)
+        derivedUrlRef.current = null
+      }
       if (ownedBlobUrlRef.current) {
         URL.revokeObjectURL(ownedBlobUrlRef.current)
         ownedBlobUrlRef.current = null
@@ -83,6 +94,10 @@ export default function ImageEditorModal({
 
   // Unmount cleanup
   useEffect(() => () => {
+    if (derivedUrlRef.current) {
+      URL.revokeObjectURL(derivedUrlRef.current)
+      derivedUrlRef.current = null
+    }
     if (ownedBlobUrlRef.current) {
       URL.revokeObjectURL(ownedBlobUrlRef.current)
       ownedBlobUrlRef.current = null
@@ -92,30 +107,63 @@ export default function ImageEditorModal({
   // Escape closes
   useEffect(() => {
     if (!open) return
-    const onKey = (e) => { if (e.key === 'Escape' && !applying && !removingBg) onCancel?.() }
+    const onKey = (e) => { if (e.key === 'Escape' && !applying && !removingBg && !keying) onCancel?.() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, applying, removingBg, onCancel])
+  }, [open, applying, removingBg, keying, onCancel])
 
   const rotate = (deg) => cropperRef.current?.cropper?.rotate(deg)
   const reset = () => cropperRef.current?.cropper?.reset()
 
+  const setDerived = useCallback((blob) => {
+    if (derivedUrlRef.current) URL.revokeObjectURL(derivedUrlRef.current)
+    const url = URL.createObjectURL(blob)
+    derivedUrlRef.current = url
+    setSrcUrl(url)
+  }, [])
+
+  // AI subject cut-out — good for photos (people, products). Runs on whatever
+  // is currently shown.
   const handleRemoveBg = useCallback(async () => {
     if (!srcUrl) return
+    setShowColourKey(false)
     setRemovingBg(true)
     try {
       const { removeBackground } = await import('@imgly/background-removal')
       const blob = await removeBackground(srcUrl, { debug: false })
-      if (ownedBlobUrlRef.current) URL.revokeObjectURL(ownedBlobUrlRef.current)
-      const url = URL.createObjectURL(blob)
-      ownedBlobUrlRef.current = url
-      setSrcUrl(url)
+      setDerived(blob)
     } catch (err) {
       setLoadError(err.message || 'Background removal failed')
     } finally {
       setRemovingBg(false)
     }
-  }, [srcUrl])
+  }, [srcUrl, setDerived])
+
+  // Colour keying — flood-fills the background colour out from the edges.
+  // Built for logos sitting on a solid or near-solid background, where the AI
+  // cut-out leaves a haze because there's no photographic subject to lock onto.
+  // Always runs on the original image so the tolerance slider isn't cumulative.
+  const runColourKey = useCallback(async (tol) => {
+    const base = ownedBlobUrlRef.current
+    if (!base) return
+    setKeying(true)
+    try {
+      const blob = await keyOutBackgroundColour(base, tol)
+      setDerived(blob)
+    } catch (err) {
+      setLoadError(err.message || 'Colour keying failed')
+    } finally {
+      setKeying(false)
+    }
+  }, [setDerived])
+
+  const handleColourKeyToggle = useCallback(() => {
+    setShowColourKey((on) => {
+      const next = !on
+      if (next) runColourKey(tolerance)
+      return next
+    })
+  }, [runColourKey, tolerance])
 
   const handleApply = useCallback(async () => {
     const cropper = cropperRef.current?.cropper
@@ -154,14 +202,14 @@ export default function ImageEditorModal({
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70"
       style={{ backdropFilter: 'blur(2px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget && !applying && !removingBg) onCancel?.() }}
+      onClick={(e) => { if (e.target === e.currentTarget && !applying && !removingBg && !keying) onCancel?.() }}
     >
       <div className="bg-pb-surface pb-card w-full max-w-2xl mx-4 my-4 overflow-hidden flex flex-col max-h-[92vh]">
         <div className="flex items-center justify-between px-5 py-3 border-b pb-hairline-b shrink-0">
           <h2 className="text-pb-text text-sm font-semibold">{title}</h2>
           <button
-            onClick={() => !applying && !removingBg && onCancel?.()}
-            disabled={applying || removingBg}
+            onClick={() => !applying && !removingBg && !keying && onCancel?.()}
+            disabled={applying || removingBg || keying}
             className="text-pb-faint hover:text-pb-text transition-colors font-mono text-[11px] px-2 py-1 disabled:opacity-40"
           >
             ✕
@@ -208,49 +256,168 @@ export default function ImageEditorModal({
             <button
               type="button"
               onClick={() => rotate(-90)}
-              disabled={!srcUrl || applying || removingBg}
+              disabled={!srcUrl || applying || removingBg || keying}
               className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-40"
             >↺ Rotate left</button>
             <button
               type="button"
               onClick={() => rotate(90)}
-              disabled={!srcUrl || applying || removingBg}
+              disabled={!srcUrl || applying || removingBg || keying}
               className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-40"
             >↻ Rotate right</button>
             <button
               type="button"
               onClick={reset}
-              disabled={!srcUrl || applying || removingBg}
+              disabled={!srcUrl || applying || removingBg || keying}
               className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text transition disabled:opacity-40"
             >Reset</button>
             {allowBackgroundRemoval && (
-              <button
-                type="button"
-                onClick={handleRemoveBg}
-                disabled={!srcUrl || applying || removingBg}
-                className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-40"
-              >{removingBg ? '⏳ Removing background…' : '✂ Remove background'}</button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleRemoveBg}
+                  disabled={!srcUrl || applying || removingBg || keying}
+                  title="Best for photos of people or products"
+                  className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-40"
+                >{removingBg ? '⏳ Removing background…' : '✂ Remove background (photo)'}</button>
+                <button
+                  type="button"
+                  onClick={handleColourKeyToggle}
+                  disabled={!srcUrl || applying || removingBg || keying}
+                  title="Best for logos on a solid or near-solid background"
+                  className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline transition disabled:opacity-40 ${showColourKey ? 'bg-pb-surface2 text-pb-text' : 'text-pb-text hover:bg-pb-surface2'}`}
+                >{keying ? '⏳ Keying colour…' : '🎨 Remove background (logo)'}</button>
+              </>
             )}
           </div>
+
+          {allowBackgroundRemoval && showColourKey && (
+            <div className="mt-3 rounded border pb-hairline bg-pb-surface2 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="bg-tolerance" className="font-mono text-[10px] tracking-wide2 text-pb-text">
+                  Colour match strength
+                </label>
+                <span className="font-mono text-[10px] text-pb-faint tabular-nums">{tolerance}</span>
+              </div>
+              <input
+                id="bg-tolerance"
+                type="range"
+                min={8}
+                max={140}
+                step={1}
+                value={tolerance}
+                disabled={keying || removingBg || applying}
+                onChange={(e) => setTolerance(Number(e.target.value))}
+                onMouseUp={(e) => runColourKey(Number(e.target.value))}
+                onTouchEnd={(e) => runColourKey(Number(e.target.value))}
+                onKeyUp={(e) => runColourKey(Number(e.target.value))}
+                className="w-full mt-2 accent-pb-accent"
+              />
+              <p className="mt-2 font-mono text-[10px] leading-relaxed text-pb-faint">
+                Removes the background colour outward from the edges. Drag up if the background
+                is still showing, down if it's eating into the logo.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t pb-hairline-t shrink-0">
           <button
             type="button"
             onClick={onCancel}
-            disabled={applying || removingBg}
+            disabled={applying || removingBg || keying}
             className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition disabled:opacity-40"
           >Cancel</button>
           <button
             type="button"
             onClick={handleApply}
-            disabled={!srcUrl || applying || removingBg}
+            disabled={!srcUrl || applying || removingBg || keying}
             className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 bg-pb-accent text-white hover:opacity-90 transition disabled:opacity-40"
           >{applying ? 'Applying…' : 'Apply'}</button>
         </div>
       </div>
     </div>
   )
+}
+
+// Colour-key the background out of a logo. Samples the background colour from
+// the four corners, then flood-fills from every edge pixel, clearing anything
+// within `tolerance` of that colour. Flood-fill (rather than a global match)
+// keeps logo internals that happen to share the background colour. A feather
+// band just past the tolerance softens anti-aliased edges so there's no jaggy
+// halo. Returns a PNG blob.
+async function keyOutBackgroundColour(url, tolerance) {
+  const img = await new Promise((resolve, reject) => {
+    const im = new Image()
+    im.crossOrigin = 'anonymous'
+    im.onload = () => resolve(im)
+    im.onerror = () => reject(new Error('Could not load image for colour keying'))
+    im.src = url
+  })
+
+  const w = img.naturalWidth
+  const h = img.naturalHeight
+  if (!w || !h) throw new Error('Image has no dimensions')
+
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  ctx.drawImage(img, 0, 0)
+  const image = ctx.getImageData(0, 0, w, h)
+  const px = image.data
+
+  // Background colour = average of the four corners.
+  const corners = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + (w - 1)) * 4]
+  let br = 0, bg = 0, bb = 0
+  for (const c of corners) { br += px[c]; bg += px[c + 1]; bb += px[c + 2] }
+  br /= 4; bg /= 4; bb /= 4
+
+  const tol = Math.max(1, tolerance)
+  const tol2 = tol * tol
+  const feather = tol * 1.6
+  const feather2 = feather * feather
+
+  const visited = new Uint8Array(w * h)
+  const stack = []
+
+  const consider = (x, y) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return
+    const i = y * w + x
+    if (visited[i]) return
+    visited[i] = 1
+    const o = i * 4
+    const dr = px[o] - br
+    const dg = px[o + 1] - bg
+    const db = px[o + 2] - bb
+    const dist2 = dr * dr + dg * dg + db * db
+    if (dist2 <= tol2) {
+      px[o + 3] = 0 // fully background → transparent, keep flooding through it
+      stack.push(i)
+    } else if (dist2 <= feather2) {
+      // Edge band: scale alpha by how far into the band the pixel sits so the
+      // cut-out feathers instead of leaving a hard ring. Don't flood past it.
+      const t = (Math.sqrt(dist2) - tol) / (feather - tol)
+      px[o + 3] = Math.round(px[o + 3] * t)
+    }
+  }
+
+  for (let x = 0; x < w; x++) { consider(x, 0); consider(x, h - 1) }
+  for (let y = 0; y < h; y++) { consider(0, y); consider(w - 1, y) }
+  while (stack.length) {
+    const i = stack.pop()
+    const x = i % w
+    const y = (i - x) / w
+    consider(x + 1, y)
+    consider(x - 1, y)
+    consider(x, y + 1)
+    consider(x, y - 1)
+  }
+
+  ctx.putImageData(image, 0, 0)
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+  })
 }
 
 function maskToCircle(canvas) {
