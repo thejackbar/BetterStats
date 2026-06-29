@@ -174,9 +174,11 @@ FIELDS = [
     ("personClub", "roleTitle", "Role title", "TEXT", None),
     ("personClub", "roleRank", "Role rank", "NUMBER", None),
     ("personClub", "outreachSelected", "Outreach selected", "BOOLEAN", None),
-    # Per-club email, so a club-specific address is preserved on the membership even
-    # when it differs from the shared Contact's single canonical email.
+    # Per-club email + phone, so a club-specific contact detail is preserved on the
+    # membership (and the "Officer roles" view shows role, email and mobile together)
+    # even when it differs from the shared Contact's single canonical one.
     ("personClub", "email", "Email", "EMAILS", None),
+    ("personClub", "phone", "Mobile", "PHONES", None),
     # ---- Touchpoint ----
     ("touchpoint", "touchpointType", "Type", "SELECT",
      _options(["Email sent", "Email delivered", "Email opened", "Email clicked",

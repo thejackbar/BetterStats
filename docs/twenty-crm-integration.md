@@ -219,10 +219,10 @@ carrying that club's `clubRole` / `roleTitle` / `roleRank` / `outreachSelected`.
 - Each club's **`personClub`** row (inverse lists: a club's "Officer roles", a
   person's "Club roles") is what makes the shared officer appear under that club with
   the right role. Single-club officers get exactly one row (harmless). The row carries
-  the **per-club** detail so club differences are preserved: `clubRole` + `roleTitle`
-  (the exact role at that club, e.g. "Junior Cricket Coordinator") and `email` (that
-  club's address, kept even when it differs from the shared Contact's single canonical
-  email). **Per-club officer views must be built on "Officer roles", not the native
+  the **per-club** detail so club differences are preserved and the "Officer roles"
+  view is self-contained: `clubRole` + `roleTitle` (the exact role at that club, e.g.
+  "Junior Cricket Coordinator"), `email` and `phone` (that club's contact details,
+  kept even when they differ from the shared Contact's single canonical ones). **Per-club officer views must be built on "Officer roles", not the native
   Contacts list** — a Contact's native `company` is single-valued, so the native list
   can only ever show a shared officer under their one home club.
 - **Matching a shared officer to their existing Contact** can't go through Twenty's

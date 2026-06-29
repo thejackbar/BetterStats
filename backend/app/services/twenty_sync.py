@@ -256,11 +256,15 @@ def _officer_role_values(ct: MarketingClubContact, club_name: str) -> dict:
         "roleRank": ct.role_rank,
         "outreachSelected": bool(ct.outreach_selected),
     }
-    # The per-club email lives on the junction so a club-specific address is kept
-    # even when it differs from the shared Contact's single canonical email.
+    # The per-club email + phone live on the junction so a club-specific contact
+    # detail is kept even when it differs from the shared Contact's canonical one, and
+    # so a club's "Officer roles" view shows role, email and mobile together.
     ev = emails_value(ct.email)
     if ev:
         vals["email"] = ev
+    ph = phone(ct.mobile)
+    if ph:
+        vals["phone"] = ph
     return _clean(vals)
 
 
