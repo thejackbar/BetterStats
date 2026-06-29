@@ -124,6 +124,58 @@ function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
   )
 }
 
+// Searchable multi-select of countries. Selecting several filters clubs in ANY of
+// them. Simpler than AssocMultiSelect — country is a plain column, no short code or
+// roster to fetch. AU-only for now; ready for multi-country directory sources.
+function CountryMultiSelect({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  const ql = q.toLowerCase()
+  const filtered = options.filter(o => o.name.toLowerCase().includes(ql)).slice(0, 800)
+  const toggle = (name) =>
+    onChange(selected.includes(name) ? selected.filter(n => n !== name) : [...selected, name])
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" className={SELECT_CLS + ' flex items-center gap-1.5'}
+              onClick={() => setOpen(o => !o)}>
+        <span>{selected.length ? `Countries (${selected.length})` : 'Countries'}</span>
+        {selected.length > 0 && (
+          <span role="button" title="Clear selection" className="text-pb-faint hover:text-red-300"
+                onClick={(e) => { e.stopPropagation(); onChange([]) }}>✕</span>
+        )}
+        <span className="text-pb-faint">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-72 max-w-[92vw] max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+          <input autoFocus className={SELECT_CLS + ' w-full mb-2'} placeholder="Search countries..."
+                 value={q} onChange={(e) => setQ(e.target.value)} />
+          {selected.length > 0 && (
+            <button type="button" className="text-[11px] text-pb-faint hover:text-pb-accent mb-1"
+                    onClick={() => onChange([])}>clear selection</button>
+          )}
+          {!filtered.length && <div className="text-xs text-pb-faint px-1 py-2">No matches.</div>}
+          {filtered.map(o => (
+            <div key={o.name}
+                 className="flex items-center gap-2 px-1 py-0.5 text-xs text-pb-text hover:bg-pb-surface rounded">
+              <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
+                <span className="truncate" title={o.name}>{o.name}</span>
+              </label>
+              <span className="text-pb-faint shrink-0">{o.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Stat({ label, value }) {
   return (
     <div className="rounded-lg border pb-hairline bg-pb-surface2 px-3 py-2">
@@ -652,9 +704,11 @@ export default function SuperMarketing() {
   const [busy, setBusy] = useState('')
   const [page, setPage] = useState(0)
   const [assocOptions, setAssocOptions] = useState([])
+  const [countryOptions, setCountryOptions] = useState([])
   const PAGE = 100
   const [filters, setFilters] = useState({
-    q: '', state: '', association: '', associations: [], postcode_from: '', postcode_to: '',
+    q: '', state: '', association: '', associations: [], countries: [],
+    postcode_from: '', postcode_to: '',
     contact: '', person: '', exclude_junior: false, exclude_emailed: false,
     exclude_carnival: false, exclude_school: false,
     exclude_exported: false, exclude_suppressed: false, visited: false,
@@ -689,6 +743,7 @@ export default function SuperMarketing() {
   useEffect(() => { loadClubs() }, [loadClubs])
   useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
+  useEffect(() => { api.mktCountries().then(setCountryOptions).catch(() => {}) }, [])
 
   const runCrawl = async () => {
     setBusy('crawl'); setMsg('')
@@ -907,13 +962,15 @@ export default function SuperMarketing() {
         <section className={CARD}>
           <div className="flex items-center justify-between mb-2">
             <span className={SECTION}>Filter clubs</span>
-            {(filters.q || filters.association || filters.associations.length || filters.state
+            {(filters.q || filters.association || filters.associations.length || filters.countries.length
+              || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
               || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
               || filters.exclude_school || filters.exclude_exported || filters.exclude_suppressed
               || filters.visited) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
+                                                  countries: [],
                                                   postcode_from: '', postcode_to: '', contact: '',
                                                   person: '', exclude_junior: false, exclude_emailed: false,
                                                   exclude_carnival: false, exclude_school: false,
@@ -948,6 +1005,13 @@ export default function SuperMarketing() {
                   </button>
                 )}
               </div>
+            </Field>
+            <Field label="Country">
+              <CountryMultiSelect
+                options={countryOptions}
+                selected={filters.countries}
+                onChange={(c) => setFilters(f => ({ ...f, countries: c }))}
+              />
             </Field>
             <Field label="Association contains">
               <input

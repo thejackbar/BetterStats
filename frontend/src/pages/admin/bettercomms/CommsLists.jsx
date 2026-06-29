@@ -88,7 +88,7 @@ function ListDetail({ list, lists, onChanged }) {
   const [memberIds, setMemberIds] = useState(null)
   const [contacts, setContacts] = useState(null)
   const [query, setQuery] = useState('')
-  const [filters, setFilters] = useState({ club: [], association: [], utm_code: [], state: [] })
+  const [filters, setFilters] = useState({ club: [], association: [], country: [], utm_code: [], state: [] })
   const [supp, setSupp] = useState('all')
   const [selected, setSelected] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
@@ -106,7 +106,7 @@ function ListDetail({ list, lists, onChanged }) {
   useEffect(() => { loadMembers() }, [loadMembers])
   useEffect(() => { loadContacts() }, [loadContacts])
   // A fresh list resets the working selection.
-  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }); setSupp('all') }, [list.id])
+  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setSupp('all') }, [list.id])
 
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
 
@@ -175,7 +175,7 @@ function ListDetail({ list, lists, onChanged }) {
 
       {/* Search + filters */}
       <input value={query} onChange={e => setQuery(e.target.value)}
-        placeholder="Search name, email, club, association, UTM code, state or website…"
+        placeholder="Search name, email, club, association, country, UTM code, state or website…"
         className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (
@@ -184,7 +184,7 @@ function ListDetail({ list, lists, onChanged }) {
         ))}
         <SuppressedToggle value={supp} onChange={setSupp} />
         {activeFilters && (
-          <button onClick={() => { setQuery(''); setFilters({ club: [], association: [], utm_code: [], state: [] }); setSupp('all') }}
+          <button onClick={() => { setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setSupp('all') }}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
         )}
         <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>

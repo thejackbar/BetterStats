@@ -77,6 +77,7 @@ const DIRECTORY_FIELD_DEFS = {
   },
   club_state: { label: 'Club state', input: 'select', ops: IS_OP, optionsKey: 'states' },
   association: { label: 'Association', input: 'select', ops: IS_OP, optionsKey: 'associations' },
+  country: { label: 'Country', input: 'select', ops: IS_OP, optionsKey: 'countries' },
 }
 
 function defsFor(opts) {
@@ -96,6 +97,7 @@ function optionsFor(def, opts) {
   if (def.optionsKey === 'teams') return (opts.teams || []).map(t => [t.id, t.name])
   if (def.optionsKey === 'states') return (opts.states || []).map(s => [s, s])
   if (def.optionsKey === 'associations') return (opts.associations || []).map(a => [a, a])
+  if (def.optionsKey === 'countries') return (opts.countries || []).map(c => [c, c])
   return []
 }
 

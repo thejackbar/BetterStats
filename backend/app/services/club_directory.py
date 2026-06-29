@@ -669,7 +669,8 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  exclude_exported: bool = False, exclude_suppressed: bool = False,
                  visited: bool = False,
                  associations: Optional[list] = None,
-                 association_extra: Optional[list] = None) -> list:
+                 association_extra: Optional[list] = None,
+                 countries: Optional[list] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
     filters. Contact-presence filters use correlated EXISTS over the contacts."""
@@ -685,6 +686,8 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(~func.lower(MarketingClub.name).like("%school%"))
     if associations:
         conds.append(or_(*[_assoc_match(n) for n in associations if n]))
+    if countries:
+        conds.append(MarketingClub.country.in_([c for c in countries if c]))
     if exclude_emailed:
         conds.append(MarketingClub.emailed_at.is_(None))
     if exclude_exported:
@@ -1122,6 +1125,20 @@ async def list_associations(session: AsyncSession) -> list[dict]:
         ORDER BY elem->>'name'
     """))).all()
     return [{"name": r[0], "id": r[1], "count": r[2], "resolved": True} for r in rows]
+
+
+async def list_countries(session: AsyncSession) -> list[dict]:
+    """Distinct countries (name + linked-club count) for the multi-select filter.
+    Unlike associations there's no registry or short code — a club's country is a
+    plain column set from its address at crawl time. AU-only for now."""
+    rows = (await session.execute(text("""
+        SELECT country, COUNT(*) AS n
+        FROM marketing_clubs
+        WHERE country IS NOT NULL AND TRIM(country) <> ''
+        GROUP BY country
+        ORDER BY country
+    """))).all()
+    return [{"name": r[0], "count": r[1]} for r in rows]
 
 
 # Bounds for the on-demand association-roster traversal (operator action).

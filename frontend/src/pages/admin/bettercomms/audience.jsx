@@ -5,11 +5,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 
 // Fields a contact is searched on (contains, OR across all of them).
-export const SEARCH_FIELDS = ['name', 'email', 'club', 'association', 'utm_code', 'state', 'website']
+export const SEARCH_FIELDS = ['name', 'email', 'club', 'association', 'country', 'utm_code', 'state', 'website']
 // The Clubs Directory facets offered as multi-select filters.
 export const FACETS = [
   { key: 'club', label: 'Club' },
   { key: 'association', label: 'Association' },
+  { key: 'country', label: 'Country' },
   { key: 'utm_code', label: 'UTM code' },
   { key: 'state', label: 'State' },
 ]
@@ -25,7 +26,7 @@ export function matchesFilters(c, filters) {
   })
 }
 export function emptyFilters() {
-  return { club: [], association: [], utm_code: [], state: [] }
+  return { club: [], association: [], country: [], utm_code: [], state: [] }
 }
 
 // Suppressed is a derived boolean the backend sets on a contact when its address
@@ -51,7 +52,7 @@ export function SuppressedToggle({ value, onChange }) {
   )
 }
 export function facetOptionsFrom(contacts) {
-  const opts = { club: new Set(), association: new Set(), utm_code: new Set(), state: new Set() }
+  const opts = { club: new Set(), association: new Set(), country: new Set(), utm_code: new Set(), state: new Set() }
   for (const c of contacts || []) for (const f of FACETS) { if (c[f.key]) opts[f.key].add(c[f.key]) }
   return Object.fromEntries(FACETS.map(f => [f.key, [...opts[f.key]].sort((a, b) => a.localeCompare(b))]))
 }
@@ -59,7 +60,7 @@ export function facetOptionsFrom(contacts) {
 // ─── CSV ─────────────────────────────────────────────────────────────────────
 const CSV_COLS = [
   ['name', 'Name'], ['email', 'Email'], ['club', 'Club'], ['association', 'Association'],
-  ['utm_code', 'UTM code'], ['state', 'State'], ['website', 'Website'],
+  ['country', 'Country'], ['utm_code', 'UTM code'], ['state', 'State'], ['website', 'Website'],
 ]
 function csvCell(v) {
   const s = v == null ? '' : String(v)
@@ -155,7 +156,7 @@ export function AudiencePanel({ contacts, total, loading, csvName = 'audience', 
   return (
     <div>
       <input value={query} onChange={e => setQuery(e.target.value)}
-        placeholder="Search name, email, club, association, UTM code, state or website…"
+        placeholder="Search name, email, club, association, country, UTM code, state or website…"
         className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (

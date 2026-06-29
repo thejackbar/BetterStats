@@ -47,13 +47,13 @@ SPECIAL_FIELDS = {"availability"}
 DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
 # Multi-value (the rule value is a list of keys; match = ANY).
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page"}
-DIR_CLUB_FIELDS = {"club_state", "association", "directory_status", "customer_status",
+DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
                    "is_trialing", "requested_trial", "had_demo", "visited_page"}
 DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS
 # Directory fields that need the linked MarketingClub joined in (visited_page
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns).
-_DIR_MC_FIELDS = {"club_state", "association", "directory_status", "customer_status",
+_DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
                   "is_trialing", "requested_trial", "had_demo", "visited_page"}
 
 # Tracked public pages a prospect can be matched on (key → path filter). A
@@ -214,6 +214,8 @@ def _directory_condition(rule: dict, cust):
         return MarketingClub.state == str(val) if val else None
     if field == "association":
         return MarketingClub.association_name == str(val) if val else None
+    if field == "country":
+        return MarketingClub.country == str(val) if val else None
     if field == "directory_status":
         return MarketingClub.status == str(val) if val else None
     if field == "visited_page":

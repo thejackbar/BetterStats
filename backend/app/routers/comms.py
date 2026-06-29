@@ -84,7 +84,7 @@ def _dir_fields(c: CommsContact, mc: "Optional[MarketingClub]") -> dict:
     """The five Clubs Directory fields resolved for one contact: a per-contact
     merge_vars override wins, then the linked directory club. Blank for an ordinary
     (non-directory) contact. Used so the Lists editor can search and filter on
-    club / association / utm_code / state / website."""
+    club / association / country / utm_code / state / website."""
     mv = _marketing_vars(mc)
     ov = c.merge_vars or {}
 
@@ -94,7 +94,7 @@ def _dir_fields(c: CommsContact, mc: "Optional[MarketingClub]") -> dict:
             return str(v).strip()
         return mv.get(key, "") or ""
 
-    return {k: pick(k) for k in ("club", "association", "utm_code", "state", "website")}
+    return {k: pick(k) for k in ("club", "association", "country", "utm_code", "state", "website")}
 
 
 async def _mc_map(db: AsyncSession, contacts) -> dict:
@@ -351,6 +351,7 @@ def _marketing_vars(mc: Optional[MarketingClub]) -> dict:
     return {
         "club": mc.name or "",
         "association": assoc,
+        "country": mc.country or "",
         "utm_code": mc.utm_code or "",
         "state": mc.state or "",
         "website": mc.website_url or "",
@@ -599,6 +600,7 @@ async def list_contacts(
             func.lower(func.coalesce(CommsContact.name, "")).like(like),
             func.lower(func.coalesce(MarketingClub.name, "")).like(like),
             func.lower(func.coalesce(MarketingClub.association_name, "")).like(like),
+            func.lower(func.coalesce(MarketingClub.country, "")).like(like),
             func.lower(func.coalesce(MarketingClub.utm_code, "")).like(like),
             func.lower(func.coalesce(MarketingClub.state, "")).like(like),
             func.lower(func.coalesce(MarketingClub.website_url, "")).like(like),
@@ -1494,7 +1496,8 @@ async def get_contact(
         "tags": c.tags or [],
         "marketing_club": ({
             "name": mc.name, "association": mvars.get("association", ""),
-            "utm_code": mc.utm_code, "state": mc.state, "website": mc.website_url,
+            "country": mc.country, "utm_code": mc.utm_code, "state": mc.state,
+            "website": mc.website_url,
         } if mc else None),
         "variables": variables,
         # Which variables can be edited, and the raw per-contact override stored for
@@ -1711,7 +1714,14 @@ async def segment_options(
             .where(CommsContact.organisation_id == club.id, MarketingClub.association_name.isnot(None))
             .distinct().order_by(MarketingClub.association_name)
         )).all() if a]
-        return {"context": "directory", "states": states, "associations": assocs}
+        countries = [c for (c,) in (await db.execute(
+            select(MarketingClub.country)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id, MarketingClub.country.isnot(None))
+            .distinct().order_by(MarketingClub.country)
+        )).all() if c]
+        return {"context": "directory", "states": states, "associations": assocs,
+                "countries": countries}
 
     teams = (await db.execute(
         select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))

@@ -437,6 +437,7 @@ export const api = {
     return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
   },
   mktAssociations: () => request('/club-admin/marketing/associations'),
+  mktCountries: () => request('/club-admin/marketing/countries'),
   mktResolveAssociation: (id, name) =>
     request('/club-admin/marketing/associations/resolve',
       { method: 'POST', body: JSON.stringify({ id, name }) }),

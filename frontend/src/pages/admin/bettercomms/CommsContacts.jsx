@@ -128,7 +128,7 @@ export default function CommsContacts() {
       </div>
 
       <input value={query} onChange={e => setQuery(e.target.value)}
-        placeholder="Search name, email, club, association, UTM code, state or website…"
+        placeholder="Search name, email, club, association, country, UTM code, state or website…"
         className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (
@@ -267,7 +267,7 @@ export function ContactDetailModal({ id, onClose, onSaved }) {
               {mc && !editing && (
                 <div className="pb-card p-3 mb-4">
                   <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">From the Clubs Directory</div>
-                  {[['Club', mc.name], ['Association', mc.association], ['UTM code', mc.utm_code], ['State', mc.state], ['Website', mc.website]].map(([k, v]) => v ? (
+                  {[['Club', mc.name], ['Association', mc.association], ['Country', mc.country], ['UTM code', mc.utm_code], ['State', mc.state], ['Website', mc.website]].map(([k, v]) => v ? (
                     <div key={k} className="flex justify-between gap-3 py-0.5 text-sm">
                       <span className="text-pb-faint">{k}</span>
                       <span className="text-pb-text truncate">{v}</span>
