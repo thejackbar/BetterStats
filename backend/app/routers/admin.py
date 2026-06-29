@@ -132,7 +132,7 @@ async def get_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: 
             FROM merge_logs
             WHERE org_id = :org_id
             ORDER BY merged_at DESC
-            LIMIT 50
+            LIMIT 2000
         """),
         {"org_id": org_id},
     )

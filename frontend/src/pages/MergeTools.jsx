@@ -345,6 +345,8 @@ function MergeHistory({ orgId, refreshKey }) {
   const [history, setHistory] = useState([])
   const [undoing, setUndoing] = useState(null)
   const [error, setError] = useState(null)
+  const [query, setQuery] = useState('')
+  const [showUndone, setShowUndone] = useState(true)
 
   useEffect(() => {
     api.getMergeHistory(orgId).then(setHistory).catch(() => {})
@@ -365,35 +367,80 @@ function MergeHistory({ orgId, refreshKey }) {
 
   if (history.length === 0) return null
 
+  const q = query.trim().toLowerCase()
+  const filtered = history.filter(e => {
+    if (!showUndone && e.undone) return false
+    if (!q) return true
+    return (e.keep_player_name || '').toLowerCase().includes(q)
+      || (e.removed_player_name || '').toLowerCase().includes(q)
+  })
+  const activeCount = history.filter(e => !e.undone).length
+
+  function fmtWhen(iso) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    return d.toLocaleString(undefined, {
+      day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+  }
+
   return (
     <div className="mt-10">
-      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Merge History</p>
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Merge History</p>
+        <span className="font-mono text-[10px] text-pb-faintest">{activeCount} active · {history.length} total</span>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2 mb-3">
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search by player name…"
+          className="flex-1 bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
+        />
+        <button
+          onClick={() => setShowUndone(s => !s)}
+          className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
+        >
+          {showUndone ? 'Hide undone' : 'Show undone'}
+        </button>
+      </div>
+
       {error && (
         <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
       )}
-      <div className="flex flex-col gap-2">
-        {history.map(entry => (
-          <div key={entry.id} className={`flex items-center gap-3 rounded border pb-hairline px-4 py-3 text-sm ${entry.undone ? 'opacity-40' : 'bg-pb-surface'}`}>
-            <div className="flex-1 min-w-0">
-              <span className="text-pb-text font-medium">{entry.keep_player_name}</span>
-              <span className="text-pb-faint mx-2">←</span>
-              <span className="text-pb-amber">{entry.removed_player_name}</span>
-              <span className="font-mono text-[10px] text-pb-faintest ml-3">{new Date(entry.merged_at).toLocaleDateString()}</span>
-            </div>
-            {entry.undone ? (
-              <span className="font-mono text-[10px] text-pb-faintest shrink-0">Undone</span>
-            ) : (
-              <button
-                onClick={() => handleUndo(entry)}
-                disabled={undoing === entry.id}
-                className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-faint hover:text-pb-text transition-colors shrink-0 disabled:opacity-50"
-              >
-                {undoing === entry.id ? 'Undoing…' : 'Undo'}
-              </button>
-            )}
+
+      {filtered.length === 0 ? (
+        <p className="font-mono text-[11px] text-pb-faintest py-4">No merges match your search.</p>
+      ) : (
+        <>
+          <p className="font-mono text-[10px] text-pb-faintest mb-2">Showing {filtered.length} of {history.length}</p>
+          <div className="flex flex-col gap-2 max-h-[32rem] overflow-y-auto pb-scroll pr-1">
+            {filtered.map(entry => (
+              <div key={entry.id} className={`flex items-center gap-3 rounded border pb-hairline px-4 py-3 text-sm ${entry.undone ? 'opacity-40' : 'bg-pb-surface'}`}>
+                <div className="flex-1 min-w-0">
+                  <span className="text-pb-text font-medium">{entry.keep_player_name}</span>
+                  <span className="text-pb-faint mx-2">←</span>
+                  <span className="text-pb-amber">{entry.removed_player_name}</span>
+                  <span className="font-mono text-[10px] text-pb-faintest ml-3">{fmtWhen(entry.merged_at)}</span>
+                </div>
+                {entry.undone ? (
+                  <span className="font-mono text-[10px] text-pb-faintest shrink-0">Undone</span>
+                ) : (
+                  <button
+                    onClick={() => handleUndo(entry)}
+                    disabled={undoing === entry.id}
+                    className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-faint hover:text-pb-text transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    {undoing === entry.id ? 'Undoing…' : 'Undo'}
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </div>
   )
 }
