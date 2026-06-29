@@ -12,11 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import ClubOnboardingRequest, get_db
+from app.services.twenty_sync import mark_contact_source
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ def _clip(value: Optional[str], limit: int) -> Optional[str]:
 async def submit_contact(
     payload: ContactIn,
     request: Request,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Store one club onboarding enquiry.
@@ -97,4 +99,8 @@ async def submit_contact(
     )
     db.add(row)
     await db.commit()
+    # If this enquirer is already a Person in the CRM, record that they made
+    # contact via the website. Runs after the response so a CRM hiccup can't slow
+    # or fail the form (Formspree is the primary delivery either way).
+    background.add_task(mark_contact_source, email, "WEBSITE")
     return {"ok": True}
