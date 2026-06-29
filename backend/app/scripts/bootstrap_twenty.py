@@ -256,7 +256,9 @@ def main():
     field_names = {n: {f["name"] for f in o.get("fields", [])} for n, o in by_name.items()}
 
     # 1b. friendlier display labels on the standard objects (Company -> Clubs,
-    # Person -> Contacts). isLabelSyncedWithName=False so the label sticks.
+    # Person -> Contacts). Only the labels are sent: a standard object rejects edits
+    # to isLabelSyncedWithName, and just diverging the label from the name is enough
+    # (this is what Twenty's own rename UI does).
     for nameSingular, ls, lp in RELABEL:
         o = by_name.get(nameSingular)
         if not o:
@@ -265,7 +267,7 @@ def main():
             print(f"label   skip    {nameSingular} ({ls}/{lp})")
             continue
         s, r = _api("PATCH", f"/rest/metadata/objects/{o['id']}",
-                    {"labelSingular": ls, "labelPlural": lp, "isLabelSyncedWithName": False})
+                    {"labelSingular": ls, "labelPlural": lp})
         print(f"label   {'ok' if s in (200, 201) else 'ERR ' + str(s):<7} "
               f"{nameSingular} -> {ls}/{lp} {('' if s in (200, 201) else json.dumps(r)[:200])}")
 
