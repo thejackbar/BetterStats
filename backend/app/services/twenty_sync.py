@@ -359,6 +359,24 @@ async def _sync_memberships(session, http, club_guid, club_name, assocs, company
         stats["memberships_" + act] += 1
 
 
+async def mark_contact_source(email: str, source: str) -> None:
+    """Set a Person's Contact source to ``source`` (WEBSITE / BETTERCOMMS_EMAIL /
+    MANUAL_EMAIL) when they make contact through that channel. Most-recent-channel-
+    wins, so this just writes the channel of the event that fired it (last write).
+    Best-effort: a CRM hiccup must never break the public flow that triggers it,
+    and a person not in the CRM is a silent no-op."""
+    if not client.configured or not email:
+        return
+    try:
+        async with httpx.AsyncClient() as http:
+            person = await client.find_by(http, "people", "emails.primaryEmail",
+                                          email.strip().lower())
+            if person and person.get("id"):
+                await client.update(http, "people", person["id"], {"contactSource": source})
+    except Exception:  # noqa: BLE001 - never let a CRM error affect the caller
+        logger.exception("twenty mark_contact_source failed for %s", email)
+
+
 async def export_to_twenty(*, filters: Optional[dict] = None,
                            contact_scope: str = "all", selected_only: bool = True,
                            limit: Optional[int] = None) -> dict:
