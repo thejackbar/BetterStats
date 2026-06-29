@@ -329,7 +329,8 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
     catch (e) { setCerr(e.message || 'Could not remove the contact.') } finally { setCbusy(false) }
   }
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="space-y-4">
+      {/* Contacts — full width so long names/emails never collide with the facts column */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <div className="text-[11px] uppercase tracking-wide text-pb-faint">
@@ -341,106 +342,126 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
           </button>
         </div>
         {(contacts.length || adding) ? (
-          <table className="w-full text-xs">
-            <tbody>
-              {contacts.map((ct) => {
-                if (editId === ct.id) {
-                  return <ContactEditRow key={ct.id} init={ct} busy={cbusy}
-                                         onCancel={() => setEditId(null)}
-                                         onSave={(vals) => saveContact(ct.id, vals)} />
-                }
-                const canEmail = !!ct.email && ct.subscribed
-                return (
-                  <tr key={ct.id} className="align-top">
-                    <td className="py-0.5 pr-2">
-                      <input type="checkbox" checked={!!ct.selected} disabled={!canEmail}
-                             title={canEmail ? 'Include in outreach' : 'No emailable address'}
-                             onChange={(e) => onToggleContact(club.id, ct.id, e.target.checked)} />
-                    </td>
-                    <td className="py-0.5 pr-2 text-pb-faint whitespace-nowrap">{ct.role || '-'}</td>
-                    <td className="py-0.5 pr-2 text-pb-text">{ct.full_name || '-'}</td>
-                    <td className="py-0.5 pr-2">
-                      {ct.email
-                        ? <a href={`mailto:${ct.email}`} className="text-pb-accent">{ct.email}</a>
-                        : <span className="text-pb-faint">-</span>}
-                      {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300">unsub</span>}
-                      {ct.exported && (
-                        <span className="ml-1 text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1"
-                              title="Already in BetterComms — a re-export will skip it (no duplicate)">
-                          exported
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-0.5 pr-2 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
-                    <td className="py-0.5 whitespace-nowrap">
-                      <button className="text-[11px] text-pb-faint hover:text-pb-accent"
-                              onClick={() => { setEditId(ct.id); setAdding(false) }}>edit</button>
-                      <button className="ml-2 text-[11px] text-pb-faint hover:text-red-300"
-                              title="Remove contact" onClick={() => removeContact(ct.id)}>✕</button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {adding && <ContactEditRow init={{}} busy={cbusy}
-                                         onCancel={() => setAdding(false)}
-                                         onSave={createContact} />}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-pb-faint">
+                <tr className="text-left">
+                  <th className="font-normal pb-1 pr-2 w-6" />
+                  <th className="font-normal pb-1 pr-3 whitespace-nowrap">Role</th>
+                  <th className="font-normal pb-1 pr-3 whitespace-nowrap">Name</th>
+                  <th className="font-normal pb-1 pr-3">Email</th>
+                  <th className="font-normal pb-1 pr-3 whitespace-nowrap">Mobile</th>
+                  <th className="font-normal pb-1 text-right whitespace-nowrap">Edit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contacts.map((ct) => {
+                  if (editId === ct.id) {
+                    return <ContactEditRow key={ct.id} init={ct} busy={cbusy}
+                                           onCancel={() => setEditId(null)}
+                                           onSave={(vals) => saveContact(ct.id, vals)} />
+                  }
+                  const canEmail = !!ct.email && ct.subscribed
+                  return (
+                    <tr key={ct.id} className="align-top border-t pb-hairline">
+                      <td className="py-1 pr-2 w-6">
+                        <input type="checkbox" checked={!!ct.selected} disabled={!canEmail}
+                               title={canEmail ? 'Include in outreach' : 'No emailable address'}
+                               onChange={(e) => onToggleContact(club.id, ct.id, e.target.checked)} />
+                      </td>
+                      <td className="py-1 pr-3 text-pb-faint whitespace-nowrap">{ct.role || '-'}</td>
+                      <td className="py-1 pr-3 text-pb-text whitespace-nowrap">{ct.full_name || '-'}</td>
+                      <td className="py-1 pr-3">
+                        {ct.email
+                          ? <a href={`mailto:${ct.email}`} className="text-pb-accent break-all">{ct.email}</a>
+                          : <span className="text-pb-faint">-</span>}
+                        {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300 whitespace-nowrap">unsub</span>}
+                        {ct.exported && (
+                          <span className="ml-1 text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1 whitespace-nowrap"
+                                title="Already in BetterComms — a re-export will skip it (no duplicate)">
+                            exported
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1 pr-3 text-pb-dim whitespace-nowrap">{ct.mobile || ''}</td>
+                      <td className="py-1 text-right whitespace-nowrap">
+                        <button className="text-[11px] text-pb-faint hover:text-pb-accent"
+                                onClick={() => { setEditId(ct.id); setAdding(false) }}>edit</button>
+                        <button className="ml-2 text-[11px] text-pb-faint hover:text-red-300"
+                                title="Remove contact" onClick={() => removeContact(ct.id)}>✕</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {adding && <ContactEditRow init={{}} busy={cbusy}
+                                           onCancel={() => setAdding(false)}
+                                           onSave={createContact} />}
+              </tbody>
+            </table>
+          </div>
         ) : <div className="text-pb-faint text-xs">No contacts stored.</div>}
         {cerr && <div className="text-red-300 text-[11px] mt-1">{cerr}</div>}
       </div>
-      <div className="text-xs space-y-2">
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1">
-            Associations {assocs === null ? '(not fetched yet)' : `(${(assocs || []).length})`}
+
+      {/* Club facts (left) + sales pipeline / site visits (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs border-t pb-hairline pt-3">
+        <div className="space-y-2">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1">
+              Associations {assocs === null ? '(not fetched yet)' : `(${(assocs || []).length})`}
+            </div>
+            {Array.isArray(assocs) && assocs.length ? (
+              <ul className="text-pb-dim">
+                {assocs.map((a, i) => (
+                  <li key={i}>{a.name}{a.competition ? <span className="text-pb-faint"> — {a.competition}</span> : null}</li>
+                ))}
+              </ul>
+            ) : <div className="text-pb-faint">{assocs === null ? 'Pending the association-enrichment pass.' : 'None found.'}</div>}
           </div>
-          {Array.isArray(assocs) && assocs.length ? (
-            <ul className="text-pb-dim">
-              {assocs.map((a, i) => (
-                <li key={i}>{a.name}{a.competition ? <span className="text-pb-faint"> — {a.competition}</span> : null}</li>
-              ))}
-            </ul>
-          ) : <div className="text-pb-faint">{assocs === null ? 'Pending the association-enrichment pass.' : 'None found.'}</div>}
+          <div className="text-pb-dim space-y-1">
+            <div><span className="text-pb-faint">Address: </span>
+              {[club.address_line1, club.suburb, club.state, club.postcode].filter(Boolean).join(', ') || '-'}</div>
+            <div><span className="text-pb-faint">Website: </span>
+              {club.website_url
+                ? <a href={club.website_url} target="_blank" rel="noreferrer" className="text-pb-accent break-all">{club.website_url}</a>
+                : '-'}</div>
+            <div className="break-all"><span className="text-pb-faint">PlayHQ code: </span>{club.playhq_id || '-'}
+              <span className="text-pb-faint"> · GUID: </span><span className="font-mono text-[10px]">{club.grassroots_guid || '-'}</span></div>
+            <div className="flex flex-wrap items-center gap-1 pt-1">
+              <span className="text-pb-faint">UTM:</span>
+              <input className={SELECT_CLS + ' w-56 font-mono'} value={utm}
+                     placeholder={club.utm_code || 'utm code'}
+                     onChange={(e) => setUtm(e.target.value)} />
+              <button disabled={utmBusy || utm === (club.utm_code || '')}
+                      className="px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent disabled:opacity-40"
+                      onClick={saveUtm}>{utmBusy ? '...' : 'Save'}</button>
+              <span className="text-[10px] text-pb-faint" title="Blank resets to the default">(blank = default)</span>
+            </div>
+            <div><span className="text-pb-faint">Status: </span>{club.status || '-'}
+              {club.is_customer && <span className="text-emerald-300"> · already a customer</span>}</div>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span>
+                <span className="text-pb-faint">Emailed: </span>
+                {club.emailed_at
+                  ? <span className="text-amber-300">yes ({club.emailed_via || 'manual'})</span>
+                  : <span className="text-pb-faint">no</span>}
+              </span>
+              <button
+                className="px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent"
+                onClick={() => onToggleEmailed(club.id, !club.emailed_at)}>
+                {club.emailed_at ? 'Unmark emailed' : 'Mark as emailed'}
+              </button>
+              <button
+                className={'px-2 py-0.5 rounded border text-[11px] hover:opacity-80 '
+                  + (club.excluded ? 'border-red-500/50 text-red-300 bg-red-500/10' : 'pb-hairline text-pb-text')}
+                title="Excluded clubs are never exported, and any contacts already in BetterAdmin Comms are dropped from audiences"
+                onClick={() => onToggleExcluded(club.id, !club.excluded)}>
+                {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="text-pb-dim">
-          <div><span className="text-pb-faint">Address: </span>
-            {[club.address_line1, club.suburb, club.state, club.postcode].filter(Boolean).join(', ') || '-'}</div>
-          <div><span className="text-pb-faint">Website: </span>
-            {club.website_url
-              ? <a href={club.website_url} target="_blank" rel="noreferrer" className="text-pb-accent">{club.website_url}</a>
-              : '-'}</div>
-          <div><span className="text-pb-faint">PlayHQ code: </span>{club.playhq_id || '-'}
-            <span className="text-pb-faint"> · GUID: </span><span className="font-mono text-[10px]">{club.grassroots_guid || '-'}</span></div>
-          <div className="flex items-center gap-1 pt-1">
-            <span className="text-pb-faint">UTM:</span>
-            <input className={SELECT_CLS + ' w-56 font-mono'} value={utm}
-                   placeholder={club.utm_code || 'utm code'}
-                   onChange={(e) => setUtm(e.target.value)} />
-            <button disabled={utmBusy || utm === (club.utm_code || '')}
-                    className="px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent disabled:opacity-40"
-                    onClick={saveUtm}>{utmBusy ? '...' : 'Save'}</button>
-            <span className="text-[10px] text-pb-faint" title="Blank resets to the default">(blank = default)</span>
-          </div>
-          <div><span className="text-pb-faint">Status: </span>{club.status || '-'}
-            {club.is_customer && <span className="text-emerald-300"> · already a customer</span>}</div>
-          <div className="pt-1">
-            <span className="text-pb-faint">Emailed: </span>
-            {club.emailed_at
-              ? <span className="text-amber-300">yes ({club.emailed_via || 'manual'})</span>
-              : <span className="text-pb-faint">no</span>}
-            <button
-              className="ml-2 px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent"
-              onClick={() => onToggleEmailed(club.id, !club.emailed_at)}>
-              {club.emailed_at ? 'Unmark emailed' : 'Mark as emailed'}
-            </button>
-            <button
-              className={'ml-2 px-2 py-0.5 rounded border text-[11px] hover:opacity-80 '
-                + (club.excluded ? 'border-red-500/50 text-red-300 bg-red-500/10' : 'pb-hairline text-pb-text')}
-              title="Excluded clubs are never exported, and any contacts already in BetterAdmin Comms are dropped from audiences"
-              onClick={() => onToggleExcluded(club.id, !club.excluded)}>
-              {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
-            </button>
-          </div>
+        <div className="space-y-2">
           {onSaveSales && <SalesEditor key={club.id} club={club} onSave={onSaveSales} />}
           <VisitsPanel clubId={club.id} summary={club.visits} />
         </div>
