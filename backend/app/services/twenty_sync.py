@@ -128,13 +128,15 @@ async def _engagement(session, club: MarketingClub) -> dict:
     trial-interest nudge; tier Cold/Warm/Hot."""
     utm = club.utm_code
     org = str(club.existing_org_id) if club.existing_org_id else None
+    # Cast the bound params to text explicitly: asyncpg can't infer a type for a
+    # bare ":utm IS NOT NULL", so the parameters need a declared type.
     row = (await session.execute(text("""
         SELECT MAX(created_at) AS last_seen,
                COUNT(DISTINCT visitor_id)
                  FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d
         FROM usage_events
-        WHERE (:utm IS NOT NULL AND utm_id = :utm)
-           OR (:org IS NOT NULL AND org_id::text = :org)
+        WHERE (CAST(:utm AS text) IS NOT NULL AND utm_id = CAST(:utm AS text))
+           OR (CAST(:org AS text) IS NOT NULL AND org_id::text = CAST(:org AS text))
     """), {"utm": utm, "org": org})).first()
     last_seen = row[0] if row else None
     sessions = (row[1] or 0) if row else 0
