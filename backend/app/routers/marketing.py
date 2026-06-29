@@ -325,6 +325,15 @@ async def export_twenty(body: ExportTwentyBody, db: AsyncSession = Depends(get_d
         limit=body.limit)
 
 
+@router.post("/refresh-twenty-engagement")
+async def refresh_twenty_engagement(_=Depends(require_super_admin)):
+    """Recompute the engagement rollup (score / tier / 30-day sessions / last seen)
+    for every club already in Twenty and PATCH it onto its Company. Runs daily on a
+    schedule too; this is the on-demand trigger. Only touches already-exported
+    clubs — it never pulls a new club into the CRM."""
+    return await twenty_sync.refresh_engagement()
+
+
 class EmailedBody(BaseModel):
     emailed: bool
     note: Optional[str] = None

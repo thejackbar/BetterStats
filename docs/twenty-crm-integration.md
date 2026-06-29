@@ -286,31 +286,46 @@ Twenty has two API layers, both REST and GraphQL, on the self-hosted domain:
 Everything else (objects, fields, pipeline stages, all record sync, the backfill)
 is code. A single idempotent `bootstrap_twenty.py` run builds the whole model.
 
-## 5. Engagement rollup and scoring (computed in BetterCricket)
+## 5. Engagement rollup and scoring (computed in BetterCricket) — BUILT
 
-There is no stored engagement rollup today; `last_activity_at` is computed
-on-demand in `services/club_directory.py`. We add a real rollup so the score is
-cheap to read and push.
+The rollup is computed in `services/twenty_sync.py::_engagement(session, club)` and
+pushed onto the Company. No new table: it reads `usage_events` directly at push
+time, so the score is always derived from live breadcrumbs and there is nothing to
+keep in sync.
 
 **Join keys that connect anonymous behaviour to a club:**
-- Customer/trial clubs: `usage_events.org_id = organisations.id`.
+- Customer/trial clubs: `usage_events.org_id = marketing_clubs.existing_org_id`.
 - Prospects: `usage_events.utm_id = marketing_clubs.utm_code` (our per-club
-  outreach code), and `club_onboarding_requests.visitor_id = usage_events.visitor_id`
-  to tie a signup back to its pre-signup browsing.
+  outreach code). The two are OR'd in one query, so a club that is both a prospect
+  and an onboarded customer counts activity from either path.
 
-**Rollup (per club, refreshed nightly + on key events), as a materialised view or
-a `club_engagement` table:**
-- `last_seen_at` = max(`created_at`)
-- `events_30d`, `sessions_30d` = volume in last 30 days
-- `pricing_views`, `module_page_views` (by module, from `path`)
-- `distinct_routes_30d` = depth of app usage (customers)
-- intent flags: submitted onboarding enquiry, `requested_trial_modules`,
-  `demo_status`
+**What it computes per club:**
+- `lastSeenAt` = max(`created_at`)
+- `sessions30d` = distinct `visitor_id` in the last 30 days
+- `engagementScore` 0–100, `engagementTier` Cold/Warm/Hot
 
-**Score 0–100** = weighted blend of recency (decay on days-since-last-seen),
-frequency (sessions_30d), depth (distinct routes / module pages), and intent
-(enquiry submitted, trial requested). Tier: Cold < 34 ≤ Warm < 67 ≤ Hot. The exact
-weights are a tuning knob, not load-bearing for the architecture.
+**Score 0–100** = recency (40 if seen ≤7d, 28 ≤30d, 14 ≤90d, else 4) + frequency
+(`sessions30d × 6`, capped at 36) + intent (+12 if `requested_trial_modules`),
+clamped to 100. Tier: Cold < 34 ≤ Warm < 67 ≤ Hot. The weights are a tuning knob,
+not load-bearing — depth (module-page views from `path`) and the onboarding-enquiry
+intent flag are an easy future addition to the same function.
+
+**Refresh paths:**
+- On every `export_to_twenty` run the engagement fields are merged into the
+  Company values, so a re-export re-scores.
+- `refresh_engagement(limit=None)` re-scores **only clubs already in the CRM** (a
+  row in `twenty_links`) and PATCHes each Company, without pulling new clubs in.
+  Wired to a daily scheduler job (06:00, gated on `twenty_configured`) and an
+  on-demand `POST /club-admin/marketing/refresh-twenty-engagement` ("Refresh Twenty
+  scores" on the directory page) — usage moves daily even when nothing else about
+  the club does.
+
+**Module interest derivation** feeds the three Company multi-selects:
+- `paidModules` ← `organisations.module_overrides` when `subscription_status` in
+  (active, trial, past_due)
+- `trialModules` ← `organisations` trial set / `marketing_clubs.trial_modules`
+- `interestedModules` ← `marketing_clubs.requested_trial_modules` ∪ module pages
+  explored in `usage_events` ∪ `club_onboarding_requests.interests`
 
 **Module interest derivation** feeds the three Company multi-selects:
 - `paidModules` ← `organisations.module_overrides` when `subscription_status` in
@@ -610,8 +625,8 @@ up `/srv/docker/twenty/db` before the first migration run. None of this touches 
 | **0. Hardening** | Fix compose secrets (§10), create API key + webhook in Settings, set `TWENTY_*` env in backend | — |
 | **1. Model bootstrap** | `scripts/bootstrap_twenty.py`: Touchpoint + Association (+ optional Email) objects, all custom fields, the Company↔Association and Company↔Person relations, pipeline stages (idempotent, re-runnable) | Phase 0 |
 | **2. Export to subset** | `twenty_client` + `export_to_twenty(filters)` (mirrors `export_to_comms`): filter the directory, upsert Associations + targeted Companies + their officers, build `twenty_links`. No mass auto-onboard | Phase 1 |
-| **3. Incremental push (subset only)** | `club_engagement` rollup + scheduled/event push of subscription, modules, score, Opportunities, Touchpoints, scoped to `twenty_links` | Phase 2 |
-| **4. Comms / SES bridge** | Hook `export_to_comms` (→ Contacted + Touchpoint) and `ses_events.ingest_ses_event` (→ per-send Touchpoints, lifecycle updates, suppression mirror to Person) (§9) | Phase 2 |
+| **3. Incremental push (subset only)** ✅ | `_engagement` rollup merged into the export + `refresh_engagement` (daily job + on-demand endpoint) re-scores `twenty_links` clubs; subscription/modules/renewal/ARR already pushed in Phase 2 (§5) | Phase 2 |
+| **4. Comms / SES bridge** ✅ | `ses_events.ingest_ses_event` mirrors opens/clicks (→ BetterComms Email contact source + last campaign) and permanent bounce/complaint (→ Person emailable flags); Contact Us reply → Website source (§9) | Phase 2 |
 | **5. List-from-Twenty** | `POST /club-admin/comms/list-from-twenty` + the BetterComms "Build List from a Twenty view" pull action (Trigger B), then the Twenty workflow push (Trigger A) (§9.4) | Phase 4 |
 | **6. Webhook write-back** | `POST /public/twenty/webhook` with HMAC verify + pipeline side effects | Phase 2 |
 | **7. Activate intelligence** | Twenty Workflows (score-driven tasks/stage moves) + Dashboards (pipeline, engagement, module interest, email deliverability) | Phases 3–6 |

@@ -803,6 +803,16 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const refreshTwentyEngagement = async () => {
+    setBusy('twenty-refresh'); setMsg('')
+    try {
+      const r = await api.mktRefreshTwentyEngagement()
+      if (r.error) { setError(r.error); return }
+      setMsg(`Refreshed engagement on ${r.refreshed || 0} club(s) in Twenty`
+        + (r.errored ? `, ${r.errored} errored (see logs).` : '.'))
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
   const bulkEmailed = async (value) => {
     if (!window.confirm(
       `${value ? 'Mark' : 'Unmark'} all ${total} club(s) in the current filtered list as `
@@ -1134,6 +1144,10 @@ export default function SuperMarketing() {
             <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
                     title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
               {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
+            </button>
+            <button className={BTN} disabled={busy === 'twenty-refresh'} onClick={refreshTwentyEngagement}
+                    title="Recompute the engagement score for every club already in Twenty from the latest usage breadcrumbs (runs daily too)">
+              {busy === 'twenty-refresh' ? 'Refreshing...' : 'Refresh Twenty scores'}
             </button>
             <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}

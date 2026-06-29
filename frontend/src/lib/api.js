@@ -466,6 +466,8 @@ export const api = {
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
   mktExportTwenty: (payload) =>
     request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
+  mktRefreshTwentyEngagement: () =>
+    request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktUpdateContact: (contactId, patch) =>
