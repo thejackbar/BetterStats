@@ -39,6 +39,12 @@ export const POSTS = [
       { q: 'Is merging players in PlayHQ reversible?', a: `No. PlayHQ states a profile merge cannot be undone. BetterCricket's merge is reversible, so you can undo it if the wrong two records get joined.` },
       { q: 'How does BetterCricket merge duplicate players?', a: `It flags likely duplicates when it imports your history, then a club admin merges each pair in a click. Every innings, spell, catch and partnership moves onto one profile, and the merge can be undone.` },
     ],
+    howto: [
+      { name: 'Get Super Admin access', text: 'Profile merging is restricted to Super Admins within your Administration Body, so a club admin contacts their association to have it done.' },
+      { name: 'Open Participants and find the profile to keep', text: 'From the menu, open Participants and search for the profile you want to keep.' },
+      { name: 'Select the duplicate and review', text: 'Choose the duplicate profile and review the fields. PlayHQ keeps the destination profile details where they differ.' },
+      { name: 'Confirm the merge', text: 'Confirm to combine registration, statistics and transfers. PlayHQ cannot undo this, so check carefully first.' },
+    ],
   },
   {
     slug: 'bettercricket-vs-teamapp',
@@ -299,6 +305,12 @@ export const POSTS = [
       { q: 'Where does the opposition data come from?', a: `The scorecards published through PlayHQ and Cricket Australia's community cricket, the same matches your club already plays in.` },
       { q: 'Does BetterIQ need extra scoring?', a: `No. It reads the scorecards you already generate and builds the opposition report from them, so your match day does not change.` },
     ],
+    howto: [
+      { name: 'Pull their recent scorecards', text: 'Find the opposition recent scorecards on PlayHQ to see how they have been going.' },
+      { name: 'Find the danger players', text: 'Look for the batter averaging well clear of their side and the bowler taking wickets most weeks, and note how the batters get out.' },
+      { name: 'Use your own head-to-head', text: 'Check your own scorecards against them for who has scored runs and which of your bowlers has their number.' },
+      { name: 'Build a one-page plan', text: 'Turn it into a few clear calls: who to get out early, who to bowl dry, and what a par score looks like at the ground.' },
+    ],
   },
   {
     slug: 'how-to-build-a-cricket-club-website',
@@ -342,6 +354,12 @@ export const POSTS = [
       { q: 'What is the best way to build a cricket club website?', a: `Connect it to your match data so fixtures, results and stats update themselves. A general website builder works, but it means typing in every result by hand.` },
       { q: 'How do I keep a club website up to date?', a: `Use a platform that pulls from your match data. BetterSocials refreshes fixtures, results, ladders and stats automatically after every game.` },
       { q: `Can I use my club's branding?`, a: `Yes. BetterSocials uses your crest, colours and fonts across the website and the match-day graphics.` },
+    ],
+    howto: [
+      { name: 'List what the site needs', text: 'Decide on fixtures and results, teams, stats, news, sponsors and contact links, and a way to keep it current.' },
+      { name: 'Choose how to build it', text: 'Compare a general website builder, a generic club system, and a cricket platform that builds the site from your match data.' },
+      { name: 'Connect it to your match data', text: 'Wire the site to the data your club already records so fixtures, results and stats fill themselves in.' },
+      { name: 'Keep it current automatically', text: 'Let the platform refresh the site after every game so it stays accurate on its own.' },
     ],
   },
   {
@@ -507,6 +525,12 @@ export const POSTS = [
       { q: `How do I keep my club's history and stats?`, a: `Get them online and keep them updating automatically. BetterCricket imports a club's full history on first sync, for many clubs going back decades, then refreshes after every match so the record never depends on one person's spreadsheet.` },
       { q: 'How do I build a cricket club website?', a: `BetterSocials gives your club a public website built from your own match data, in your crest, colours and fonts, with match-day graphics. It updates from the same data as your stats, so there is nothing to maintain by hand.` },
     ],
+    howto: [
+      { name: 'Map the jobs', text: 'List the recurring jobs: registration, fixtures, availability and selection, fees, comms, the website, and stats.' },
+      { name: 'Use the official competition layer', text: 'Run registration, fixtures and scoring through PlayHQ, the platform your association uses.' },
+      { name: 'Add a club platform on top', text: 'Use a club platform to turn the same data into your website, stats, selection, fees and analysis without entering it twice.' },
+      { name: 'Start small and automate', text: 'Begin by getting your history and stats online, then add selection, fees and the rest as you go.' },
+    ],
   },
   {
     slug: 'how-to-merge-duplicate-player-records',
@@ -560,6 +584,13 @@ export const POSTS = [
         'Run a sync after a merging session if you want milestone badges and leaderboards to refresh immediately',
       ]},
       { type: 'callout', text: 'BetterCricket includes the Merge Duplicates tool on every plan. Bring your club online and we\'ll handle the initial historical sync. Duplicate cleanup is then a few minutes of work, fully reversible, and your players\' careers finally live on one profile.' },
+    ],
+    howto: [
+      { name: 'Open Merge Duplicates', text: 'In the admin sidebar, open Merge Duplicates. BetterCricket scans your players and surfaces pairs with matching names.' },
+      { name: 'Review the suggested pair', text: 'Each pair shows the two records side by side with seasons, runs, wickets and game counts so you can confirm they are the same person.' },
+      { name: 'Confirm the merge', text: 'Choose which record to keep and confirm. Every innings, spell, catch and partnership moves onto the surviving profile.' },
+      { name: 'Use Manual Merge for name changes', text: 'For records under different names, like a maiden and married name, use the Manual Merge panel to pick the two records yourself.' },
+      { name: 'Undo if needed', text: 'Every merge appears in the Merge History with an Undo button, so an accidental merge can be rolled back.' },
     ],
   },
   {

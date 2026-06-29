@@ -474,6 +474,19 @@ def _blog_html(slug: str, page_url: str, base: str) -> str | None:
             ],
         })
 
+    howto = post.get("howto") or []
+    if howto:
+        jsonld.append({
+            "@context": "https://schema.org",
+            "@type": "HowTo",
+            "name": post["title"],
+            "description": post["description"],
+            "step": [
+                {"@type": "HowToStep", "position": i + 1, "name": s["name"], "text": s["text"]}
+                for i, s in enumerate(howto)
+            ],
+        })
+
     return _html(
         title,
         post["description"],
