@@ -411,6 +411,9 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                for ct in _scoped(contacts, contact_scope)],
                 })
 
+            logger.info("twenty export: %d club snapshot(s); officer counts: %s",
+                        len(snapshots),
+                        {s["name"]: len(s["people"]) for s in snapshots})
             assoc_cache: dict = {}
             async with httpx.AsyncClient() as http:
                 for snap in snapshots:
@@ -418,17 +421,22 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                         ctid, cact = await _upsert(session, http, "club", snap["guid"],
                                                    "companies", "bcClubId", snap["company"])
                         stats["clubs_" + cact] += 1
+                        logger.info("twenty export: club %r -> company %s id=%s (%d officers)",
+                                    snap["name"], cact, ctid, len(snap["people"]))
                         await _sync_memberships(session, http, snap["guid"], snap["name"],
                                                 snap["assocs"], ctid, assoc_cache, stats)
                         for bc_id, pvals in snap["people"]:
                             try:
-                                _, pact = await _upsert(session, http, "person", bc_id, "people",
-                                                        "bcContactId", {**pvals, "companyId": ctid})
+                                pid, pact = await _upsert(session, http, "person", bc_id, "people",
+                                                          "bcContactId", {**pvals, "companyId": ctid})
                                 stats["people_" + pact] += 1
+                                logger.info("twenty export:   officer %s -> %s id=%s",
+                                            bc_id, pact, pid)
                             except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
                                 stats["people_errored"] += 1
                                 logger.exception("twenty export: officer %s failed", bc_id)
                         await session.commit()
+                        logger.info("twenty export: committed club %r", snap["name"])
                     except Exception:  # noqa: BLE001 - one bad club must not abort the run
                         errors += 1
                         await session.rollback()
