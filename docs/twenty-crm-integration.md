@@ -102,7 +102,7 @@ Twenty Company already has name, domain, address, employees, linkedin, etc. Add:
 | `renewalDate` | DATE | `organisations.renewal_date` |
 | `billingCycle` | SELECT | monthly, annual |
 | `arr` | CURRENCY | annual value (derived from modules held) |
-| `associations` | RELATION (many-to-many → Association) | every association the club plays in (`marketing_clubs.associations`); a club belongs to at least one |
+| `primaryAssociationLink` | RELATION (many-to-one → Association) | the club's primary association; inverse `clubs` gives "all clubs in an association". Twenty's metadata API has no native many-to-many, so multi-association membership (a club in several) is a follow-up via a junction object |
 | `primaryAssociation` | TEXT | `marketing_clubs.association_name` (denormalised for quick display/group-by) |
 | `clubKind` | SELECT | club, association, carnival, school, junior (drives the directory exclude filters) |
 | `postcode` | TEXT | `marketing_clubs.postcode` (enables the postcode-range filter) |
@@ -173,7 +173,7 @@ multi-select option. `fees` + `comms` + `merch` are the BetterAdmin umbrella.
 
 | Field | Type | Holds |
 |---|---|---|
-| `type` | SELECT | email_sent, email_delivered, email_opened, email_clicked, email_bounced, email_complaint, email_unsubscribe, email_reply, exported_to_comms, call, meeting, demo, trial_start, trial_end, onboarding_enquiry, web_milestone, note, system |
+| `touchpointType` | SELECT | email_sent, email_delivered, email_opened, email_clicked, email_bounced, email_complaint, email_unsubscribe, email_reply, exported_to_comms, call, meeting, demo, trial_start, trial_end, onboarding_enquiry, web_milestone, note, system (named `touchpointType` because `type` is a reserved field name in Twenty) |
 | `direction` | SELECT | inbound, outbound, system |
 | `occurredAt` | DATE_TIME | when it happened |
 | `subject` | TEXT | one-line summary |
@@ -201,7 +201,13 @@ associations) and each club's `associations` payload.
 | `clubs` | RELATION (many-to-many → Company) | every club in the association |
 
 This makes **"all clubs in an association"** a native related-records view on the
-Association record, and lets you filter People by their club's association.
+Association record (the `clubs` inverse of `Company.primaryAssociationLink`), and
+lets you filter People by their club's association.
+
+**Build status:** objects, all 58 custom fields, the pipeline stages, and the
+relations above are created by `backend/app/scripts/bootstrap_twenty.py` (idempotent;
+run with `TWENTY_API_URL` + `TWENTY_API_KEY` set). It has been run against the live
+workspace, so the model exists. Re-run it after editing the spec to add new fields.
 
 ### 3.8 Email (Campaign) custom object — optional, recommended
 
