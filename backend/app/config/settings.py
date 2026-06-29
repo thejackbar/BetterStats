@@ -121,6 +121,20 @@ class Settings(BaseSettings):
     ses_club_domain: str = "betteradmin-comms.work"
     ses_marketing_domain: str = "betteratcricket-comms.work"
 
+    # ─── Twenty CRM integration (super-admin GTM workspace) ───────────────────
+    # Self-hosted Twenty instance that holds the BetterCricket sales/CRM model.
+    # The export pushes the *targeted subset* of the Clubs Directory (filtered
+    # clubs + their officers) into Twenty as Companies/People/Associations.
+    # Blank url/key = the export endpoint reports "not configured" and does
+    # nothing. The model itself is built by app/scripts/bootstrap_twenty.py;
+    # these drive the ongoing record sync (twenty_client / twenty_sync).
+    twenty_api_url: str = ""   # e.g. https://twenty.betterat.cricket (the SERVER_URL)
+    twenty_api_key: str = ""   # a workspace API key with record write
+
+    @property
+    def twenty_configured(self) -> bool:
+        return bool(self.twenty_api_url and self.twenty_api_key)
+
     @property
     def square_api_base(self) -> str:
         return (

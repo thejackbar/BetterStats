@@ -437,6 +437,7 @@ export const api = {
     return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
   },
   mktAssociations: () => request('/club-admin/marketing/associations'),
+  mktCountries: () => request('/club-admin/marketing/countries'),
   mktResolveAssociation: (id, name) =>
     request('/club-admin/marketing/associations/resolve',
       { method: 'POST', body: JSON.stringify({ id, name }) }),
@@ -463,6 +464,8 @@ export const api = {
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
   mktExportComms: (payload) =>
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
+  mktExportTwenty: (payload) =>
+    request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktUpdateContact: (contactId, patch) =>

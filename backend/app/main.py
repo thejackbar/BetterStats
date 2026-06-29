@@ -316,6 +316,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_utm_code "
             "ON marketing_clubs(utm_code)"))
+        # Twenty CRM integration: membership ledger mapping a BetterCricket entity
+        # (club / person / association) to its Twenty record id. A row exists only
+        # for the targeted subset exported to Twenty, so it doubles as "what's in
+        # the CRM" and makes upserts idempotent (content_hash skips no-op updates).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS twenty_links (
+                entity_type TEXT NOT NULL,
+                bc_id TEXT NOT NULL,
+                twenty_id TEXT NOT NULL,
+                content_hash TEXT,
+                last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (entity_type, bc_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_twenty_links_twenty ON twenty_links(twenty_id)"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of

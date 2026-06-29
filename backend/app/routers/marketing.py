@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db, async_session_maker, MarketingClub, MarketingClubContact
 from app.routers.auth import require_super_admin
 from app.services import club_directory as cd
+from app.services import twenty_sync
 
 router = APIRouter(prefix="/club-admin/marketing", tags=["marketing"])
 
@@ -49,7 +50,8 @@ async def crawl_control(body: CrawlControlBody, db: AsyncSession = Depends(get_d
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
                    person=None, exclude_junior=False, exclude_emailed=False,
                    exclude_carnival=False, exclude_school=False, associations=None,
-                   exclude_exported=False, exclude_suppressed=False, visited=False):
+                   exclude_exported=False, exclude_suppressed=False, visited=False,
+                   countries=None):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
@@ -62,6 +64,7 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
         "exclude_suppressed": bool(exclude_suppressed),
         "visited": bool(visited),
         "associations": [a for a in (associations or []) if a],
+        "countries": [c for c in (countries or []) if c],
     }
 
 
@@ -69,6 +72,12 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
 async def list_associations(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
     """Distinct associations (name + id + club count) for the multi-select filter."""
     return await cd.list_associations(db)
+
+
+@router.get("/countries")
+async def list_countries(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """Distinct countries (name + club count) for the multi-select filter."""
+    return await cd.list_countries(db)
 
 
 class ShortcodeBody(BaseModel):
@@ -115,6 +124,7 @@ async def list_clubs(
     state: Optional[str] = None,
     association: Optional[str] = None,
     associations: Optional[List[str]] = Query(None),
+    countries: Optional[List[str]] = Query(None),
     status: Optional[str] = None,
     postcode_from: Optional[str] = None,
     postcode_to: Optional[str] = None,
@@ -143,7 +153,7 @@ async def list_clubs(
         q, state, association, status, postcode_from, postcode_to, contact,
         person, exclude_junior, exclude_emailed, exclude_carnival, exclude_school,
         associations, exclude_exported=exclude_exported,
-        exclude_suppressed=exclude_suppressed, visited=visited))
+        exclude_suppressed=exclude_suppressed, visited=visited, countries=countries))
     for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
@@ -245,6 +255,7 @@ class ExportBody(BaseModel):
     exclude_suppressed: bool = False
     visited: bool = False
     associations: Optional[List[str]] = None
+    countries: Optional[List[str]] = None
     # Default True: only push contacts a super admin ticked for outreach. Set
     # False to export every subscribed, emailable contact regardless of selection.
     selected_only: bool = True
@@ -262,10 +273,53 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
         body.postcode_to, body.contact, body.person, body.exclude_junior,
         body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
         exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
-        visited=body.visited))
+        visited=body.visited, countries=body.countries))
     return await cd.export_to_comms(
         db, organisation_id=body.organisation_id, selected_only=body.selected_only,
         filters=filters)
+
+
+class ExportTwentyBody(BaseModel):
+    # Same directory filters the page shows, so the export acts on the currently
+    # filtered list (the targeted subset that enters the CRM).
+    q: Optional[str] = None
+    state: Optional[str] = None
+    association: Optional[str] = None
+    status: Optional[str] = None
+    postcode_from: Optional[str] = None
+    postcode_to: Optional[str] = None
+    contact: Optional[str] = None
+    person: Optional[str] = None
+    exclude_junior: bool = False
+    exclude_emailed: bool = False
+    exclude_carnival: bool = False
+    exclude_school: bool = False
+    exclude_exported: bool = False
+    exclude_suppressed: bool = False
+    visited: bool = False
+    associations: Optional[List[str]] = None
+    countries: Optional[List[str]] = None
+    # all | named | pst — which officers of each matched club to push.
+    contact_scope: str = "all"
+    # Optional cap on clubs per run (None = all matched).
+    limit: Optional[int] = None
+
+
+@router.post("/export-twenty")
+async def export_twenty(body: ExportTwentyBody, db: AsyncSession = Depends(get_db),
+                        _=Depends(require_super_admin)):
+    """Push the currently-filtered directory subset into Twenty CRM (Companies +
+    Associations + People). Idempotent — re-running upserts and skips unchanged
+    records. Excluded clubs are always skipped."""
+    filters = await cd.expand_shortcode(db, _filter_kwargs(
+        body.q, body.state, body.association, body.status, body.postcode_from,
+        body.postcode_to, body.contact, body.person, body.exclude_junior,
+        body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
+        exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
+        visited=body.visited, countries=body.countries))
+    scope = body.contact_scope if body.contact_scope in ("all", "named", "pst") else "all"
+    return await twenty_sync.export_to_twenty(
+        db, filters=filters, contact_scope=scope, limit=body.limit)
 
 
 class EmailedBody(BaseModel):
@@ -324,6 +378,7 @@ class BulkActionBody(BaseModel):
     exclude_suppressed: bool = False
     visited: bool = False
     associations: Optional[List[str]] = None
+    countries: Optional[List[str]] = None
 
 
 async def _bulk_filters(db: AsyncSession, body: BulkActionBody) -> dict:
@@ -332,7 +387,7 @@ async def _bulk_filters(db: AsyncSession, body: BulkActionBody) -> dict:
         body.postcode_to, body.contact, body.person, body.exclude_junior,
         body.exclude_emailed, body.exclude_carnival, body.exclude_school, body.associations,
         exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
-        visited=body.visited))
+        visited=body.visited, countries=body.countries))
 
 
 @router.post("/clubs/bulk-emailed")
@@ -558,6 +613,7 @@ async def export_csv(
     exclude_suppressed: bool = False,
     visited: bool = False,
     associations: Optional[List[str]] = Query(None),
+    countries: Optional[List[str]] = Query(None),
     only_with_email: bool = True,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_super_admin),
@@ -567,7 +623,7 @@ async def export_csv(
         q, state, association, status, postcode_from, postcode_to, contact, person,
         exclude_junior, exclude_emailed, exclude_carnival, exclude_school, associations,
         exclude_exported=exclude_exported, exclude_suppressed=exclude_suppressed,
-        visited=visited))
+        visited=visited, countries=countries))
     csv_text = await cd.clubs_to_csv(db, only_with_email=only_with_email, filters=filters)
     return Response(
         content=csv_text, media_type="text/csv",
