@@ -230,11 +230,13 @@ The two standard objects are relabelled for the cricket domain — **Company →
 Person → "Contacts"** — by a relabel pass in `bootstrap_twenty.py` (the API names stay
 `company`/`person`, so the REST endpoints and all sync code are unchanged). The two
 junction objects (**Memberships** = `clubAssociation`, **Officer roles** =
-`personClub`) are plumbing, not browsing targets. There is no metadata flag to hide an
-object from the sidebar (nav visibility is a per-user view preference in Twenty), so
-hide them once in the UI: open the object switcher in the left sidebar and toggle off
-Memberships and Officer roles. Their data still shows where it matters — inline on a
-Club ("Memberships", "Officer roles") and on a Contact ("Club roles").
+`personClub`) are plumbing, not browsing targets. Twenty has **no way to hide an
+object from the sidebar yet** — neither a metadata flag nor a UI toggle (it's an open
+feature request, twentyhq/twenty#10455), and `isActive: false` would disable the
+object and its relations, so that's not an option either. They therefore stay visible
+in the nav for now; their clear labels ("Memberships", "Officer roles") are the
+mitigation. Their data shows where it matters regardless — inline on a Club
+("Memberships", "Officer roles") and on a Contact ("Club roles").
 
 **Build status:** objects, all custom fields, the pipeline stages, the relabels and
 the relations above are created by `backend/app/scripts/bootstrap_twenty.py`
