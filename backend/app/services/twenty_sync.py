@@ -95,7 +95,10 @@ def _role(role: Optional[str]) -> str:
     return "OTHER"
 
 
-def _company_values(club: MarketingClub, assoc_twenty_id: Optional[str]) -> dict:
+def _company_values(club: MarketingClub) -> dict:
+    # Association membership is a separate many-to-many via the clubAssociation
+    # junction (see _sync_memberships); the company carries only a denormalised
+    # primary-association name for quick display.
     return _clean({
         "name": club.name,
         "bcClubId": club.grassroots_guid,
@@ -111,7 +114,6 @@ def _company_values(club: MarketingClub, assoc_twenty_id: Optional[str]) -> dict
         "utmCode": club.utm_code,
         "dataSource": "PLAYHQ",
         "publicProfileUrl": link(club.website_url),
-        "primaryAssociationLinkId": assoc_twenty_id,
         "lastSyncedAt": _now_iso(),
     })
 
@@ -175,9 +177,14 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
         {"e": entity_type, "b": bc_id, "t": twenty_id, "h": content_hash})
 
 
-async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values):
+async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
+                  create_extra=None):
     """Create-or-update a Twenty record, keyed on the local link table first, then
-    the external-key field as a dedupe fallback. Returns (twenty_id, action)."""
+    the external-key field as a dedupe fallback. ``create_extra`` is merged only on
+    creation (not on update), so fields an operator may edit in Twenty (e.g. a
+    membership's isPrimary) are set once and never overwritten. The content hash is
+    computed on ``values`` only, so create_extra never forces an update. Returns
+    (twenty_id, action)."""
     h = _hash(values)
     link_row = await _link_get(session, entity_type, bc_id)
     if link_row:
@@ -193,41 +200,107 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values):
         await client.update(http, plural, tid, values)
         await _link_put(session, entity_type, bc_id, tid, h)
         return tid, "adopted"
-    rec = await client.create(http, plural, values)
+    rec = await client.create(http, plural, {**values, **(create_extra or {})})
     tid = rec["id"]
     await _link_put(session, entity_type, bc_id, tid, h)
     return tid, "created"
 
 
-async def _assoc_extra(session, assoc_guid: Optional[str]) -> dict:
-    """Short code + linked-club count for an association, from the directory's
-    association registry (PlayHQ doesn't carry them on the club). No state column
-    exists for an association, so assocState is left unset."""
-    if not assoc_guid:
-        return {}
-    row = (await session.execute(text(
-        "SELECT short_code, club_count FROM marketing_associations WHERE id = :id"),
-        {"id": assoc_guid})).first()
-    if not row:
-        return {}
-    return {"shortCode": row[0], "clubCount": row[1]}
+async def _assoc_state(session, guid: Optional[str], name: Optional[str]) -> Optional[str]:
+    """Derive an association's state from the modal state of its member clubs
+    (associations carry no state of their own). Matches members by the primary
+    association_guid or the associations JSONB array, falling back to name."""
+    if guid:
+        row = (await session.execute(text(
+            "SELECT state FROM marketing_clubs "
+            "WHERE state IS NOT NULL AND state <> '' "
+            "AND (association_guid = :g OR associations @> CAST(:elem AS jsonb)) "
+            "GROUP BY state ORDER BY COUNT(*) DESC LIMIT 1"),
+            {"g": guid, "elem": json.dumps([{"id": guid}])})).first()
+        if row:
+            return row[0]
+    if name:
+        row = (await session.execute(text(
+            "SELECT state FROM marketing_clubs "
+            "WHERE state IS NOT NULL AND state <> '' "
+            "AND lower(association_name) = lower(:n) "
+            "GROUP BY state ORDER BY COUNT(*) DESC LIMIT 1"),
+            {"n": name})).first()
+        if row:
+            return row[0]
+    return None
 
 
-async def _ensure_assoc(session, http, club, cache, stats) -> Optional[str]:
-    bc_id = club.association_guid or ("name:" + club.association_name)
+async def _assoc_extra(session, guid: Optional[str], name: Optional[str]) -> dict:
+    """Short code + linked-club count (from the association registry) + a state
+    derived from the member clubs."""
+    extra: dict = {}
+    if guid:
+        row = (await session.execute(text(
+            "SELECT short_code, club_count FROM marketing_associations WHERE id = :id"),
+            {"id": guid})).first()
+        if row:
+            extra["shortCode"] = row[0]
+            extra["clubCount"] = row[1]
+    extra["assocState"] = await _assoc_state(session, guid, name)
+    return _clean(extra)
+
+
+async def _ensure_assoc_by(session, http, guid: Optional[str], name: str,
+                           cache: dict, stats) -> Optional[str]:
+    """Upsert one association by (guid, name) and return its Twenty id."""
+    bc_id = guid or ("name:" + name)
     if bc_id in cache:
         return cache[bc_id]
-    values = _clean({"name": club.association_name, "bcAssociationId": bc_id,
-                     **(await _assoc_extra(session, club.association_guid))})
+    values = _clean({"name": name, "bcAssociationId": bc_id,
+                     **(await _assoc_extra(session, guid, name))})
     try:
         tid, act = await _upsert(session, http, "association", bc_id,
                                  "associations", "bcAssociationId", values)
         stats["assoc_" + act] += 1
         cache[bc_id] = tid
         return tid
-    except Exception as e:  # noqa: BLE001 - association is best-effort
-        logger.warning("twenty assoc upsert failed for %s: %s", club.association_name, e)
+    except Exception:  # noqa: BLE001 - association is best-effort
+        logger.exception("twenty assoc upsert failed for %s", name)
         return None
+
+
+def _club_assocs(club: MarketingClub):
+    """Every association the club belongs to as (guid, name, is_primary), deduped.
+    Combines the primary association_name/guid with the full associations JSONB
+    array; is_primary marks the one PlayHQ lists as primary (editable in Twenty)."""
+    out, seen = [], set()
+    items = []
+    if club.association_name:
+        items.append((club.association_guid, club.association_name))
+    for a in (club.associations or []):
+        if isinstance(a, dict) and a.get("name"):
+            items.append((a.get("id"), a.get("name")))
+    for guid, name in items:
+        key = guid or ("name:" + name)
+        if key in seen:
+            continue
+        seen.add(key)
+        is_primary = (guid is not None and guid == club.association_guid) or \
+                     (guid is None and name == club.association_name)
+        out.append((guid, name, is_primary))
+    return out
+
+
+async def _sync_memberships(session, http, club, company_tid, cache, stats):
+    """Upsert one clubAssociation (membership) per association the club plays in,
+    so a club shows under every association and an association shows all its clubs.
+    isPrimary is set on creation only, so an operator can re-point it in Twenty."""
+    for guid, name, is_primary in _club_assocs(club):
+        assoc_tid = await _ensure_assoc_by(session, http, guid, name, cache, stats)
+        if not assoc_tid:
+            continue
+        bc_id = f"{club.grassroots_guid}:{guid or name}"
+        values = _clean({"name": f"{club.name} — {name}",
+                         "companyId": company_tid, "associationId": assoc_tid})
+        _, act = await _upsert(session, http, "membership", bc_id, "clubAssociations",
+                               None, values, create_extra={"isPrimary": bool(is_primary)})
+        stats["memberships_" + act] += 1
 
 
 async def export_to_twenty(session: AsyncSession, *, filters: Optional[dict] = None,
@@ -263,12 +336,11 @@ async def export_to_twenty(session: AsyncSession, *, filters: Optional[dict] = N
         async with httpx.AsyncClient() as http:
             for club in clubs:
                 try:
-                    assoc_tid = (await _ensure_assoc(session, http, club, assoc_cache, stats)
-                                 if club.association_name else None)
                     ctid, cact = await _upsert(session, http, "club", club.grassroots_guid,
                                                "companies", "bcClubId",
-                                               _company_values(club, assoc_tid))
+                                               _company_values(club))
                     stats["clubs_" + cact] += 1
+                    await _sync_memberships(session, http, club, ctid, assoc_cache, stats)
                     cq = select(MarketingClubContact).where(
                         MarketingClubContact.marketing_club_id == club.id)
                     if selected_only:
