@@ -784,6 +784,27 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE player_achievements ADD COLUMN IF NOT EXISTS season_end TEXT"
         ))
+        # Achievement imports are grouped into a batch so they can be undone as a
+        # unit (mirrors the BetterImport stats importer).
+        await conn.execute(text(
+            "ALTER TABLE player_achievements ADD COLUMN IF NOT EXISTS import_batch_id UUID"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS achievement_import_batches (
+                id UUID PRIMARY KEY,
+                org_id UUID NOT NULL,
+                filename TEXT,
+                row_count INTEGER NOT NULL DEFAULT 0,
+                created_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'imported',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_import_batch "
+            "ON player_achievements(import_batch_id)"
+        ))
         # Performance indexes on the per-game tables' join columns (migration
         # 103). Postgres doesn't index foreign keys automatically, so the records
         # board scanned the whole partnerships table four times per request.

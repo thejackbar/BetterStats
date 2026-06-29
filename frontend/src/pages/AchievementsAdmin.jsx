@@ -86,6 +86,15 @@ function ImportPanel({ orgId, onImported }) {
   const [colMap, setColMap] = useState({})
   const [pdfImporting, setPdfImporting] = useState(false)
   const [pdfDone, setPdfDone] = useState(null)
+  const [linkChoices, setLinkChoices] = useState({})   // name → chosen player_id
+  const [linking, setLinking] = useState(false)
+  const [history, setHistory] = useState([])
+  const [undoing, setUndoing] = useState(null)
+
+  const loadHistory = () => {
+    api.listAchievementImports(orgId).then(d => setHistory(d || [])).catch(() => {})
+  }
+  useEffect(() => { loadHistory() }, [orgId])
 
   const handleDownloadTemplate = async () => {
     const token = localStorage.getItem('bs_token')
@@ -122,15 +131,60 @@ function ImportPanel({ orgId, onImported }) {
     setResult(null)
     setError(null)
     setCheckedDupes({})
+    setLinkChoices({})
     try {
       const res = await api.importAchievements(orgId, file)
       setResult(res)
+      // Pre-select the strongest candidate for each suggested name.
+      const choices = {}
+      for (const s of res.suggested_matches || []) {
+        if (s.candidates?.length) choices[s.name] = s.candidates[0].player_id
+      }
+      setLinkChoices(choices)
       onImported()
+      loadHistory()
     } catch (err) {
       setError(err.message || 'Import failed')
     } finally {
       setImporting(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const handleApplyLinks = async () => {
+    const suggestions = result?.suggested_matches || []
+    const links = suggestions
+      .map(s => ({ player_name: s.name, player_id: linkChoices[s.name] }))
+      .filter(l => l.player_id)
+    if (!links.length) return
+    setLinking(true)
+    try {
+      await api.linkAchievementPlayers(orgId, links, result.batch_id)
+      const linkedNames = new Set(links.map(l => l.player_name))
+      setResult(prev => ({
+        ...prev,
+        suggested_matches: (prev.suggested_matches || []).filter(s => !linkedNames.has(s.name)),
+      }))
+      onImported()
+    } catch (err) {
+      setError(err.message || 'Could not link players')
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  const handleUndo = async (batch) => {
+    if (!window.confirm(`Undo this import? ${batch.remaining} achievement${batch.remaining !== 1 ? 's' : ''} will be removed.`)) return
+    setUndoing(batch.id)
+    try {
+      await api.undoAchievementImport(orgId, batch.id)
+      if (result?.batch_id === batch.id) setResult(null)
+      onImported()
+      loadHistory()
+    } catch (err) {
+      setError(err.message || 'Undo failed')
+    } finally {
+      setUndoing(null)
     }
   }
 
@@ -199,10 +253,11 @@ function ImportPanel({ orgId, onImported }) {
     if (!rows.length) { setError('Tick at least one column to import.'); return }
     setPdfImporting(true); setError(null)
     try {
-      const res = await api.forceImportAchievements(orgId, rows)
+      const res = await api.forceImportAchievements(orgId, rows, { filename: 'Honour board' })
       setPdfDone({ created: res.created ?? rows.length })
       setPdfResult(null); setColMap({})
       onImported()
+      loadHistory()
     } catch (err) {
       setError(err.message || 'Import failed')
     } finally {
@@ -223,7 +278,7 @@ function ImportPanel({ orgId, onImported }) {
     if (!rows.length) return
     setForcing(true)
     try {
-      await api.forceImportAchievements(orgId, rows)
+      await api.forceImportAchievements(orgId, rows, { batchId: result?.batch_id })
       setResult(prev => ({
         ...prev,
         created: (prev.created || 0) + rows.length,
@@ -231,6 +286,7 @@ function ImportPanel({ orgId, onImported }) {
       }))
       setCheckedDupes({})
       onImported()
+      loadHistory()
     } catch (err) {
       setError(err.message || 'Force import failed')
     } finally {
@@ -346,6 +402,57 @@ function ImportPanel({ orgId, onImported }) {
           {result.errors?.length > 0 && (
             <div className="text-pb-red font-mono text-[10px]">{result.errors.map((e, i) => <p key={i}>{e}</p>)}</div>
           )}
+          {result.auto_matched?.length > 0 && (
+            <div>
+              <p className="font-mono text-[10px] mt-2" style={{ color: 'var(--pb-accent)' }}>
+                ✓ Auto-linked {result.auto_matched.length} near-match name{result.auto_matched.length !== 1 ? 's' : ''} (e.g. initials → full name)
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {result.auto_matched.map(m => (
+                  <span key={m.name} className="font-mono text-[10px] bg-pb-surface border pb-hairline text-pb-dim px-2 py-0.5 rounded">
+                    {m.name} <span className="text-pb-faint">→</span> {m.matched_name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {result.suggested_matches?.length > 0 && (
+            <div className="mt-3 pt-3 border-t pb-hairline">
+              <p className="font-mono text-[10px] text-pb-amber mb-2">
+                ? {result.suggested_matches.length} name{result.suggested_matches.length !== 1 ? 's need' : ' needs'} confirming. Pick the player, then link.
+              </p>
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pb-scroll">
+                {result.suggested_matches.map(s => (
+                  <div key={s.name} className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[10px] text-pb-text w-40 flex-shrink-0 truncate" title={s.name}>{s.name}</span>
+                    <span className="text-pb-faint">→</span>
+                    <select
+                      className={`${INPUT_CLS} flex-1 min-w-[10rem] py-1`}
+                      value={linkChoices[s.name] || ''}
+                      onChange={e => setLinkChoices(prev => ({ ...prev, [s.name]: e.target.value }))}
+                    >
+                      <option value="">Don't link</option>
+                      {s.candidates.map(c => (
+                        <option key={c.player_id} value={c.player_id}>
+                          {c.name}{c.confidence ? ` (${Math.round(c.confidence * 100)}%)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={handleApplyLinks}
+                disabled={linking || !Object.values(linkChoices).some(Boolean)}
+                className="mt-3 px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                {linking ? 'Linking…' : 'Link selected players'}
+              </button>
+            </div>
+          )}
+
           {result.unmatched_players?.length > 0 && (
             <div>
               <p className="text-pb-amber font-mono text-[10px] mt-2">⚠ Player names not matched ({result.unmatched_players.length}) — still saved, can be linked manually</p>
@@ -404,6 +511,42 @@ function ImportPanel({ orgId, onImported }) {
           )}
         </div>
       )}
+
+      {history.length > 0 && (
+        <div className="mt-5 pt-4 border-t pb-hairline">
+          <p className="font-mono text-[10px] tracking-wide text-pb-faint mb-2 uppercase">Recent imports</p>
+          <div className="space-y-1">
+            {history.slice(0, 8).map(b => (
+              <div key={b.id} className="flex flex-wrap items-center gap-2 py-1">
+                <span className="font-mono text-[10px] text-pb-text truncate max-w-[14rem]" title={b.filename}>{b.filename || 'Import'}</span>
+                <span className="font-mono text-[10px] text-pb-faint">
+                  {b.status === 'undone'
+                    ? `undone · ${b.created_count} removed`
+                    : `${b.remaining} achievement${b.remaining !== 1 ? 's' : ''}`}
+                </span>
+                {b.created_at && (
+                  <span className="font-mono text-[10px] text-pb-faintest">
+                    {new Date(b.created_at).toLocaleDateString()}
+                  </span>
+                )}
+                <span className="flex-1" />
+                {b.status === 'undone' ? (
+                  <span className="font-mono text-[10px] text-pb-faintest">undone</span>
+                ) : (
+                  <button
+                    onClick={() => handleUndo(b)}
+                    disabled={undoing === b.id || b.remaining === 0}
+                    className="font-mono text-[10px] text-pb-red hover:underline disabled:opacity-40 disabled:no-underline"
+                  >
+                    {undoing === b.id ? 'Undoing…' : 'Undo'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {error && <p className="mt-3 font-mono text-[11px] text-pb-red">{error}</p>}
     </div>
   )

@@ -849,11 +849,20 @@ export const api = {
       credentials: 'include',
     }).then(r => r.json())
   },
-  forceImportAchievements: (orgId, rows) =>
+  forceImportAchievements: (orgId, rows, { batchId = null, filename = null } = {}) =>
     request(`/achievements/import/force?org_id=${orgId}`, {
       method: 'POST',
-      body: JSON.stringify({ rows }),
+      body: JSON.stringify({ rows, batch_id: batchId, filename }),
     }),
+  linkAchievementPlayers: (orgId, links, batchId = null) =>
+    request(`/achievements/link?org_id=${orgId}`, {
+      method: 'POST',
+      body: JSON.stringify({ links, batch_id: batchId }),
+    }),
+  listAchievementImports: (orgId) =>
+    request(`/achievements/imports?org_id=${orgId}`),
+  undoAchievementImport: (orgId, batchId) =>
+    request(`/achievements/imports/${batchId}/undo?org_id=${orgId}`, { method: 'POST' }),
   parseAchievementsPdf: (orgId, file) => {
     const form = new FormData()
     form.append('file', file)

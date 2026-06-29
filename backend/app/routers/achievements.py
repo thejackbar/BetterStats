@@ -10,6 +10,7 @@ import io
 import csv
 
 from app.models.db import get_db
+from app.services.import_ingest import match_players
 
 router = APIRouter(prefix="/achievements", tags=["achievements"])
 
@@ -60,6 +61,52 @@ async def _resolve_player(db: AsyncSession, player_name: str, org_id: str) -> Op
         if _normalise(row["name"]) == norm:
             return str(row["id"])
     return None
+
+
+async def _resolve_players_bulk(db: AsyncSession, names: list[str], org_id: str) -> dict:
+    """Match a batch of player names against the org roster using the BetterImport
+    matcher — the same logic the stats import uses. Loads the roster once.
+
+    For each name returns ``{player_id, matched_name, confidence, status,
+    candidates}`` where status is:
+      - ``exact``   — name matched a single player outright (linked).
+      - ``auto``    — linked on a near-match: a middle-initial difference, or a
+                      single "Surname Initial" hit (so "K Millington" links to
+                      "Kent Millington"). Reported back so the operator can check.
+      - ``suggest`` — one or more candidates but no confident pick (e.g. two
+                      players share the surname+initial); left unlinked for the
+                      operator to confirm.
+      - ``none``    — no candidate; saved with the name only, link later.
+    """
+    result = await db.execute(
+        text("SELECT id, name FROM players WHERE organisation_id = :org_id"),
+        {"org_id": org_id},
+    )
+    roster = [(str(r["id"]), r["name"]) for r in result.mappings().all()]
+    raw = match_players([n for n in {*names} if n], roster)
+
+    out: dict = {}
+    for name, m in raw.items():
+        pid = m.get("player_id")
+        conf = m.get("confidence") or 0.0
+        cands = m.get("candidates") or []
+        if pid:
+            out[name] = {
+                "player_id": pid, "matched_name": m.get("matched_name"),
+                "confidence": conf, "status": "exact" if conf >= 1.0 else "auto",
+            }
+        elif len(cands) == 1 and (cands[0].get("confidence") or 0) >= 0.9:
+            # One strong candidate — link it. This is the "K Millington" →
+            # "Kent Millington" case the operator asked for.
+            out[name] = {
+                "player_id": cands[0]["player_id"], "matched_name": cands[0]["name"],
+                "confidence": cands[0].get("confidence") or 0.9, "status": "auto",
+            }
+        elif cands:
+            out[name] = {"player_id": None, "confidence": conf, "status": "suggest", "candidates": cands}
+        else:
+            out[name] = {"player_id": None, "confidence": conf, "status": "none"}
+    return out
 
 
 # ─── GET list ────────────────────────────────────────────
@@ -434,12 +481,12 @@ def _is_duplicate(player_id, player_name_norm: str, season: str, category_norm: 
     return False
 
 
-async def _insert_achievement(db: AsyncSession, org_id: str, player_id, player_name: str, season, subcategory, category: str, achievement: str, detail):
+async def _insert_achievement(db: AsyncSession, org_id: str, player_id, player_name: str, season, subcategory, category: str, achievement: str, detail, import_batch_id=None):
     await db.execute(
         text("""
             INSERT INTO player_achievements
-                (org_id, player_id, player_name, season, category, subcategory, achievement, detail)
-            VALUES (:org_id, :player_id, :player_name, :season, :category, :subcategory, :achievement, :detail)
+                (org_id, player_id, player_name, season, category, subcategory, achievement, detail, import_batch_id)
+            VALUES (:org_id, :player_id, :player_name, :season, :category, :subcategory, :achievement, :detail, :import_batch_id)
         """),
         {
             "org_id": org_id,
@@ -450,6 +497,7 @@ async def _insert_achievement(db: AsyncSession, org_id: str, player_id, player_n
             "subcategory": subcategory,
             "achievement": achievement,
             "detail": detail,
+            "import_batch_id": import_batch_id,
         },
     )
 
@@ -472,12 +520,18 @@ async def import_achievements(
         raise HTTPException(status_code=400, detail="No data found in file")
 
     existing = await _load_existing(db, org_id)
+    matches = await _resolve_players_bulk(
+        db, [row.get("player_name", "").strip() for row in rows], org_id
+    )
 
+    batch_id = uuid.uuid4()
     created = 0
     skipped = 0
     errors = []
-    unmatched_players = []
+    unmatched_players: list[str] = []
     skipped_duplicates = []
+    auto_matched: dict = {}   # name → matched display name (near-match links)
+    suggested: dict = {}      # name → candidate list (left unlinked)
 
     for i, row in enumerate(rows, 2):
         player_name = row.get("player_name", "").strip()
@@ -501,8 +555,14 @@ async def import_achievements(
             skipped += 1
             continue
 
-        player_id = await _resolve_player(db, player_name, org_id)
-        if not player_id:
+        m = matches.get(player_name, {})
+        player_id = m.get("player_id")
+        status = m.get("status")
+        if player_id and status == "auto":
+            auto_matched[player_name] = m.get("matched_name")
+        elif not player_id and status == "suggest":
+            suggested[player_name] = m.get("candidates") or []
+        elif not player_id:
             unmatched_players.append(player_name)
 
         if _is_duplicate(player_id, _normalise(player_name), season, _norm(category), _norm(achievement), existing):
@@ -518,17 +578,36 @@ async def import_achievements(
             })
             continue
 
-        await _insert_achievement(db, org_id, player_id, player_name, season, subcategory, category, achievement, detail)
+        await _insert_achievement(db, org_id, player_id, player_name, season, subcategory, category, achievement, detail, batch_id)
         created += 1
+
+    if created:
+        await db.execute(
+            text("""
+                INSERT INTO achievement_import_batches
+                    (id, org_id, filename, row_count, created_count, status)
+                VALUES (:id, :org_id, :filename, :row_count, :created_count, 'imported')
+            """),
+            {
+                "id": batch_id,
+                "org_id": org_id,
+                "filename": file.filename or "import.csv",
+                "row_count": len(rows),
+                "created_count": created,
+            },
+        )
 
     await db.commit()
 
     return {
         "status": "imported",
+        "batch_id": str(batch_id) if created else None,
         "created": created,
         "skipped": skipped,
         "errors": errors,
-        "unmatched_players": list(set(unmatched_players)),
+        "unmatched_players": sorted(set(unmatched_players)),
+        "auto_matched": [{"name": k, "matched_name": v} for k, v in sorted(auto_matched.items())],
+        "suggested_matches": [{"name": k, "candidates": v} for k, v in sorted(suggested.items())],
         "skipped_duplicates": skipped_duplicates,
     }
 
@@ -545,6 +624,12 @@ class ForceImportRow(BaseModel):
 
 class ForceImportBody(BaseModel):
     rows: list[ForceImportRow]
+    # When the force-import is the "import duplicates anyway" step of a file
+    # import, the caller passes that import's batch_id so the rows fold into the
+    # same undoable batch. Otherwise (e.g. the honour-board reader) a fresh batch
+    # is created so those rows can be undone too.
+    batch_id: Optional[str] = None
+    filename: Optional[str] = None
 
 
 @router.post("/import/force")
@@ -553,19 +638,147 @@ async def force_import_achievements(
     body: ForceImportBody = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
+    if not body.rows:
+        return {"status": "imported", "created": 0, "batch_id": None}
+
+    # Reuse the caller's batch when valid for this org, else mint a new one.
+    batch_id = None
+    if body.batch_id:
+        existing_batch = await db.execute(
+            text("SELECT id FROM achievement_import_batches WHERE id = :id AND org_id = :org_id"),
+            {"id": body.batch_id, "org_id": org_id},
+        )
+        if existing_batch.first():
+            batch_id = uuid.UUID(body.batch_id)
+    new_batch = batch_id is None
+    if new_batch:
+        batch_id = uuid.uuid4()
+
+    matches = await _resolve_players_bulk(db, [r.player_name for r in body.rows], org_id)
+
     created = 0
     for row in body.rows:
-        player_id = row.player_id
-        if not player_id:
-            player_id = await _resolve_player(db, row.player_name, org_id)
+        player_id = row.player_id or matches.get(row.player_name, {}).get("player_id")
         await _insert_achievement(
             db, org_id, player_id, row.player_name,
             row.season or None, row.subcategory or None,
-            row.category, row.achievement, row.detail or None,
+            row.category, row.achievement, row.detail or None, batch_id,
         )
         created += 1
+
+    if new_batch:
+        await db.execute(
+            text("""
+                INSERT INTO achievement_import_batches
+                    (id, org_id, filename, row_count, created_count, status)
+                VALUES (:id, :org_id, :filename, :row_count, :created_count, 'imported')
+            """),
+            {"id": batch_id, "org_id": org_id, "filename": body.filename or "Award import",
+             "row_count": created, "created_count": created},
+        )
+    else:
+        await db.execute(
+            text("""
+                UPDATE achievement_import_batches
+                SET row_count = row_count + :n, created_count = created_count + :n
+                WHERE id = :id
+            """),
+            {"n": created, "id": batch_id},
+        )
+
     await db.commit()
-    return {"status": "imported", "created": created}
+    return {"status": "imported", "created": created, "batch_id": str(batch_id)}
+
+
+# ─── Link unmatched names to players ───────────────────────────────────────────
+
+class LinkRow(BaseModel):
+    player_name: str
+    player_id: str
+
+
+class LinkBody(BaseModel):
+    links: list[LinkRow]
+    batch_id: Optional[str] = None   # scope the link to one import when given
+
+
+@router.post("/link")
+async def link_players(
+    org_id: str = Query(...),
+    body: LinkBody = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Attach a player_id to every still-unmatched achievement whose stored name
+    matches (case- and whitespace-insensitively). Powers the "confirm match"
+    picker shown after an import for ambiguous names."""
+    updated = 0
+    for link in body.links:
+        params = {"org_id": org_id, "pid": link.player_id, "pname": _norm(link.player_name)}
+        scope = ""
+        if body.batch_id:
+            scope = " AND import_batch_id = :bid"
+            params["bid"] = body.batch_id
+        res = await db.execute(
+            text(f"""
+                UPDATE player_achievements
+                SET player_id = :pid
+                WHERE org_id = :org_id AND player_id IS NULL{scope}
+                  AND lower(regexp_replace(trim(player_name), '\\s+', ' ', 'g')) = :pname
+            """),
+            params,
+        )
+        updated += res.rowcount or 0
+    await db.commit()
+    return {"status": "linked", "updated": updated}
+
+
+# ─── Import history + undo ─────────────────────────────────────────────────────
+
+@router.get("/imports")
+async def list_import_batches(org_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    rows = await db.execute(
+        text("""
+            SELECT b.id, b.filename, b.row_count, b.created_count, b.status,
+                   b.created_at, b.undone_at,
+                   (SELECT COUNT(*) FROM player_achievements pa
+                      WHERE pa.import_batch_id = b.id) AS remaining
+            FROM achievement_import_batches b
+            WHERE b.org_id = :org_id
+            ORDER BY b.created_at DESC
+        """),
+        {"org_id": org_id},
+    )
+    return [dict(r) for r in rows.mappings().all()]
+
+
+@router.post("/imports/{batch_id}/undo")
+async def undo_import_batch(
+    batch_id: str,
+    org_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove every achievement created by an import, then mark the batch undone.
+    Mirrors the BetterImport undo."""
+    batch = (await db.execute(
+        text("SELECT id, status FROM achievement_import_batches WHERE id = :id AND org_id = :org_id"),
+        {"id": batch_id, "org_id": org_id},
+    )).mappings().first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Import not found")
+    if batch["status"] == "undone":
+        raise HTTPException(status_code=409, detail="This import has already been undone")
+
+    res = await db.execute(
+        text("DELETE FROM player_achievements WHERE import_batch_id = :id AND org_id = :org_id"),
+        {"id": batch_id, "org_id": org_id},
+    )
+    removed = res.rowcount or 0
+    await db.execute(
+        text("UPDATE achievement_import_batches SET status = 'undone', undone_at = NOW() WHERE id = :id"),
+        {"id": batch_id},
+    )
+    await db.commit()
+    return {"status": "undone", "removed": removed}
 
 
 # ─── Parse an honour board from a PDF or photo (no API tokens) ─────────────────
