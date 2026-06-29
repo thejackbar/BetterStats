@@ -284,6 +284,47 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
         {"e": entity_type, "b": bc_id, "t": twenty_id, "h": content_hash})
 
 
+async def _prewarm_person_emails(session, http) -> int:
+    """List every Person already in Twenty and (re)build the email -> Person id map in
+    twenty_links. Twenty's email filter doesn't reliably match an existing record on
+    this version, so to adopt a shared officer's duplicate we keep our OWN complete
+    index — and it must cover people created by ANY earlier export or by hand, not just
+    those re-processed in this run. Best-effort: on any failure we just fall back to
+    the per-run map. Returns how many email->id entries were indexed."""
+    cursor, seen = None, 0
+    for _ in range(200):  # cap 200 pages * 60 = 12k people
+        try:
+            payload = await client.list_page(http, "people", limit=60, starting_after=cursor)
+        except Exception:  # noqa: BLE001
+            logger.exception("twenty prewarm: listing people failed; using per-run map only")
+            break
+        data = payload.get("data") if isinstance(payload, dict) else None
+        people = data.get("people") if isinstance(data, dict) else (data if isinstance(data, list) else None)
+        if not people:
+            break
+        for p in people:
+            pid = p.get("id")
+            email = ((p.get("emails") or {}).get("primaryEmail") or "").strip().lower()
+            if pid and email:
+                await _link_put(session, "person_email", email, pid, "")
+                seen += 1
+        page = (payload.get("pageInfo") or {}) if isinstance(payload, dict) else {}
+        cursor = page.get("endCursor")
+        # Stop on the last page. Fall back to the last record's id as a cursor if the
+        # payload doesn't carry pageInfo but the page was full.
+        if page.get("hasNextPage") is False or not people:
+            break
+        if not cursor:
+            if len(people) < 60:
+                break
+            cursor = people[-1].get("id")
+            if not cursor:
+                break
+    await session.commit()
+    logger.info("twenty prewarm: indexed %d existing contact email(s)", seen)
+    return seen
+
+
 async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
                   create_extra=None, dedup=None, known_id=None):
     """Create-or-update a Twenty record, keyed on the local link table first, then
@@ -541,6 +582,10 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                         {s["name"]: len(s["people"]) for s in snapshots})
             assoc_cache: dict = {}
             async with httpx.AsyncClient() as http:
+                # Build a complete email -> existing-Person map first, so a shared
+                # officer is adopted no matter which earlier export created their twin
+                # (Twenty's own email filter can't be trusted to find it).
+                await _prewarm_person_emails(session, http)
                 for snap in snapshots:
                     try:
                         ctid, cact = await _upsert(session, http, "club", snap["guid"],
