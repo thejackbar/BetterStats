@@ -48,6 +48,8 @@ If we ever want raw-event history visible in Twenty, it goes as a periodic
 | **Person** | standard | A club officer / named contact | `marketing_club_contacts` + customer-org contacts |
 | **Opportunity** | standard | One sales pursuit per club; carries the pipeline stage | derived from club status |
 | **Touchpoint** | **custom (new)** | A typed correspondence/action/event (campaign sent, reply, demo, trial start, onboarding enquiry, milestone) | `comms_campaigns`/`comms_recipients`, `club_onboarding_requests`, key `usage_events` |
+| **Association** | **custom (new)** | A cricket association/competition a club belongs to | `list_associations` registry (~677), `marketing_clubs.associations` |
+| **Email** (Campaign) | **custom (new, optional)** | A named BetterComms bulk email; lets you see everyone who received "Email X" | `comms_campaigns` |
 | Note / Task | standard | Free-form sales notes and follow-ups | entered in Twenty, mirrored back to BetterCricket |
 | Workflow / Dashboard | standard | Twenty-side automation and reporting | configured in Twenty |
 
@@ -74,7 +76,10 @@ Twenty Company already has name, domain, address, employees, linkedin, etc. Add:
 | `renewalDate` | DATE | `organisations.renewal_date` |
 | `billingCycle` | SELECT | monthly, annual |
 | `arr` | CURRENCY | annual value (derived from modules held) |
-| `association` | TEXT | `marketing_clubs.association_name` |
+| `associations` | RELATION (many-to-many → Association) | every association the club plays in (`marketing_clubs.associations`); a club belongs to at least one |
+| `primaryAssociation` | TEXT | `marketing_clubs.association_name` (denormalised for quick display/group-by) |
+| `clubKind` | SELECT | club, association, carnival, school, junior (drives the directory exclude filters) |
+| `postcode` | TEXT | `marketing_clubs.postcode` (enables the postcode-range filter) |
 | `state` | SELECT | NSW, VIC, WA, … (`marketing_clubs.state`) |
 | `utmCode` | TEXT | `marketing_clubs.utm_code` (joins to `usage_events.utm_id`) |
 | `firstTouchSource` | SELECT | facebook, google, email, direct, … (`usage_events.traffic_source`) |
@@ -96,6 +101,8 @@ Twenty Person already has name, emails, phones, company relation, job title. Add
 | `outreachSelected` | BOOLEAN | ticked for outreach |
 | `lastEmailedAt` | DATE_TIME | most recent campaign send to this address |
 | `contactSource` | SELECT | api, website, manual |
+| `namedEmail` | BOOLEAN | email belongs to a real person, not a generic club mailbox (drives the `named_email` / `pst` filters) |
+| `emailsReceived` | NUMBER | count of bulk Emails sent to this person (rollup) |
 
 ### 3.4 Opportunity: the custom pipeline
 
@@ -145,6 +152,80 @@ multi-select option. `fees` + `comms` + `merch` are the BetterAdmin umbrella.
 | `externalRef` | TEXT | source id (e.g. `comms_campaigns.id`, `club_onboarding_requests.id`) |
 | `company` | RELATION (many-to-one → Company) | the club |
 | `person` | RELATION (many-to-one → Person) | the officer, when known |
+| `email` | RELATION (many-to-one → Email) | the named bulk Email this touchpoint belongs to, when it came from a campaign |
+
+### 3.7 Association custom object
+
+A cricket association/competition. A club belongs to one or more (the
+`marketing_clubs.associations` array), so Company ↔ Association is **many-to-many**
+(Twenty supports this). Fed by the directory's `list_associations` registry (~677
+associations) and each club's `associations` payload.
+
+| Field | Type | Holds |
+|---|---|---|
+| `bcAssociationId` | TEXT (unique key) | association GUID from the registry |
+| `name` | (Twenty name field) | association name |
+| `shortCode` | TEXT | searchable short code (`set_association_shortcode`) |
+| `state` | SELECT | state the association sits in |
+| `clubCount` | NUMBER | linked clubs (from the registry) |
+| `clubs` | RELATION (many-to-many → Company) | every club in the association |
+
+This makes **"all clubs in an association"** a native related-records view on the
+Association record, and lets you filter People by their club's association.
+
+### 3.8 Email (Campaign) custom object — optional, recommended
+
+People are bulk-emailed many times, and each send is identified by a BetterComms
+**Email name**. Modelling the Email as its own object gives you a clean "who
+received Email X" page and a per-club email history. One record per
+`comms_campaigns` row.
+
+| Field | Type | Holds |
+|---|---|---|
+| `bcCampaignId` | TEXT (unique key) | `comms_campaigns.id` |
+| `name` | (Twenty name field) | the Email name / subject |
+| `sentAt` | DATE_TIME | `comms_campaigns.sent_at` |
+| `listName` | TEXT | the BetterComms List/segment it targeted |
+| `recipients` / `delivered` / `bounced` / `complaints` | NUMBER | rollup from `comms_campaigns.stats` + `email_events` |
+
+If you'd rather not add a fourth object for v1, drop the Email object and instead
+carry a `campaignName` TEXT field on the Touchpoint. You still get filter/group-by
+on the Email name; you just don't get a dedicated Email page. Recommend the object,
+it's cheap and the "everyone who got Email X" view is exactly the ask.
+
+### 3.9 Filter parity (Twenty must filter the way the directory does)
+
+Every Club Directory filter maps to a Twenty field so the same slice is reproducible
+in Twenty (and so a Twenty filter can drive a BetterComms List, §9.4):
+
+| Directory filter | Twenty field to filter on |
+|---|---|
+| free-text `q` | Company name / Person name |
+| `state` | `Company.state` |
+| `association` / `associations` (multi) | `Company.associations` relation (or the Association record) |
+| `status` | `Company.lifecycleStage` |
+| `postcode_from`/`postcode_to` | `Company.postcode` (range) |
+| `contact_filter = any_email` | `Person.emails` is not empty |
+| `contact_filter = named_email` | `Person.namedEmail = true` |
+| `contact_filter = pst` | `Person.namedEmail = true` AND `Person.clubRole` in (President, Secretary, Treasurer) |
+| `exclude_carnival` / `exclude_school` / `exclude_junior` | `Company.clubKind` |
+| `exclude_emailed` | `Company.lifecycleStage ≠ Contacted/...` or `Person.lastEmailedAt` empty |
+| `exclude_exported` | `Person.outreachSelected` / a synced flag |
+| `exclude_suppressed` | `Person.subscribed = true` |
+| `visited` (has web activity) | `Company.lastSeenAt` not empty / `engagementScore > 0` |
+| `trial_modules` / `requested_trial_modules` / `demo_status` | `Company.trialModules` / `interestedModules` / `subscriptionStatus` |
+
+### 3.10 Standard saved views to ship
+
+- **People by Club** — already native: open a Company to see its officers. Plus a
+  global People view grouped by Company.
+- **Clubs by Association** — native on the Association record; plus a Companies view
+  grouped by `primaryAssociation`.
+- **Pipeline** — Opportunities grouped by stage (kanban).
+- **Hot prospects** — People/Companies filtered by `engagementTier = Hot` and not
+  yet Customer.
+- **Emailable officers** — People where `subscribed = true` AND `namedEmail = true`,
+  grouped by Company (the starting point for building a List, §12).
 
 ## 4. Can we automate building the model? Yes, almost entirely.
 
@@ -211,6 +292,7 @@ then react (e.g. score crosses 67 → auto-create a "call this club" Task).
 | `marketing_clubs` | Company (prospect) | grassroots_guid, name, status, association_name, state, contact_email/phone, website_url, utm_code, trial_modules, requested_trial_modules, demo_status, emailed_at/via, existing_org_id |
 | `organisations` | Company (customer) | id, name, slug, subscription_status, module_overrides, renewal_date, billing_cycle, contact_email |
 | `marketing_club_contacts` | Person | full_name, role, role_rank, email, mobile, subscribed, bounced, outreach_selected, source |
+| `list_associations` registry + `marketing_clubs.associations` | Association object + Company↔Association relation | association id, name, short_code, state, club_count |
 | `club_onboarding_requests` | Touchpoint (onboarding_enquiry) + Company hint | name, club, email, interests, status, visitor_id, created_at |
 | `usage_events` | Company engagement rollup (NOT raw) + Touchpoint (web_milestone) | org_id, visitor_id, utm_id, traffic_source, path, created_at |
 | `comms_campaigns` + `comms_recipients` | Touchpoint (email_sent) at send time | subject, sent_at, status, per-recipient status/email, provider_message_id |
@@ -343,7 +425,62 @@ This keeps Twenty's view of who is emailable identical to BetterCricket's, so a
 salesperson never emails a suppressed or complained address, and the engagement
 score reflects real deliverability.
 
-### 9.3 Direction and ownership
+### 9.4 Filter People in Twenty, build a BetterComms List (reverse action)
+
+The high-value workflow: a user filters People in Twenty on any attribute, action,
+or behaviour (engagement tier, association, role, modules of interest, last
+emailed, never opened, and so on), then hands that set to BetterComms as a named
+**List**, and sends a bulk **Email** to it. The send then flows straight back into
+Twenty through §9.1–9.3.
+
+The filter is always authored in Twenty. There are two ways to hand the set over;
+both call the **same** BetterCricket endpoint and produce the same named List, so
+build the endpoint first and the trigger is just UX.
+
+**New endpoint** `POST /club-admin/comms/list-from-twenty` (super-admin, or a
+HMAC-signed public variant for the workflow path). Body: `{ listName,
+people: [{ bcContactId, email, bcClubId }] }`. It:
+1. resolves each `bcContactId` → `marketing_club_contacts`, and reuses the
+   `export_to_comms` rules (skip suppressed and existing customers, link
+   `marketing_club_id`, tag with club + association names) to materialise/refresh
+   the `comms_contacts` rows under the outreach org,
+2. creates (or replaces) a named BetterComms **List** (`comms_segments` static
+   membership, or a saved list) called `listName` containing exactly that set,
+3. returns the list id and final size (after suppression filtering), which the
+   workflow surfaces back to the user.
+
+A bulk Email composed against that List sends via SES and reports back per §9.2.
+
+**Trigger A — push from Twenty (the UX the requirement describes).** A manual
+Twenty **Workflow** (HTTP Request / serverless-function action) over the
+selected/filtered People POSTs them to the endpoint with a `listName` the user
+types. Idempotent: each call upserts into the named list, so a fan-out over records
+still converges on one List. (Confirm the exact trigger surface, run-on-selection
+vs run-on-view, against your installed Twenty version; the workflow UX has moved
+across releases.)
+
+**Trigger B — pull from BetterComms (the reliable fallback).** BetterComms gets a
+"Build List from a Twenty view" action: the user picks a saved Twenty **View** (or
+passes filter criteria), BetterCricket calls Twenty's Core API
+`GET /rest/people?filter=…` to fetch the matches, then runs the same materialise +
+name-the-List logic. One request, no per-record fan-out, no workflow plumbing.
+
+Recommend shipping the endpoint + Trigger B first (works today on any Twenty
+version), then adding Trigger A once the workflow action is confirmed.
+
+### 9.5 Manual email via Gmail
+
+Officers are also emailed by hand from Gmail, outside the bulk channel. Twenty has
+**native connected-account email sync**: a user connects their Gmail, and messages
+to/from any known Person auto-log onto that Person's timeline. So manual outreach is
+captured with no build, as long as the recipient exists as a Person (which the
+backfill guarantees). Keep the two channels distinct: bulk sends come in as
+Touchpoints we push (SES is the source of truth for deliverability/suppression);
+manual Gmail threads come in via Twenty's own sync. They sit side by side on the
+timeline and don't conflict, because manual Gmail never touches the SES suppression
+list.
+
+### 9.6 Direction and ownership
 
 Email eligibility stays **owned by BetterCricket** (SES + the suppression list are
 the source of truth, legally too, under the Spam Act). Twenty only ever *reflects*
@@ -379,12 +516,13 @@ up `/srv/docker/twenty/db` before the first migration run. None of this touches 
 | Phase | Deliverable | Depends on |
 |---|---|---|
 | **0. Hardening** | Fix compose secrets (§10), create API key + webhook in Settings, set `TWENTY_*` env in backend | — |
-| **1. Model bootstrap** | `scripts/bootstrap_twenty.py`: Touchpoint object, all custom fields, pipeline stages (idempotent, re-runnable) | Phase 0 |
-| **2. Backfill** | `twenty_client` + one-shot push of 6,500 Companies and ~20,000 People, build `twenty_links` | Phase 1 |
+| **1. Model bootstrap** | `scripts/bootstrap_twenty.py`: Touchpoint + Association (+ optional Email) objects, all custom fields, the Company↔Association and Company↔Person relations, pipeline stages (idempotent, re-runnable) | Phase 0 |
+| **2. Backfill** | `twenty_client` + one-shot push of ~677 Associations, 6,500 Companies (with association links) and ~20,000 People, build `twenty_links` | Phase 1 |
 | **3. Incremental push** | `club_engagement` rollup + scheduled/event push of subscription, modules, score, Opportunities, Touchpoints | Phase 2 |
 | **4. Comms / SES bridge** | Hook `export_to_comms` (→ Contacted + Touchpoint) and `ses_events.ingest_ses_event` (→ per-send Touchpoints, lifecycle updates, suppression mirror to Person) (§9) | Phase 2 |
-| **5. Webhook write-back** | `POST /public/twenty/webhook` with HMAC verify + pipeline side effects | Phase 2 |
-| **6. Activate intelligence** | Twenty Workflows (score-driven tasks/stage moves) + Dashboards (pipeline, engagement, module interest, email deliverability) | Phases 3–5 |
+| **5. List-from-Twenty** | `POST /club-admin/comms/list-from-twenty` + the BetterComms "Build List from a Twenty view" pull action (Trigger B), then the Twenty workflow push (Trigger A) (§9.4) | Phase 4 |
+| **6. Webhook write-back** | `POST /public/twenty/webhook` with HMAC verify + pipeline side effects | Phase 2 |
+| **7. Activate intelligence** | Twenty Workflows (score-driven tasks/stage moves) + Dashboards (pipeline, engagement, module interest, email deliverability) | Phases 3–6 |
 
 ## 12. Open decisions
 
@@ -397,3 +535,9 @@ up `/srv/docker/twenty/db` before the first migration run. None of this touches 
 - **Customer success as a second pipeline** — keep post-sale on Company fields
   (recommended for v1) or add a second Opportunity record type for renewals
   (revisit once there are paying renewals to manage).
+- **Email as an object vs a field** — model the named bulk Email as its own object
+  (recommended, gives the "everyone who got Email X" view) or just a `campaignName`
+  field on the Touchpoint (lighter, no Email page). §3.8.
+- **List-build trigger** — pull from BetterComms first (Trigger B, works on any
+  Twenty version), then add the in-Twenty workflow button (Trigger A) once the
+  workflow HTTP action is confirmed on the installed version. §9.4.
