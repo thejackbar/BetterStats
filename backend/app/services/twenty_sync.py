@@ -359,22 +359,28 @@ async def _sync_memberships(session, http, club_guid, club_name, assocs, company
         stats["memberships_" + act] += 1
 
 
-async def mark_contact_source(email: str, source: str) -> None:
-    """Set a Person's Contact source to ``source`` (WEBSITE / BETTERCOMMS_EMAIL /
-    MANUAL_EMAIL) when they make contact through that channel. Most-recent-channel-
-    wins, so this just writes the channel of the event that fired it (last write).
-    Best-effort: a CRM hiccup must never break the public flow that triggers it,
-    and a person not in the CRM is a silent no-op."""
-    if not client.configured or not email:
+async def update_person_by_email(email: str, fields: dict) -> None:
+    """Best-effort update of a Person matched by their unique email with arbitrary
+    Twenty fields (contact source, subscribed/bounced flags, last campaign, …).
+    No-op if Twenty isn't configured or the person isn't in the CRM, and never
+    raises into the caller — used from public/webhook paths that must not break."""
+    if not client.configured or not email or not fields:
         return
     try:
         async with httpx.AsyncClient() as http:
             person = await client.find_by(http, "people", "emails.primaryEmail",
                                           email.strip().lower())
             if person and person.get("id"):
-                await client.update(http, "people", person["id"], {"contactSource": source})
+                await client.update(http, "people", person["id"], fields)
     except Exception:  # noqa: BLE001 - never let a CRM error affect the caller
-        logger.exception("twenty mark_contact_source failed for %s", email)
+        logger.exception("twenty update_person_by_email failed for %s", email)
+
+
+async def mark_contact_source(email: str, source: str) -> None:
+    """Set a Person's Contact source to ``source`` (WEBSITE / BETTERCOMMS_EMAIL /
+    MANUAL_EMAIL). Most-recent-channel-wins, so it just writes the channel of the
+    event that fired it (last write)."""
+    await update_person_by_email(email, {"contactSource": source})
 
 
 async def export_to_twenty(*, filters: Optional[dict] = None,
