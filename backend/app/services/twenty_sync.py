@@ -229,9 +229,11 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
     h = _hash(values)
     link_row = await _link_get(session, entity_type, bc_id)
     if link_row:
-        tid, old_hash = link_row
-        if old_hash == h:
-            return tid, "unchanged"
+        tid, _old_hash = link_row
+        # Always PATCH — never trust a cached hash to mean "still present". A record
+        # can be deleted in Twenty out-of-band, and only the update round-trip tells
+        # us (404 -> recreate below). Skipping on a matching hash would leave a
+        # deleted record gone forever.
         updated = await client.update(http, plural, tid, values)
         if updated is not None:
             await _link_put(session, entity_type, bc_id, tid, h)
