@@ -222,7 +222,11 @@ carrying that club's `clubRole` / `roleTitle` / `roleRank` / `outreachSelected`.
   the **per-club** detail so club differences are preserved and the "Officer roles"
   view is self-contained: `clubRole` + `roleTitle` (the exact role at that club, e.g.
   "Junior Cricket Coordinator"), `email` and `phone` (that club's contact details,
-  kept even when they differ from the shared Contact's single canonical ones). **Per-club officer views must be built on "Officer roles", not the native
+  kept even when they differ from the shared Contact's single canonical ones).
+- The **Contact** carries a `multiClub` flag + `clubCount`, set from the number of
+  clubs it holds an Officer-role in, so a shared officer is visible at a glance in the
+  Contacts list (the native single Company can't convey it). Updated only when the
+  club set grows, so steady-state re-exports don't re-write it. **Per-club officer views must be built on "Officer roles", not the native
   Contacts list** — a Contact's native `company` is single-valued, so the native list
   can only ever show a shared officer under their one home club.
 - **Matching a shared officer to their existing Contact** can't go through Twenty's

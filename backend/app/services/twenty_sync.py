@@ -704,8 +704,21 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                                         {**off["role"], "personId": pid,
                                                          "companyId": ctid})
                                 stats["officer_roles_" + ract] += 1
-                                logger.info("twenty export:   officer %s -> %s id=%s (role %s)",
-                                            bc_id, pact, pid, ract)
+                                # Track the set of clubs this Contact holds a role in, so
+                                # we can flag a multi-club officer (the native single
+                                # Company can't show it). Only PATCH the flag when the set
+                                # grows, so it costs nothing on steady-state re-exports.
+                                cl_row = await _link_get(session, "person_clubs", pid)
+                                clubs = set(json.loads(cl_row[1]) if cl_row and cl_row[1] else [])
+                                if ctid not in clubs:
+                                    clubs.add(ctid)
+                                    await _link_put(session, "person_clubs", pid, pid,
+                                                    json.dumps(sorted(clubs)))
+                                    await client.update(http, "people", pid,
+                                                        {"multiClub": len(clubs) > 1,
+                                                         "clubCount": len(clubs)})
+                                logger.info("twenty export:   officer %s -> %s id=%s (role %s, %d club(s))",
+                                            bc_id, pact, pid, ract, len(clubs))
                             except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
                                 stats["people_errored"] += 1
                                 logger.exception(

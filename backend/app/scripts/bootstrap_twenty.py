@@ -151,6 +151,10 @@ FIELDS = [
     ("person", "emailsReceived", "Emails received", "NUMBER", None),
     ("person", "country", "Country", "TEXT", None),
     ("person", "lastCampaign", "Last campaign", "TEXT", None),
+    # Multi-club officer: set when a Contact holds an Officer-role in more than one
+    # club (the native single Company can't show that; the flag/count surface it).
+    ("person", "multiClub", "In multiple clubs", "BOOLEAN", None),
+    ("person", "clubCount", "Club count", "NUMBER", None),
     # ---- Opportunity ----
     ("opportunity", "bcOpportunityKey", "BC Opportunity key", "TEXT", None),
     ("opportunity", "modulesInScope", "Modules in scope", "MULTI_SELECT", MODULE_OPTS),
