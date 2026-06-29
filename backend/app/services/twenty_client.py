@@ -14,7 +14,9 @@ many-to-one relation is set with ``<fieldName>Id``.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -22,6 +24,20 @@ import httpx
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+class TwentyApiError(Exception):
+    """A Twenty REST error carrying the response body, so logs show which field
+    Twenty rejected (raise_for_status alone only gives the status code)."""
+
+
+def _raise(r: httpx.Response, method: str, plural: str):
+    try:
+        detail = r.json()
+    except Exception:
+        detail = {"text": (r.text or "")[:200]}
+    raise TwentyApiError(f"{method} /rest/{plural} -> {r.status_code}: "
+                         f"{json.dumps(detail)[:400]}")
 
 
 def _record(payload: dict):
@@ -69,7 +85,8 @@ class TwentyClient:
     async def create(self, http: httpx.AsyncClient, plural: str, values: dict) -> dict:
         r = await http.post(f"{self.base}/rest/{plural}", headers=self._headers,
                             json=values, timeout=30)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            _raise(r, "POST", plural)
         return _record(r.json())
 
     async def update(self, http: httpx.AsyncClient, plural: str, record_id: str,
@@ -81,7 +98,8 @@ class TwentyClient:
                              headers=self._headers, json=values, timeout=30)
         if r.status_code == 404:
             return None
-        r.raise_for_status()
+        if r.status_code >= 400:
+            _raise(r, "PATCH", plural)
         return _record(r.json())
 
     async def find_by(self, http: httpx.AsyncClient, plural: str, field: str,
@@ -116,14 +134,36 @@ def link(url: Optional[str], label: Optional[str] = None) -> Optional[dict]:
     return {"primaryLinkUrl": url, "primaryLinkLabel": label or ""}
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def emails_value(raw: Optional[str]) -> Optional[dict]:
+    """A Twenty EMAILS value from a messy directory field — Twenty 400s on a
+    malformed or whitespace-padded address. Splits on common separators and
+    returns the first token that is a valid single email, else None (so the
+    person is created without an email rather than failing)."""
+    if not raw:
+        return None
+    for part in re.split(r"[\s,;/]+", str(raw).strip()):
+        p = part.strip().strip(".,;<>()")
+        if _EMAIL_RE.match(p):
+            return {"primaryEmail": p.lower()}
+    return None
+
+
 def phone(number: Optional[str], country: str = "AU", calling: str = "+61") -> Optional[dict]:
+    """A Twenty PHONES value from a messy directory field — Twenty 400s on an
+    invalid number (e.g. two numbers mashed together). Splits on explicit
+    separators only (NOT spaces, which appear inside one number), and returns the
+    first part whose digits are a plausible phone length, else None."""
     if not number:
         return None
-    n = "".join(ch for ch in str(number) if ch.isdigit() or ch == "+")
-    if not n:
-        return None
-    return {"primaryPhoneNumber": n, "primaryPhoneCountryCode": country,
-            "primaryPhoneCallingCode": calling}
+    for tok in re.split(r"[/;,|]| or | and |&", str(number), flags=re.I):
+        digits = "".join(ch for ch in tok if ch.isdigit())
+        if 7 <= len(digits) <= 15:
+            return {"primaryPhoneNumber": digits, "primaryPhoneCountryCode": country,
+                    "primaryPhoneCallingCode": calling}
+    return None
 
 
 def full_name(name: Optional[str]) -> dict:

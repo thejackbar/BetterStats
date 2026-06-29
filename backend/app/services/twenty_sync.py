@@ -26,7 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
 from app.services.club_directory import club_filters
-from app.services.twenty_client import client, currency, full_name, link, phone
+from app.services.twenty_client import (client, currency, emails_value, full_name,
+                                        link, phone)
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +169,12 @@ def _person_values(ct: MarketingClubContact, company_twenty_id: Optional[str],
         "country": club_country,        # an officer inherits their club's country
         "companyId": company_twenty_id,
     }
-    if ct.email:
-        vals["emails"] = {"primaryEmail": ct.email}
-    if ct.mobile:
-        vals["phones"] = phone(ct.mobile)
+    ev = emails_value(ct.email)
+    if ev:
+        vals["emails"] = ev
+    ph = phone(ct.mobile)
+    if ph:
+        vals["phones"] = ph
     if ct.role:
         vals["jobTitle"] = ct.role          # the raw role into Twenty's standard Job title
     src = (ct.source or "").upper()
@@ -416,9 +419,13 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                         await _sync_memberships(session, http, snap["guid"], snap["name"],
                                                 snap["assocs"], ctid, assoc_cache, stats)
                         for bc_id, pvals in snap["people"]:
-                            _, pact = await _upsert(session, http, "person", bc_id, "people",
-                                                    "bcContactId", {**pvals, "companyId": ctid})
-                            stats["people_" + pact] += 1
+                            try:
+                                _, pact = await _upsert(session, http, "person", bc_id, "people",
+                                                        "bcContactId", {**pvals, "companyId": ctid})
+                                stats["people_" + pact] += 1
+                            except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
+                                stats["people_errored"] += 1
+                                logger.exception("twenty export: officer %s failed", bc_id)
                         await session.commit()
                     except Exception:  # noqa: BLE001 - one bad club must not abort the run
                         errors += 1
