@@ -321,6 +321,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_utm_code "
             "ON marketing_clubs(utm_code)"))
+        # Visit→club resolution also probes organisations by slug (the path-slug
+        # branch); the only lookup key on that path that wasn't indexed (migration 121).
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_organisations_slug ON organisations(slug)"))
         # Twenty CRM integration: membership ledger mapping a BetterCricket entity
         # (club / person / association) to its Twenty record id. A row exists only
         # for the targeted subset exported to Twenty, so it doubles as "what's in

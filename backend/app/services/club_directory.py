@@ -701,9 +701,9 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
     if visited:
         # Only clubs where someone has visited the public site from a link tagged
         # with this club's UTM code — resolved through utm_code matches AND manual
-        # aliases (see the note above club_visit_stats). Safe SQL: only fixed table
-        # names, never client input.
-        conds.append(text(_visit_exists_sql("marketing_clubs")))
+        # aliases (see the note above club_visit_stats). One-pass set membership (not
+        # a per-club correlated EXISTS). Safe SQL: only fixed table names, never input.
+        conds.append(text(_visited_in_sql("marketing_clubs")))
     if person:
         p = f"%{person.lower()}%"
         conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
@@ -1387,26 +1387,17 @@ _RESOLVED_VISITS = (
     "FROM usage_events ue WHERE ue.event_type = 'page_view'"
 )
 
-# The correlated form, for an EXISTS against an outer `marketing_clubs` row —
-# used by the directory list filter and the dashboard count. ``{mc}`` is the
-# outer table/alias name.
-def _visit_exists_sql(mc: str = "marketing_clubs") -> str:
-    return (
-        "EXISTS (SELECT 1 FROM usage_events ue "
-        "LEFT JOIN marketing_utm_aliases ua_i ON ua_i.utm_value = ue.utm_id "
-        "                                    AND ua_i.marketing_club_id IS NOT NULL "
-        "LEFT JOIN marketing_utm_aliases ua_s ON ua_s.utm_value = ue.utm_source "
-        "                                    AND ua_s.marketing_club_id IS NOT NULL "
-        f"LEFT JOIN marketing_utm_aliases ua_p ON ua_p.utm_value = {_PATH_CODE} "
-        "                                    AND ua_p.marketing_club_id IS NOT NULL "
-        "WHERE ue.event_type = 'page_view' AND ("
-        f"ue.utm_id = {mc}.utm_code OR ue.utm_source = {mc}.utm_code "
-        f"OR ua_i.marketing_club_id = {mc}.id OR ua_s.marketing_club_id = {mc}.id "
-        f"OR ua_p.marketing_club_id = {mc}.id "
-        f"OR ({_PATH_CODE} <> '' AND {_PATH_CODE} = {mc}.utm_code) "
-        f"OR ({_PATH_CODE} <> '' AND EXISTS (SELECT 1 FROM organisations o "
-        f"     WHERE o.id = {mc}.existing_org_id AND o.slug = {_PATH_CODE}))))"
-    )
+# Single-pass form for the directory "visited" filter + the dashboard count.
+# Resolve every page_view to ONE club (the same single-attribution priority the
+# visit stats use), then keep clubs that are some visit's resolved club. This is a
+# set membership test evaluated ONCE for the whole query, replacing a correlated
+# EXISTS that re-scanned usage_events for every candidate club (and that used the
+# broader any-overlap attribution, so a single visit could mark several colliding
+# clubs visited — out of step with the per-club stats). ``{mc}`` is the outer
+# table/alias. The resolution probes are all indexed: marketing_clubs(utm_code),
+# marketing_utm_aliases(utm_value) UNIQUE, organisations(slug).
+def _visited_in_sql(mc: str = "marketing_clubs") -> str:
+    return f"{mc}.id::text IN (SELECT v.cid FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL)"
 
 
 async def club_visit_stats(session: AsyncSession, club_ids: list) -> dict:
@@ -1587,7 +1578,7 @@ async def directory_stats(session: AsyncSession) -> dict:
     emailed = await session.scalar(
         select(func.count(MarketingClub.id)).where(MarketingClub.emailed_at.isnot(None))) or 0
     visited = await session.scalar(text(
-        "SELECT COUNT(*) FROM marketing_clubs mc WHERE " + _visit_exists_sql("mc"))) or 0
+        f"SELECT COUNT(DISTINCT v.cid) FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL")) or 0
     distinct_assoc = await session.scalar(
         select(func.count(func.distinct(MarketingClub.association_guid)))
         .where(MarketingClub.association_guid.isnot(None))) or 0

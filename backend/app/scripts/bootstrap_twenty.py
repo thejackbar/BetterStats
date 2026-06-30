@@ -115,6 +115,10 @@ FIELDS = [
      _options(["Cold", "Warm", "Hot", "Not interested"])),
     ("company", "lastSeenAt", "Last seen at", "DATE_TIME", None),
     ("company", "sessions30d", "Sessions (30d)", "NUMBER", None),
+    # Ever visited the public site (all-time) + the date of the last web visit, so a
+    # View can filter on "has visited the site" rather than the 30-day session count.
+    ("company", "hasVisitedSite", "Has visited site", "BOOLEAN", None),
+    ("company", "lastWebVisitAt", "Last web visit", "DATE_TIME", None),
     ("company", "emailEngaged30d", "Email opens/clicks (30d)", "NUMBER", None),
     ("company", "lastEmailAt", "Last email engagement", "DATE_TIME", None),
     # Modules the club wants but isn't paying for — a prospect's interest or a

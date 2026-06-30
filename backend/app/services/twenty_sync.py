@@ -237,9 +237,15 @@ async def _engagement(session, club: MarketingClub,
         "emailEngaged30d": eng_30d,
         "upsellModules": _modules(upsell),
         "inSalesCycle": in_cycle,
+        # Ever visited the public site (all-time, not the 30-day session count) so a
+        # CRM View can filter "has visited the site". `last_web` is MAX(created_at) of
+        # web activity attributed by utm_id or org id — the primary attribution path.
+        "hasVisitedSite": bool(last_web),
     }
     if last_touch:
         fields["lastSeenAt"] = last_touch.isoformat()
+    if last_web:
+        fields["lastWebVisitAt"] = last_web.isoformat()
     if last_email:
         fields["lastEmailAt"] = last_email.isoformat()
     return fields
