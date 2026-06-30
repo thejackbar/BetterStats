@@ -171,22 +171,30 @@ def _grid_from_layouts(layouts: list[str], source: str) -> dict | None:
         parsed = _parse_page(layout)
         if not parsed:
             continue
-        for idx, label in parsed["labels"].items():
-            if label and label not in columns:
+        # Fall back to a generic column name when a header was blank or OCR missed it,
+        # so the column's data still comes through for the admin to label in review
+        # (an empty header used to silently drop the whole column).
+        page_labels: dict[int, str] = {}
+        for idx in parsed["labels"]:
+            label = parsed["labels"][idx] or f"Column {idx + 1}"
+            page_labels[idx] = label
+            if label not in columns:
                 columns.append(label)
         for row in parsed["rows"]:
             for idx, text in row["cells"].items():
-                label = parsed["labels"].get(idx, "")
+                label = page_labels.get(idx) or f"Column {idx + 1}"
                 name = _clean(text)
-                if name and label:
+                if name:
                     out_rows.append({"season": row["season"], "label": label, "player_name": name})
     if not out_rows:
         return None
     warnings: list[str] = []
     if source == "ocr":
         warnings.append(
-            "Read by OCR from a scanned or photographed board, so check the names and "
-            "spellings carefully before importing."
+            "Read by OCR from a photo or scan, so check the names, seasons and columns "
+            "before importing. A column whose heading couldn't be read is shown as "
+            "'Column N' for you to label. For a clean import, export the board to PDF from "
+            "Word, Excel or Google Sheets, or use the CSV template."
         )
     return {
         "available": True,
@@ -209,36 +217,109 @@ def _ocr_available() -> bool:
         return False
 
 
-def _layout_from_words(words: list[dict]) -> str:
-    """Rebuild a monospace layout string from OCR word boxes.
+def _clean_token(text: str) -> str:
+    """Strip OCR'd table rules from a word so grid lines don't corrupt the cell.
 
-    Scales each word's x position by a page-wide pixels-per-character estimate, so a
-    normal word gap stays a single space and a column gap grows to the 2+ spaces
-    `_cells` needs to split columns. That lets OCR output reuse the same parser as the
+    A bordered table (the common honour-board look) makes Tesseract read the vertical
+    rules as ``|`` and the horizontal ones as ``_``/dashes, often glued to a real word
+    ("Camarda_|") or standing alone ("_|"). We turn internal pipes into spaces and trim
+    rule characters off the ends, keeping real hyphens inside names (Westphal-Groves).
+    A token left with no letter or digit is pure rule noise and is dropped.
+    """
+    t = (text or "").replace("|", " ")
+    t = re.sub(r"\s+", " ", t).strip()
+    t = t.strip("_│─—–•· ")  # box-draw, underscores, bullets, em/en dashes
+    if not re.search(r"[A-Za-z0-9]", t):
+        return ""
+    return t
+
+
+def _detect_columns(boxes: list[dict], min_gap: float) -> list[list[float]]:
+    """Find table columns by projection profile.
+
+    Merge every word's horizontal span [left, right]; a gutter wider than `min_gap`
+    that no word crosses separates two columns. Unlike clustering word left-edges,
+    this keeps a multi-word cell ("Steve Camarda") in one column because the words sit
+    flush against each other, while still cutting on the real whitespace gutter before
+    the next column. Works for bordered and borderless boards alike.
+    """
+    spans = sorted((w["left"], w["left"] + max(w.get("width", 1), 1)) for w in boxes)
+    cols: list[list[float]] = []
+    for lo, hi in spans:
+        if cols and lo - cols[-1][1] < min_gap:
+            cols[-1][1] = max(cols[-1][1], hi)
+        else:
+            cols.append([lo, hi])
+    return cols
+
+
+def _layout_from_words(words: list[dict]) -> str:
+    """Rebuild an aligned monospace layout string from OCR word boxes.
+
+    Detect columns by the whitespace gutters between them (`_detect_columns`), drop each
+    word into the column its centre falls in, then lay the columns out at fixed character
+    offsets with a clear gap. That guarantees the 2+ space column separation `_cells`
+    needs regardless of OCR spacing jitter, and reuses the same downstream parser as the
     PDF text layer.
     """
     import statistics
-    boxes = [w for w in words if (w.get("text") or "").strip()]
+    boxes = [w for w in words if _clean_token(w.get("text", ""))]
     if not boxes:
         return ""
-    widths = [w["width"] / max(len(w["text"].strip()), 1) for w in boxes if w.get("width", 0) > 0]
-    ppc = max(statistics.median(widths) if widths else 8.0, 1.0)
+
+    char_widths = [w["width"] / max(len(w["text"].strip()), 1) for w in boxes if w.get("width", 0) > 0]
+    char_w = max(statistics.median(char_widths) if char_widths else 8.0, 1.0)
+    # A column gutter is wider than a normal inter-word space (~0.3 char); 1.5 chars
+    # cleanly clears word spacing without merging genuinely separate columns.
+    cols = _detect_columns(boxes, char_w * 1.5)
+
+    centres = [(lo + hi) / 2 for lo, hi in cols]
+
+    def col_of(w: dict) -> int:
+        c = w["left"] + max(w.get("width", 1), 1) / 2
+        for i, (lo, hi) in enumerate(cols):
+            if lo <= c <= hi:
+                return i
+        return min(range(len(centres)), key=lambda i: abs(c - centres[i]))
 
     lines: dict = {}
     for w in boxes:
         lines.setdefault(w["line"], []).append(w)
     ordered = sorted(lines.values(), key=lambda ws: min(x["top"] for x in ws))
 
-    out_lines = []
+    # First pass: place each line's words into columns; measure each column's width.
+    rows_cells: list[dict[int, str]] = []
+    colw = [0] * len(cols)
     for ws in ordered:
-        buf = ""
+        cells: dict[int, str] = {}
         for w in sorted(ws, key=lambda x: x["left"]):
-            col = int(round(w["left"] / ppc))
-            if col > len(buf):
-                buf += " " * (col - len(buf))
-            elif buf and not buf.endswith(" "):
-                buf += " "
-            buf += w["text"].strip()
+            tok = _clean_token(w.get("text", ""))
+            if not tok:
+                continue
+            ci = col_of(w)
+            cells[ci] = f"{cells[ci]} {tok}" if ci in cells else tok
+        if not cells:
+            continue
+        rows_cells.append(cells)
+        for ci, tok in cells.items():
+            colw[ci] = max(colw[ci], len(tok))
+
+    # Second pass: emit columns at consistent start offsets so the grid stays aligned.
+    GAP = 3
+    starts, acc = [0] * len(cols), 0
+    for ci in range(len(cols)):
+        starts[ci] = acc
+        acc += colw[ci] + GAP
+
+    out_lines = []
+    for cells in rows_cells:
+        buf = ""
+        for ci in sorted(cells):
+            if starts[ci] > len(buf):
+                buf += " " * (starts[ci] - len(buf))
+            elif buf and not buf.endswith("  "):
+                buf += "  "
+            buf += cells[ci]
         out_lines.append(buf)
     return "\n".join(out_lines)
 
