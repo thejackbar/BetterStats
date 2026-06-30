@@ -49,6 +49,19 @@ FIELD_LABELS = {
     "gender": "Gender",
 }
 
+# Display labels for the controlled-vocabulary fields — the exact values offered
+# as dropdowns in the Excel template. They mirror frontend/src/lib/playerAttributes.js
+# (ROLE_OPTS / BAT_HANDS / BOWLING_OPTS / GENDER_OPTS) and all normalise cleanly
+# back to our codes (norm_role / norm_batting_hand / norm_bowling / norm_gender).
+ROLE_VALUES = ["Batter", "Bowler", "All Rounder", "Wicketkeeper", "Wicketkeeper-Batter"]
+BATTING_VALUES = ["Right handed", "Left handed"]
+BOWLING_VALUES = [
+    "Right-arm fast", "Right-arm fast-medium", "Right-arm medium",
+    "Off spin", "Leg spin",
+    "Left-arm fast", "Left-arm medium", "Left-arm orthodox", "Left-arm wrist spin",
+]
+GENDER_VALUES = ["Male", "Female"]
+
 # Lower-cased, punctuation-normalised header synonyms for auto-mapping. The
 # wizard always lets the user confirm/override, so a near miss is cheap.
 SYNONYMS = {

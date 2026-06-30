@@ -478,3 +478,86 @@ async def template(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="player_profiles_template.csv"'},
     )
+
+
+@router.get("/template.xlsx")
+async def template_xlsx(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """An Excel version of the template with **dropdowns** on the fixed-choice
+    columns (Role, Batting, Bowling, Gender) and the club's BetterSelect squads in
+    the Squad column, so the optional fields are filled by picking rather than
+    typing. A plain CSV can't carry dropdowns, so this is the Excel companion to
+    template.csv. Dropdowns suggest but don't force — you can still type a value
+    (e.g. a brand-new squad to create), and the importer normalises either way."""
+    import openpyxl
+    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    # The club's selection-pool squads (BetterSelect teams) for the Squad dropdown.
+    teams = (await db.execute(
+        select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))
+    )).scalars().all()
+    squad_names = [t.name for t in sorted(teams, key=lambda t: (t.sequence or 0, (t.name or "").lower()))]
+
+    headers = ["Name", "Email", "Phone", "Squad", "Role", "Batting", "Bowling", "Gender"]
+    examples = [
+        ["Smith, John", "john.smith@example.com", "0412 345 678",
+         (squad_names[0] if squad_names else "1st XI"), "All Rounder", "Right handed", "Right-arm fast-medium", "Male"],
+        ["Patel, Anjali", "anjali.patel@example.com", "0423 456 789",
+         (squad_names[1] if len(squad_names) > 1 else "Women's 1st XI"), "Batter", "Left handed", "", "Female"],
+    ]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Players"
+    ws.append(headers)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for row in examples:
+        ws.append(row)
+    ws.freeze_panes = "A2"
+    for i, width in enumerate([22, 28, 16, 22, 20, 16, 22, 10], start=1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+
+    # A hidden "Lists" sheet holds the dropdown values; the main sheet references
+    # them by range (sidesteps the 255-char inline-list limit and keeps it tidy).
+    lists = wb.create_sheet("Lists")
+    header_col = {h: i + 1 for i, h in enumerate(headers)}
+    dropdowns = {
+        "Squad": squad_names,
+        "Role": prof.ROLE_VALUES,
+        "Batting": prof.BATTING_VALUES,
+        "Bowling": prof.BOWLING_VALUES,
+        "Gender": prof.GENDER_VALUES,
+    }
+    MAX_ROW = 1000
+    list_col = 1
+    for header, values in dropdowns.items():
+        if not values:
+            continue
+        letter = get_column_letter(list_col)
+        lists.cell(row=1, column=list_col, value=header)
+        for ri, v in enumerate(values, start=2):
+            lists.cell(row=ri, column=list_col, value=v)
+        dv = DataValidation(
+            type="list", formula1=f"Lists!${letter}$2:${letter}${len(values) + 1}", allow_blank=True,
+        )
+        dv.showErrorMessage = False  # suggest the list but still allow a typed value
+        ws.add_data_validation(dv)
+        pcol = get_column_letter(header_col[header])
+        dv.add(f"{pcol}2:{pcol}{MAX_ROW}")
+        list_col += 1
+    lists.sheet_state = "hidden"
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="player_profiles_template.xlsx"'},
+    )

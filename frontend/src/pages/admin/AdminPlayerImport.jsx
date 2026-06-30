@@ -207,7 +207,7 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
         <h2 className="font-display font-semibold text-lg text-pb-text mb-1">Match players</h2>
         <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
           Exact name matches link automatically. Confirm the close ones, and decide what to do with any name we
-          don't recognise — create a new player, point it at an existing one, or skip it. Skipped and unconfirmed
+          don't recognise: create a new player, point it at an existing one, or skip it. Skipped and unconfirmed
           rows are left out of the import.
         </p>
         {loading && rows.length === 0 ? (
@@ -226,7 +226,7 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
 
             {active === 'matched' && (
               <p className="text-[12px] text-green-300 mb-3">
-                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched a player exactly — nothing to do unless one looks wrong.
+                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched a player exactly, so there's nothing to do unless one looks wrong.
               </p>
             )}
             {active === 'close' && buckets.close.length > 0 && (
@@ -241,7 +241,7 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
             )}
             {active === 'nomatch' && buckets.nomatch.length > 0 && (
               <div className="flex items-center gap-3 mb-3 flex-wrap">
-                <p className="text-[12px] text-pb-faint">No player like this exists. These are <span className="text-pb-faint">skipped</span> by default — create them as new players, or pick an existing one.</p>
+                <p className="text-[12px] text-pb-faint">No player like this exists. These are <span className="text-pb-faint">skipped</span> by default. Create them as new players, or pick an existing one.</p>
                 <button onClick={() => bulkNomatch('__new__')} className="ml-auto font-mono text-[10px] tracking-wide2 border border-pb-accent/40 text-pb-accent rounded px-3 py-1.5 hover:bg-pb-accent/10">CREATE ALL NEW</button>
                 <button onClick={() => bulkNomatch('__skip__')} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text">SKIP ALL</button>
               </div>
@@ -314,7 +314,7 @@ function SquadMatch({ rows, allTeams, overrides, setOverride, loading, onNext, o
         <h2 className="font-display font-semibold text-lg text-pb-text mb-1">Match squads</h2>
         <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
           Each squad name in your file maps to a selection-pool team. Exact names link automatically; pick a team for
-          the rest, create a new one, or leave it unset. Squad is optional — anything left unset just won't change.
+          the rest, create a new one, or leave it unset. Squad is optional, so anything left unset just won't change.
         </p>
         {loading && rows.length === 0 ? (
           <div className="py-10 text-center"><PbSpinner message="Matching squads…" /></div>
@@ -438,19 +438,19 @@ function ReviewStep({ resolved, resolving, committing, committed, onCommit, onBa
           })}
           {resolving && preview.length === 0 && <div className="py-8 text-center"><PbSpinner message="Working out changes…" /></div>}
           {!resolving && changing.length === 0 && unchanged.length === 0 && (
-            <div className="py-4 text-center text-pb-dim text-[12px]">No matched players yet — go back and match some names.</div>
+            <div className="py-4 text-center text-pb-dim text-[12px]">No matched players yet. Go back and match some names.</div>
           )}
           {!resolving && changing.length === 0 && unchanged.length > 0 && !showUnchanged && (
-            <div className="py-4 text-center text-pb-dim text-[12px]">Every matched player is already up to date — nothing to change.</div>
+            <div className="py-4 text-center text-pb-dim text-[12px]">Every matched player is already up to date, so there's nothing to change.</div>
           )}
         </div>
         {changing.length > 400 && (
-          <p className="font-mono text-[10px] text-pb-faintest mt-2">Showing the first 400 of {changing.length} — all will be imported.</p>
+          <p className="font-mono text-[10px] text-pb-faintest mt-2">Showing the first 400 of {changing.length}. All will be imported.</p>
         )}
 
         {(resolved?.notes || []).length > 0 && (
           <details className="mt-4">
-            <summary className="font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer">{resolved.notes.length} cell(s) couldn't be read — left unchanged</summary>
+            <summary className="font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer">{resolved.notes.length} cell(s) couldn't be read, left unchanged</summary>
             <ul className="mt-2 text-[11px] text-pb-faint space-y-0.5">
               {resolved.notes.map((n, i) => <li key={i}>· {n}</li>)}
             </ul>
@@ -565,7 +565,7 @@ export default function AdminPlayerImport() {
         <Link to="/admin/players" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← PLAYERS</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Import player details</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed max-w-3xl">
-          Upload a spreadsheet to fill in players' contact details in bulk — mainly email and phone, plus optional
+          Upload a spreadsheet to fill in players' contact details in bulk. Mainly email and phone, plus optional
           squad, role, batting hand, bowling and gender. We match each row to a player by name (the same smart
           matching used across the site) and show you exactly what will change before anything is saved.
         </p>
@@ -605,8 +605,11 @@ export default function AdminPlayerImport() {
               </button>
             </div>
             <p className="font-mono text-[10px] text-pb-faintest mt-3">
-              One row per player, a Name column plus whichever details you have. Headers can be anything — we map them next.{' '}
-              <a href="/api/club-admin/player-import/template.csv" className="text-pb-accent hover:underline">Download a template</a>.
+              One row per player, a Name column plus whichever details you have. Headers can be anything, we map them next.{' '}
+              Start from a template:{' '}
+              <a href="/api/club-admin/player-import/template.xlsx" className="text-pb-accent hover:underline">Excel with dropdowns</a>
+              {' '}(Role, Batting, Bowling, Gender and your BetterSelect squads are pick lists){' '}or{' '}
+              <a href="/api/club-admin/player-import/template.csv" className="text-pb-accent hover:underline">plain CSV</a>.
             </p>
           </div>
         )}
@@ -628,7 +631,7 @@ export default function AdminPlayerImport() {
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
                   <span className="inline-block w-2.5 h-2.5 rounded-sm bg-pb-text/80 border pb-hairline"></span>your column
                 </span>
-                <span className="text-pb-faintest text-[10px] sm:ml-1">Only Name is required — map whichever details you have, leave the rest blank.</span>
+                <span className="text-pb-faintest text-[10px] sm:ml-1">Only Name is required. Map whichever details you have and leave the rest blank.</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {FIELDS.map(([f, label, required]) => (
@@ -640,7 +643,7 @@ export default function AdminPlayerImport() {
             <div className="flex items-center gap-3">
               {!mapReady && <span className="font-mono text-[10px] text-pb-red/70">Map the Player name column to continue.</span>}
               {mapReady && mappedValueFields.length === 0 && (
-                <span className="font-mono text-[10px] text-pb-amber">Map at least one detail column (e.g. Email) — otherwise there's nothing to import.</span>
+                <span className="font-mono text-[10px] text-pb-amber">Map at least one detail column (e.g. Email), otherwise there's nothing to import.</span>
               )}
               <button onClick={() => setStep('players')} disabled={!mapReady}
                 className="ml-auto px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
