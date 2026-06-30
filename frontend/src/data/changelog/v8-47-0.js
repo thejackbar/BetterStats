@@ -1,7 +1,7 @@
 export default {
-  version: 'v8.46.0',
+  version: 'v8.47.0',
   date: '2026-06-30',
-  sortKey: '2026-06-30T14:00:00Z',
+  sortKey: '2026-06-30T15:00:00Z',
   title: 'Usage Breadcrumbs: search, Meta ad tracking and a mobile pass',
   items: [
     'You can now search the breadcrumbs. Type a page path or a UTM (for example utm_campaign=spring, /pricing, applecross or fbclid) and the whole Analytics section filters to match, so you can track how a campaign or a page is being used. Quick chips cover the common ones.',
