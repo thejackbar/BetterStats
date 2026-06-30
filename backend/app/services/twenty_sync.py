@@ -69,6 +69,34 @@ def _modules(keys) -> list:
     return [str(k).upper() for k in (keys or []) if k]
 
 
+# The Company module multi-selects in Twenty only allow the seven ENTITLEMENT keys
+# (SELECT/SOCIALS/FEES/COMMS/MERCH/IQ/FANTASY — see bootstrap_twenty.MODULE_OPTS).
+# Marketing trial/interest lists use the BILLING key 'admin' (BetterAdmin) and can
+# carry 'core', neither of which is a valid option — sending them 400s the upsert.
+# Normalise to the valid set: expand admin -> its members, drop core/unknown.
+_TWENTY_MODULE_KEYS = frozenset({"select", "socials", "fees", "comms", "merch", "iq", "fantasy"})
+_ADMIN_MEMBERS = ("fees", "comms", "merch")
+
+
+def _expand_modules(keys) -> set:
+    """Module keys (which may include the billing key 'admin' or 'core') -> the set of
+    valid Twenty entitlement keys (lowercase)."""
+    out: set = set()
+    for k in (keys or []):
+        kk = str(k).lower().strip()
+        if kk == "admin":
+            out.update(_ADMIN_MEMBERS)
+        elif kk in _TWENTY_MODULE_KEYS:
+            out.add(kk)
+        # 'core' and anything unrecognised are dropped (not Twenty options)
+    return out
+
+
+def _twenty_modules(keys) -> list:
+    """The MULTI_SELECT-safe, uppercase module list for Twenty."""
+    return sorted(k.upper() for k in _expand_modules(keys))
+
+
 def _club_kind(name: Optional[str]) -> str:
     n = (name or "").lower()
     if "carnival" in n:
@@ -198,9 +226,8 @@ async def _engagement(session, club: MarketingClub,
 
     # Modules the club wants but isn't paying for = the open opportunity (a prospect's
     # interest, or a customer's expansion / trialing-extra). Drives the upsell signal.
-    paid = {str(k).lower() for k in ((org.module_overrides if org else None) or [])}
-    wanted = {str(k).lower() for k in (club.requested_trial_modules or [])} | \
-             {str(k).lower() for k in (club.trial_modules or [])}
+    paid = _expand_modules((org.module_overrides if org else None) or [])
+    wanted = _expand_modules(club.requested_trial_modules or []) | _expand_modules(club.trial_modules or [])
     upsell = sorted(wanted - paid)
 
     freq_pts = min(sessions * 6 + eng_30d * 4, 40)
@@ -235,7 +262,7 @@ async def _engagement(session, club: MarketingClub,
         "engagementTier": tier,
         "sessions30d": sessions,
         "emailEngaged30d": eng_30d,
-        "upsellModules": _modules(upsell),
+        "upsellModules": _twenty_modules(upsell),
         "inSalesCycle": in_cycle,
         # Ever visited the public site (all-time, not the 30-day session count) so a
         # CRM View can filter "has visited the site". `last_web` is MAX(created_at) of
@@ -263,8 +290,8 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
         "bcClubId": club.grassroots_guid,
         "lifecycleStage": _lifecycle(club),
         "subscriptionStatus": _sub_status(club),
-        "trialModules": _modules(club.trial_modules),
-        "interestedModules": _modules(club.requested_trial_modules),
+        "trialModules": _twenty_modules(club.trial_modules),
+        "interestedModules": _twenty_modules(club.requested_trial_modules),
         "clubKind": _club_kind(club.name),
         "clubState": club.state,
         "country": club.country,
@@ -283,10 +310,10 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
         # org-wide flag. The org-level status stays a master switch — paused/cancelled
         # there means nothing is live, so paidModules is empty and ARR is $0.
         paid, trial, renewals = _module_split(org)
-        vals["paidModules"] = _modules(paid)
+        vals["paidModules"] = _twenty_modules(paid)
         vals["arr"] = currency(_arr(paid))
         if trial:
-            vals["trialModules"] = sorted(set(vals.get("trialModules") or []) | set(_modules(trial)))
+            vals["trialModules"] = sorted(set(vals.get("trialModules") or []) | set(_twenty_modules(trial)))
         if org.billing_cycle:
             vals["billingCycle"] = org.billing_cycle.upper()
         # The next renewal across paid modules (each module now renews on its own
