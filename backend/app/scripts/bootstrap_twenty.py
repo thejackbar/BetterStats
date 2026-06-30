@@ -61,17 +61,16 @@ def _options(labels):
              "position": i} for i, l in enumerate(labels)]
 
 
-MODULES = ["BetterSelect", "BetterSocials", "BetterFees", "BetterComms",
-           "BetterMerch", "BetterIQ", "BetterFantasyCricket"]
-# value/label: keep the value as the canonical module key the backend uses.
+# The BILLABLE modules — what a club can actually pay for or trial. BetterFees,
+# BetterComms and BetterMerch are never sold/trialed individually; they're the
+# BetterAdmin umbrella, so Twenty shows one "BetterAdmin" (ADMIN) value, not the
+# three. value = the billing key the backend sends (see twenty_sync._twenty_modules).
 MODULE_OPTS = [
     {"label": "BetterSelect", "value": "SELECT", "color": "purple", "position": 0},
     {"label": "BetterSocials", "value": "SOCIALS", "color": "yellow", "position": 1},
-    {"label": "BetterFees", "value": "FEES", "color": "green", "position": 2},
-    {"label": "BetterComms", "value": "COMMS", "color": "sky", "position": 3},
-    {"label": "BetterMerch", "value": "MERCH", "color": "orange", "position": 4},
-    {"label": "BetterIQ", "value": "IQ", "color": "blue", "position": 5},
-    {"label": "BetterFantasyCricket", "value": "FANTASY", "color": "pink", "position": 6},
+    {"label": "BetterAdmin", "value": "ADMIN", "color": "green", "position": 2},
+    {"label": "BetterIQ", "value": "IQ", "color": "blue", "position": 3},
+    {"label": "BetterFantasyCricket", "value": "FANTASY", "color": "pink", "position": 4},
 ]
 
 OBJECTS = [

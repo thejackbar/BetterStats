@@ -69,32 +69,31 @@ def _modules(keys) -> list:
     return [str(k).upper() for k in (keys or []) if k]
 
 
-# The Company module multi-selects in Twenty only allow the seven ENTITLEMENT keys
-# (SELECT/SOCIALS/FEES/COMMS/MERCH/IQ/FANTASY — see bootstrap_twenty.MODULE_OPTS).
-# Marketing trial/interest lists use the BILLING key 'admin' (BetterAdmin) and can
-# carry 'core', neither of which is a valid option — sending them 400s the upsert.
-# Normalise to the valid set: expand admin -> its members, drop core/unknown.
-_TWENTY_MODULE_KEYS = frozenset({"select", "socials", "fees", "comms", "merch", "iq", "fantasy"})
-_ADMIN_MEMBERS = ("fees", "comms", "merch")
+# Twenty represents modules at the BILLABLE level: BetterAdmin is ONE module, so its
+# members (fees/comms/merch — never sold or trialed on their own) collapse into
+# 'admin'. core (always-on) and anything unrecognised are dropped. Result set:
+# select / socials / admin / iq / fantasy (see bootstrap_twenty.MODULE_OPTS).
+_ADMIN_MEMBERS = frozenset({"fees", "comms", "merch"})
+_BILLABLE_KEYS = frozenset({"select", "socials", "iq", "fantasy"})
 
 
-def _expand_modules(keys) -> set:
-    """Module keys (which may include the billing key 'admin' or 'core') -> the set of
-    valid Twenty entitlement keys (lowercase)."""
+def _billing_modules(keys) -> set:
+    """Module keys (entitlement or billing) -> the set of Twenty billable module values
+    (lowercase). fees/comms/merch -> admin; core/unknown dropped."""
     out: set = set()
     for k in (keys or []):
         kk = str(k).lower().strip()
-        if kk == "admin":
-            out.update(_ADMIN_MEMBERS)
-        elif kk in _TWENTY_MODULE_KEYS:
+        if kk in _ADMIN_MEMBERS or kk == "admin":
+            out.add("admin")
+        elif kk in _BILLABLE_KEYS:
             out.add(kk)
-        # 'core' and anything unrecognised are dropped (not Twenty options)
+        # 'core' and anything unrecognised are dropped (not Twenty paid/trial options)
     return out
 
 
 def _twenty_modules(keys) -> list:
-    """The MULTI_SELECT-safe, uppercase module list for Twenty."""
-    return sorted(k.upper() for k in _expand_modules(keys))
+    """The MULTI_SELECT-safe, uppercase billable-module list for Twenty."""
+    return sorted(k.upper() for k in _billing_modules(keys))
 
 
 def _club_kind(name: Optional[str]) -> str:
@@ -226,8 +225,8 @@ async def _engagement(session, club: MarketingClub,
 
     # Modules the club wants but isn't paying for = the open opportunity (a prospect's
     # interest, or a customer's expansion / trialing-extra). Drives the upsell signal.
-    paid = _expand_modules((org.module_overrides if org else None) or [])
-    wanted = _expand_modules(club.requested_trial_modules or []) | _expand_modules(club.trial_modules or [])
+    paid = _billing_modules((org.module_overrides if org else None) or [])
+    wanted = _billing_modules(club.requested_trial_modules or []) | _billing_modules(club.trial_modules or [])
     upsell = sorted(wanted - paid)
 
     freq_pts = min(sessions * 6 + eng_30d * 4, 40)
