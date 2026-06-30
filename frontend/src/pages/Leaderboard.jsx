@@ -354,7 +354,7 @@ function FieldingTable({ rows, sortBy, fmt = n => n }) {
 
 export default function Leaderboard() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
   usePageMeta({
@@ -362,8 +362,6 @@ export default function Leaderboard() {
     description: club?.name ? `Top batting, bowling, and fielding statistics for ${club.name}.` : null,
     image: club?.logo_url || null,
   })
-
-  if (inactive) return <ClubInactive />
 
   const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
 
@@ -455,6 +453,8 @@ export default function Leaderboard() {
     }).finally(() => setSirsLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, mainTab])
 
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
   const currentSeason = seasons?.find(s => s.id === selectedSeason)

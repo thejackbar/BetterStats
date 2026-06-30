@@ -233,7 +233,7 @@ function getRowHighlights(values, higher) {
 
 export default function PlayerComparison() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
 
@@ -318,7 +318,8 @@ export default function PlayerComparison() {
   const hasEnough      = selectedPlayers.length >= 2
   const excludeIds     = selectedPlayers.map(p => p.id)
 
-  if (inactive) return <ClubInactive />
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">

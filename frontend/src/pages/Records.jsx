@@ -543,11 +543,9 @@ const TABS = [
 
 export default function Records() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
-
-  if (inactive) return <ClubInactive />
 
   const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
 
@@ -579,6 +577,8 @@ export default function Records() {
       .finally(() => setLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender])
 
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
   const latestSeason = seasons?.[0]?.name || null

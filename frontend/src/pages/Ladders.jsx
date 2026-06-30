@@ -27,7 +27,7 @@ function gradeNav(slug, seasonId, gradeId, gradeName) {
 
 export default function Ladders() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
 
   const { seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade } = useClubData(orgId)
@@ -55,7 +55,8 @@ export default function Ladders() {
     api.laddersGrade(selectedGrade).then(setGrade).catch(() => setGrade(null))
   }, [selectedGrade])
 
-  if (inactive) return <ClubInactive />
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 
   // Wrap a single grade response into the board's item shape so we reuse LadderBoard.
   const gradeAsBoard = grade && grade !== 'loading'

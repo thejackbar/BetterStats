@@ -236,7 +236,7 @@ const PERF_TABS = [
 
 export default function TeamDetail() {
   const { clubSlug, gradeId } = useParams()
-  const { club, loading: clubLoading, inactive } = useClub(clubSlug)
+  const { club, loading: clubLoading, inactive, notFound } = useClub(clubSlug)
   const orgId = club?.id
   const fmtName = useNameFormat(club)
 
@@ -277,8 +277,9 @@ export default function TeamDetail() {
       : `Team — ${club?.name || clubSlug}`,
   })
 
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading || loading) return <PbSpinner />
-  if (inactive) return <ClubInactive />
 
   // Win/Loss/Draw from results
   const wins   = results.filter(g => g.result === 'WIN').length

@@ -85,15 +85,13 @@ function GradeSection({ gradeName, games }) {
 
 export default function GamesPage() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   usePageMeta({
     title: club?.name ? `${club.name} Games — BetterCricket` : null,
     description: club?.name ? `Match results for ${club.name}.` : null,
     image: club?.logo_url || null,
   })
-
-  if (inactive) return <ClubInactive />
 
   const {
     seasons, grades,
@@ -160,6 +158,8 @@ export default function GamesPage() {
   const currentSeason = seasons?.find(s => s.id === selectedSeason)
   const seasonLabel = currentSeason?.name || 'ALL SEASONS'
 
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
   return (

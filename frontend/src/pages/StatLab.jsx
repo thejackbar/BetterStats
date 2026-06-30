@@ -1064,7 +1064,7 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
 
 export default function StatLab() {
   const { clubSlug, reportSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   const { org, seasons, loading: clubLoading } = useClubData(orgId)
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -1177,8 +1177,6 @@ export default function StatLab() {
     const p = encodeQueryToParams(query)
     setSearchParams(p, { replace: true })
   }, [query, reportSlug, setSearchParams])
-
-  if (inactive) return <ClubInactive />
 
   const runQuery = useCallback(async (overrideQuery, overrideDerived = undefined, page = 1) => {
     if (!orgId) return
@@ -1344,6 +1342,8 @@ export default function StatLab() {
     }
   }, [refreshReports, openReport, navigate, clubSlug])
 
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading || !schema) return <PbSpinner message="Loading…" />
 
   const canSave = !!user && user.club_id === orgId

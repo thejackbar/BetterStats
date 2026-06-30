@@ -19,7 +19,9 @@ async function request(path, options = {}) {
     } else {
       detail = `HTTP ${res.status}`
     }
-    throw new Error(detail)
+    const error = new Error(detail)
+    error.status = res.status
+    throw error
   }
   // 204 No Content (DELETE endpoints) and any empty 2xx body have nothing to
   // parse, so return null instead of letting res.json() throw "Unexpected end
