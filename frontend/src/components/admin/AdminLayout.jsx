@@ -36,6 +36,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/admin/games', label: 'Matches', cap: null },
       { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
+      { to: '/admin/players/import', label: 'Import Players', cap: CAP.MANAGE_PLAYERS },
       { to: '/admin/seasons', label: 'Seasons', cap: null },
     ],
   },

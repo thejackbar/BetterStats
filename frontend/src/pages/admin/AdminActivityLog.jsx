@@ -10,6 +10,7 @@ const ACTION_LABELS = {
   merge_seasons: 'Merged seasons',
   undo_merge_seasons: 'Undid season merge',
   patch_settings: 'Updated club settings',
+  player_profile_import: 'Imported player details',
 }
 
 const ACTION_COLOURS = {
@@ -20,6 +21,7 @@ const ACTION_COLOURS = {
   undo_merge_grades: 'var(--pb-amber, #f59e0b)',
   undo_merge_seasons: 'var(--pb-amber, #f59e0b)',
   patch_settings: 'var(--pb-dim)',
+  player_profile_import: 'var(--pb-accent)',
 }
 
 function fmtTime(iso) {
@@ -69,6 +71,14 @@ function DetailLine({ entry }) {
       return (
         <span className="text-pb-dim text-sm">
           Changed: {(d.changed_fields || []).join(', ') || '(no fields)'}
+        </span>
+      )
+    case 'player_profile_import':
+      return (
+        <span className="text-pb-dim text-sm">
+          {d.updated || 0} updated{d.created ? `, ${d.created} created` : ''}
+          {d.fields_written ? ` · ${d.fields_written} field${d.fields_written === 1 ? '' : 's'} set` : ''}
+          {d.filename ? ` · ${d.filename}` : ''}
         </span>
       )
     default:

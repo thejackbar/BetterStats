@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { nameMatchesSearch, formatPlayerName, joinDisplayName, nameSortKey } from '../../lib/nameFormat'
@@ -341,6 +342,15 @@ export default function AdminPlayers() {
           </div>
           <div className="flex items-center gap-3">
             {msg && <span className="font-mono text-[11px] tracking-wide2" style={{ color: 'var(--pb-accent)' }}>{msg.toUpperCase()}</span>}
+            {canEdit && (
+              <Link
+                to="/admin/players/import"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-display font-semibold text-[13.5px] text-pb-text border border-pb-hairline hover:border-pb-accent"
+                title="Bulk-fill emails, phones and more from a spreadsheet"
+              >
+                <Icon name="sheet" size={16} /> Import CSV
+              </Link>
+            )}
             <button
               onClick={() => { setShowCreate(v => !v); setCreateMsg('') }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-display font-semibold text-[13.5px] text-pb-bg"
