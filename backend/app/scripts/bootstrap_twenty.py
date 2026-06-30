@@ -313,6 +313,31 @@ def main():
             print(f"field   ERR {s} {obj}.{name} ({ftype}) {json.dumps(r)[:200]}")
     print(f"fields: created={created} skipped={skipped} errored={errored}")
 
+    # 2b. reconcile SELECT / MULTI_SELECT options on EXISTING fields — adding an
+    # option to the FIELDS spec only takes effect on a field created this run, so an
+    # existing field (e.g. engagementTier gaining "Not interested") needs its options
+    # PATCHed. Merge (keep current options, append the missing ones) so no value a
+    # record already uses is removed.
+    for obj, name, label, ftype, options in FIELDS:
+        if ftype not in ("SELECT", "MULTI_SELECT") or not options:
+            continue
+        o = by_name.get(obj)
+        fld = next((f for f in (o.get("fields", []) if o else []) if f["name"] == name), None)
+        if not fld:
+            continue  # newly created this run -> already has the options
+        cur = fld.get("options") or []
+        cur_vals = {c.get("value") for c in cur}
+        missing = [op for op in options if op["value"] not in cur_vals]
+        if not missing:
+            continue
+        merged = [dict(op) for op in (list(cur) + missing)]
+        for i, op in enumerate(merged):
+            op["position"] = i
+        s, r = _api("PATCH", f"/rest/metadata/fields/{fld['id']}", {"options": merged})
+        print(f"options {'ok' if s in (200, 201) else 'ERR ' + str(s):<7} "
+              f"{obj}.{name} +{[m['value'] for m in missing]} "
+              f"{('' if s in (200, 201) else json.dumps(r)[:200])}")
+
     # 3. pipeline stages on opportunity.stage
     opp = by_name.get("opportunity")
     stage = next((f for f in opp.get("fields", []) if f["name"] == "stage"), None) if opp else None
