@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -97,7 +98,10 @@ const ChevronIcon = () => (
 )
 
 function ContactForm() {
-  const [fields, setFields] = useState(EMPTY_FIELDS)
+  const [searchParams] = useSearchParams()
+  const prefillClub = searchParams.get('club')
+  const [fields, setFields] = useState(() =>
+    prefillClub ? { ...EMPTY_FIELDS, club: prefillClub } : EMPTY_FIELDS)
   const [errors, setErrors] = useState({})
   const [status, setStatus] = useState('idle') // idle | submitting | success | error
 

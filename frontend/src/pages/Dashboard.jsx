@@ -97,7 +97,7 @@ function MilestonesSection({ milestones, loading }) {
 
 export default function Dashboard() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
 
@@ -169,7 +169,8 @@ export default function Dashboard() {
       .finally(() => setFixturesLoading(false))
   }, [orgId])
 
-  if (inactive) return <ClubInactive />
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (loading) return <PbSpinner message="Loading club data…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
   if (!org) return null

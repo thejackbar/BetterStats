@@ -27,7 +27,7 @@ function PlayerStat({ label, value, accent }) {
 
 export default function Players() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading: clubLoading } = useClubData(orgId)
@@ -70,7 +70,8 @@ export default function Players() {
     return players.filter(p => nameMatchesSearch(p.display_name || p.name, search))
   }, [players, search])
 
-  if (inactive) return <ClubInactive />
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading players…" />
 
   return (

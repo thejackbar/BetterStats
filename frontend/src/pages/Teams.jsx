@@ -10,7 +10,7 @@ import { formatSeason } from '../lib/cricketFormat'
 
 export default function Teams() {
   const { clubSlug } = useParams()
-  const { club, loading: clubLoading, inactive } = useClub(clubSlug)
+  const { club, loading: clubLoading, inactive, notFound } = useClub(clubSlug)
   const orgId = club?.id
 
   const [seasons, setSeasons] = useState([])
@@ -43,7 +43,8 @@ export default function Teams() {
   }, [orgId, selectedSeason])
 
   if (clubLoading) return <PbSpinner />
-  if (inactive) return <ClubInactive />
+  if (inactive) return <ClubInactive slug={clubSlug} />
+  if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 
   const selectedSeasonObj = seasons.find(s => s.id === selectedSeason)
 
