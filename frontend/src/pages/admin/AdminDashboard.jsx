@@ -20,7 +20,7 @@ function ModuleName({ name }) {
   return <span className="font-display font-bold text-lg">{name}</span>
 }
 
-function ModuleTile({ mod, entitled }) {
+function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRequest }) {
   const brand = moduleBrand(mod.key)
   // Scope the module's accent colour to this tile only — every var(--pb-accent)
   // inside (the name suffix, arrow, tint, border) becomes the module colour.
@@ -78,6 +78,35 @@ function ModuleTile({ mod, entitled }) {
       <div className="text-pb-faintest text-xs mt-2">
         Available as an add-on. <Link to="/pricing" className="underline hover:text-pb-faint">See pricing</Link>.
       </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {pendingKind ? (
+          <span className="font-mono text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
+            {pendingKind === 'subscribe' ? 'Subscription requested' : 'Trial requested'} — pending review
+          </span>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={requesting}
+              onClick={() => onRequest('trial')}
+              className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border transition-colors disabled:opacity-50"
+              style={{ color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' }}
+            >
+              {requesting ? '…' : 'Request trial'}
+            </button>
+            {canSubscribe && (
+              <button
+                type="button"
+                disabled={requesting}
+                onClick={() => onRequest('subscribe')}
+                className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+              >
+                Request to subscribe
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -86,11 +115,29 @@ export default function AdminDashboard() {
   const { user, hasModule } = useAuth()
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
+  const [myRequests, setMyRequests] = useState([])
+  const [requesting, setRequesting] = useState('')
 
   useEffect(() => {
     api.adminGetSettings().then(setSettings).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
+    api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
   }, [])
+
+  // Raise a trial / subscription request for a billable module (BetterAdmin covers
+  // fees + comms + merch as one). Queued for a super admin to action.
+  const requestModule = async (moduleKey, kind) => {
+    setRequesting(moduleKey)
+    try {
+      await api.requestModule(moduleKey, kind)
+      const d = await api.listMyModuleRequests()
+      setMyRequests(Array.isArray(d) ? d : [])
+    } catch {
+      // best-effort; the locked tile just stays requestable
+    } finally {
+      setRequesting('')
+    }
+  }
 
   const isSuper = user?.role === 'super_admin'
   const activeModules = user?.entitlements?.modules || []
@@ -151,13 +198,22 @@ export default function AdminDashboard() {
         {/* Better modules — entitled tiles open; locked tiles upsell. */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-          {dashboardTiles().map(tile => (
-            <ModuleTile
-              key={tile.key}
-              mod={tile}
-              entitled={tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key))}
-            />
-          ))}
+          {dashboardTiles().map(tile => {
+            // tile.key is the billable module key (BetterAdmin = 'admin'), so a
+            // request for the group is one request, not one per member.
+            const pending = myRequests.find(r => r.status === 'outstanding' && r.module_key === tile.key)
+            return (
+              <ModuleTile
+                key={tile.key}
+                mod={tile}
+                entitled={tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key))}
+                pendingKind={pending?.kind}
+                canSubscribe={!!user?.is_primary_admin}
+                requesting={requesting === tile.key}
+                onRequest={(kind) => requestModule(tile.key, kind)}
+              />
+            )
+          })}
         </div>
 
         {/* Core admin quick links */}

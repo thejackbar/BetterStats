@@ -1913,6 +1913,100 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_fantasy_h2h_fixtures_league ON fantasy_h2h_fixtures(league_id, round_no)"
         ))
+        # Per-module subscriptions + Club General Settings + primary admin
+        # (migration 118) — defensive idempotent mirror so the API boots even if
+        # alembic lags. Backfill matches the migration: one row per held module
+        # inheriting the club's current org-wide status + renewal.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS general_settings JSONB NOT NULL DEFAULT '{}'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_memberships ADD COLUMN IF NOT EXISTS is_primary_admin BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_membership_primary "
+            "ON club_memberships(club_id) WHERE is_primary_admin"
+        ))
+        await conn.execute(text("""
+            UPDATE club_memberships m
+            SET is_primary_admin = true
+            FROM (
+                SELECT DISTINCT ON (club_id) id
+                FROM club_memberships
+                WHERE role = 'club_admin'
+                ORDER BY club_id, created_at ASC, id ASC
+            ) first
+            WHERE m.id = first.id
+              AND NOT EXISTS (
+                SELECT 1 FROM club_memberships x
+                WHERE x.club_id = m.club_id AND x.is_primary_admin
+              )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_module_subscriptions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                module_key TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                trial_started_at TIMESTAMPTZ,
+                trial_ends_at TIMESTAMPTZ,
+                renewal_date DATE,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_org_module UNIQUE (organisation_id, module_key)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_org_module_subscriptions_org "
+            "ON org_module_subscriptions(organisation_id)"
+        ))
+        await conn.execute(text("""
+            INSERT INTO org_module_subscriptions
+                (organisation_id, module_key, status, renewal_date, started_at, created_at, updated_at)
+            SELECT
+                o.id,
+                m.module_key,
+                CASE WHEN o.subscription_status IN ('active','trial','past_due')
+                     THEN o.subscription_status ELSE 'active' END,
+                o.renewal_date,
+                NOW(), NOW(), NOW()
+            FROM organisations o
+            CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(o.module_overrides, '[]'::jsonb)) AS m(module_key)
+            WHERE m.module_key IN ('select','socials','fees','iq','comms','merch','fantasy')
+            ON CONFLICT (organisation_id, module_key) DO NOTHING
+        """))
+        # Module action requests — the super-admin trial/subscription queue
+        # (migration 119). Defensive idempotent mirror.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS module_action_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                module_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'outstanding',
+                source TEXT NOT NULL DEFAULT 'app',
+                note TEXT,
+                requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                completed_at TIMESTAMPTZ,
+                result_subscription_id UUID REFERENCES org_module_subscriptions(id) ON DELETE SET NULL,
+                external_ref TEXT
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_module_action_requests_status "
+            "ON module_action_requests(status, requested_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_module_action_requests_org "
+            "ON module_action_requests(organisation_id)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_module_action_external_ref "
+            "ON module_action_requests(external_ref) WHERE external_ref IS NOT NULL"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

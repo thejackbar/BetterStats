@@ -140,6 +140,19 @@ export const MODULE_TOGGLES = [
   { key: 'fantasy', label: 'BetterFantasyCricket', modules: ['fantasy'] },
 ]
 
+// Display name for a billable module key (BetterAdmin = the fees/comms/merch
+// umbrella). Mirrors the backend BILLABLE_MODULE_NAMES; covers the member keys too.
+export const BILLABLE_MODULE_NAME = {
+  select: 'BetterSelect',
+  socials: 'BetterSocials',
+  admin: 'BetterAdmin',
+  iq: 'BetterIQ',
+  fantasy: 'BetterFantasyCricket',
+  fees: 'BetterFees',
+  comms: 'BetterComms',
+  merch: 'BetterMerch',
+}
+
 // Subscription statuses — keep in sync with backend ALL_STATUSES /
 // ACTIVE_STATUSES. `live` = entitlements stay active for that status.
 export const SUBSCRIPTION_STATUSES = [

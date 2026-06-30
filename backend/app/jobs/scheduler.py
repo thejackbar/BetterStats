@@ -125,6 +125,21 @@ async def crawl_marketing_clubs():
             logger.error(f"Marketing club crawl failed: {e}")
 
 
+async def sweep_module_trials():
+    """Refresh the held-modules cache for any club whose module trial has passed
+    its end, so the synchronous gate drops it even where the per-module rows aren't
+    eager-loaded (the loaded gate already expires it read-time). Idempotent."""
+    from app.services import module_subscriptions
+    async with async_session_maker() as session:
+        try:
+            affected = await module_subscriptions.sweep_expired_trials(session)
+            if affected:
+                logger.info(f"Module trial sweep: refreshed {len(affected)} club(s)")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Module trial sweep failed: {e}")
+
+
 # Hold a reference to the continuous-crawl task so it isn't garbage-collected.
 _marketing_continuous_task: "asyncio.Task | None" = None
 
@@ -191,6 +206,16 @@ def start_scheduler():
         trigger="interval",
         minutes=15,
         id="fantasy_draft_tick",
+        replace_existing=True,
+    )
+    # Per-module subscriptions — sweep expired trials daily so the held-modules
+    # cache drops a lapsed trial for the synchronous gate too.
+    scheduler.add_job(
+        sweep_module_trials,
+        trigger="cron",
+        hour=1,
+        minute=30,
+        id="daily_module_trial_sweep",
         replace_existing=True,
     )
     # BetterCricket outreach — crawl the national club directory. Two modes, both

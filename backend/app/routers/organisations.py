@@ -93,6 +93,10 @@ async def onboard_organisation(
             membership.club_id = org.id
         else:
             db.add(ClubMembership(club_id=org.id, user_id=current_user.id, role="club_admin"))
+        await db.flush()
+        # The first admin of a club is its primary/owner admin.
+        from app.services.memberships import ensure_primary_admin
+        await ensure_primary_admin(db, org.id)
         await db.commit()
 
     return {

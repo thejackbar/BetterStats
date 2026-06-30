@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 import bcrypt as _bcrypt
 from jose import JWTError, jwt
@@ -101,11 +102,14 @@ async def get_current_club(
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
     eff_id = _effective_club_id(membership, current_user)
-    club = await db.get(Organisation, eff_id) if eff_id else None
+    # Eager-load per-module subscriptions so the entitlement gate enforces
+    # read-time trial expiry exactly (see app/auth/modules.py).
+    _opts = [selectinload(Organisation.module_subscriptions)]
+    club = await db.get(Organisation, eff_id, options=_opts) if eff_id else None
     # A dangling active_club_id (e.g. the acted-as club was deleted) falls back
     # to the staff member's home membership club rather than 403-ing them out.
     if club is None and eff_id != membership.club_id:
-        club = await db.get(Organisation, membership.club_id)
+        club = await db.get(Organisation, membership.club_id, options=_opts)
     if not club:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club not found")
     return club
@@ -199,7 +203,12 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
 
     home_club = await db.get(Organisation, membership.club_id) if membership else None
     eff_id = _effective_club_id(membership, current_user)
-    club = await db.get(Organisation, eff_id) if eff_id else None
+    # Eager-load per-module subscriptions so entitlement_summary can return each
+    # module's status / renewal / trial end (and apply read-time trial expiry).
+    club = await db.get(
+        Organisation, eff_id,
+        options=[selectinload(Organisation.module_subscriptions)],
+    ) if eff_id else None
     # active_club_id may dangle (acted-as club deleted) — fall back to home.
     if club is None and membership is not None:
         club = home_club
@@ -227,6 +236,10 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         "home_club_id": str(membership.club_id) if membership else None,
         "home_club_name": home_club.name if home_club else None,
         "acting_as_club": acting,
+        # The club's primary/owner admin gate: only the primary may request a paid
+        # module subscription (any club_admin may request a trial). True for a super
+        # admin so the UI never blocks them.
+        "is_primary_admin": bool(is_super or (membership and getattr(membership, "is_primary_admin", False))),
     }
 
 

@@ -173,9 +173,25 @@ class Organisation(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
+    # ─── Club General Settings (migration 118) ───────────────────────────────
+    # Extensible per-club settings blob, super-admin managed (matches the
+    # theme_config / net_settings precedent). First key: default_trial_days (int,
+    # defaults to 14 when absent) — the trial length prefilled when a module trial
+    # is requested/started for this club. Grows with more settings over time.
+    general_settings = Column(JSONB, nullable=False, server_default="{}", default=dict)
+
     seasons = relationship("Season", back_populates="organisation")
     players = relationship("Player", back_populates="organisation")
     memberships = relationship("ClubMembership", back_populates="club")
+    # ─── Per-module subscription state (migration 118) ───────────────────────
+    # The source of truth for which modules a club holds and each module's own
+    # status / renewal / trial window. module_overrides is kept in sync as a
+    # denormalised "currently-held" cache for the fast synchronous gate; see
+    # app/auth/modules.py.
+    module_subscriptions = relationship(
+        "OrgModuleSubscription", back_populates="organisation",
+        cascade="all, delete-orphan",
+    )
 
 
 class Sponsor(Base):
@@ -347,10 +363,76 @@ class ClubMembership(Base):
     # role". For super_admin/club_admin the list is ignored (those roles
     # imply all caps). For club_member, this is the explicit allowlist.
     capabilities = Column(JSONB, default=list, nullable=False, server_default="[]")
+    # The club's primary / owner admin (migration 118). The first club_admin
+    # created for a club is primary; it's reassignable to another club_admin (by
+    # the current primary or a super admin). Only the primary may request a paid
+    # module subscription (financial authority gate); any club_admin may request a
+    # trial. At most one true per club (partial unique index uq_membership_primary).
+    is_primary_admin = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     club = relationship("Organisation", back_populates="memberships")
     user = relationship("User", back_populates="memberships")
+
+
+class OrgModuleSubscription(Base):
+    """Per-module subscription state for a club (migration 118).
+
+    One row per club × module that the club holds or is trialing. This is the
+    source of truth for entitlement; ``organisations.module_overrides`` is kept in
+    sync as a denormalised currently-held cache for the fast synchronous gate (see
+    app/auth/modules.py). The org-level ``organisations.subscription_status`` is a
+    whole-account master switch above these rows: paused/cancelled there drops the
+    club to Core only regardless of per-module state.
+
+    ``status`` mirrors the org-level vocabulary (active / trial / past_due /
+    paused / cancelled). A trial is live only while ``now <= trial_ends_at`` —
+    expiry is evaluated on read, so a trial lapses on its own with no scheduler.
+    """
+    __tablename__ = "org_module_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "module_key", name="uq_org_module"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    module_key = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, server_default="active", default="active")
+    trial_started_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    trial_ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    renewal_date = Column(Date, nullable=True)
+    started_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    organisation = relationship("Organisation", back_populates="module_subscriptions")
+
+
+class ModuleActionRequest(Base):
+    """A request to change a club's module entitlement, actioned by a super admin
+    (migration 119). A request never changes entitlement on its own — it queues an
+    action. ``kind`` is trial / subscribe / cancel; ``source`` records where it came
+    from (app / super_admin / twenty). The super admin actions it from the queue;
+    completing a trial request creates the trial (``result_subscription_id``).
+
+    Mirrors the ClubOnboardingRequest pattern (super-admin actionable, lifecycle +
+    source + timestamps). ``external_ref`` dedupes a Twenty-origin request.
+    """
+    __tablename__ = "module_action_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    module_key = Column(Text, nullable=False)
+    kind = Column(Text, nullable=False)                 # trial | subscribe | cancel
+    status = Column(Text, nullable=False, server_default="outstanding", default="outstanding")  # outstanding | completed | dismissed
+    source = Column(Text, nullable=False, server_default="app", default="app")  # app | super_admin | twenty
+    note = Column(Text, nullable=True)
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    requested_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    result_subscription_id = Column(UUID(as_uuid=True), ForeignKey("org_module_subscriptions.id", ondelete="SET NULL"), nullable=True)
+    external_ref = Column(Text, nullable=True)          # dedupe key for a Twenty-origin request
 
 
 class Season(Base):
