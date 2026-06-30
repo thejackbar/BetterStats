@@ -7,6 +7,7 @@ campaign (the existing send pipeline), and download a CSV.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
@@ -312,12 +313,54 @@ class ExportTwentyBody(BaseModel):
     limit: Optional[int] = None
 
 
+# A Twenty export against the CRM's 100/min rate limit takes minutes for a big
+# filter — far longer than the nginx proxy timeout — so it runs in the background and
+# the UI polls /export-twenty/status. One at a time (overlapping runs compounded the
+# rate-limiting). State is in-process: a worker restart mid-run loses it, so a run
+# older than this is treated as stale and a new one is allowed.
+_EXPORT_STALE_SECS = 30 * 60
+_twenty_export: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "result": None, "error": None,
+}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _export_stale() -> bool:
+    if not _twenty_export["running"] or not _twenty_export["started_at"]:
+        return False
+    try:
+        started = datetime.fromisoformat(_twenty_export["started_at"])
+        return (datetime.now(timezone.utc) - started).total_seconds() > _EXPORT_STALE_SECS
+    except Exception:
+        return True
+
+
+async def _export_twenty_bg(filters: dict, scope: str, selected_only: bool, limit):
+    try:
+        res = await twenty_sync.export_to_twenty(
+            filters=filters, contact_scope=scope, selected_only=selected_only, limit=limit)
+        _twenty_export["result"], _twenty_export["error"] = res, None
+    except Exception as e:  # noqa: BLE001 — never let a CRM error wedge the runner
+        _twenty_export["result"], _twenty_export["error"] = None, str(e)
+    finally:
+        _twenty_export["running"] = False
+        _twenty_export["finished_at"] = _now_iso()
+
+
 @router.post("/export-twenty")
-async def export_twenty(body: ExportTwentyBody, db: AsyncSession = Depends(get_db),
+async def export_twenty(body: ExportTwentyBody, background: BackgroundTasks,
+                        db: AsyncSession = Depends(get_db),
                         _=Depends(require_super_admin)):
-    """Push the currently-filtered directory subset into Twenty CRM (Companies +
-    Associations + People). Idempotent — re-running upserts and skips unchanged
-    records. Excluded clubs are always skipped."""
+    """Kick off pushing the currently-filtered directory subset into Twenty CRM
+    (Companies + Associations + People) in the background and return immediately;
+    poll /export-twenty/status for progress + the result. Idempotent — re-running
+    upserts and skips unchanged records. Excluded clubs are always skipped."""
+    if _twenty_export["running"] and not _export_stale():
+        return {"status": "already_running", "started_at": _twenty_export["started_at"]}
     filters = await cd.expand_shortcode(db, _filter_kwargs(
         body.q, body.state, body.association, body.status, body.postcode_from,
         body.postcode_to, body.contact, body.person, body.exclude_junior,
@@ -325,9 +368,16 @@ async def export_twenty(body: ExportTwentyBody, db: AsyncSession = Depends(get_d
         exclude_exported=body.exclude_exported, exclude_suppressed=body.exclude_suppressed,
         visited=body.visited, emailed=body.emailed, countries=body.countries))
     scope = body.contact_scope if body.contact_scope in ("all", "named", "pst") else "all"
-    return await twenty_sync.export_to_twenty(
-        filters=filters, contact_scope=scope, selected_only=body.selected_only,
-        limit=body.limit)
+    _twenty_export.update(running=True, started_at=_now_iso(), finished_at=None,
+                          result=None, error=None)
+    background.add_task(_export_twenty_bg, filters, scope, body.selected_only, body.limit)
+    return {"status": "started"}
+
+
+@router.get("/export-twenty/status")
+async def export_twenty_status(_=Depends(require_super_admin)):
+    """Current/last Twenty export state for the UI poller."""
+    return dict(_twenty_export)
 
 
 @router.post("/refresh-twenty-engagement")

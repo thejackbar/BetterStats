@@ -472,6 +472,7 @@ export const api = {
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
   mktExportTwenty: (payload) =>
     request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
+  mktExportTwentyStatus: () => request('/club-admin/marketing/export-twenty/status'),
   mktRefreshTwentyEngagement: () =>
     request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
   mktSetContactSelected: (contactId, selected) =>

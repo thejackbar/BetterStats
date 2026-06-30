@@ -752,6 +752,17 @@ export default function SuperMarketing() {
   useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
   useEffect(() => { api.mktCountries().then(setCountryOptions).catch(() => {}) }, [])
+  // Re-attach to an in-flight Twenty export if the page was reloaded mid-run.
+  useEffect(() => {
+    api.mktExportTwentyStatus().then((s) => {
+      if (s && s.running) {
+        setBusy('twenty')
+        setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
+        pollTwentyExport().finally(() => setBusy(''))
+      }
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const runCrawl = async () => {
     setBusy('crawl'); setMsg('')
@@ -796,18 +807,39 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const formatTwentyResult = (r) => {
+    const cl = (r.clubs_created || 0) + (r.clubs_updated || 0) + (r.clubs_adopted || 0)
+    const pp = (r.people_created || 0) + (r.people_updated || 0) + (r.people_adopted || 0)
+    let m = `Exported to Twenty: ${r.matched_clubs} club(s) matched, ${cl} club + ${pp} officer record(s) synced`
+    m += (r.clubs_unchanged || r.people_unchanged) ? `, ${(r.clubs_unchanged || 0) + (r.people_unchanged || 0)} unchanged` : ''
+    m += r.errors ? `. ${r.errors} club(s) errored (see logs).` : '.'
+    return m
+  }
+
+  // Poll the background export until it finishes; surfaces the result/error.
+  const pollTwentyExport = async () => {
+    // ~20 min cap at 3s intervals — long exports throttle through Twenty's rate limit.
+    for (let i = 0; i < 400; i++) {
+      await new Promise((res) => setTimeout(res, 3000))
+      let s
+      try {
+        s = await api.mktExportTwentyStatus()
+      } catch { continue } // transient network/poll error — keep waiting
+      if (s.running) continue
+      if (s.error) { setError(s.error); return }
+      if (s.result) { setMsg(formatTwentyResult(s.result)); loadClubs(); return }
+      return // no result and not running — nothing to report
+    }
+    setMsg('Export is still running — check back shortly, then refresh the list.')
+  }
+
   const exportTwenty = async () => {
-    setBusy('twenty'); setMsg('')
+    setBusy('twenty'); setMsg(''); setError('')
     try {
       const r = await api.mktExportTwenty({ ...filters })
       if (r.error) { setError(r.error); return }
-      const cl = (r.clubs_created || 0) + (r.clubs_updated || 0) + (r.clubs_adopted || 0)
-      const pp = (r.people_created || 0) + (r.people_updated || 0) + (r.people_adopted || 0)
-      let m = `Exported to Twenty: ${r.matched_clubs} club(s) matched, ${cl} club + ${pp} officer record(s) synced`
-      m += (r.clubs_unchanged || r.people_unchanged) ? `, ${(r.clubs_unchanged || 0) + (r.people_unchanged || 0)} unchanged` : ''
-      m += r.errors ? `. ${r.errors} club(s) errored (see logs).` : '.'
-      setMsg(m)
-      loadClubs()
+      setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
+      await pollTwentyExport()
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
