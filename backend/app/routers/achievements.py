@@ -8,9 +8,12 @@ import uuid
 import re
 import io
 import csv
+import logging
 
 from app.models.db import get_db
 from app.services.import_ingest import match_players
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/achievements", tags=["achievements"])
 
@@ -809,4 +812,14 @@ async def parse_pdf(
         raise HTTPException(status_code=400, detail="File must be 15 MB or smaller.")
 
     from app.services.awards_pdf import extract_awards_grid, extract_awards_image
-    return extract_awards_grid(content) if is_pdf else extract_awards_image(content)
+    try:
+        return extract_awards_grid(content) if is_pdf else extract_awards_image(content)
+    except Exception:
+        logger.exception("parse_pdf: unexpected failure reading honour board")
+        return {
+            "available": False,
+            "message": (
+                "Something went wrong reading that file. A PDF exported from Word, Excel "
+                "or Google Sheets reads most reliably, or use the CSV template instead."
+            ),
+        }

@@ -74,7 +74,67 @@ function PlayerAutocomplete({ players, value, onChange }) {
   )
 }
 
-function ImportPanel({ orgId, onImported }) {
+// Post-import linker: search the WHOLE player roster (not just the fuzzy
+// candidates) so any name can be linked by hand. Candidate quick-picks stay as
+// one-tap shortcuts when the matcher did find close names.
+function LinkPicker({ players, candidates, initialLabel, onPick }) {
+  const [query, setQuery] = useState(initialLabel || '')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  const filtered = query.trim().length >= 1
+    ? players.filter(p => (p.display_name || p.name).toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8)
+    : []
+
+  const choose = (p) => { const dn = p.display_name || p.name; setQuery(dn); onPick(p.id); setOpen(false) }
+
+  return (
+    <div className="flex-1 min-w-[12rem]">
+      <div ref={ref} className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={e => { setQuery(e.target.value); onPick(null); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search players…"
+          className={`${INPUT_CLS} py-1`}
+        />
+        <Dropdown
+          anchorRef={ref}
+          open={open && filtered.length > 0}
+          onClose={() => setOpen(false)}
+          maxHeight={208}
+          className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll"
+        >
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              onMouseDown={() => choose(p)}
+              className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
+            >
+              {p.display_name || p.name}
+            </button>
+          ))}
+        </Dropdown>
+      </div>
+      {candidates?.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {candidates.map(c => (
+            <button
+              key={c.player_id}
+              onClick={() => { setQuery(c.name); onPick(c.player_id) }}
+              className="font-mono text-[10px] bg-pb-surface border pb-hairline text-pb-dim hover:text-pb-text px-2 py-0.5 rounded"
+            >
+              {c.name}{c.confidence ? ` (${Math.round(c.confidence * 100)}%)` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ImportPanel({ orgId, onImported, players }) {
   const fileRef = useRef(null)
   const [importing, setImporting] = useState(false)
   const [forcing, setForcing] = useState(false)
@@ -152,10 +212,9 @@ function ImportPanel({ orgId, onImported }) {
   }
 
   const handleApplyLinks = async () => {
-    const suggestions = result?.suggested_matches || []
-    const links = suggestions
-      .map(s => ({ player_name: s.name, player_id: linkChoices[s.name] }))
-      .filter(l => l.player_id)
+    const links = Object.entries(linkChoices)
+      .filter(([, id]) => id)
+      .map(([player_name, player_id]) => ({ player_name, player_id }))
     if (!links.length) return
     setLinking(true)
     try {
@@ -164,7 +223,13 @@ function ImportPanel({ orgId, onImported }) {
       setResult(prev => ({
         ...prev,
         suggested_matches: (prev.suggested_matches || []).filter(s => !linkedNames.has(s.name)),
+        unmatched_players: (prev.unmatched_players || []).filter(n => !linkedNames.has(n)),
       }))
+      setLinkChoices(prev => {
+        const next = { ...prev }
+        for (const n of linkedNames) delete next[n]
+        return next
+      })
       onImported()
     } catch (err) {
       setError(err.message || 'Could not link players')
@@ -417,52 +482,41 @@ function ImportPanel({ orgId, onImported }) {
             </div>
           )}
 
-          {result.suggested_matches?.length > 0 && (
-            <div className="mt-3 pt-3 border-t pb-hairline">
-              <p className="font-mono text-[10px] text-pb-amber mb-2">
-                ? {result.suggested_matches.length} name{result.suggested_matches.length !== 1 ? 's need' : ' needs'} confirming. Pick the player, then link.
-              </p>
-              <div className="space-y-1.5 max-h-56 overflow-y-auto pb-scroll">
-                {result.suggested_matches.map(s => (
-                  <div key={s.name} className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[10px] text-pb-text w-40 flex-shrink-0 truncate" title={s.name}>{s.name}</span>
-                    <span className="text-pb-faint">→</span>
-                    <select
-                      className={`${INPUT_CLS} flex-1 min-w-[10rem] py-1`}
-                      value={linkChoices[s.name] || ''}
-                      onChange={e => setLinkChoices(prev => ({ ...prev, [s.name]: e.target.value }))}
-                    >
-                      <option value="">Don't link</option>
-                      {s.candidates.map(c => (
-                        <option key={c.player_id} value={c.player_id}>
-                          {c.name}{c.confidence ? ` (${Math.round(c.confidence * 100)}%)` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
+          {(result.suggested_matches?.length > 0 || result.unmatched_players?.length > 0) && (() => {
+            const toLink = [
+              ...(result.suggested_matches || []).map(s => ({ name: s.name, candidates: s.candidates || [] })),
+              ...(result.unmatched_players || []).map(n => ({ name: n, candidates: [] })),
+            ]
+            return (
+              <div className="mt-3 pt-3 border-t pb-hairline">
+                <p className="font-mono text-[10px] text-pb-amber mb-2">
+                  ? {toLink.length} name{toLink.length !== 1 ? 's' : ''} to link. Search your players and pick the right one, then link. Anything you leave blank still saves with the name typed in.
+                </p>
+                <div className="space-y-2 max-h-72 overflow-y-auto pb-scroll">
+                  {toLink.map(item => (
+                    <div key={item.name} className="flex flex-wrap items-start gap-2">
+                      <span className="font-mono text-[10px] text-pb-text w-40 flex-shrink-0 truncate pt-2" title={item.name}>{item.name}</span>
+                      <span className="text-pb-faint pt-2">→</span>
+                      <LinkPicker
+                        players={players}
+                        candidates={item.candidates}
+                        initialLabel={item.candidates?.[0]?.name || ''}
+                        onPick={id => setLinkChoices(prev => ({ ...prev, [item.name]: id }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handleApplyLinks}
+                  disabled={linking || !Object.values(linkChoices).some(Boolean)}
+                  className="mt-3 px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+                  style={{ background: 'var(--pb-accent)' }}
+                >
+                  {linking ? 'Linking…' : 'Link selected players'}
+                </button>
               </div>
-              <button
-                onClick={handleApplyLinks}
-                disabled={linking || !Object.values(linkChoices).some(Boolean)}
-                className="mt-3 px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
-                style={{ background: 'var(--pb-accent)' }}
-              >
-                {linking ? 'Linking…' : 'Link selected players'}
-              </button>
-            </div>
-          )}
-
-          {result.unmatched_players?.length > 0 && (
-            <div>
-              <p className="text-pb-amber font-mono text-[10px] mt-2">⚠ Player names not matched ({result.unmatched_players.length}) — still saved, can be linked manually</p>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {result.unmatched_players.map(n => (
-                  <span key={n} className="font-mono text-[10px] bg-pb-surface border pb-hairline text-pb-amber px-2 py-0.5 rounded">{n}</span>
-                ))}
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           {dupes.length > 0 && (
             <div className="mt-3 pt-3 border-t pb-hairline">
@@ -916,7 +970,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
         </div>
       </div>
 
-      <ImportPanel orgId={orgId} onImported={load} />
+      <ImportPanel orgId={orgId} onImported={load} players={players} />
 
       {showBulk && (
         <BulkAddPanel orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
