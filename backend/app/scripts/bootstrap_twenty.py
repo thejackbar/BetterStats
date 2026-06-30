@@ -112,7 +112,7 @@ FIELDS = [
     ("company", "interestedModules", "Interested modules", "MULTI_SELECT", MODULE_OPTS),
     ("company", "engagementScore", "Engagement score", "NUMBER", None),
     ("company", "engagementTier", "Engagement tier", "SELECT",
-     _options(["Cold", "Warm", "Hot"])),
+     _options(["Cold", "Warm", "Hot", "Not interested"])),
     ("company", "lastSeenAt", "Last seen at", "DATE_TIME", None),
     ("company", "sessions30d", "Sessions (30d)", "NUMBER", None),
     ("company", "emailEngaged30d", "Email opens/clicks (30d)", "NUMBER", None),

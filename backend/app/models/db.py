@@ -2161,6 +2161,9 @@ class MarketingClub(Base):
     requested_trial_modules = Column(JSONB, nullable=False, server_default="[]", default=list)
     # Demo follow-on state: NULL/'' = no demo; else in_trial | trial_expired | customer.
     demo_status = Column(Text, nullable=True)
+    # Sales disposition: club contacted and explicitly not interested. Manual, and it
+    # overrides the computed engagement tier in the CRM (never auto-recomputed away).
+    not_interested = Column(Boolean, nullable=False, server_default="false", default=False)
     detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)

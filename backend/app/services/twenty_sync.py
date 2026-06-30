@@ -156,6 +156,12 @@ async def _engagement(session, club: MarketingClub,
     email + buying intent); a CUSTOMER (linked org) is scored on account health +
     expansion, never Cold, with the modules they want-but-don't-pay-for surfaced as an
     upsell opportunity so a customer mid-sales-cycle is tracked, not buried at zero."""
+    # "Not interested" is a manual disposition that overrides the computed heat, so it
+    # isn't recomputed away on the next refresh — set it in the Club Directory.
+    if getattr(club, "not_interested", False):
+        return {"engagementScore": 0, "engagementTier": "NOT_INTERESTED",
+                "sessions30d": 0, "emailEngaged30d": 0,
+                "upsellModules": [], "inSalesCycle": False}
     utm = club.utm_code
     org_id = str(club.existing_org_id) if club.existing_org_id else None
     is_customer = org is not None

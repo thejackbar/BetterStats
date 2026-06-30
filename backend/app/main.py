@@ -270,6 +270,11 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS requested_trial_modules JSONB NOT NULL DEFAULT '[]'"))
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS demo_status TEXT"))
+        # Sales disposition: a club contacted and explicitly declined. Manual, so it
+        # overrides the computed engagement tier (and isn't recomputed away).
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS not_interested "
+            "BOOLEAN NOT NULL DEFAULT FALSE"))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))

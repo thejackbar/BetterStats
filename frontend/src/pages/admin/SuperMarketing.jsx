@@ -222,17 +222,19 @@ function SalesEditor({ club, onSave }) {
   const [trial, setTrial] = useState(club.trial_modules || [])
   const [requested, setRequested] = useState(club.requested_trial_modules || [])
   const [demo, setDemo] = useState(club.demo_status || '')
+  const [notInt, setNotInt] = useState(!!club.not_interested)
   const [busy, setBusy] = useState(false)
   const toggle = (list, set, k) => set(list.includes(k) ? list.filter(x => x !== k) : [...list, k])
   const arrEq = (a, b) => a.length === b.length && a.every(x => b.includes(x))
   const dirty = !arrEq(trial, club.trial_modules || []) ||
-    !arrEq(requested, club.requested_trial_modules || []) || demo !== (club.demo_status || '')
+    !arrEq(requested, club.requested_trial_modules || []) || demo !== (club.demo_status || '') ||
+    notInt !== !!club.not_interested
   const save = async () => {
     setBusy(true)
     try {
       await onSave(club.id, {
         trial_modules: trial, requested_trial_modules: requested,
-        demo_status: demo || null, set_demo: true,
+        demo_status: demo || null, set_demo: true, not_interested: notInt,
       })
     } finally { setBusy(false) }
   }
@@ -259,6 +261,12 @@ function SalesEditor({ club, onSave }) {
         <select value={demo} onChange={e => setDemo(e.target.value)} className={SELECT_CLS}>
           {DEMO_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
+        <label className="flex items-center gap-1.5 cursor-pointer text-pb-dim hover:text-pb-text ml-1"
+          title="Club contacted and explicitly not interested — overrides the engagement tier in the CRM">
+          <input type="checkbox" className="accent-pb-accent shrink-0" checked={notInt}
+            onChange={e => setNotInt(e.target.checked)} />
+          <span>Not interested</span>
+        </label>
         <button disabled={busy || !dirty} onClick={save}
           className="px-2 py-0.5 rounded border pb-hairline text-[11px] text-pb-text hover:border-pb-accent disabled:opacity-40">
           {busy ? '...' : 'Save'}
@@ -916,6 +924,7 @@ export default function SuperMarketing() {
         trial_modules: r.trial_modules,
         requested_trial_modules: r.requested_trial_modules,
         demo_status: r.demo_status,
+        not_interested: r.not_interested,
       } : c))
       setMsg('Sales state saved.')
     } catch (e) { setError(e.message || 'Could not save the sales state.') }

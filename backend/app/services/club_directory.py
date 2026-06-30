@@ -1009,7 +1009,7 @@ def _clean_modules(values) -> list:
 
 async def set_sales_state(session: AsyncSession, club_id: str, *,
                           trial_modules=None, requested_trial_modules=None,
-                          demo_status=...) -> Optional[dict]:
+                          demo_status=..., not_interested=None) -> Optional[dict]:
     """Set a prospect club's sales-pipeline state (super-admin maintained, no
     automated source). Only the fields passed are changed. Returns the new state,
     or None if the club isn't found."""
@@ -1023,6 +1023,8 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     if demo_status is not ...:
         ds = (str(demo_status).strip().lower() if demo_status else "") or None
         club.demo_status = ds if ds in DEMO_STATUSES else None
+    if not_interested is not None:
+        club.not_interested = bool(not_interested)
     club.updated_at = func.now()
     await session.commit()
     await session.refresh(club)
@@ -1031,6 +1033,7 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
         "trial_modules": club.trial_modules or [],
         "requested_trial_modules": club.requested_trial_modules or [],
         "demo_status": club.demo_status,
+        "not_interested": bool(club.not_interested),
     }
 
 

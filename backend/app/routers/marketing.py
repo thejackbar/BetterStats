@@ -204,6 +204,7 @@ async def list_clubs(
             "trial_modules": c.trial_modules or [],
             "requested_trial_modules": c.requested_trial_modules or [],
             "demo_status": c.demo_status,
+            "not_interested": bool(c.not_interested),
             "contacts": [{
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
@@ -477,19 +478,22 @@ class SalesBody(BaseModel):
     requested_trial_modules: Optional[list[str]] = None
     demo_status: Optional[str] = None
     set_demo: bool = False  # send true to apply demo_status (incl. clearing it)
+    not_interested: Optional[bool] = None
 
 
 @router.patch("/clubs/{club_id}/sales")
 async def set_club_sales(club_id: str, body: SalesBody, db: AsyncSession = Depends(get_db),
                          _=Depends(require_super_admin)):
     """Set a prospect's sales-pipeline state: which modules it's trialing / has
-    requested a trial for, and its demo follow-on state. Only fields supplied are
-    changed (demo_status only when set_demo is true, so it can be cleared)."""
+    requested a trial for, its demo follow-on state, and the not-interested
+    disposition. Only fields supplied are changed (demo_status only when set_demo is
+    true, so it can be cleared)."""
     res = await cd.set_sales_state(
         db, club_id,
         trial_modules=body.trial_modules,
         requested_trial_modules=body.requested_trial_modules,
         demo_status=(body.demo_status if body.set_demo else ...),
+        not_interested=body.not_interested,
     )
     if res is None:
         raise HTTPException(status_code=404, detail="Club not found")
