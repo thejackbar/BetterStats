@@ -67,6 +67,7 @@ const AdminPartnershipRecords = lazy(() => import('./pages/admin/AdminPartnershi
 const AdminManualEntries = lazy(() => import('./pages/admin/AdminManualEntries'))
 const AdminScorecardUpload = lazy(() => import('./pages/admin/AdminScorecardUpload'))
 const AdminImport = lazy(() => import('./pages/admin/AdminImport'))
+const AdminPlayerImport = lazy(() => import('./pages/admin/AdminPlayerImport'))
 const AdminMilestones = lazy(() => import('./pages/admin/AdminMilestones'))
 const AdminActivityLog = lazy(() => import('./pages/admin/AdminActivityLog'))
 const AdminChangelog = lazy(() => import('./pages/admin/AdminChangelog'))
@@ -225,6 +226,7 @@ export default function App() {
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
+          <Route path="/admin/players/import" element={<ProtectedRoute><AdminPlayerImport /></ProtectedRoute>} />
           <Route path="/admin/games" element={<ProtectedRoute><AdminGames /></ProtectedRoute>} />
           <Route path="/admin/seasons" element={<ProtectedRoute><AdminSeasons /></ProtectedRoute>} />
           <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />

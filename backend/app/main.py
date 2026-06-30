@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2070,6 +2070,7 @@ app.include_router(seo.router)
 app.include_router(families.router)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
+app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import
 app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
 app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)
 app.include_router(usage.router)

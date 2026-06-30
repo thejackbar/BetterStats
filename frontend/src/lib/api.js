@@ -407,6 +407,12 @@ export const api = {
   importList: () => request('/club-admin/imports'),
   importUndo: (batchId) =>
     request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
+  // ─── BetterImport (profiles) — bulk player contact/profile CSV import ────────
+  playerImportPreview: (file) => uploadFile('/club-admin/player-import/preview', file),
+  playerImportResolve: (payload) =>
+    request('/club-admin/player-import/resolve', { method: 'POST', body: JSON.stringify(payload) }),
+  playerImportCommit: (payload) =>
+    request('/club-admin/player-import/commit', { method: 'POST', body: JSON.stringify(payload) }),
   // ─── KlubPro → BetterStats migration (super-admin onboarding) ────────────────
   kpStatus: () => request('/club-admin/klubpro/status'),
   kpDashboard: () => request('/club-admin/klubpro/dashboard'),
