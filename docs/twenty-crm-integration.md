@@ -342,54 +342,56 @@ is code. A single idempotent `bootstrap_twenty.py` run builds the whole model.
 
 ## 5. Engagement rollup and scoring (computed in BetterCricket) — BUILT
 
-The rollup is computed in `services/twenty_sync.py::_engagement(session, club)` and
-pushed onto the Company. No new table: it reads `usage_events` directly at push
-time, so the score is always derived from live breadcrumbs and there is nothing to
-keep in sync.
+The rollup is computed in `services/twenty_sync.py::_engagement(session, club, org)`
+and pushed onto the Company. No new table: it reads the raw signals directly at push
+time, so the score always reflects live activity and there is nothing to keep in sync.
 
-**Join keys that connect anonymous behaviour to a club:**
-- Customer/trial clubs: `usage_events.org_id = marketing_clubs.existing_org_id`.
-- Prospects: `usage_events.utm_id = marketing_clubs.utm_code` (our per-club
-  outreach code). The two are OR'd in one query, so a club that is both a prospect
-  and an onboarded customer counts activity from either path.
+**Two signal sources, both attributed to the club:**
+- **Web** — `usage_events` by `utm_id = marketing_clubs.utm_code` (prospect) OR
+  `org_id = marketing_clubs.existing_org_id` (customer/trial). Gives `lastSeenAt` and
+  `sessions30d` (distinct visitors, 30 days). *Caveat:* a web visit only attributes
+  to the club if it carried that club's UTM code (or is org-scoped) — an untagged
+  organic visit isn't linkable to a specific club.
+- **Email** — `email_events` opens/clicks for the club's contact emails (or org for a
+  customer). Gives `lastEmailAt` and `emailEngaged30d`. Opens/clicks are engagement;
+  sends are our action, not theirs, so they don't score. This is what makes an
+  emailed-and-engaged prospect register (the old model read web only and missed it).
 
-**What it computes per club:**
-- `lastSeenAt` = max(`created_at`)
-- `sessions30d` = distinct `visitor_id` in the last 30 days
-- `engagementScore` 0–100, `engagementTier` Cold/Warm/Hot
+**Lifecycle-aware scoring** (the score means different things by stage):
+- **Prospect (lead heat)** = recency of last touch (web or email; 40/28/14/4 by age) +
+  frequency (`sessions30d × 6 + emailEngaged30d × 4`, capped 40) + intent (+12
+  `requested_trial_modules`, +8 `demo_status = in_trial`), clamped 100. Tier Cold < 34
+  ≤ Warm < 67 ≤ Hot.
+- **Customer (health + expansion)** = base 45 (a paying account is engaged) + half the
+  recency + half the frequency (product use) + 15 if there's an upsell. Floored at
+  **Warm** (a customer is never Cold), Hot when expanding or score ≥ 67. This is the
+  fix for "a customer trialing more modules sat at Cold/0".
 
-**Score 0–100** = recency (40 if seen ≤7d, 28 ≤30d, 14 ≤90d, else 4) + frequency
-(`sessions30d × 6`, capped at 36) + intent (+12 if `requested_trial_modules`),
-clamped to 100. Tier: Cold < 34 ≤ Warm < 67 ≤ Hot. The weights are a tuning knob,
-not load-bearing — depth (module-page views from `path`) and the onboarding-enquiry
-intent flag are an easy future addition to the same function.
+**Opportunity + sales-cycle signals:**
+- `upsellModules` = modules the club wants (`requested_trial_modules` ∪
+  `trial_modules`) minus what it pays for (`module_overrides`). A prospect's interest,
+  or a customer's expansion/trialing-extra.
+- `inSalesCycle` = a customer with an upsell, or a prospect showing intent or any
+  engagement — i.e. a deal to work, not just a name on a list.
+
+**Fields pushed:** `engagementScore`, `engagementTier`, `sessions30d`,
+`emailEngaged30d`, `lastSeenAt`, `lastEmailAt`, `upsellModules`, `inSalesCycle`.
+Module *holdings* (separate from the score) feed `paidModules` ←
+`organisations.module_overrides`, `trialModules` ← `marketing_clubs.trial_modules`,
+`interestedModules` ← `marketing_clubs.requested_trial_modules`.
 
 **Refresh paths:**
-- On every `export_to_twenty` run the engagement fields are merged into the
-  Company values, so a re-export re-scores.
-- `refresh_engagement(limit=None)` re-scores **only clubs already in the CRM** (a
-  row in `twenty_links`) and PATCHes each Company, without pulling new clubs in.
-  Wired to a daily scheduler job (06:00, gated on `twenty_configured`) and an
-  on-demand `POST /club-admin/marketing/refresh-twenty-engagement` ("Refresh Twenty
-  scores" on the directory page) — usage moves daily even when nothing else about
-  the club does.
+- On every `export_to_twenty` run the engagement fields are merged into the Company
+  values, so a re-export re-scores.
+- `refresh_engagement(limit=None)` re-scores **only clubs already in the CRM** (a row
+  in `twenty_links`), loading each linked org so customers are scored on health +
+  expansion, and PATCHes each Company without pulling new clubs in. Wired to a daily
+  scheduler job (06:00, gated on `twenty_configured`) and an on-demand
+  `POST /club-admin/marketing/refresh-twenty-engagement` ("Refresh Twenty scores").
 
-**Module interest derivation** feeds the three Company multi-selects:
-- `paidModules` ← `organisations.module_overrides` when `subscription_status` in
-  (active, trial, past_due)
-- `trialModules` ← `organisations` trial set / `marketing_clubs.trial_modules`
-- `interestedModules` ← `marketing_clubs.requested_trial_modules` ∪ module pages
-  explored in `usage_events` ∪ `club_onboarding_requests.interests`
-
-**Module interest derivation** feeds the three Company multi-selects:
-- `paidModules` ← `organisations.module_overrides` when `subscription_status` in
-  (active, trial, past_due)
-- `trialModules` ← `organisations` trial set / `marketing_clubs.trial_modules`
-- `interestedModules` ← `marketing_clubs.requested_trial_modules` ∪ module pages
-  explored in `usage_events` ∪ `club_onboarding_requests.interests`
-
-Score and tier are pushed to Twenty as plain numbers/fields. Twenty Workflows can
-then react (e.g. score crosses 67 → auto-create a "call this club" Task).
+The weights are a tuning knob, not load-bearing. Twenty Workflows can react to the
+output (e.g. `inSalesCycle = true` and tier Hot → auto-create a "call this club"
+Task).
 
 ## 6. Source entities that feed Twenty
 

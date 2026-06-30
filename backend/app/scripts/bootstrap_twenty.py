@@ -115,6 +115,12 @@ FIELDS = [
      _options(["Cold", "Warm", "Hot"])),
     ("company", "lastSeenAt", "Last seen at", "DATE_TIME", None),
     ("company", "sessions30d", "Sessions (30d)", "NUMBER", None),
+    ("company", "emailEngaged30d", "Email opens/clicks (30d)", "NUMBER", None),
+    ("company", "lastEmailAt", "Last email engagement", "DATE_TIME", None),
+    # Modules the club wants but isn't paying for — a prospect's interest or a
+    # customer's expansion/trial-extra. Drives the in-sales-cycle flag.
+    ("company", "upsellModules", "Upsell modules", "MULTI_SELECT", MODULE_OPTS),
+    ("company", "inSalesCycle", "In sales cycle", "BOOLEAN", None),
     ("company", "renewalDate", "Renewal date", "DATE_TIME", None),
     ("company", "billingCycle", "Billing cycle", "SELECT", _options(["Monthly", "Annual"])),
     ("company", "arr", "ARR", "CURRENCY", None),

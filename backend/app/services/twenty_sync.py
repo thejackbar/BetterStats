@@ -130,40 +130,111 @@ def _arr(module_overrides) -> float:
     return total - {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}.get(priced, 146)
 
 
-async def _engagement(session, club: MarketingClub) -> dict:
-    """A small per-club engagement rollup from usage_events (the breadcrumbs),
-    pushed onto the Company so the CRM can score/sort without holding raw events.
-    A club's activity is matched by its outreach UTM code (prospects) OR its org id
-    (customers/trials). Score 0-100 from recency + 30-day session frequency + a
-    trial-interest nudge; tier Cold/Warm/Hot."""
+def _recency_pts(last, full=40):
+    """Recency points from a last-touch timestamp: decays with age, a small floor
+    for any touch ever, 0 if never."""
+    if not last:
+        return 0
+    days = (datetime.datetime.now(datetime.timezone.utc) - last).days
+    if days <= 7:
+        return full
+    if days <= 30:
+        return int(full * 0.7)
+    if days <= 90:
+        return int(full * 0.35)
+    return int(full * 0.1)
+
+
+async def _engagement(session, club: MarketingClub,
+                      org: "Optional[Organisation]" = None) -> dict:
+    """A per-club engagement rollup pushed onto the Company so the CRM can score and
+    sort without holding raw events. Two signal sources, both attributed to the club:
+    web breadcrumbs (``usage_events`` by outreach UTM code or org id) AND email
+    engagement (``email_events`` opens/clicks for the club's contact emails or org).
+
+    Lifecycle-aware: a PROSPECT is scored on lead heat (recency + frequency of web +
+    email + buying intent); a CUSTOMER (linked org) is scored on account health +
+    expansion, never Cold, with the modules they want-but-don't-pay-for surfaced as an
+    upsell opportunity so a customer mid-sales-cycle is tracked, not buried at zero."""
     utm = club.utm_code
-    org = str(club.existing_org_id) if club.existing_org_id else None
-    # Cast the bound params to text explicitly: asyncpg can't infer a type for a
-    # bare ":utm IS NOT NULL", so the parameters need a declared type.
-    row = (await session.execute(text("""
+    org_id = str(club.existing_org_id) if club.existing_org_id else None
+    is_customer = org is not None
+
+    # Web activity (usage_events) by UTM code (prospect) or org id (customer/trial).
+    web = (await session.execute(text("""
         SELECT MAX(created_at) AS last_seen,
                COUNT(DISTINCT visitor_id)
                  FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d
         FROM usage_events
         WHERE (CAST(:utm AS text) IS NOT NULL AND utm_id = CAST(:utm AS text))
            OR (CAST(:org AS text) IS NOT NULL AND org_id::text = CAST(:org AS text))
-    """), {"utm": utm, "org": org})).first()
-    last_seen = row[0] if row else None
-    sessions = (row[1] or 0) if row else 0
+    """), {"utm": utm, "org": org_id})).first()
+    last_web = web[0] if web else None
+    sessions = (web[1] or 0) if web else 0
 
-    score = 0
-    if last_seen:
-        days = (datetime.datetime.now(datetime.timezone.utc) - last_seen).days
-        score += 40 if days <= 7 else 28 if days <= 30 else 14 if days <= 90 else 4
-    score += min(sessions * 6, 36)
-    if club.requested_trial_modules:
-        score += 12
-    score = min(score, 100)
-    tier = "COLD" if score < 34 else "WARM" if score < 67 else "HOT"
+    # Email engagement (email_events opens/clicks) for this club's contact emails, or
+    # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
+    em = (await session.execute(text("""
+        SELECT MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
+               COUNT(*) FILTER (WHERE event_type IN ('open','click')
+                                AND created_at > NOW() - INTERVAL '30 days') AS eng_30d
+        FROM email_events
+        WHERE lower(email) IN (
+                SELECT lower(email) FROM marketing_club_contacts
+                WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> '')
+           OR (CAST(:org AS text) IS NOT NULL AND organisation_id::text = CAST(:org AS text))
+    """), {"cid": str(club.id), "org": org_id})).first()
+    last_email = em[0] if em else None
+    eng_30d = (em[1] or 0) if em else 0
 
-    fields = {"engagementScore": score, "engagementTier": tier, "sessions30d": sessions}
-    if last_seen:
-        fields["lastSeenAt"] = last_seen.isoformat()
+    last_touch = max([d for d in (last_web, last_email) if d], default=None)
+
+    # Modules the club wants but isn't paying for = the open opportunity (a prospect's
+    # interest, or a customer's expansion / trialing-extra). Drives the upsell signal.
+    paid = {str(k).lower() for k in ((org.module_overrides if org else None) or [])}
+    wanted = {str(k).lower() for k in (club.requested_trial_modules or [])} | \
+             {str(k).lower() for k in (club.trial_modules or [])}
+    upsell = sorted(wanted - paid)
+
+    freq_pts = min(sessions * 6 + eng_30d * 4, 40)
+    recency = _recency_pts(last_touch)
+
+    if is_customer:
+        # Account health + expansion. A paying account starts engaged, gains for
+        # recent product use, and for an active expansion opportunity; floored at Warm.
+        score = 45 + int(recency * 0.5) + min(int(freq_pts * 0.5), 20)
+        if upsell:
+            score += 15
+        score = min(score, 100)
+        tier = "HOT" if (score >= 67 or upsell) else "WARM"
+    else:
+        # Prospect lead heat: recency + frequency of any touch + buying intent.
+        score = recency + freq_pts
+        if club.requested_trial_modules:
+            score += 12
+        if (club.demo_status or "") == "in_trial":
+            score += 8
+        score = min(score, 100)
+        tier = "COLD" if score < 34 else "WARM" if score < 67 else "HOT"
+
+    # In an active sales cycle: a customer expanding, or a prospect showing intent or
+    # engagement (so it's a deal to work, not just a name on a list).
+    in_cycle = bool(upsell) if is_customer else bool(
+        club.requested_trial_modules or (club.demo_status or "") == "in_trial"
+        or last_touch or sessions or eng_30d)
+
+    fields = {
+        "engagementScore": score,
+        "engagementTier": tier,
+        "sessions30d": sessions,
+        "emailEngaged30d": eng_30d,
+        "upsellModules": _modules(upsell),
+        "inSalesCycle": in_cycle,
+    }
+    if last_touch:
+        fields["lastSeenAt"] = last_touch.isoformat()
+    if last_email:
+        fields["lastEmailAt"] = last_email.isoformat()
     return fields
 
 
@@ -619,7 +690,7 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                     cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
                 contacts = (await session.execute(cq)).scalars().all()
                 company = {**_company_values(club, org),
-                           **(await _engagement(session, club))}
+                           **(await _engagement(session, club, org))}
                 people = [{
                     "bc_id": str(ct.id),
                     "person": _person_values(ct, club.country),
@@ -766,13 +837,16 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                 select(MarketingClub).where(
                     MarketingClub.grassroots_guid.in_(guids)))).scalars().all()
             } if guids else {}
-            # Snapshot the engagement fields per company before any IO.
+            # Snapshot the engagement fields per company before any IO. Load the
+            # linked org (if any) so a customer is scored on health + expansion.
             updates = []
             for guid in guids:
                 club = clubs.get(guid)
                 if club is None:
                     continue
-                updates.append((tid_by_guid[guid], await _engagement(session, club)))
+                org = (await session.get(Organisation, club.existing_org_id)
+                       if club.existing_org_id else None)
+                updates.append((tid_by_guid[guid], await _engagement(session, club, org)))
 
             async with httpx.AsyncClient() as http:
                 for tid, fields in updates:
