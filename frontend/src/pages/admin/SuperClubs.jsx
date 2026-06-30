@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import { MODULE_TOGGLES, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
+import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 
@@ -563,14 +564,18 @@ export default function SuperClubs() {
                           const editingTrial = !!trialEdit[key]
                           const trialView = editingTrial || sub?.status === 'trial'
                           const draft = trialDraft(sub || { module: key })
+                          // Each granted chip wears its module's own brand colour
+                          // (the shared moduleBrand source of truth), not the page accent.
+                          const brand = moduleBrand(key).accent
                           return (
                             <div key={key} className="flex flex-wrap items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-2.5 py-1.5">
                               {/* Core is the base — it can't be removed; disable it via its
-                                  status (Cancelled / Paused), not by un-granting. */}
+                                  status (Cancelled / Paused), not by un-granting. Core's button is
+                                  permanently disabled, so dim only while busy (not for Core itself). */}
                               <button type="button" disabled={busy || isCore}
                                 onClick={() => { if (isCore) return; granted ? removeModule(club.id, key) : grantModule(club.id, key) }}
-                                className={`font-mono text-[11px] px-2.5 py-1 rounded border transition-colors disabled:opacity-50 w-40 shrink-0 text-left ${granted ? 'bg-pb-accent/10' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
-                                style={granted ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 50%, transparent)' } : {}}
+                                className={`font-mono text-[11px] px-2.5 py-1 rounded border transition-colors w-48 shrink-0 text-left whitespace-nowrap ${busy ? 'opacity-50' : ''} ${granted ? '' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
+                                style={granted ? { color: brand, borderColor: `color-mix(in srgb, ${brand} 50%, transparent)`, backgroundColor: `color-mix(in srgb, ${brand} 12%, transparent)` } : {}}
                                 title={isCore ? 'BetterStats is the base — set status to disable' : (granted ? 'Click to remove' : 'Click to grant')}>
                                 {granted ? '✓ ' : '+ '}{tog.label}
                               </button>
