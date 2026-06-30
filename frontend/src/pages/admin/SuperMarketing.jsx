@@ -719,7 +719,7 @@ export default function SuperMarketing() {
     postcode_from: '', postcode_to: '',
     contact: '', person: '', exclude_junior: false, exclude_emailed: false,
     exclude_carnival: false, exclude_school: false,
-    exclude_exported: false, exclude_suppressed: false, visited: false,
+    exclude_exported: false, exclude_suppressed: false, visited: false, emailed: false,
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
@@ -1001,7 +1001,7 @@ export default function SuperMarketing() {
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
               || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
               || filters.exclude_school || filters.exclude_exported || filters.exclude_suppressed
-              || filters.visited) && (
+              || filters.visited || filters.emailed) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                   countries: [],
@@ -1009,7 +1009,7 @@ export default function SuperMarketing() {
                                                   person: '', exclude_junior: false, exclude_emailed: false,
                                                   exclude_carnival: false, exclude_school: false,
                                                   exclude_exported: false, exclude_suppressed: false,
-                                                  visited: false })}>
+                                                  visited: false, emailed: false })}>
                 Clear all
               </button>
             )}
@@ -1133,6 +1133,12 @@ export default function SuperMarketing() {
               <input type="checkbox" checked={filters.visited}
                      onChange={(e) => setFilters(f => ({ ...f, visited: e.target.checked }))} />
               Visited the site (via their UTM)
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
+                   title="Only clubs that have been emailed (outreach send recorded)">
+              <input type="checkbox" checked={filters.emailed}
+                     onChange={(e) => setFilters(f => ({ ...f, emailed: e.target.checked }))} />
+              Emailed
             </label>
           </div>
         </section>

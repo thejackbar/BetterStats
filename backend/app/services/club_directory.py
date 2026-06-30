@@ -667,7 +667,7 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  exclude_junior: bool = False, exclude_emailed: bool = False,
                  exclude_carnival: bool = False, exclude_school: bool = False,
                  exclude_exported: bool = False, exclude_suppressed: bool = False,
-                 visited: bool = False,
+                 visited: bool = False, emailed: bool = False,
                  associations: Optional[list] = None,
                  association_extra: Optional[list] = None,
                  countries: Optional[list] = None) -> list:
@@ -690,6 +690,10 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(MarketingClub.country.in_([c for c in countries if c]))
     if exclude_emailed:
         conds.append(MarketingClub.emailed_at.is_(None))
+    if emailed:
+        # Only clubs that have been emailed (the outreach send timestamp is set) —
+        # the positive counterpart to exclude_emailed.
+        conds.append(MarketingClub.emailed_at.isnot(None))
     if exclude_exported:
         # Only clubs that still have an emailable contact not yet in BetterComms.
         conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
