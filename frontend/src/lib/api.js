@@ -831,6 +831,7 @@ export const api = {
   superListClubAdmins: (clubId) => request(`/club-admin/super/clubs/${clubId}/admins`),
   superSetPrimaryAdmin: (clubId, userId) =>
     request(`/club-admin/super/clubs/${clubId}/primary-admin`, { method: 'PUT', body: JSON.stringify({ user_id: userId }) }),
+  getPrimaryAdmin: () => request('/club-admin/primary-admin'),
   transferPrimaryAdmin: (userId) =>
     request('/club-admin/primary-admin/transfer', { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
   // Module action requests — the trial/subscription queue (migration 119).

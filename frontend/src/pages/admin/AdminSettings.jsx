@@ -35,6 +35,74 @@ function ColorField({ label, hint, value, fallback, onChange, onReset }) {
   )
 }
 
+function PrimaryAdminCard() {
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = () => api.getPrimaryAdmin().then(setData).catch(() => setData(null))
+  useEffect(() => { load() }, [])
+
+  if (!data || !data.admins?.length) return null
+
+  const primary = data.admins.find(a => a.is_primary_admin)
+  const others = data.admins.filter(a => !a.is_primary_admin)
+
+  const transfer = async (userId) => {
+    if (!userId) return
+    const to = data.admins.find(a => a.user_id === userId)
+    if (!window.confirm(`Make ${to?.display_name || to?.username} the primary admin? Only the primary admin can request paid subscriptions.`)) return
+    setBusy(true)
+    setMsg('')
+    try {
+      await api.transferPrimaryAdmin(userId)
+      setMsg('Primary admin updated')
+      await load()
+    } catch (e) {
+      setMsg(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="pb-card p-5 mb-6">
+      <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide2 mb-1">Primary admin</h2>
+      <p className="text-pb-faint text-sm mb-3">
+        The primary admin is the club's owner account. Only they can request a paid subscription
+        to a module; any club admin can request a trial.
+      </p>
+      <p className="text-sm text-pb-text mb-3">
+        Current: <span className="font-medium">{primary ? (primary.display_name || primary.username) : '— none —'}</span>
+        {primary?.is_me && <span className="text-pb-faint"> (you)</span>}
+      </p>
+      {data.can_transfer ? (
+        others.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="font-mono text-[10px] text-pb-faint">Transfer to</label>
+            <select
+              defaultValue=""
+              disabled={busy}
+              onChange={e => transfer(e.target.value)}
+              className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent disabled:opacity-50"
+            >
+              <option value="" disabled>Choose an admin…</option>
+              {others.map(a => (
+                <option key={a.user_id} value={a.user_id}>{a.display_name || a.username}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <p className="font-mono text-[10px] text-pb-faintest">Add another club admin to be able to hand this over.</p>
+        )
+      ) : (
+        <p className="font-mono text-[10px] text-pb-faintest">Only the current primary admin can reassign this.</p>
+      )}
+      {msg && <p className="font-mono text-[11px] mt-2" style={{ color: 'var(--pb-accent)' }}>{msg}</p>}
+    </div>
+  )
+}
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState(null)
   const [form, setForm] = useState({})
@@ -163,6 +231,8 @@ export default function AdminSettings() {
     <AdminLayout>
       <div className="max-w-2xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-6">Club Settings</h1>
+
+        <PrimaryAdminCard />
 
         <form onSubmit={save} className="space-y-6">
           {/* --- Identity --- */}

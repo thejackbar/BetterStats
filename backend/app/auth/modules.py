@@ -35,9 +35,43 @@ MODULE_MERCH = "merch"       # BetterMerch   — club stock register (apparel, e
 MODULE_FANTASY = "fantasy"   # BetterFantasyCricket — internal club fantasy league
 
 # BetterFees + BetterComms + BetterMerch are presented together on the admin
-# dashboard under the **BetterAdmin** umbrella (see frontend modules.js), but
-# stay separate entitlement keys here so they can be granted à la carte.
+# dashboard under the **BetterAdmin** umbrella (see frontend modules.js). They stay
+# separate ENTITLEMENT keys here (each route gates on its own key), but are sold,
+# trialed and requested as ONE billable module — BetterAdmin (see billing helpers
+# below), matching the public pricing (one $149 umbrella).
 ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS, MODULE_MERCH, MODULE_FANTASY)
+
+# ─── Billable modules ─────────────────────────────────────────────────────────
+# A *billable* module maps to one or more *entitlement* keys. BetterAdmin is the
+# only group today (fees + comms + merch move together); everything else is 1:1.
+# Subscriptions, trials and requests act on billable modules; entitlement gating
+# still uses the underlying keys.
+MODULE_ADMIN = "admin"     # BetterAdmin umbrella
+MODULE_GROUPS: dict[str, tuple[str, ...]] = {
+    MODULE_ADMIN: (MODULE_FEES, MODULE_COMMS, MODULE_MERCH),
+}
+BILLABLE_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_ADMIN, MODULE_IQ, MODULE_FANTASY)
+BILLABLE_MODULE_NAMES = {
+    MODULE_SELECT: "BetterSelect",
+    MODULE_SOCIALS: "BetterSocials",
+    MODULE_ADMIN: "BetterAdmin",
+    MODULE_IQ: "BetterIQ",
+    MODULE_FANTASY: "BetterFantasyCricket",
+}
+
+
+def expand_billing_module(key: str) -> tuple[str, ...]:
+    """The entitlement keys a billable module covers (BetterAdmin -> fees/comms/merch;
+    everything else -> itself)."""
+    return MODULE_GROUPS.get(key, (key,))
+
+
+def billing_key_for(entitlement_key: str) -> str:
+    """The billable module an entitlement key rolls up to (fees/comms/merch -> admin)."""
+    for group, members in MODULE_GROUPS.items():
+        if entitlement_key in members:
+            return group
+    return entitlement_key
 
 # Display metadata, surfaced to the admin module-tile dashboard. ``built`` flags
 # whether the module exists yet. BetterIQ Phase 1 (opposition analysis) is now

@@ -18,7 +18,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.modules import ALL_MODULES
+from app.auth.modules import BILLABLE_MODULES, billing_key_for
 from app.models.db import (
     MarketingClub, ModuleActionRequest, Organisation, OrgModuleSubscription,
 )
@@ -46,7 +46,8 @@ def _modules_from(value) -> list[str]:
         parts = [str(p).strip() for p in value]
     else:
         return []
-    return [p.lower() for p in parts if p and p.lower() in ALL_MODULES]
+    # Billable module keys (BetterAdmin = 'admin'), matching what we export.
+    return [p.lower() for p in parts if p and p.lower() in BILLABLE_MODULES]
 
 
 async def _resolve_org(db: AsyncSession, record: dict) -> Organisation | None:
@@ -80,9 +81,10 @@ async def dispatch_webhook(db: AsyncSession, payload: dict) -> dict:
     if org is None:
         return {"handled": False, "reason": "no linked club"}
 
-    # Skip modules the club already holds.
+    # Skip modules the club already holds (compared at the billable level, so a club
+    # already on BetterAdmin isn't asked again for fees/comms/merch).
     held = {
-        s.module_key for s in (await db.execute(
+        billing_key_for(k) for k in (await db.execute(
             select(OrgModuleSubscription.module_key)
             .where(OrgModuleSubscription.organisation_id == org.id)
         )).scalars().all()

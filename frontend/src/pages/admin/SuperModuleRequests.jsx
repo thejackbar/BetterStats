@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../lib/api'
-import { MODULE_INFO } from '../../lib/modules'
+import { BILLABLE_MODULE_NAME } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 const STATUSES = ['outstanding', 'completed', 'dismissed']
-const MODULE_NAME = Object.fromEntries(MODULE_INFO.map(m => [m.key, m.name]))
 
 const STATUS_STYLE = {
   outstanding: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
@@ -127,7 +126,7 @@ export default function SuperModuleRequests() {
                 <div key={r.id} className="pb-card p-4">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="font-medium text-pb-text">{r.club_name || '—'}</span>
-                    <span className="text-pb-text text-sm">{MODULE_NAME[r.module_key] || r.module_key}</span>
+                    <span className="text-pb-text text-sm">{r.module_name || BILLABLE_MODULE_NAME[r.module_key] || r.module_key}</span>
                     <span className="font-mono text-[10px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint">
                       {KIND_LABEL[r.kind] || r.kind}
                     </span>

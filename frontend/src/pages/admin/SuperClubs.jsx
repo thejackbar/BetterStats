@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
-import { MODULE_TOGGLES, MODULE_INFO, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
+import { MODULE_TOGGLES, BILLABLE_MODULE_NAME, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
-// module key -> display name (e.g. 'iq' -> 'BetterIQ')
-const MODULE_NAME = Object.fromEntries(MODULE_INFO.map(m => [m.key, m.name]))
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-AU') : '—')
 
 const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
@@ -474,7 +472,7 @@ export default function SuperClubs() {
                             const isTrial = sub.status === 'trial'
                             return (
                               <div key={sub.module} className="flex flex-wrap items-center gap-2 bg-pb-surface2/60 border pb-hairline rounded px-2.5 py-1.5">
-                                <span className="text-pb-text text-xs font-medium w-28 shrink-0">{MODULE_NAME[sub.module] || sub.module}</span>
+                                <span className="text-pb-text text-xs font-medium w-28 shrink-0">{sub.name || BILLABLE_MODULE_NAME[sub.module] || sub.module}</span>
                                 <select
                                   value={sub.status}
                                   disabled={busy}

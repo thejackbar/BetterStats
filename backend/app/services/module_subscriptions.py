@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import (
     ALL_MODULES, STATUS_ACTIVE, STATUS_TRIAL, sub_is_live, sub_is_trial_expired,
-    org_default_trial_days,
+    org_default_trial_days, expand_billing_module,
 )
 from app.models.db import OrgModuleSubscription, Organisation
 
@@ -138,6 +138,49 @@ def remove_module(org, module_key: str, *, now: datetime | None = None) -> bool:
     org.module_subscriptions.remove(sub)
     recompute_overrides_cache(org, now or _now())
     return True
+
+
+# ─── Billable-module wrappers ─────────────────────────────────────────────────
+# A billable module (BetterAdmin) can cover several entitlement keys; these apply
+# the same change to every member so the group always moves as one unit.
+
+def start_trial_billing(org, billing_key: str, *, start=None, end=None, days=None, now=None):
+    """Start a trial for a billable module across all its entitlement keys, with the
+    SAME start/end for each so the group reads as one trial."""
+    now = now or _now()
+    start = start or now
+    if end is None:
+        end = start + timedelta(days=days if days and days > 0 else org_default_trial_days(org))
+    return [
+        upsert_subscription(org, ek, status=STATUS_TRIAL,
+                            trial_started_at=start, trial_ends_at=end, now=now)
+        for ek in expand_billing_module(billing_key)
+    ]
+
+
+def set_status_billing(org, billing_key: str, status: str, *, renewal_date=..., now=None):
+    now = now or _now()
+    return [
+        set_status(org, ek, status, renewal_date=renewal_date, now=now)
+        for ek in expand_billing_module(billing_key)
+    ]
+
+
+def set_trial_end_billing(org, billing_key: str, trial_ends_at, *, now=None) -> None:
+    now = now or _now()
+    for ek in expand_billing_module(billing_key):
+        sub = _find(org, ek)
+        if sub is not None:
+            sub.trial_ends_at = trial_ends_at
+            sub.updated_at = now
+    recompute_overrides_cache(org, now)
+
+
+def remove_billing(org, billing_key: str, *, now=None) -> bool:
+    removed = False
+    for ek in expand_billing_module(billing_key):
+        removed = remove_module(org, ek, now=now) or removed
+    return removed
 
 
 async def sweep_expired_trials(db: AsyncSession, *, now: datetime | None = None) -> list[str]:

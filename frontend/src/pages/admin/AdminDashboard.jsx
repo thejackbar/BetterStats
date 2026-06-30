@@ -124,12 +124,12 @@ export default function AdminDashboard() {
     api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
   }, [])
 
-  // Raise a trial / subscription request for a module (or every module of a group
-  // tile, e.g. BetterAdmin = fees + comms + merch). Queued for a super admin.
-  const requestModule = async (tileKey, keys, kind) => {
-    setRequesting(tileKey)
+  // Raise a trial / subscription request for a billable module (BetterAdmin covers
+  // fees + comms + merch as one). Queued for a super admin to action.
+  const requestModule = async (moduleKey, kind) => {
+    setRequesting(moduleKey)
     try {
-      await Promise.all(keys.map(k => api.requestModule(k, kind)))
+      await api.requestModule(moduleKey, kind)
       const d = await api.listMyModuleRequests()
       setMyRequests(Array.isArray(d) ? d : [])
     } catch {
@@ -199,8 +199,9 @@ export default function AdminDashboard() {
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
           {dashboardTiles().map(tile => {
-            const keys = tile.isGroup ? tile.members.map(m => m.key) : [tile.key]
-            const pending = myRequests.find(r => r.status === 'outstanding' && keys.includes(r.module_key))
+            // tile.key is the billable module key (BetterAdmin = 'admin'), so a
+            // request for the group is one request, not one per member.
+            const pending = myRequests.find(r => r.status === 'outstanding' && r.module_key === tile.key)
             return (
               <ModuleTile
                 key={tile.key}
@@ -209,7 +210,7 @@ export default function AdminDashboard() {
                 pendingKind={pending?.kind}
                 canSubscribe={!!user?.is_primary_admin}
                 requesting={requesting === tile.key}
-                onRequest={(kind) => requestModule(tile.key, keys, kind)}
+                onRequest={(kind) => requestModule(tile.key, kind)}
               />
             )
           })}

@@ -29,6 +29,7 @@ from app.auth.capabilities import (
 from app.auth.modules import (
     ALL_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
     STATUS_TRIAL, org_default_trial_days,
+    BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for,
 )
 from app.services import module_subscriptions as mod_subs
 from datetime import date as _date, datetime as _datetime, timezone as _timezone
@@ -1461,23 +1462,32 @@ async def super_overview(
         raise HTTPException(status_code=500, detail=f"Overview failed: {type(e).__name__}: {e}")
 
 
+_STATUS_PRIORITY = {"trial": 0, "active": 1, "past_due": 2, "paused": 3, "cancelled": 4}
+
+
 def _module_subs_payload(org) -> list[dict]:
-    """Per-module subscription rows for a club (super-admin view). Requires the
-    module_subscriptions relationship to be loaded."""
+    """Per-billable-module subscription rows for a club (super-admin view). The
+    BetterAdmin members (fees/comms/merch) collapse into one row — they always move
+    as a unit. Requires the module_subscriptions relationship to be loaded."""
     now = _datetime.now(_timezone.utc)
-    rows = sorted((org.module_subscriptions or []), key=lambda s: s.module_key)
-    return [
-        {
-            "module": s.module_key,
-            "status": s.status,
-            "is_trial_expired": mod_subs.sub_is_trial_expired(s, now),
-            "trial_started_at": s.trial_started_at.isoformat() if s.trial_started_at else None,
-            "trial_ends_at": s.trial_ends_at.isoformat() if s.trial_ends_at else None,
-            "renewal_date": s.renewal_date.isoformat() if s.renewal_date else None,
-        }
-        for s in rows
-        if s.module_key in ALL_MODULES
-    ]
+    groups: dict[str, list] = {}
+    for s in (org.module_subscriptions or []):
+        if s.module_key in ALL_MODULES:
+            groups.setdefault(billing_key_for(s.module_key), []).append(s)
+    out = []
+    for bk, rows in groups.items():
+        # Representative = the most-live member (they're kept in sync, but be safe).
+        rep = sorted(rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 9))[0]
+        out.append({
+            "module": bk,
+            "name": BILLABLE_MODULE_NAMES.get(bk, bk),
+            "status": rep.status,
+            "is_trial_expired": mod_subs.sub_is_trial_expired(rep, now),
+            "trial_started_at": rep.trial_started_at.isoformat() if rep.trial_started_at else None,
+            "trial_ends_at": rep.trial_ends_at.isoformat() if rep.trial_ends_at else None,
+            "renewal_date": rep.renewal_date.isoformat() if rep.renewal_date else None,
+        })
+    return sorted(out, key=lambda d: d["module"])
 
 
 def _club_payload(org) -> dict:
@@ -1652,7 +1662,8 @@ async def _load_club_with_subs(db: AsyncSession, club_id: str) -> Organisation:
 
 
 def _validate_module(module_key: str) -> None:
-    if module_key not in ALL_MODULES:
+    """Validate a billable module key (BetterAdmin = admin, not its members)."""
+    if module_key not in BILLABLE_MODULES:
         raise HTTPException(status_code=422, detail=f"Unknown module: {module_key}")
 
 
@@ -1680,7 +1691,7 @@ async def start_module_trial(
         raise HTTPException(status_code=422, detail="days must be a positive integer")
     if body.start and body.end and body.end <= body.start:
         raise HTTPException(status_code=422, detail="Trial end must be after the start")
-    mod_subs.start_trial(org, module_key, start=body.start, end=body.end, days=body.days)
+    mod_subs.start_trial_billing(org, module_key, start=body.start, end=body.end, days=body.days)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return _club_payload(org)
@@ -1708,25 +1719,22 @@ async def patch_module_subscription(
     if "status" in fields and fields["status"] not in ALL_STATUSES:
         raise HTTPException(status_code=422, detail=f"Status must be one of: {', '.join(ALL_STATUSES)}")
     now = _datetime.now(_timezone.utc)
-    sub = next((s for s in (org.module_subscriptions or []) if s.module_key == module_key), None)
-    if sub is None:
-        # No row yet — granting via a status set creates one.
-        if "status" not in fields:
-            raise HTTPException(status_code=404, detail="Module not held by this club")
-        sub = mod_subs.upsert_subscription(
-            org, module_key, status=fields["status"],
-            renewal_date=fields.get("renewal_date"),
-            trial_ends_at=fields.get("trial_ends_at"), now=now,
+    # Apply to every member of the billable module (BetterAdmin moves as one).
+    if "status" in fields:
+        mod_subs.set_status_billing(
+            org, module_key, fields["status"],
+            renewal_date=fields["renewal_date"] if "renewal_date" in fields else ...,
+            now=now,
         )
-    else:
-        if "status" in fields:
-            sub.status = fields["status"]
-        if "renewal_date" in fields:
-            sub.renewal_date = fields["renewal_date"]
-        if "trial_ends_at" in fields:
-            sub.trial_ends_at = fields["trial_ends_at"]
-        sub.updated_at = now
-        mod_subs.recompute_overrides_cache(org, now)
+    elif "renewal_date" in fields:
+        mod_subs.set_status_billing(
+            org, module_key,
+            next((s.status for s in (org.module_subscriptions or [])
+                  if billing_key_for(s.module_key) == module_key), "active"),
+            renewal_date=fields["renewal_date"], now=now,
+        )
+    if "trial_ends_at" in fields:
+        mod_subs.set_trial_end_billing(org, module_key, fields["trial_ends_at"], now=now)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return _club_payload(org)
@@ -1739,10 +1747,10 @@ async def remove_module_subscription(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Drop a module entirely (delete its subscription row)."""
+    """Drop a module entirely (delete its subscription row(s))."""
     _validate_module(module_key)
     org = await _load_club_with_subs(db, club_id)
-    if not mod_subs.remove_module(org, module_key):
+    if not mod_subs.remove_billing(org, module_key):
         raise HTTPException(status_code=404, detail="Module not held by this club")
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
@@ -1796,6 +1804,41 @@ async def super_set_primary_admin(
     return {"ok": True}
 
 
+@router.get("/primary-admin")
+async def get_primary_admin_info(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's admins and whether the caller may reassign the primary admin.
+    Drives the club-side 'transfer primary admin' control."""
+    me = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_super = bool(me and me.role == "super_admin")
+    if not is_super and not (me and me.club_id == club.id and me.role == "club_admin"):
+        raise HTTPException(status_code=403, detail="Club admins only")
+    rows = (await db.execute(
+        select(ClubMembership, User)
+        .join(User, User.id == ClubMembership.user_id)
+        .where(ClubMembership.club_id == club.id, ClubMembership.role == "club_admin")
+        .order_by(ClubMembership.is_primary_admin.desc(), ClubMembership.created_at.asc())
+    )).all()
+    return {
+        "can_transfer": bool(is_super or (me and me.is_primary_admin and me.club_id == club.id)),
+        "admins": [
+            {
+                "user_id": str(u.id),
+                "username": u.username,
+                "display_name": u.display_name,
+                "is_primary_admin": bool(m.is_primary_admin),
+                "is_me": u.id == current_user.id,
+            }
+            for m, u in rows
+        ],
+    }
+
+
 @router.post("/primary-admin/transfer")
 async def transfer_primary_admin(
     body: PrimaryAdminSet,
@@ -1830,6 +1873,7 @@ def _request_payload(r: ModuleActionRequest, *, org_name=None, requester=None, c
         "organisation_id": str(r.organisation_id),
         "club_name": org_name,
         "module_key": r.module_key,
+        "module_name": BILLABLE_MODULE_NAMES.get(r.module_key, r.module_key),
         "kind": r.kind,
         "status": r.status,
         "source": r.source,
@@ -1858,7 +1902,7 @@ async def create_module_request(
     Any club_admin may request a trial or a cancellation; only the club's primary
     admin may request a paid subscription (financial authority gate). The request is
     queued for a super admin — it does not change entitlement on its own."""
-    if body.module_key not in ALL_MODULES:
+    if body.module_key not in BILLABLE_MODULES:
         raise HTTPException(status_code=422, detail=f"Unknown module: {body.module_key}")
     if body.kind not in _REQUEST_KINDS:
         raise HTTPException(status_code=422, detail=f"kind must be one of: {', '.join(_REQUEST_KINDS)}")
@@ -2004,17 +2048,19 @@ async def approve_module_request(
     if req.kind == "trial":
         if body.start and body.end and body.end <= body.start:
             raise HTTPException(status_code=422, detail="Trial end must be after the start")
-        result_sub = mod_subs.start_trial(
+        subs = mod_subs.start_trial_billing(
             org, req.module_key, start=body.start, end=body.end, days=body.days, now=now,
         )
+        result_sub = subs[0] if subs else None
     elif req.kind == "subscribe":
-        result_sub = mod_subs.set_status(
+        subs = mod_subs.set_status_billing(
             org, req.module_key, "active",
             renewal_date=body.renewal_date if body.renewal_date is not None else ...,
             now=now,
         )
+        result_sub = subs[0] if subs else None
     elif req.kind == "cancel":
-        mod_subs.remove_module(org, req.module_key, now=now)
+        mod_subs.remove_billing(org, req.module_key, now=now)
     await db.flush()
     req.status = "completed"
     req.completed_by = current_user.id
