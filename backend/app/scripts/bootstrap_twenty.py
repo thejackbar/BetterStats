@@ -161,6 +161,10 @@ FIELDS = [
     # club (the native single Company can't show that; the flag/count surface it).
     ("person", "multiClub", "In multiple clubs", "BOOLEAN", None),
     ("person", "clubCount", "Club count", "NUMBER", None),
+    # Denormalised lifecycle stage of the club the Contact belongs to, so it's
+    # visible/filterable on the Contact (Twenty can't show a nested relation field).
+    ("person", "clubLifecycleStage", "Club lifecycle stage", "SELECT",
+     _options(["Target", "Prospect", "Engaged", "Trial", "Customer", "Churned", "Suppressed"])),
     # ---- Opportunity ----
     ("opportunity", "bcOpportunityKey", "BC Opportunity key", "TEXT", None),
     ("opportunity", "modulesInScope", "Modules in scope", "MULTI_SELECT", MODULE_OPTS),

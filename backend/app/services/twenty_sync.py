@@ -263,9 +263,23 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
         "lastSyncedAt": _now_iso(),
     }
     if org is not None:
-        vals["subscriptionStatus"] = (org.subscription_status or "").upper() or None
-        vals["paidModules"] = _modules(org.module_overrides)
-        vals["arr"] = currency(_arr(org.module_overrides))
+        status = (org.subscription_status or "").lower()
+        vals["subscriptionStatus"] = status.upper() or None
+        held = _modules(org.module_overrides)
+        # ARR is only real for a PAYING club: a trial (or paused/cancelled) holds its
+        # modules on trial, so its modules are trial-not-paid and its ARR is $0.
+        # NOTE: subscription_status is still org-wide here — a true per-module
+        # subscribed/trial split needs the org model change discussed in the brief.
+        paying = status in ("active", "past_due")
+        if paying:
+            vals["paidModules"] = held
+            vals["arr"] = currency(_arr(org.module_overrides))
+        else:
+            vals["paidModules"] = []
+            vals["arr"] = currency(0)
+            if status == "trial":
+                vals["trialModules"] = sorted(
+                    set(vals.get("trialModules") or []) | set(held))
         if org.billing_cycle:
             vals["billingCycle"] = org.billing_cycle.upper()
         if org.renewal_date:
@@ -691,9 +705,13 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                 contacts = (await session.execute(cq)).scalars().all()
                 company = {**_company_values(club, org),
                            **(await _engagement(session, club, org))}
+                club_stage = _lifecycle(club)
                 people = [{
                     "bc_id": str(ct.id),
-                    "person": _person_values(ct, club.country),
+                    # clubLifecycleStage denormalises the club's stage onto the Contact
+                    # so it's visible/filterable there (always refreshed).
+                    "person": {**_person_values(ct, club.country),
+                               "clubLifecycleStage": club_stage},
                     "create_extra": _person_create_extra(ct),
                     "role": _officer_role_values(ct, club.name),
                 } for ct in _scoped(contacts, contact_scope)]
