@@ -59,17 +59,19 @@ subscription, and a super admin actions those asks from a queue.
 - **Twenty**: every super-admin subscription/trial change re-pushes the club to Twenty so
   `paidModules` / `trialModules` / `arr` update. Twenty stays a one-way export.
 
-## Open decisions (need confirmation)
+## Decisions (settled, round 2)
 
-1. **Default-trial-days home**: confirm the small `platform_settings` singleton + optional
-   per-club `trial_days_override`, vs a code-only `.env` default. (Recommend the singleton
-   so a super admin can edit it in-app, since you asked for it in settings.)
-2. **Primary-admin gate**: confirm adding `is_primary_admin` to `club_memberships`
-   (one per club, set for the first admin at onboarding) vs simply treating the existing
-   `club_admin` role as the owner. The literal ask (primary vs other admins) needs the flag.
-3. **Twenty-origin requests**: in this phase requests originate in-app only. Requests raised
-   inside Twenty would need a new inbound channel (webhook or poll); Twenty is export-only
-   today. Deferred to a later phase; the queue's `source` field is designed to accept it.
+- **Default-trial-days home**: a new per-club **Club General Settings** surface (super-admin
+  managed), first field `default_trial_days` (default 14). Deliberately extensible: more
+  general-settings fields get added over time. No platform singleton; a brand-new club
+  inherits 14 from the column/blob default, and a super admin can change it per club.
+- **Primary-admin gate**: add `is_primary_admin` to `club_memberships` (one per club). The
+  first `club_admin` created for a club becomes primary. The current primary can transfer it
+  to another `club_admin`; a super admin can reassign it too. Any `club_admin` can request a
+  trial; only the primary can request a paid subscription.
+- **Twenty-origin requests**: built now (Phase 2), on a generic Twenty **inbound** channel
+  (webhook -> dispatcher) so future Twenty-origin request types reuse it. The queue's
+  `source` field already accepts `twenty`.
 
 ## Data model
 
@@ -111,20 +113,27 @@ Mirrors the `club_onboarding_requests` pattern (super-admin actionable, lifecycl
 | completed_at     | timestamptz | nullable                                             |
 | result_sub_id    | uuid fk     | -> org_module_subscriptions, nullable (what it made) |
 
-### `platform_settings` (new, singleton) — pending decision 1
+### Club General Settings (new, per-club, extensible)
 
-Single row. `default_trial_days int not null default 14`, plus `updated_at`.
+Stored as `organisations.general_settings JSONB not null default '{}'` (matches the
+`theme_config` / `net_settings` precedent), with a typed accessor + validation service.
+First key: `default_trial_days` (int, defaults to 14 when absent). Super-admin managed via a
+new "Club General Settings" surface; designed to grow with more fields. When a trial is
+requested/started for a club, the prefilled length reads this club's `default_trial_days`.
 
-### `club_memberships` (altered) — pending decision 2
+### `club_memberships` (altered)
 
 Add `is_primary_admin boolean not null default false`, one true per club (partial unique
-index). Backfill the earliest `club_admin` membership per club.
+index `WHERE is_primary_admin`). Backfill the earliest `club_admin` membership per club.
+Reassignment: an endpoint the current primary can call to transfer to another `club_admin`,
+and a super-admin endpoint to set it directly. Flag exposed on `/auth/me` so the frontend can
+gate the subscribe-request control.
 
 ### `organisations` (altered)
 
-Optional `trial_days_override int null` (per-club default-trial override).
-`subscription_status` / `billing_cycle` stay (master switch + single cycle).
-`module_overrides` retained, kept in sync from the new table for backward compat.
+`general_settings JSONB` (above). `subscription_status` / `billing_cycle` stay (master switch
++ single cycle). `module_overrides` retained, kept in sync from the new table for backward
+compat.
 
 ## Entitlement resolution (new shape)
 
@@ -171,11 +180,22 @@ Day-one parity: for every existing held module in `module_overrides`, insert an
 and `renewal_date`. No club changes entitlement on deploy. Backfill `is_primary_admin` to the
 earliest `club_admin` per club. Seed `platform_settings.default_trial_days = 14`.
 
+## Twenty inbound channel (generic foundation)
+
+Twenty is export-only today. To accept Twenty-origin requests we add a generic **inbound**
+handler: `POST /webhooks/twenty` (shared-secret verified), parsing a Twenty webhook payload
+into a typed event, then a small **dispatcher** that routes by event type. The first consumer
+creates a `module_action_requests` row (`source='twenty'`) when a club's interested/requested
+module changes in the CRM. The dispatcher is deliberately generic so later Twenty-origin
+request types (not just module requests) plug into the same entrypoint. Config:
+`TWENTY_WEBHOOK_SECRET` in `.env`; the Twenty workspace is set to POST record updates to the
+endpoint.
+
 ## Phasing
 
 - **Phase 1** — data model + entitlement resolution + backfill + per-module super-admin
   editing + Twenty per-module ARR/paid/trial. (Fixes the CRM TODO, no behaviour change for
   existing clubs.)
 - **Phase 2** — request-and-approve queue (club-admin request -> super-admin action),
-  notifications, primary-admin gate, default-trial settings.
-- **Phase 3** — Twenty-origin requests (inbound channel), if wanted.
+  notifications, primary-admin gate (+ reassignment), Club General Settings surface
+  (default-trial-days), and the Twenty inbound channel for Twenty-origin requests.
