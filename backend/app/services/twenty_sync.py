@@ -22,6 +22,7 @@ from typing import Optional
 import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
@@ -265,26 +266,59 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
     if org is not None:
         status = (org.subscription_status or "").lower()
         vals["subscriptionStatus"] = status.upper() or None
-        held = _modules(org.module_overrides)
-        # ARR is only real for a PAYING club: a trial (or paused/cancelled) holds its
-        # modules on trial, so its modules are trial-not-paid and its ARR is $0.
-        # NOTE: subscription_status is still org-wide here — a true per-module
-        # subscribed/trial split needs the org model change discussed in the brief.
-        paying = status in ("active", "past_due")
-        if paying:
-            vals["paidModules"] = held
-            vals["arr"] = currency(_arr(org.module_overrides))
-        else:
-            vals["paidModules"] = []
-            vals["arr"] = currency(0)
-            if status == "trial":
-                vals["trialModules"] = sorted(
-                    set(vals.get("trialModules") or []) | set(held))
+        # Per-module split (migration 118): a club can pay for some modules while
+        # trialing others, so paid vs trial is resolved per module, not from one
+        # org-wide flag. The org-level status stays a master switch — paused/cancelled
+        # there means nothing is live, so paidModules is empty and ARR is $0.
+        paid, trial, renewals = _module_split(org)
+        vals["paidModules"] = _modules(paid)
+        vals["arr"] = currency(_arr(paid))
+        if trial:
+            vals["trialModules"] = sorted(set(vals.get("trialModules") or []) | set(_modules(trial)))
         if org.billing_cycle:
             vals["billingCycle"] = org.billing_cycle.upper()
-        if org.renewal_date:
-            vals["renewalDate"] = org.renewal_date.isoformat() + "T00:00:00Z"
+        # The next renewal across paid modules (each module now renews on its own
+        # date); fall back to the legacy org-level renewal_date.
+        renewal = min(renewals) if renewals else org.renewal_date
+        if renewal:
+            vals["renewalDate"] = renewal.isoformat() + "T00:00:00Z"
     return _clean(vals)
+
+
+def _module_split(org):
+    """Split a club's held modules into genuinely-paid vs trial, with the per-module
+    renewal dates of the paid ones. Reads the per-module rows when loaded; falls back
+    to the legacy org-wide ``module_overrides`` + ``subscription_status``. The org-level
+    master switch (paused/cancelled) means nothing is live."""
+    from app.auth.modules import (
+        org_subscription_active, sub_is_live, PAID_STATUSES, STATUS_TRIAL, ALL_MODULES,
+    )
+    if not org_subscription_active(org):
+        return [], [], []
+    subs = None
+    try:
+        from sqlalchemy import inspect as _sa_inspect
+        if "module_subscriptions" not in _sa_inspect(org).unloaded:
+            subs = list(org.module_subscriptions or [])
+    except Exception:
+        subs = None
+    if subs is None:
+        # Legacy fallback: the whole club is paid, or (status trial) all-on-trial.
+        held = [m for m in (org.module_overrides or []) if m in ALL_MODULES]
+        if (org.subscription_status or "").lower() == STATUS_TRIAL:
+            return [], held, []
+        return held, [], []
+    paid, trial, renewals = [], [], []
+    for s in subs:
+        if s.module_key not in ALL_MODULES or not sub_is_live(s):
+            continue
+        if s.status in PAID_STATUSES:
+            paid.append(s.module_key)
+            if s.renewal_date:
+                renewals.append(s.renewal_date)
+        elif s.status == STATUS_TRIAL:
+            trial.append(s.module_key)
+    return paid, trial, renewals
 
 
 def _person_values(ct: MarketingClubContact, club_country: Optional[str] = None) -> dict:
@@ -696,7 +730,9 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
             # touched after this point, so commits/rollbacks below are safe.
             snapshots = []
             for club in clubs:
-                org = (await session.get(Organisation, club.existing_org_id)
+                org = (await session.get(
+                            Organisation, club.existing_org_id,
+                            options=[selectinload(Organisation.module_subscriptions)])
                        if club.existing_org_id else None)
                 cq = select(MarketingClubContact).where(
                     MarketingClubContact.marketing_club_id == club.id)
