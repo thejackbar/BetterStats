@@ -1971,6 +1971,37 @@ async def lifespan(app: FastAPI):
             WHERE m.module_key IN ('select','socials','fees','iq','comms','merch','fantasy')
             ON CONFLICT (organisation_id, module_key) DO NOTHING
         """))
+        # Module action requests — the super-admin trial/subscription queue
+        # (migration 119). Defensive idempotent mirror.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS module_action_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                module_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'outstanding',
+                source TEXT NOT NULL DEFAULT 'app',
+                note TEXT,
+                requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                completed_at TIMESTAMPTZ,
+                result_subscription_id UUID REFERENCES org_module_subscriptions(id) ON DELETE SET NULL,
+                external_ref TEXT
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_module_action_requests_status "
+            "ON module_action_requests(status, requested_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_module_action_requests_org "
+            "ON module_action_requests(organisation_id)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_module_action_external_ref "
+            "ON module_action_requests(external_ref) WHERE external_ref IS NOT NULL"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

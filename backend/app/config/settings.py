@@ -130,10 +130,19 @@ class Settings(BaseSettings):
     # these drive the ongoing record sync (twenty_client / twenty_sync).
     twenty_api_url: str = ""   # e.g. https://twenty.betterat.cricket (the SERVER_URL)
     twenty_api_key: str = ""   # a workspace API key with record write
+    # Shared secret for the INBOUND Twenty webhook (POST /webhooks/twenty). When set,
+    # a Twenty record-update webhook can raise a module trial request back in
+    # BetterCricket (source=twenty). Blank = the endpoint is a no-op (returns 200 and
+    # ignores the payload), so it's safe to leave unconfigured.
+    twenty_webhook_secret: str = ""
 
     @property
     def twenty_configured(self) -> bool:
         return bool(self.twenty_api_url and self.twenty_api_key)
+
+    @property
+    def twenty_webhook_configured(self) -> bool:
+        return bool(self.twenty_webhook_secret)
 
     @property
     def square_api_base(self) -> str:

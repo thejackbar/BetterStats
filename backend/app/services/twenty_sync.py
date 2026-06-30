@@ -689,6 +689,34 @@ async def mark_contact_source(email: str, source: str) -> None:
     await update_person_by_email(email, {"contactSource": source})
 
 
+async def push_org_company(org_id) -> dict:
+    """Push ONE onboarded club's Company fields (paid/trial modules, ARR, subscription
+    status, renewal) to Twenty after a subscription change. Best-effort and
+    no-op when Twenty isn't configured or the club has no linked CRM record."""
+    if not client.configured:
+        return {"skipped": "twenty not configured"}
+    try:
+        async with async_session_maker() as session:
+            session.sync_session.expire_on_commit = False
+            mc = (await session.execute(
+                select(MarketingClub).where(MarketingClub.existing_org_id == org_id)
+            )).scalar_one_or_none()
+            if mc is None:
+                return {"skipped": "no linked CRM club"}
+            org = await session.get(
+                Organisation, org_id,
+                options=[selectinload(Organisation.module_subscriptions)],
+            )
+            company = _company_values(mc, org)
+            async with httpx.AsyncClient() as http:
+                await _upsert(session, http, "club", mc.grassroots_guid,
+                              "companies", "bcClubId", company)
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"push_org_company failed for {org_id}: {e}")
+        return {"error": str(e)}
+
+
 async def export_to_twenty(*, filters: Optional[dict] = None,
                            contact_scope: str = "all", selected_only: bool = True,
                            limit: Optional[int] = None) -> dict:

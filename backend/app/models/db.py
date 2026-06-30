@@ -408,6 +408,33 @@ class OrgModuleSubscription(Base):
     organisation = relationship("Organisation", back_populates="module_subscriptions")
 
 
+class ModuleActionRequest(Base):
+    """A request to change a club's module entitlement, actioned by a super admin
+    (migration 119). A request never changes entitlement on its own — it queues an
+    action. ``kind`` is trial / subscribe / cancel; ``source`` records where it came
+    from (app / super_admin / twenty). The super admin actions it from the queue;
+    completing a trial request creates the trial (``result_subscription_id``).
+
+    Mirrors the ClubOnboardingRequest pattern (super-admin actionable, lifecycle +
+    source + timestamps). ``external_ref`` dedupes a Twenty-origin request.
+    """
+    __tablename__ = "module_action_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    module_key = Column(Text, nullable=False)
+    kind = Column(Text, nullable=False)                 # trial | subscribe | cancel
+    status = Column(Text, nullable=False, server_default="outstanding", default="outstanding")  # outstanding | completed | dismissed
+    source = Column(Text, nullable=False, server_default="app", default="app")  # app | super_admin | twenty
+    note = Column(Text, nullable=True)
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    requested_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    result_subscription_id = Column(UUID(as_uuid=True), ForeignKey("org_module_subscriptions.id", ondelete="SET NULL"), nullable=True)
+    external_ref = Column(Text, nullable=True)          # dedupe key for a Twenty-origin request
+
+
 class Season(Base):
     __tablename__ = "seasons"
 
