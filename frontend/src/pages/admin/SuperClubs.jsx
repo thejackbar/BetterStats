@@ -1,12 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
-import { MODULE_TOGGLES, BILLABLE_MODULE_NAME, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
+import { MODULE_TOGGLES, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-AU') : '—')
+
+// datetime-local helpers (local wall-clock, "YYYY-MM-DDTHH:mm").
+const _pad = (n) => String(n).padStart(2, '0')
+const toLocalInput = (d) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())}T${_pad(d.getHours())}:${_pad(d.getMinutes())}`
+const isoToLocalInput = (iso) => (iso ? toLocalInput(new Date(iso)) : '')
 
 const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
 
@@ -20,10 +25,14 @@ export default function SuperClubs() {
   const [editId, setEditId] = useState(null)
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
-    module_overrides: [], subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    subscription_status: 'active', renewal_date: '', billing_cycle: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [clubAdmins, setClubAdmins] = useState([])
+  // Default trial length (global General Settings) — prefills new trial end dates.
+  const [defaultTrialDays, setDefaultTrialDays] = useState(14)
+  // In-progress trial start/end edits per module key, before Apply.
+  const [trialEdit, setTrialEdit] = useState({})
   // Global platform General Settings (currently just the default trial length).
   const [showSettings, setShowSettings] = useState(false)
   const [settingsForm, setSettingsForm] = useState({ default_trial_days: 14 })
@@ -64,7 +73,10 @@ export default function SuperClubs() {
       setSettingsSaving(false)
     }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    api.superGetGeneralSettings().then(s => setDefaultTrialDays(s?.default_trial_days || 14)).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -155,7 +167,6 @@ export default function SuperClubs() {
       slug: club.slug || '',
       short_name: club.short_name || '',
       contact_email: club.contact_email || '',
-      module_overrides: [...(club.module_overrides || [])],
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
@@ -189,14 +200,48 @@ export default function SuperClubs() {
       setModuleBusy('')
     }
   }
-  const startModuleTrial = (clubId, key, days) =>
-    runModuleAction(key, () => api.superStartModuleTrial(clubId, key, days ? { days } : {}))
-  const setModuleStatus = (clubId, key, status) =>
-    runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
+  // The trial start/end shown for a module: the in-progress edit if any, else the
+  // saved trial dates, else prefilled now → now + the default trial length.
+  const trialDraft = (sub) => {
+    const key = sub?.module
+    if (key && trialEdit[key]) return trialEdit[key]
+    const now = new Date()
+    return {
+      start: isoToLocalInput(sub?.trial_started_at) || toLocalInput(now),
+      end: isoToLocalInput(sub?.trial_ends_at) || toLocalInput(new Date(now.getTime() + defaultTrialDays * 86400000)),
+    }
+  }
+  const clearTrialEdit = (key) => setTrialEdit(t => { const n = { ...t }; delete n[key]; return n })
+
+  const grantModule = (clubId, key) =>
+    runModuleAction(key, () => api.superPatchModule(clubId, key, { status: 'active' }))
+  const removeModule = (clubId, key) =>
+    runModuleAction(key, () => { clearTrialEdit(key); return api.superRemoveModule(clubId, key) })
   const setModuleRenewal = (clubId, key, date) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { renewal_date: date || null }))
-  const removeModule = (clubId, key) =>
-    runModuleAction(key, () => api.superRemoveModule(clubId, key))
+  // Status select: 'trial' opens the inline date editor (persisted on Apply) seeded
+  // from the row's draft; any other status applies immediately.
+  const onModuleStatus = (clubId, key, status, seedDraft) => {
+    if (status === 'trial') {
+      setTrialEdit(t => ({ ...t, [key]: seedDraft }))
+      return
+    }
+    clearTrialEdit(key)
+    runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
+  }
+  const applyTrial = (clubId, key, draft) => {
+    if (draft.start && draft.end && new Date(draft.end) <= new Date(draft.start)) {
+      setMsg('Trial end must be after the start')
+      return
+    }
+    runModuleAction(key, async () => {
+      await api.superStartModuleTrial(clubId, key, {
+        start: new Date(draft.start).toISOString(),
+        end: new Date(draft.end).toISOString(),
+      })
+      clearTrialEdit(key)
+    })
+  }
 
   const syncClub = async (club) => {
     setSyncing(club.id)
@@ -504,83 +549,71 @@ export default function SuperClubs() {
                     </div>
                     <div className="col-span-2">
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Modules (entitlements)</label>
-                      <div className="flex flex-wrap gap-2">
+                      <p className="font-mono text-[10px] text-pb-faintest mb-2">
+                        Add a module to grant it, then set its status. Choosing Trial lets you set the start
+                        and end date &amp; time — prefilled from now and the default trial length. Changes apply immediately.
+                      </p>
+                      <div className="space-y-1.5">
                         {MODULE_TOGGLES.map(tog => {
-                          const on = tog.modules.every(m => editForm.module_overrides.includes(m))
+                          const key = tog.key
+                          const sub = (club.module_subscriptions || []).find(s => s.module === key)
+                          const granted = !!sub
+                          const busy = moduleBusy === key
+                          const editingTrial = !!trialEdit[key]
+                          const trialView = editingTrial || sub?.status === 'trial'
+                          const draft = trialDraft(sub || { module: key })
                           return (
-                            <button
-                              key={tog.key}
-                              type="button"
-                              onClick={() => setEditForm(f => {
-                                const set = new Set(f.module_overrides)
-                                tog.modules.forEach(m => (on ? set.delete(m) : set.add(m)))
-                                return { ...f, module_overrides: [...set] }
-                              })}
-                              className={`font-mono text-[11px] px-2.5 py-1.5 rounded border transition-colors ${on ? 'border-pb-accent/50 bg-pb-accent/10' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
-                              style={on ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 50%, transparent)' } : {}}
-                            >
-                              {on ? '✓ ' : '+ '}{tog.label}
-                            </button>
+                            <div key={key} className="flex flex-wrap items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-2.5 py-1.5">
+                              <button type="button" disabled={busy}
+                                onClick={() => (granted ? removeModule(club.id, key) : grantModule(club.id, key))}
+                                className={`font-mono text-[11px] px-2.5 py-1 rounded border transition-colors disabled:opacity-50 w-40 shrink-0 text-left ${granted ? 'bg-pb-accent/10' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
+                                style={granted ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 50%, transparent)' } : {}}
+                                title={granted ? 'Click to remove' : 'Click to grant'}>
+                                {granted ? '✓ ' : '+ '}{tog.label}
+                              </button>
+                              {granted && (
+                                <>
+                                  <select value={editingTrial ? 'trial' : sub.status} disabled={busy}
+                                    onChange={e => onModuleStatus(club.id, key, e.target.value, draft)}
+                                    className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50">
+                                    {SUBSCRIPTION_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                                  </select>
+                                  {trialView ? (
+                                    <>
+                                      <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">Start
+                                        <input type="datetime-local" value={draft.start} disabled={busy}
+                                          onChange={e => setTrialEdit(t => ({ ...t, [key]: { ...draft, start: e.target.value } }))}
+                                          className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50" />
+                                      </label>
+                                      <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">End
+                                        <input type="datetime-local" value={draft.end} disabled={busy}
+                                          onChange={e => setTrialEdit(t => ({ ...t, [key]: { ...draft, end: e.target.value } }))}
+                                          className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50" />
+                                      </label>
+                                      <button type="button" disabled={busy}
+                                        onClick={() => applyTrial(club.id, key, draft)}
+                                        className="font-mono text-[10px] px-2 py-1 rounded border transition-colors disabled:opacity-50"
+                                        style={{ color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' }}>
+                                        {editingTrial ? 'Apply trial' : 'Update'}
+                                      </button>
+                                      {sub?.status === 'trial' && sub?.is_trial_expired && (
+                                        <span className="font-mono text-[10px] text-pb-red">expired</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">Renews
+                                      <input type="date" value={sub.renewal_date || ''} disabled={busy}
+                                        onChange={e => setModuleRenewal(club.id, key, e.target.value)}
+                                        className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50" />
+                                    </label>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           )
                         })}
                       </div>
                     </div>
-
-                    {/* Per-module subscription detail — status / renewal / trial,
-                        each applied immediately via its own endpoint. */}
-                    {(club.module_subscriptions?.length > 0) && (
-                      <div className="col-span-2">
-                        <label className="font-mono text-[10px] text-pb-faint block mb-1.5">Per-module status</label>
-                        <div className="space-y-1.5">
-                          {club.module_subscriptions.map(sub => {
-                            const busy = moduleBusy === sub.module
-                            const isTrial = sub.status === 'trial'
-                            return (
-                              <div key={sub.module} className="flex flex-wrap items-center gap-2 bg-pb-surface2/60 border pb-hairline rounded px-2.5 py-1.5">
-                                <span className="text-pb-text text-xs font-medium w-28 shrink-0">{sub.name || BILLABLE_MODULE_NAME[sub.module] || sub.module}</span>
-                                <select
-                                  value={sub.status}
-                                  disabled={busy}
-                                  onChange={e => setModuleStatus(club.id, sub.module, e.target.value)}
-                                  className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50"
-                                >
-                                  {SUBSCRIPTION_STATUSES.map(s => (
-                                    <option key={s.key} value={s.key}>{s.label}</option>
-                                  ))}
-                                </select>
-                                <input
-                                  type="date"
-                                  value={sub.renewal_date || ''}
-                                  disabled={busy}
-                                  onChange={e => setModuleRenewal(club.id, sub.module, e.target.value)}
-                                  title="Renewal date"
-                                  className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50"
-                                />
-                                {isTrial && (
-                                  <span className={`font-mono text-[10px] ${sub.is_trial_expired ? 'text-pb-red' : 'text-pb-faint'}`}>
-                                    trial {sub.is_trial_expired ? 'expired' : 'ends'} {fmtDate(sub.trial_ends_at)}
-                                  </span>
-                                )}
-                                <div className="ml-auto flex items-center gap-2">
-                                  {!isTrial && (
-                                    <button type="button" disabled={busy}
-                                      onClick={() => startModuleTrial(club.id, sub.module)}
-                                      className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">
-                                      Start trial
-                                    </button>
-                                  )}
-                                  <button type="button" disabled={busy}
-                                    onClick={() => removeModule(club.id, sub.module)}
-                                    className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors disabled:opacity-50">
-                                    Remove
-                                  </button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
 
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Subscription status (master switch)</label>
