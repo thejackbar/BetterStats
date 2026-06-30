@@ -172,7 +172,7 @@ export default function Navbar() {
 
           {/* Logo / club name */}
           <Link
-            to={marketingAdmin ? '/admin' : `/${slug}`}
+            to={marketingAdmin ? '/admin' : (slug ? `/${slug}` : '/')}
             className="flex items-center gap-3 mr-6 shrink-0 group"
           >
             {customLogo ? (
