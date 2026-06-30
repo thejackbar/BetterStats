@@ -109,6 +109,24 @@ def _role_params(roles: list[str]) -> dict:
     return {}
 
 
+def _search_clause(q: Optional[str], params: dict) -> str:
+    """ANDable clause matching a free-text query against the path, route and
+    UTM fields. Mutates ``params`` to add the ``:q`` bind.
+
+    The page-view beacon stores the FULL landing URL (incl. the query string)
+    in ``path``, so a search like ``utm_campaign=spring`` or ``applecross``
+    matches historical rows too — not just the rows written after the dedicated
+    utm_* columns existed. Empty/whitespace ``q`` → no clause."""
+    if not q or not q.strip():
+        return ""
+    params["q"] = f"%{q.strip()}%"
+    return (
+        "AND (ue.path ILIKE :q OR ue.route ILIKE :q "
+        "OR ue.utm_source ILIKE :q OR ue.utm_campaign ILIKE :q "
+        "OR ue.utm_content ILIKE :q OR ue.utm_medium ILIKE :q)"
+    )
+
+
 # ─── Visitor identity ────────────────────────────────────────────────────────
 # A visitor is keyed by the first-party `visitor_id` (a random UUID the SPA
 # keeps in localStorage) when present, falling back to the hashed IP for legacy
@@ -374,6 +392,7 @@ async def summary(
     days: int = 7,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -384,7 +403,7 @@ async def summary(
     if event_type:
         extra.append("AND ue.event_type = :etype")
         params["etype"] = event_type
-    extras = "\n".join(extra) + " " + _role_filter(roles)
+    extras = "\n".join(extra) + " " + _role_filter(roles) + " " + _search_clause(q, params)
     row = await db.execute(
         text(
             f"""
@@ -418,6 +437,7 @@ async def timeseries(
     days: int = 7,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -430,6 +450,7 @@ async def timeseries(
     if event_type:
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
+    search = _search_clause(q, params)
     rows = await db.execute(
         text(
             f"""
@@ -443,6 +464,7 @@ async def timeseries(
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
             {type_clause}
             {_role_filter(roles)}
+            {search}
             GROUP BY bucket
             ORDER BY bucket ASC
             """
@@ -468,6 +490,7 @@ async def by_feature(
     days: int = 7,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -480,6 +503,7 @@ async def by_feature(
     if event_type:
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
+    search = _search_clause(q, params)
     rows = await db.execute(
         text(
             f"""
@@ -493,6 +517,7 @@ async def by_feature(
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
             {type_clause}
             {_role_filter(roles)}
+            {search}
             GROUP BY ue.route, ue.path, ue.event_type
             """
         ),
@@ -555,6 +580,7 @@ async def by_club(
     days: int = 7,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -573,6 +599,7 @@ async def by_club(
     if event_type:
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
+    search = _search_clause(q, params)
     rows = await db.execute(
         text(
             f"""
@@ -592,6 +619,7 @@ async def by_club(
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
             {type_clause}
             {_role_filter(roles)}
+            {search}
             GROUP BY 1, 2, 3
             ORDER BY hits DESC
             """
@@ -618,6 +646,7 @@ async def visitors(
     days: int = 7,
     event_type: Optional[str] = None,
     anon_only: bool = False,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -639,6 +668,7 @@ async def visitors(
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
     anon_clause = "AND ue.user_id IS NULL" if anon_only else ""
+    search = _search_clause(q, params)
     row = (await db.execute(
         text(
             f"""
@@ -653,6 +683,7 @@ async def visitors(
                   AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
                   {type_clause}
                   {anon_clause}
+                  {search}
                 GROUP BY {_VKEY}
             ),
             first_seen AS (
@@ -696,6 +727,7 @@ async def top_routes(
     limit: int = 30,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -707,6 +739,7 @@ async def top_routes(
     if event_type:
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
+    search = _search_clause(q, params)
     rows = await db.execute(
         text(
             f"""
@@ -722,6 +755,7 @@ async def top_routes(
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
             {type_clause}
             {_role_filter(roles)}
+            {search}
             GROUP BY route_key, ue.event_type
             ORDER BY hits DESC
             LIMIT :lim
@@ -747,6 +781,7 @@ async def top_users(
     days: int = 7,
     limit: int = 30,
     role: Optional[list[str]] = Query(None),
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -754,6 +789,7 @@ async def top_users(
     limit = max(1, min(limit, 200))
     roles = _normalise_roles(role)
     params: dict = {"days": days, "lim": limit, **_role_params(roles)}
+    search = _search_clause(q, params)
     rows = await db.execute(
         text(
             f"""
@@ -771,6 +807,7 @@ async def top_users(
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
               AND ue.user_id IS NOT NULL
               {_role_filter(roles)}
+              {search}
             GROUP BY ue.user_id, u.email, u.display_name, cm.role
             ORDER BY hits DESC
             LIMIT :lim
@@ -797,6 +834,7 @@ async def recent_events(
     limit: int = 200,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -809,7 +847,7 @@ async def recent_events(
         params["etype"] = event_type
     # _role_filter starts with AND; recent has its own WHERE 1=1 base so any
     # combination works.
-    extras_sql = "\n".join(extras) + " " + _role_filter(roles)
+    extras_sql = "\n".join(extras) + " " + _role_filter(roles) + " " + _search_clause(q, params)
     rows = await db.execute(
         text(
             f"""
@@ -955,6 +993,7 @@ async def by_location(
     days: int = 7,
     role: Optional[list[str]] = Query(None),
     event_type: Optional[str] = None,
+    q: Optional[str] = None,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -967,6 +1006,7 @@ async def by_location(
     if event_type:
         type_clause = "AND ue.event_type = :etype"
         params["etype"] = event_type
+    search = _search_clause(q, params)
 
     country_rows = await db.execute(
         text(
@@ -980,6 +1020,7 @@ async def by_location(
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
             {type_clause}
             {_role_filter(roles)}
+            {search}
             GROUP BY ue.country
             ORDER BY hits DESC
             LIMIT 25
@@ -1002,6 +1043,7 @@ async def by_location(
               AND ue.city IS NOT NULL
             {type_clause}
             {_role_filter(roles)}
+            {search}
             GROUP BY ue.country, ue.region, ue.city
             ORDER BY hits DESC
             LIMIT 25
@@ -1027,6 +1069,170 @@ async def by_location(
                 "unique_ips": int(r["unique_ips"] or 0),
             }
             for r in city_rows.mappings().all()
+        ],
+    }
+
+
+# ─── Campaigns / Meta ads attribution ────────────────────────────────────────
+
+@router.get("/club-admin/usage/campaigns")
+async def campaigns(
+    days: int = 30,
+    q: Optional[str] = None,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marketing-attribution view of anonymous public page views — what our
+    paid + organic campaigns actually drive.
+
+    Every dimension is parsed at read time from the stored landing URL (the
+    beacon keeps the full query string in ``path``), so it covers every event on
+    record with no backfill. 'Meta' = Facebook + Instagram: the ads we run,
+    detected by a meta/fb/ig ``utm_source`` or an ``fbclid``/``igshid`` on the
+    URL. This is the click-through side — who arrived, which campaign/creative,
+    where they landed, and whether they went on to a high-intent page.
+    Impressions / spend / CTR live in Meta Ads Manager (would need the
+    Marketing API) and are out of scope here.
+    """
+    days = max(1, min(days, 365))
+    params: dict = {"days": days}
+    search = _search_clause(q, params)
+
+    base = (
+        "ue.event_type = 'page_view' "
+        "AND ue.user_id IS NULL "
+        "AND split_part(ue.path, '?', 1) !~* '^/admin' "
+        "AND ue.created_at >= NOW() - (:days * INTERVAL '1 day') "
+    )
+
+    # UTM dimensions read from the landing URL, preferring the dedicated column.
+    cam = "COALESCE(NULLIF(ue.utm_campaign, ''), substring(ue.path from 'utm_campaign=([^&]+)'))"
+    con = "COALESCE(NULLIF(ue.utm_content, ''),  substring(ue.path from 'utm_content=([^&]+)'))"
+    src = "lower(COALESCE(NULLIF(ue.utm_source, ''), substring(ue.path from 'utm_source=([^&]+)')))"
+    med = "lower(COALESCE(NULLIF(ue.utm_medium, ''), substring(ue.path from 'utm_medium=([^&]+)')))"
+    land = "split_part(COALESCE(NULLIF(ue.landing_path, ''), ue.path), '?', 1)"
+
+    meta_pred = (
+        "(ue.traffic_source IN ('facebook', 'instagram') "
+        f"OR {src} IN ('fb', 'facebook', 'meta', 'ig', 'instagram') "
+        "OR ue.path ~* '(fbclid|igshid)=')"
+    )
+
+    # Headline — Meta (the ads we run).
+    meta = (await db.execute(text(f"""
+        SELECT
+          COUNT(DISTINCT {_VKEY})                                            AS visitors,
+          COUNT(*)                                                           AS views,
+          COUNT(*) FILTER (WHERE ue.path ~* 'fbclid=')                       AS fbclid,
+          COUNT(DISTINCT {_VKEY}) FILTER (
+              WHERE {src} IN ('ig', 'instagram') OR ue.path ~* 'igshid=')    AS instagram,
+          COUNT(DISTINCT {_VKEY}) FILTER (
+              WHERE {src} IN ('fb', 'facebook', 'meta') OR ue.path ~* 'fbclid=') AS facebook,
+          COUNT(DISTINCT {_VKEY}) FILTER (WHERE {med} ~ 'paid')              AS paid
+        FROM usage_events ue
+        WHERE {base} AND {meta_pred} {search}
+    """), params)).mappings().first()
+
+    # Every campaign / UTM combination — the searchable usage-tracking table.
+    campaign_rows = (await db.execute(text(f"""
+        SELECT {cam} AS campaign, {src} AS source, {med} AS medium,
+               COUNT(DISTINCT {_VKEY}) AS visitors,
+               COUNT(*) AS views,
+               COUNT(DISTINCT {land}) AS landing_pages,
+               MAX(ue.created_at) AS last_seen
+        FROM usage_events ue
+        WHERE {base} AND ({cam} IS NOT NULL OR {src} IS NOT NULL) {search}
+        GROUP BY 1, 2, 3
+        ORDER BY visitors DESC, views DESC
+        LIMIT 60
+    """), params)).mappings().all()
+
+    # Ad creatives — utm_content is usually the ad name ({{ad.name}}).
+    creative_rows = (await db.execute(text(f"""
+        SELECT {con} AS content, {cam} AS campaign,
+               COUNT(DISTINCT {_VKEY}) AS visitors, COUNT(*) AS views
+        FROM usage_events ue
+        WHERE {base} AND {con} IS NOT NULL {search}
+        GROUP BY 1, 2 ORDER BY visitors DESC LIMIT 30
+    """), params)).mappings().all()
+
+    # Where Meta clicks land.
+    landing_rows = (await db.execute(text(f"""
+        SELECT {land} AS page,
+               COUNT(DISTINCT {_VKEY}) AS visitors, COUNT(*) AS views
+        FROM usage_events ue
+        WHERE {base} AND {meta_pred} {search}
+        GROUP BY 1 ORDER BY visitors DESC LIMIT 15
+    """), params)).mappings().all()
+
+    # Did the ad click do anything? Meta visitors who went on to a high-intent
+    # page (pricing / contact) — the closest signal to a conversion we hold.
+    conv = (await db.execute(text(f"""
+        WITH mv AS (
+            SELECT DISTINCT {_VKEY} AS vkey
+            FROM usage_events ue
+            WHERE {base} AND {meta_pred} AND {_VKEY} IS NOT NULL {search}
+        ),
+        intent AS (
+            SELECT DISTINCT {_VKEY} AS vkey
+            FROM usage_events ue
+            WHERE ue.event_type = 'page_view'
+              AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+              AND split_part(ue.path, '?', 1) ~* '^/(pricing|contact)(/|$)'
+        )
+        SELECT (SELECT COUNT(*) FROM mv)                                       AS visitors,
+               (SELECT COUNT(*) FROM mv WHERE vkey IN (SELECT vkey FROM intent)) AS reached_intent
+    """), params)).mappings().first()
+
+    def _u(v):
+        return unquote_plus(v) if v else None
+
+    conv_v = int(conv["visitors"] or 0)
+    conv_i = int(conv["reached_intent"] or 0)
+    return {
+        "days": days,
+        "meta": {
+            "visitors": int(meta["visitors"] or 0),
+            "views": int(meta["views"] or 0),
+            "fbclid": int(meta["fbclid"] or 0),
+            "facebook": int(meta["facebook"] or 0),
+            "instagram": int(meta["instagram"] or 0),
+            "paid": int(meta["paid"] or 0),
+        },
+        "conversion": {
+            "visitors": conv_v,
+            "reached_intent": conv_i,
+            "pct": round(100 * conv_i / conv_v) if conv_v else 0,
+        },
+        "campaigns": [
+            {
+                "campaign": _u(r["campaign"]),
+                "source": _u(r["source"]),
+                "medium": _u(r["medium"]),
+                "visitors": int(r["visitors"] or 0),
+                "views": int(r["views"] or 0),
+                "landing_pages": int(r["landing_pages"] or 0),
+                "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
+            }
+            for r in campaign_rows
+        ],
+        "creatives": [
+            {
+                "content": _u(r["content"]),
+                "campaign": _u(r["campaign"]),
+                "visitors": int(r["visitors"] or 0),
+                "views": int(r["views"] or 0),
+            }
+            for r in creative_rows
+        ],
+        "landing": [
+            {
+                "page": r["page"],
+                "label": _page_label(r["page"]),
+                "visitors": int(r["visitors"] or 0),
+                "views": int(r["views"] or 0),
+            }
+            for r in landing_rows
         ],
     }
 

@@ -165,29 +165,57 @@ function ChartTooltip({ active, payload, label }) {
   )
 }
 
-// Collapsible section. Default open, remembers its state — so nothing is
-// hidden unless you choose to tuck it away.
-function Panel({ id, title, sub, defaultOpen = true, children }) {
-  const [open, setOpen] = useState(() => {
+// Per-section collapse state, persisted in localStorage and wired to a global
+// expand/collapse-all broadcast so the whole page can be tucked away at once —
+// handy on a phone. Default open; nothing hides unless you choose to.
+function useCollapse(id, defaultOpen = true) {
+  const [open, setOpenState] = useState(() => {
     try {
       const v = localStorage.getItem('uSec:' + id)
       return v == null ? defaultOpen : v === '1'
     } catch { return defaultOpen }
   })
-  const toggle = () => setOpen(o => {
-    const n = !o
+  const set = useCallback((n) => {
+    setOpenState(n)
     try { localStorage.setItem('uSec:' + id, n ? '1' : '0') } catch { /* ignore */ }
-    return n
-  })
+  }, [id])
+  useEffect(() => {
+    const h = (e) => set(!!e.detail)
+    window.addEventListener('usage-collapse-all', h)
+    return () => window.removeEventListener('usage-collapse-all', h)
+  }, [set])
+  return [open, () => set(!open)]
+}
+
+// Broadcast to every useCollapse on the page.
+function collapseAll(open) {
+  window.dispatchEvent(new CustomEvent('usage-collapse-all', { detail: open }))
+}
+
+// Collapsible section. Default open, remembers its state — so nothing is
+// hidden unless you choose to tuck it away.
+function Panel({ id, title, sub, defaultOpen = true, children }) {
+  const [open, toggle] = useCollapse(id, defaultOpen)
   return (
     <div className="mb-6">
       <button onClick={toggle} className="w-full flex items-center gap-2 mb-2 text-left">
         <span className="font-mono text-pb-faint text-[11px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
-        <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">{title}</h2>
-        {sub && <span className="font-mono text-[9px] text-pb-faintest">{sub}</span>}
+        <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide truncate">{title}</h2>
+        {sub && <span className="font-mono text-[9px] text-pb-faintest hidden sm:inline">{sub}</span>}
       </button>
       {open && <div>{children}</div>}
     </div>
+  )
+}
+
+// Source dot + label chip, reused by the campaigns table.
+function SourceTag({ source }) {
+  const m = sourceMeta(source)
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />
+      {m.label}
+    </span>
   )
 }
 
@@ -199,6 +227,7 @@ function LiveSection() {
   const [live, setLive] = useState(true)
   const [updatedAt, setUpdatedAt] = useState(null)
   const [, tick] = useState(0)
+  const [open, toggle] = useCollapse('live', true)
 
   const load = useCallback(async () => {
     try {
@@ -209,12 +238,14 @@ function LiveSection() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  // Only fetch/poll while the section is open — no point hammering the API
+  // when it's collapsed.
+  useEffect(() => { if (open) load() }, [open, load])
   useEffect(() => {
-    if (!live) return
+    if (!live || !open) return
     const id = setInterval(load, 8000)
     return () => clearInterval(id)
-  }, [live, load])
+  }, [live, open, load])
   useEffect(() => {
     const id = setInterval(() => tick(n => n + 1), 1000)
     return () => clearInterval(id)
@@ -238,23 +269,29 @@ function LiveSection() {
   return (
     <div className="mb-8">
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">Live</h2>
-        <Dot on={live} />
-        <span className="font-mono text-[9px] text-pb-faintest">
-          {updatedAt ? `updated ${fmtAgo(new Date(updatedAt).toISOString())}` : ''}
+        <button onClick={toggle} className="flex items-center gap-2 min-w-0 text-left">
+          <span className="font-mono text-pb-faint text-[11px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
+          <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">Live</h2>
+          <Dot on={live && open} />
+        </button>
+        <span className="font-mono text-[9px] text-pb-faintest hidden sm:inline">
+          {open && updatedAt ? `updated ${fmtAgo(new Date(updatedAt).toISOString())}` : ''}
         </span>
-        <span className="ml-auto flex items-center gap-2">
-          <button onClick={() => setLive(l => !l)}
-            className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
-            {live ? 'Pause' : 'Resume'}
-          </button>
-          <button onClick={load}
-            className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
-            Refresh
-          </button>
-        </span>
+        {open && (
+          <span className="ml-auto flex items-center gap-2">
+            <button onClick={() => setLive(l => !l)}
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+              {live ? 'Pause' : 'Resume'}
+            </button>
+            <button onClick={load}
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+              Refresh
+            </button>
+          </span>
+        )}
       </div>
 
+      {open && (<>
       {error && (
         <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
       )}
@@ -319,11 +356,11 @@ function LiveSection() {
                     const isNew = (Date.now() - new Date(e.created_at).getTime()) < 15000
                     return (
                       <div key={`${e.created_at}-${i}`}
-                        className={`flex items-center gap-2.5 px-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                        className={`flex items-center gap-2 px-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
                         <Dot on={isNew} />
-                        <span className="font-mono text-[10px] text-pb-faintest w-14 shrink-0">{fmtAgo(e.created_at)}</span>
+                        <span className="font-mono text-[10px] text-pb-faintest w-11 sm:w-14 shrink-0">{fmtAgo(e.created_at)}</span>
                         <div className="flex-1 min-w-0">
-                          <div className="text-[13px] text-pb-text truncate">{e.label}</div>
+                          <div className="text-[12px] sm:text-[13px] text-pb-text truncate">{e.label}</div>
                           <a href={e.page} target="_blank" rel="noopener noreferrer"
                             className="font-mono text-[10px] text-pb-faint hover:text-pb-accent hover:underline truncate block">
                             {e.page}
@@ -334,7 +371,7 @@ function LiveSection() {
                           <span className="w-2 h-2 rounded-full" style={{ background: m.dot }} />
                           <span className="font-mono text-[9px] text-pb-faint hidden sm:inline">{m.label}</span>
                         </span>
-                        <span className="font-mono text-[10px] text-pb-faint w-20 text-right truncate shrink-0"
+                        <span className="font-mono text-[10px] text-pb-faint w-16 sm:w-24 text-right truncate shrink-0"
                           title={[e.city, e.region, e.country].filter(Boolean).join(', ')}>
                           {e.country ? `${flagFor(e.country)} ${e.city || e.country}` : ''}
                         </span>
@@ -399,7 +436,148 @@ function LiveSection() {
           </div>
         </>
       )}
+      </>)}
     </div>
+  )
+}
+
+// ─── Meta ads & campaigns (marketing attribution) ────────────────────────────
+
+function MetaStat({ label, value, hint }) {
+  return (
+    <div className="pb-card px-3 py-2">
+      <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">{label}</div>
+      <div className="font-display text-xl text-pb-text">{value}</div>
+      {hint && <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{hint}</div>}
+    </div>
+  )
+}
+
+// What our Meta (Facebook + Instagram) ads and other UTM-tagged links drive.
+// Pure read over data we already hold — click-through side only (impressions /
+// spend / CTR would need Meta's Marketing API). Honours the window + search.
+function MetaCampaigns({ data, loading }) {
+  const meta = data?.meta
+  const conv = data?.conversion
+  const campaigns = data?.campaigns || []
+  const creatives = data?.creatives || []
+  const landing = data?.landing || []
+  const empty = !loading && data && !campaigns.length && !(meta?.views)
+
+  return (
+    <Panel id="campaigns" title="Meta ads & campaigns" sub="paid + UTM-tagged traffic">
+      {loading && !data && (
+        <div className="pb-card p-6 text-center font-mono text-[11px] text-pb-faint">Loading…</div>
+      )}
+      {empty && (
+        <div className="pb-card p-6 text-center font-mono text-[11px] text-pb-faint leading-relaxed">
+          No campaign-tagged traffic in this window. Meta ads show up here once their links carry
+          <span className="text-pb-faint"> ?utm_source=meta&amp;utm_medium=paid_social&amp;utm_campaign=…</span>
+          {' '}(a bare <span className="text-pb-faint">fbclid</span> is detected too).
+        </div>
+      )}
+      {data && !empty && (
+        <div className="space-y-5">
+          {/* Meta headline */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="pb-card px-3 py-2" style={{ background: 'color-mix(in srgb, #1877f2 10%, transparent)' }}>
+              <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Meta visitors</div>
+              <div className="font-display text-2xl text-pb-text">{fmtNum(meta?.visitors)}</div>
+              <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{fmtNum(meta?.views)} views</div>
+            </div>
+            <MetaStat label="Facebook" value={fmtNum(meta?.facebook)} hint="visitors" />
+            <MetaStat label="Instagram" value={fmtNum(meta?.instagram)} hint="visitors" />
+            <MetaStat label="Paid clicks" value={fmtNum(meta?.paid)} hint={`${fmtNum(meta?.fbclid)} via fbclid`} />
+          </div>
+
+          {/* Did the click do anything? */}
+          {conv && conv.visitors > 0 && (
+            <div className="pb-card px-4 py-3">
+              <div className="flex items-center justify-between mb-1.5 gap-2">
+                <span className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">Did the ad click do anything?</span>
+                <span className="font-mono text-[10px] text-pb-text shrink-0">{conv.reached_intent}/{conv.visitors} · {conv.pct}%</span>
+              </div>
+              <div className="h-3 rounded bg-pb-surface2 overflow-hidden">
+                <div className="h-full rounded" style={{ width: `${conv.pct}%`, background: 'var(--pb-accent)' }} />
+              </div>
+              <div className="font-mono text-[9px] text-pb-faintest mt-1.5">Meta visitors who went on to the pricing or contact page.</div>
+            </div>
+          )}
+
+          <div className="grid lg:grid-cols-2 gap-5">
+            {/* Campaigns / UTM table */}
+            <div>
+              <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">Campaigns &amp; UTMs</h3>
+              <div className="pb-card overflow-hidden">
+                {campaigns.length === 0 && (
+                  <div className="p-4 text-center font-mono text-[10px] text-pb-faint">No tagged campaigns.</div>
+                )}
+                {campaigns.map((c, i) => (
+                  <div key={i} className={`px-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex-1 min-w-0 font-mono text-[12px] text-pb-text truncate">
+                        {c.campaign || <span className="text-pb-faintest">(no campaign)</span>}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-mono text-[11px] text-pb-text">{fmtNum(c.visitors)} ppl</div>
+                        <div className="font-mono text-[9px] text-pb-faintest">{fmtNum(c.views)} views</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-x-2 gap-y-0.5 flex-wrap font-mono text-[9px] text-pb-faintest mt-0.5">
+                      {c.source && <SourceTag source={c.source} />}
+                      {c.medium && <span>{c.medium}</span>}
+                      <span>{c.landing_pages} page{c.landing_pages === 1 ? '' : 's'}</span>
+                      {c.last_seen && <span className="ml-auto">{fmtTime(c.last_seen)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Creatives + landing pages */}
+            <div className="space-y-5">
+              <div>
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">
+                  Ad creatives <span className="font-mono text-[9px] text-pb-faintest normal-case tracking-normal">utm_content</span>
+                </h3>
+                <div className="pb-card px-3 py-2">
+                  {creatives.length === 0 ? (
+                    <div className="py-2 text-center font-mono text-[10px] text-pb-faint">No creative-tagged ads.</div>
+                  ) : creatives.map((c, i) => (
+                    <div key={i} className="flex items-center gap-2 py-1">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-mono text-[11px] text-pb-text truncate">{c.content}</div>
+                        {c.campaign && <div className="font-mono text-[9px] text-pb-faintest truncate">{c.campaign}</div>}
+                      </div>
+                      <div className="text-right shrink-0 font-mono text-[10px] text-pb-faint">{fmtNum(c.visitors)} · {fmtNum(c.views)}v</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">Where ads land</h3>
+                <div className="pb-card px-3 py-2">
+                  {landing.length === 0 ? (
+                    <div className="py-2 text-center font-mono text-[10px] text-pb-faint">No paid landings yet.</div>
+                  ) : (() => {
+                    const max = Math.max(1, ...landing.map(l => l.visitors || 0))
+                    return landing.map((l, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1">
+                        <div className="w-28 sm:w-36 shrink-0 truncate font-mono text-[11px] text-pb-text" title={l.page}>{l.label}</div>
+                        <div className="flex-1 h-3 bg-pb-surface2 rounded overflow-hidden">
+                          <div className="h-full rounded" style={{ width: `${Math.round((l.visitors / max) * 100)}%`, background: 'var(--pb-accent)' }} />
+                        </div>
+                        <div className="w-10 text-right font-mono text-[10px] text-pb-faint shrink-0">{fmtNum(l.visitors)}</div>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
   )
 }
 
@@ -420,6 +598,9 @@ export default function AdminUsage() {
   const [topRoutes, setTopRoutes] = useState([])
   const [topUsers, setTopUsers] = useState([])
   const [recent, setRecent] = useState([])
+  const [campaigns, setCampaigns] = useState(null)
+  const [search, setSearch] = useState('')
+  const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -427,33 +608,40 @@ export default function AdminUsage() {
     setRoles(prev => prev.includes(value) ? prev.filter(r => r !== value) : [...prev, value])
   }, [])
 
+  // Debounce the search box so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 350)
+    return () => clearTimeout(t)
+  }, [search])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const opts = { days, eventType: eventType || null, roles }
+    const opts = { days, eventType: eventType || null, roles, q }
     try {
-      const [s, vis, ts, feat, brole, bclub, bloc, r, u, e] = await Promise.all([
+      const [s, vis, ts, feat, brole, bclub, bloc, r, u, e, camp] = await Promise.all([
         api.adminUsageSummary(opts),
-        api.adminUsageVisitors({ days, eventType: eventType || null }),
+        api.adminUsageVisitors({ days, eventType: eventType || null, q }),
         api.adminUsageTimeseries(opts),
         api.adminUsageByFeature(opts),
-        // by-role chart shows the overall split, ignores the role filter
+        // by-role chart shows the overall split, ignores the role + search filters
         api.adminUsageByRole({ days, eventType: eventType || null }),
         api.adminUsageByClub(opts),
         api.adminUsageByLocation(opts),
         api.adminUsageTopRoutes({ ...opts, limit: 20 }),
-        api.adminUsageTopUsers({ days, roles, limit: 20 }),
+        api.adminUsageTopUsers({ days, roles, limit: 20, q }),
         api.adminUsageRecent({ ...opts, limit: 100 }),
+        api.adminUsageCampaigns({ days, q }),
       ])
       setSummary(s); setVisitors(vis); setSeries(ts); setByFeature(feat)
       setByRole(brole); setByClub(bclub); setByLocation(bloc)
-      setTopRoutes(r); setTopUsers(u); setRecent(e)
+      setTopRoutes(r); setTopUsers(u); setRecent(e); setCampaigns(camp)
     } catch (err) {
       setError(err?.message || 'Failed to load usage data')
     } finally {
       setLoading(false)
     }
-  }, [days, eventType, roles])
+  }, [days, eventType, roles, q])
 
   useEffect(() => { load() }, [load])
 
@@ -470,7 +658,7 @@ export default function AdminUsage() {
   return (
     <AdminLayout>
       <div className="max-w-6xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Usage Breadcrumbs</h1>
+        <h1 className="font-display font-bold text-xl sm:text-2xl text-pb-text mb-2">Usage Breadcrumbs</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
           Who's on the site right now, and what people are doing across BetterStats.
           IPs are stored as a truncated hash, not the raw address.
@@ -480,10 +668,49 @@ export default function AdminUsage() {
         <LiveSection />
 
         {/* ── Analytics (filtered) ─────────────────────────────────────── */}
-        <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide mb-3 pt-2 pb-hairline-t">Analytics</h2>
+        <div className="flex items-center gap-2 mb-3 pt-2 pb-hairline-t">
+          <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">Analytics</h2>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button onClick={() => collapseAll(true)}
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">Expand all</button>
+            <button onClick={() => collapseAll(false)}
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">Collapse all</button>
+          </div>
+        </div>
 
         {/* Filters */}
         <div className="mb-5 space-y-2">
+          {/* Search — path / route / UTM. Filters the whole Analytics section,
+              including the Meta ads & campaigns view. */}
+          <div>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-pb-faint text-[12px] pointer-events-none">🔍</span>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search path or UTM — /pricing, utm_campaign=spring, applecross, fbclid…"
+                className="w-full bg-pb-surface border pb-hairline rounded pl-8 pr-16 py-2 font-mono text-[12px] text-pb-text placeholder:text-pb-faintest focus:outline-none focus:border-pb-accent"
+              />
+              {search && (
+                <button onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+                  clear
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              {['utm_source=', 'utm_campaign=', 'utm_medium=paid', 'fbclid', '/pricing', '/contact'].map(chip => (
+                <button key={chip} onClick={() => setSearch(chip)}
+                  className={`font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline transition ${
+                    search === chip ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'}`}>
+                  {chip}
+                </button>
+              ))}
+              {q && (
+                <span className="font-mono text-[9px] text-pb-faintest ml-auto self-center">filtering by “{q}”</span>
+              )}
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2 items-center">
             <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide w-14">Window</span>
             {WINDOW_OPTIONS.map(opt => (
@@ -536,7 +763,8 @@ export default function AdminUsage() {
           <div className="mb-4 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
         )}
 
-        {/* Summary cards */}
+        {/* Overview — counters + return-visitor split, collapsible. */}
+        <Panel id="overview" title="Overview" sub="counts for the window">
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
             {[
@@ -556,7 +784,7 @@ export default function AdminUsage() {
 
         {/* Visitors — new vs returning, derived from the (hashed) IP. */}
         {visitors && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
               { label: 'Visitors', value: visitors.visitors, hint: 'unique IPs' },
               { label: 'Returning', value: visitors.returning, hint: `${visitors.returning_pct}% · seen before` },
@@ -572,6 +800,10 @@ export default function AdminUsage() {
             ))}
           </div>
         )}
+        </Panel>
+
+        {/* Meta ads & campaigns (marketing attribution) */}
+        <MetaCampaigns data={campaigns} loading={loading} />
 
         {/* Time series */}
         <Panel id="timeseries" title="Activity over time" sub={series.bucket === 'hour' ? 'per hour' : 'per day'}>
@@ -790,34 +1022,38 @@ export default function AdminUsage() {
             {loading && !recent.length && <div className="p-6 text-center font-mono text-[11px] text-pb-faint">Loading…</div>}
             {!loading && !recent.length && <div className="p-6 text-center font-mono text-[11px] text-pb-faint">No events.</div>}
             {recent.map((r, i) => (
-              <div key={r.id} className={`flex items-center gap-3 px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                <TypeBadge type={r.event_type} />
-                <span className="font-mono text-[10px] text-pb-faintest shrink-0 w-24">{fmtTime(r.created_at)}</span>
-                <StatusBadge status={r.status} />
-                <span className="font-mono text-[10px] text-pb-faint shrink-0 w-12">{r.method}</span>
-                <div className="flex-1 min-w-0">
-                  {r.target_name && r.target_url ? (
-                    <a href={r.target_url} target="_blank" rel="noopener noreferrer"
-                      className="text-pb-accent hover:underline text-[12px] truncate block" title={r.path}>{r.target_name}</a>
-                  ) : r.event_type === 'page_view' && r.path ? (
-                    <a href={r.path} target="_blank" rel="noopener noreferrer"
-                      className="font-mono text-[10px] text-pb-text hover:text-pb-accent hover:underline truncate block">{r.path}</a>
-                  ) : (
-                    <span className="font-mono text-[10px] text-pb-text truncate block" title={r.path}>{r.path}</span>
+              <div key={r.id} className={`px-3 sm:px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                {/* Primary line — type, status, what was hit, duration */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <TypeBadge type={r.event_type} />
+                  <StatusBadge status={r.status} />
+                  <div className="flex-1 min-w-0">
+                    {r.target_name && r.target_url ? (
+                      <a href={r.target_url} target="_blank" rel="noopener noreferrer"
+                        className="text-pb-accent hover:underline text-[12px] truncate block" title={r.path}>{r.target_name}</a>
+                    ) : r.event_type === 'page_view' && r.path ? (
+                      <a href={r.path} target="_blank" rel="noopener noreferrer"
+                        className="font-mono text-[10px] text-pb-text hover:text-pb-accent hover:underline truncate block">{r.path}</a>
+                    ) : (
+                      <span className="font-mono text-[10px] text-pb-text truncate block" title={r.path}>{r.path}</span>
+                    )}
+                  </div>
+                  {r.duration_ms != null && (
+                    <span className="font-mono text-[9px] text-pb-faintest shrink-0">{r.duration_ms}ms</span>
                   )}
                 </div>
-                <span className="text-xs shrink-0 w-20 text-right truncate"
-                  title={[r.city, r.region, r.country].filter(Boolean).join(', ') || 'Unknown'}>
-                  {r.country ? (
-                    <span className="font-mono text-pb-faint">{flagFor(r.country)} {r.city || r.country}</span>
-                  ) : <span className="font-mono text-[10px] text-pb-faintest">—</span>}
-                </span>
-                <span className="font-mono text-[10px] text-pb-faint shrink-0 w-28 text-right truncate flex items-center justify-end gap-1.5">
-                  {r.user_id ? (<><span className="truncate">{userLabel(r)}</span><RoleBadge role={r.user_role} /></>) : 'anon'}
-                </span>
-                <span className="font-mono text-[9px] text-pb-faintest shrink-0 w-12 text-right">
-                  {r.duration_ms != null ? `${r.duration_ms}ms` : ''}
-                </span>
+                {/* Meta line — wraps under the path on a phone, sits inline on desktop */}
+                <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap font-mono text-[9px] text-pb-faintest mt-1">
+                  <span className="shrink-0">{fmtTime(r.created_at)}</span>
+                  <span className="hidden sm:inline shrink-0">{r.method}</span>
+                  <span className="shrink-0 truncate max-w-[45%]"
+                    title={[r.city, r.region, r.country].filter(Boolean).join(', ') || 'Unknown'}>
+                    {r.country ? <>{flagFor(r.country)} {r.city || r.country}</> : '—'}
+                  </span>
+                  <span className="ml-auto inline-flex items-center gap-1.5 truncate max-w-[55%]">
+                    {r.user_id ? (<><span className="truncate">{userLabel(r)}</span><RoleBadge role={r.user_role} /></>) : 'anon'}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

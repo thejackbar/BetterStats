@@ -549,40 +549,48 @@ export const api = {
   // Activity log (audit trail)
   adminListActivityLog: (limit = 100) =>
     request(`/club-admin/activity-log?limit=${limit}`),
-  // Usage breadcrumbs (super-admin only)
-  adminUsageRecent: ({ limit = 200, eventType = null, roles = [] } = {}) => {
+  // Usage breadcrumbs (super-admin only). `q` is a free-text search over the
+  // path / route / UTM fields — threaded through every analytics view so the
+  // whole page reflects "show me everything matching <term>".
+  adminUsageRecent: ({ limit = 200, eventType = null, roles = [], q = '' } = {}) => {
     const params = new URLSearchParams({ limit: String(limit) })
     if (eventType) params.set('event_type', eventType)
     ;(roles || []).forEach(r => params.append('role', r))
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/recent?${params}`)
   },
-  adminUsageTopRoutes: ({ days = 7, limit = 30, eventType = null, roles = [] } = {}) => {
+  adminUsageTopRoutes: ({ days = 7, limit = 30, eventType = null, roles = [], q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days), limit: String(limit) })
     if (eventType) params.set('event_type', eventType)
     ;(roles || []).forEach(r => params.append('role', r))
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/top-routes?${params}`)
   },
-  adminUsageTopUsers: ({ days = 7, limit = 30, roles = [] } = {}) => {
+  adminUsageTopUsers: ({ days = 7, limit = 30, roles = [], q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days), limit: String(limit) })
     ;(roles || []).forEach(r => params.append('role', r))
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/top-users?${params}`)
   },
-  adminUsageSummary: ({ days = 7, roles = [], eventType = null } = {}) => {
+  adminUsageSummary: ({ days = 7, roles = [], eventType = null, q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     ;(roles || []).forEach(r => params.append('role', r))
     if (eventType) params.set('event_type', eventType)
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/summary?${params}`)
   },
-  adminUsageTimeseries: ({ days = 7, roles = [], eventType = null } = {}) => {
+  adminUsageTimeseries: ({ days = 7, roles = [], eventType = null, q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     ;(roles || []).forEach(r => params.append('role', r))
     if (eventType) params.set('event_type', eventType)
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/timeseries?${params}`)
   },
-  adminUsageByFeature: ({ days = 7, roles = [], eventType = null } = {}) => {
+  adminUsageByFeature: ({ days = 7, roles = [], eventType = null, q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     ;(roles || []).forEach(r => params.append('role', r))
     if (eventType) params.set('event_type', eventType)
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/by-feature?${params}`)
   },
   adminUsageByRole: ({ days = 7, eventType = null } = {}) => {
@@ -590,23 +598,33 @@ export const api = {
     if (eventType) params.set('event_type', eventType)
     return request(`/club-admin/usage/by-role?${params}`)
   },
-  adminUsageByLocation: ({ days = 7, roles = [], eventType = null } = {}) => {
+  adminUsageByLocation: ({ days = 7, roles = [], eventType = null, q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     ;(roles || []).forEach(r => params.append('role', r))
     if (eventType) params.set('event_type', eventType)
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/by-location?${params}`)
   },
-  adminUsageByClub: ({ days = 7, roles = [], eventType = null } = {}) => {
+  adminUsageByClub: ({ days = 7, roles = [], eventType = null, q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     ;(roles || []).forEach(r => params.append('role', r))
     if (eventType) params.set('event_type', eventType)
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/by-club?${params}`)
   },
-  adminUsageVisitors: ({ days = 7, eventType = null, anonOnly = false } = {}) => {
+  adminUsageVisitors: ({ days = 7, eventType = null, anonOnly = false, q = '' } = {}) => {
     const params = new URLSearchParams({ days: String(days) })
     if (eventType) params.set('event_type', eventType)
     if (anonOnly) params.set('anon_only', 'true')
+    if (q) params.set('q', q)
     return request(`/club-admin/usage/visitors?${params}`)
+  },
+  // Marketing attribution: Meta-ad headline, campaigns/UTM table, ad creatives,
+  // landing pages, ad-click conversion. `q` searches the same path/UTM fields.
+  adminUsageCampaigns: ({ days = 30, q = '' } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (q) params.set('q', q)
+    return request(`/club-admin/usage/campaigns?${params}`)
   },
   // Realtime snapshot: active visitors, per-minute, live feed, top pages, sources, UTMs.
   adminUsageLive: () => request('/club-admin/usage/live'),
