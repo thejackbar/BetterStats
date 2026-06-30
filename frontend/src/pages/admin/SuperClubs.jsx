@@ -26,6 +26,7 @@ export default function SuperClubs() {
     default_trial_days: 14,
   })
   const [moduleBusy, setModuleBusy] = useState('')
+  const [clubAdmins, setClubAdmins] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
 
@@ -135,6 +136,19 @@ export default function SuperClubs() {
       billing_cycle: club.billing_cycle || '',
       default_trial_days: club.default_trial_days || 14,
     })
+    setClubAdmins([])
+    api.superListClubAdmins(club.id).then(d => setClubAdmins(Array.isArray(d) ? d : [])).catch(() => {})
+  }
+
+  const setPrimaryAdmin = async (clubId, userId) => {
+    setMsg('')
+    try {
+      await api.superSetPrimaryAdmin(clubId, userId)
+      const d = await api.superListClubAdmins(clubId)
+      setClubAdmins(Array.isArray(d) ? d : [])
+    } catch (err) {
+      setMsg(err.message)
+    }
   }
 
   // Per-module actions apply immediately (their own endpoints), then reload so the
@@ -537,6 +551,25 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, default_trial_days: e.target.value }))}
                         className={INPUT_CLS} />
                     </div>
+                    {clubAdmins.length > 0 && (
+                      <div className="col-span-2">
+                        <label className="font-mono text-[10px] text-pb-faint block mb-1">Primary / owner admin</label>
+                        <select
+                          value={clubAdmins.find(a => a.is_primary_admin)?.user_id || ''}
+                          onChange={e => setPrimaryAdmin(club.id, e.target.value)}
+                          className={INPUT_CLS}>
+                          <option value="" disabled>— none —</option>
+                          {clubAdmins.map(a => (
+                            <option key={a.user_id} value={a.user_id}>
+                              {a.display_name || a.username}{a.is_primary_admin ? ' (primary)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                          Only the primary admin can request a paid subscription. Applied immediately.
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <p className="font-mono text-[10px] text-pb-faintest">
                     Core (BetterStats) is always on. Tick a module to grant it (or remove it). Each held module

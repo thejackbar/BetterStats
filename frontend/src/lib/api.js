@@ -827,6 +827,23 @@ export const api = {
     request(`/club-admin/super/clubs/${clubId}/modules/${moduleKey}`, { method: 'PATCH', body: JSON.stringify(data) }),
   superRemoveModule: (clubId, moduleKey) =>
     request(`/club-admin/super/clubs/${clubId}/modules/${moduleKey}`, { method: 'DELETE' }),
+  // Primary / owner admin (migration 118).
+  superListClubAdmins: (clubId) => request(`/club-admin/super/clubs/${clubId}/admins`),
+  superSetPrimaryAdmin: (clubId, userId) =>
+    request(`/club-admin/super/clubs/${clubId}/primary-admin`, { method: 'PUT', body: JSON.stringify({ user_id: userId }) }),
+  transferPrimaryAdmin: (userId) =>
+    request('/club-admin/primary-admin/transfer', { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+  // Module action requests — the trial/subscription queue (migration 119).
+  requestModule: (moduleKey, kind = 'trial', note) =>
+    request('/club-admin/module-requests', { method: 'POST', body: JSON.stringify({ module_key: moduleKey, kind, note }) }),
+  listMyModuleRequests: () => request('/club-admin/module-requests'),
+  superListModuleRequests: (status) =>
+    request(`/club-admin/super/module-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  superCountModuleRequests: () => request('/club-admin/super/module-requests/count'),
+  superApproveModuleRequest: (id, body = {}) =>
+    request(`/club-admin/super/module-requests/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  superDismissModuleRequest: (id) =>
+    request(`/club-admin/super/module-requests/${id}/dismiss`, { method: 'POST' }),
   superListUsers: () => request('/club-admin/super/users'),
   superCreateUser: (data) =>
     request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(data) }),

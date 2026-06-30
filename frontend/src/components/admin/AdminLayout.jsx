@@ -80,6 +80,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
+  { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/announce', label: 'Club Announcements' },
   { to: '/admin/usage', label: 'Usage' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
@@ -88,9 +89,21 @@ const SUPER_LINKS = [
 
 export default function AdminLayout({ children }) {
   const { user, logout, switchClub, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
+
+  // Super-admin module-request queue badge — refreshed on mount.
+  useEffect(() => {
+    if (user?.role !== 'super_admin') return
+    let alive = true
+    api.superCountModuleRequests()
+      .then(d => { if (alive) setModuleReqCount(d?.outstanding || 0) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [user?.role])
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  // Outstanding module requests (super-admin queue badge).
+  const [moduleReqCount, setModuleReqCount] = useState(0)
   const [bellOpen, setBellOpen] = useState(false)
   const [bellSummary, setBellSummary] = useState(null)
   const [bellError, setBellError] = useState(null)
@@ -318,14 +331,19 @@ export default function AdminLayout({ children }) {
                     key={link.to}
                     to={link.to}
                     onClick={() => setMobileOpen(false)}
-                    className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
+                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
                       isActive(link.to, link.exact)
                         ? 'bg-pb-surface2 text-pb-text'
                         : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
                     }`}
                     style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
                   >
-                    {link.label.toUpperCase()}
+                    <span>{link.label.toUpperCase()}</span>
+                    {link.badge === 'moduleRequests' && moduleReqCount > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
+                        {moduleReqCount}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </div>
