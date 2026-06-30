@@ -193,9 +193,27 @@ endpoint.
 
 ## Phasing
 
-- **Phase 1** — data model + entitlement resolution + backfill + per-module super-admin
-  editing + Twenty per-module ARR/paid/trial. (Fixes the CRM TODO, no behaviour change for
-  existing clubs.)
-- **Phase 2** — request-and-approve queue (club-admin request -> super-admin action),
-  notifications, primary-admin gate (+ reassignment), Club General Settings surface
-  (default-trial-days), and the Twenty inbound channel for Twenty-origin requests.
+- **Phase 1 (shipped)** — data model + entitlement resolution + backfill + per-module
+  super-admin editing + Twenty per-module ARR/paid/trial. Fixes the CRM TODO, no behaviour
+  change for existing clubs. Migration 118; `services/module_subscriptions.py`; SuperClubs
+  per-module editor.
+- **Phase 2 (shipped)** — request-and-approve queue (`module_action_requests`, migration
+  119), super-admin queue page + badge, club-admin request controls (trial any admin /
+  subscribe primary-only), primary-admin flag + reassignment, Club General Settings
+  (default-trial-days), and the Twenty inbound webhook for Twenty-origin requests.
+
+## Deploy notes
+
+- **Migrations 118 + 119** run via alembic, and are mirrored idempotently in the
+  `main.py` lifespan, so the box self-heals if alembic lags. The 118 backfill is
+  non-breaking (every held module gets a row inheriting the club's current status).
+- **Twenty inbound webhook** is off until `TWENTY_WEBHOOK_SECRET` is set in the server
+  `.env`. When set, point the Twenty workspace's Company webhook at
+  `https://betterat.cricket/api/webhooks/twenty` (nginx strips `/api`). The endpoint
+  accepts either an HMAC-SHA256 signature over the raw body
+  (`X-Twenty-Webhook-Signature`) or a bearer header (`X-Webhook-Secret`) equal to the
+  secret. The payload field paths in `services/twenty_inbound.py` (`bcClubId`,
+  `interestedModules`) follow what we export; verify them against a real Twenty payload
+  and adjust if needed.
+- **No new scheduler config** — the daily trial-expiry sweep registers itself in
+  `jobs/scheduler.py`.
