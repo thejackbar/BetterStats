@@ -363,8 +363,6 @@ export default function Leaderboard() {
     image: club?.logo_url || null,
   })
 
-  if (inactive) return <ClubInactive />
-
   const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
 
   const [orgGrades, setOrgGrades] = useState([])
@@ -455,6 +453,7 @@ export default function Leaderboard() {
     }).finally(() => setSirsLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, mainTab])
 
+  if (inactive) return <ClubInactive />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
   const currentSeason = seasons?.find(s => s.id === selectedSeason)

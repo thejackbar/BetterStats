@@ -122,8 +122,6 @@ export default function Dashboard() {
     jsonLd: clubJsonLd,
   })
 
-  if (inactive) return <ClubInactive />
-
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading, error } = useClubData(orgId)
   const { games, loading: gamesLoading } = useRecentGames(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
 
@@ -171,6 +169,7 @@ export default function Dashboard() {
       .finally(() => setFixturesLoading(false))
   }, [orgId])
 
+  if (inactive) return <ClubInactive />
   if (loading) return <PbSpinner message="Loading club data…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
   if (!org) return null

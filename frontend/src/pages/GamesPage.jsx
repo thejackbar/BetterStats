@@ -93,8 +93,6 @@ export default function GamesPage() {
     image: club?.logo_url || null,
   })
 
-  if (inactive) return <ClubInactive />
-
   const {
     seasons, grades,
     selectedSeason, setSelectedSeason,
@@ -160,6 +158,7 @@ export default function GamesPage() {
   const currentSeason = seasons?.find(s => s.id === selectedSeason)
   const seasonLabel = currentSeason?.name || 'ALL SEASONS'
 
+  if (inactive) return <ClubInactive />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
   return (

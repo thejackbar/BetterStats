@@ -32,8 +32,6 @@ export default function Players() {
   const fmt = useNameFormat(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading: clubLoading } = useClubData(orgId)
 
-  if (inactive) return <ClubInactive />
-
   const [players, setPlayers] = useState([])
   const [battingStats, setBattingStats] = useState({})
   const [bowlingStats, setBowlingStats] = useState({})
@@ -72,6 +70,7 @@ export default function Players() {
     return players.filter(p => nameMatchesSearch(p.display_name || p.name, search))
   }, [players, search])
 
+  if (inactive) return <ClubInactive />
   if (clubLoading) return <PbSpinner message="Loading players…" />
 
   return (

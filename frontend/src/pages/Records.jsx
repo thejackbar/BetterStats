@@ -547,8 +547,6 @@ export default function Records() {
   useClubTheme(club)
   const fmt = useNameFormat(club)
 
-  if (inactive) return <ClubInactive />
-
   const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
 
   const [orgGrades, setOrgGrades] = useState([])
@@ -579,6 +577,7 @@ export default function Records() {
       .finally(() => setLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender])
 
+  if (inactive) return <ClubInactive />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
   const latestSeason = seasons?.[0]?.name || null
