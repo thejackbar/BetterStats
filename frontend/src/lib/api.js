@@ -820,6 +820,13 @@ export const api = {
     request(`/club-admin/super/clubs/${clubId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   superDeleteClub: (clubId) =>
     request(`/club-admin/super/clubs/${clubId}`, { method: 'DELETE' }),
+  // Per-module subscriptions (migration 118).
+  superStartModuleTrial: (clubId, moduleKey, body = {}) =>
+    request(`/club-admin/super/clubs/${clubId}/modules/${moduleKey}/trial`, { method: 'POST', body: JSON.stringify(body) }),
+  superPatchModule: (clubId, moduleKey, data) =>
+    request(`/club-admin/super/clubs/${clubId}/modules/${moduleKey}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superRemoveModule: (clubId, moduleKey) =>
+    request(`/club-admin/super/clubs/${clubId}/modules/${moduleKey}`, { method: 'DELETE' }),
   superListUsers: () => request('/club-admin/super/users'),
   superCreateUser: (data) =>
     request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(data) }),

@@ -1,10 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
-import { MODULE_TOGGLES, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
+import { MODULE_TOGGLES, MODULE_INFO, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+
+// module key -> display name (e.g. 'iq' -> 'BetterIQ')
+const MODULE_NAME = Object.fromEntries(MODULE_INFO.map(m => [m.key, m.name]))
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-AU') : '—')
 
 const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
 
@@ -19,7 +23,9 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     module_overrides: [], subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    default_trial_days: 14,
   })
+  const [moduleBusy, setModuleBusy] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
 
@@ -127,8 +133,32 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
+      default_trial_days: club.default_trial_days || 14,
     })
   }
+
+  // Per-module actions apply immediately (their own endpoints), then reload so the
+  // club's module_subscriptions refresh in place.
+  const runModuleAction = async (key, fn) => {
+    setModuleBusy(key)
+    setMsg('')
+    try {
+      await fn()
+      await load()
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setModuleBusy('')
+    }
+  }
+  const startModuleTrial = (clubId, key, days) =>
+    runModuleAction(key, () => api.superStartModuleTrial(clubId, key, days ? { days } : {}))
+  const setModuleStatus = (clubId, key, status) =>
+    runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
+  const setModuleRenewal = (clubId, key, date) =>
+    runModuleAction(key, () => api.superPatchModule(clubId, key, { renewal_date: date || null }))
+  const removeModule = (clubId, key) =>
+    runModuleAction(key, () => api.superRemoveModule(clubId, key))
 
   const syncClub = async (club) => {
     setSyncing(club.id)
@@ -153,6 +183,7 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
+        default_trial_days: Number(editForm.default_trial_days) || 14,
       }
       await api.superPatchClub(editId, payload)
       setMsg('Club updated')
@@ -417,8 +448,65 @@ export default function SuperClubs() {
                         })}
                       </div>
                     </div>
+
+                    {/* Per-module subscription detail — status / renewal / trial,
+                        each applied immediately via its own endpoint. */}
+                    {(club.module_subscriptions?.length > 0) && (
+                      <div className="col-span-2">
+                        <label className="font-mono text-[10px] text-pb-faint block mb-1.5">Per-module status</label>
+                        <div className="space-y-1.5">
+                          {club.module_subscriptions.map(sub => {
+                            const busy = moduleBusy === sub.module
+                            const isTrial = sub.status === 'trial'
+                            return (
+                              <div key={sub.module} className="flex flex-wrap items-center gap-2 bg-pb-surface2/60 border pb-hairline rounded px-2.5 py-1.5">
+                                <span className="text-pb-text text-xs font-medium w-28 shrink-0">{MODULE_NAME[sub.module] || sub.module}</span>
+                                <select
+                                  value={sub.status}
+                                  disabled={busy}
+                                  onChange={e => setModuleStatus(club.id, sub.module, e.target.value)}
+                                  className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50"
+                                >
+                                  {SUBSCRIPTION_STATUSES.map(s => (
+                                    <option key={s.key} value={s.key}>{s.label}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="date"
+                                  value={sub.renewal_date || ''}
+                                  disabled={busy}
+                                  onChange={e => setModuleRenewal(club.id, sub.module, e.target.value)}
+                                  title="Renewal date"
+                                  className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50"
+                                />
+                                {isTrial && (
+                                  <span className={`font-mono text-[10px] ${sub.is_trial_expired ? 'text-pb-red' : 'text-pb-faint'}`}>
+                                    trial {sub.is_trial_expired ? 'expired' : 'ends'} {fmtDate(sub.trial_ends_at)}
+                                  </span>
+                                )}
+                                <div className="ml-auto flex items-center gap-2">
+                                  {!isTrial && (
+                                    <button type="button" disabled={busy}
+                                      onClick={() => startModuleTrial(club.id, sub.module, club.default_trial_days)}
+                                      className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">
+                                      Start trial
+                                    </button>
+                                  )}
+                                  <button type="button" disabled={busy}
+                                    onClick={() => removeModule(club.id, sub.module)}
+                                    className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors disabled:opacity-50">
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     <div>
-                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Subscription status</label>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Subscription status (master switch)</label>
                       <select value={editForm.subscription_status}
                         onChange={e => setEditForm(f => ({ ...f, subscription_status: e.target.value }))}
                         className={INPUT_CLS}>
@@ -438,15 +526,23 @@ export default function SuperClubs() {
                       </select>
                     </div>
                     <div>
-                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Renewal date</label>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Renewal date (default)</label>
                       <input type="date" value={editForm.renewal_date}
                         onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
                         className={INPUT_CLS} />
                     </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Default trial days</label>
+                      <input type="number" min="1" value={editForm.default_trial_days}
+                        onChange={e => setEditForm(f => ({ ...f, default_trial_days: e.target.value }))}
+                        className={INPUT_CLS} />
+                    </div>
                   </div>
                   <p className="font-mono text-[10px] text-pb-faintest">
-                    Core (BetterStats) is always on. Tick the modules this club has paid for. BetterAdmin covers BetterFees + BetterComms.
-                    Paused / Cancelled fall back to Core only regardless of modules.
+                    Core (BetterStats) is always on. Tick a module to grant it (or remove it). Each held module
+                    carries its own status, renewal date and trial above. Subscription status is the whole-account
+                    master switch — Paused / Cancelled fall back to Core only regardless of modules. A trial ends on
+                    its end date automatically. Default trial days seeds new trials (Club General Settings).
                   </p>
                   <div className="flex gap-2">
                     <button type="submit" disabled={saving}
