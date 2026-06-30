@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import logging
@@ -28,24 +29,37 @@ async def receive_webhook(request: Request):
 
 
 def _verify_twenty(request: Request, raw: bytes) -> bool:
-    """Authenticate an inbound Twenty webhook against the shared secret. Accepts
-    either an HMAC-SHA256 signature over the raw body (``X-Twenty-Webhook-Signature``)
-    or a plain bearer match (``X-Webhook-Secret``) — whichever the workspace is set up
-    to send. Both compared in constant time."""
+    """Authenticate an inbound Twenty webhook against the shared secret (the value set
+    in the webhook's Secret field, used to compute the HMAC signature of the payload).
+
+    We don't depend on the exact signature HEADER NAME (it varies by sender/version):
+    we compute HMAC-SHA256(secret, raw body) and accept the request if ANY header value
+    matches it (hex or base64, tolerating a ``sha256=`` / ``v1=`` prefix). A plain bearer
+    header (``X-Webhook-Secret``) equal to the secret is also accepted for manual tests.
+    All comparisons are constant-time."""
     secret = settings.twenty_webhook_secret
     if not secret:
         return False
     bearer = request.headers.get("x-webhook-secret") or ""
     if bearer and hmac.compare_digest(bearer, secret):
         return True
-    sig = (request.headers.get("x-twenty-webhook-signature")
-           or request.headers.get("x-webhook-signature") or "")
-    if sig:
-        expected = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
-        # Tolerate a "sha256=" prefix some senders add.
-        sig = sig.split("=", 1)[-1] if "=" in sig else sig
-        if hmac.compare_digest(sig, expected):
-            return True
+    digest = hmac.new(secret.encode(), raw, hashlib.sha256)
+    expected_hex = digest.hexdigest()
+    expected_b64 = base64.b64encode(digest.digest()).decode()
+    for value in request.headers.values():
+        if not value:
+            continue
+        v = value.strip()
+        # Try the raw value (covers base64, which can contain '=' padding) AND the part
+        # after a "sha256=" / "v1=" style scheme prefix.
+        candidates = {v}
+        if "=" in v:
+            candidates.add(v.split("=", 1)[1].strip())
+        for c in candidates:
+            if c and len(c) == len(expected_hex) and hmac.compare_digest(c.lower(), expected_hex):
+                return True
+            if c and len(c) == len(expected_b64) and hmac.compare_digest(c, expected_b64):
+                return True
     return False
 
 
@@ -58,6 +72,10 @@ async def receive_twenty_webhook(request: Request, db: AsyncSession = Depends(ge
         return {"status": "ignored", "reason": "webhook not configured"}
     raw = await request.body()
     if not _verify_twenty(request, raw):
+        # Self-diagnosing: log the header names (not values) so we can match Twenty's
+        # actual signature header if the secret/format ever drifts.
+        logger.warning("Twenty webhook signature mismatch; header names=%s",
+                       list(request.headers.keys()))
         return Response(status_code=401)
     try:
         import json
