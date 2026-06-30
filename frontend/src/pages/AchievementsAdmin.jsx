@@ -77,8 +77,8 @@ function PlayerAutocomplete({ players, value, onChange }) {
 // Post-import linker: search the WHOLE player roster (not just the fuzzy
 // candidates) so any name can be linked by hand. Candidate quick-picks stay as
 // one-tap shortcuts when the matcher did find close names.
-function LinkPicker({ players, candidates, initialLabel, onPick }) {
-  const [query, setQuery] = useState(initialLabel || '')
+function LinkPicker({ players, candidates, onPick }) {
+  const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -195,12 +195,10 @@ function ImportPanel({ orgId, onImported, players }) {
     try {
       const res = await api.importAchievements(orgId, file)
       setResult(res)
-      // Pre-select the strongest candidate for each suggested name.
-      const choices = {}
-      for (const s of res.suggested_matches || []) {
-        if (s.candidates?.length) choices[s.name] = s.candidates[0].player_id
-      }
-      setLinkChoices(choices)
+      // Don't pre-select anything. The suggested names are the ones the matcher
+      // wasn't sure about, so default to blank (saved with the name, linkable
+      // later) and let the operator pick only the ones they're sure of.
+      setLinkChoices({})
       onImported()
       loadHistory()
     } catch (err) {
@@ -490,7 +488,7 @@ function ImportPanel({ orgId, onImported, players }) {
             return (
               <div className="mt-3 pt-3 border-t pb-hairline">
                 <p className="font-mono text-[10px] text-pb-amber mb-2">
-                  ? {toLink.length} name{toLink.length !== 1 ? 's' : ''} to link. Search your players and pick the right one, then link. Anything you leave blank still saves with the name typed in.
+                  ? {toLink.length} name{toLink.length !== 1 ? 's' : ''} to link, optional. Search your players and pick only the ones you're sure of, then link. Leave the rest blank: they're already saved with the name and can be linked any time later.
                 </p>
                 <div className="space-y-2 max-h-72 overflow-y-auto pb-scroll">
                   {toLink.map(item => (
@@ -500,7 +498,6 @@ function ImportPanel({ orgId, onImported, players }) {
                       <LinkPicker
                         players={players}
                         candidates={item.candidates}
-                        initialLabel={item.candidates?.[0]?.name || ''}
                         onPick={id => setLinkChoices(prev => ({ ...prev, [item.name]: id }))}
                       />
                     </div>
