@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.modules import (
-    ALL_MODULES, STATUS_ACTIVE, STATUS_TRIAL, sub_is_live, sub_is_trial_expired,
+    ALL_MODULES, MODULE_CORE, STATUS_ACTIVE, STATUS_TRIAL, sub_is_live, sub_is_trial_expired,
     org_default_trial_days, expand_billing_module,
 )
 from app.models.db import OrgModuleSubscription, Organisation
@@ -110,6 +110,18 @@ def set_status(org, module_key: str, status: str, *, renewal_date=..., now: date
     sub.updated_at = now
     recompute_overrides_cache(org, now)
     return sub
+
+
+def ensure_core_subscription(org, *, now: datetime | None = None):
+    """Make sure a club holds an active BetterStats (Core) subscription. Called when a
+    club is created so Core is tracked from day one (the migration backfills existing
+    clubs). Requires module_subscriptions loaded (a fresh org has an empty collection)."""
+    now = now or _now()
+    if _find(org, MODULE_CORE) is None:
+        org.module_subscriptions.append(
+            OrgModuleSubscription(organisation_id=org.id, module_key=MODULE_CORE,
+                                  status=STATUS_ACTIVE, started_at=now)
+        )
 
 
 def reconcile_held_modules(org, desired_keys, *, now: datetime | None = None) -> None:

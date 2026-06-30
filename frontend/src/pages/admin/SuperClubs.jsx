@@ -556,6 +556,7 @@ export default function SuperClubs() {
                       <div className="space-y-1.5">
                         {MODULE_TOGGLES.map(tog => {
                           const key = tog.key
+                          const isCore = key === 'core'
                           const sub = (club.module_subscriptions || []).find(s => s.module === key)
                           const granted = !!sub
                           const busy = moduleBusy === key
@@ -564,11 +565,13 @@ export default function SuperClubs() {
                           const draft = trialDraft(sub || { module: key })
                           return (
                             <div key={key} className="flex flex-wrap items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-2.5 py-1.5">
-                              <button type="button" disabled={busy}
-                                onClick={() => (granted ? removeModule(club.id, key) : grantModule(club.id, key))}
+                              {/* Core is the base — it can't be removed; disable it via its
+                                  status (Cancelled / Paused), not by un-granting. */}
+                              <button type="button" disabled={busy || isCore}
+                                onClick={() => { if (isCore) return; granted ? removeModule(club.id, key) : grantModule(club.id, key) }}
                                 className={`font-mono text-[11px] px-2.5 py-1 rounded border transition-colors disabled:opacity-50 w-40 shrink-0 text-left ${granted ? 'bg-pb-accent/10' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
                                 style={granted ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 50%, transparent)' } : {}}
-                                title={granted ? 'Click to remove' : 'Click to grant'}>
+                                title={isCore ? 'BetterStats is the base — set status to disable' : (granted ? 'Click to remove' : 'Click to grant')}>
                                 {granted ? '✓ ' : '+ '}{tog.label}
                               </button>
                               {granted && (

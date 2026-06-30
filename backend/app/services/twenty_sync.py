@@ -74,12 +74,13 @@ def _modules(keys) -> list:
 # 'admin'. core (always-on) and anything unrecognised are dropped. Result set:
 # select / socials / admin / iq / fantasy (see bootstrap_twenty.MODULE_OPTS).
 _ADMIN_MEMBERS = frozenset({"fees", "comms", "merch"})
-_BILLABLE_KEYS = frozenset({"select", "socials", "iq", "fantasy"})
+_BILLABLE_KEYS = frozenset({"core", "select", "socials", "iq", "fantasy"})
 
 
 def _billing_modules(keys) -> set:
     """Module keys (entitlement or billing) -> the set of Twenty billable module values
-    (lowercase). fees/comms/merch -> admin; core/unknown dropped."""
+    (lowercase). fees/comms/merch -> admin; unknown dropped. core (BetterStats) is a
+    billable module now, so it passes through."""
     out: set = set()
     for k in (keys or []):
         kk = str(k).lower().strip()
@@ -87,7 +88,7 @@ def _billing_modules(keys) -> set:
             out.add("admin")
         elif kk in _BILLABLE_KEYS:
             out.add(kk)
-        # 'core' and anything unrecognised are dropped (not Twenty paid/trial options)
+        # anything unrecognised is dropped (not a Twenty paid/trial option)
     return out
 
 
@@ -143,15 +144,18 @@ def _role(role: Optional[str]) -> str:
 
 # Public annual pricing (frontend/src/data/pricing.js): Core $399 + BetterSelect /
 # BetterSocials / BetterAdmin $149 each + BetterIQ $249, with a bundle discount by
-# priced-module count. BetterAdmin is the fees+comms+merch umbrella.
-def _arr(module_overrides) -> float:
-    keys = {str(k).lower() for k in (module_overrides or [])}
-    total, priced = 399.0, 0
+# priced add-on count. BetterAdmin is the fees+comms+merch umbrella. The $399 base is
+# tied to Core being PAID — a club trialing/not-paying Core reads $0.
+def _arr(module_keys) -> float:
+    keys = _billing_modules(module_keys)  # collapse to billable (core/select/socials/admin/iq/...)
+    total, priced = 0.0, 0
+    if "core" in keys:
+        total += 399                       # BetterStats base, only when paid
     if "select" in keys:
         total += 149; priced += 1
     if "socials" in keys:
         total += 149; priced += 1
-    if keys & {"fees", "comms", "merch"}:
+    if "admin" in keys:
         total += 149; priced += 1          # BetterAdmin umbrella, charged once
     if "iq" in keys:
         total += 249; priced += 1
@@ -330,6 +334,7 @@ def _module_split(org):
     master switch (paused/cancelled) means nothing is live."""
     from app.auth.modules import (
         org_subscription_active, sub_is_live, PAID_STATUSES, STATUS_TRIAL, ALL_MODULES,
+        MANAGED_MODULES,
     )
     if not org_subscription_active(org):
         return [], [], []
@@ -348,7 +353,7 @@ def _module_split(org):
         return held, [], []
     paid, trial, renewals = [], [], []
     for s in subs:
-        if s.module_key not in ALL_MODULES or not sub_is_live(s):
+        if s.module_key not in MANAGED_MODULES or not sub_is_live(s):  # MANAGED includes core
             continue
         if s.status in PAID_STATUSES:
             paid.append(s.module_key)

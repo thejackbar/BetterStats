@@ -27,7 +27,7 @@ from app.auth.capabilities import (
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
 )
 from app.auth.modules import (
-    ALL_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
+    ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
     STATUS_TRIAL, org_default_trial_days,
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for,
 )
@@ -1472,7 +1472,7 @@ def _module_subs_payload(org) -> list[dict]:
     now = _datetime.now(_timezone.utc)
     groups: dict[str, list] = {}
     for s in (org.module_subscriptions or []):
-        if s.module_key in ALL_MODULES:
+        if s.module_key in MANAGED_MODULES:
             groups.setdefault(billing_key_for(s.module_key), []).append(s)
     out = []
     for bk, rows in groups.items():
@@ -1590,6 +1590,8 @@ async def create_club(
         is_active=False,
     )
     db.add(org)
+    await db.flush()
+    mod_subs.ensure_core_subscription(org)  # Core tracked from day one
     await db.commit()
     return {"id": str(org.id), "slug": org.slug, "name": org.name}
 

@@ -78,10 +78,14 @@ def _cache_bust() -> int:
 
 
 async def _public_org(slug: str, db: AsyncSession) -> Organisation:
+    from sqlalchemy.orm import selectinload
+    from app.auth.modules import org_core_live
     org = (await db.execute(
         select(Organisation).where(Organisation.slug == slug.lower())
+        .options(selectinload(Organisation.module_subscriptions))
     )).scalar_one_or_none()
-    if not org or not org.is_active:
+    # Hidden when manually inactive OR BetterStats (Core) isn't live.
+    if not org or not org.is_active or not org_core_live(org):
         raise HTTPException(status_code=404, detail="Club not found")
     return org
 

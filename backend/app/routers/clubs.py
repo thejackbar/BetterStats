@@ -2,22 +2,34 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.models.db import Organisation, Season, Sponsor, get_db
 from app.routers.organisations import _season_sort_key
+from app.auth.modules import org_core_live
 
 router = APIRouter(prefix="/clubs", tags=["clubs"])
 
 INACTIVE_DETAIL = "This club page is currently not available. Contact your club executives to get access."
 
 
+def _public_blocked(org) -> bool:
+    """A club's public surfaces are hidden when it's manually inactive OR its
+    BetterStats (Core) module isn't live (cancelled / expired trial / master switch
+    off). org must be loaded with module_subscriptions for the Core check."""
+    return (not org.is_active) or (not org_core_live(org))
+
+
 @router.get("/{slug}")
 async def get_club_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Organisation).where(Organisation.slug == slug.lower()))
+    result = await db.execute(
+        select(Organisation).where(Organisation.slug == slug.lower())
+        .options(selectinload(Organisation.module_subscriptions))
+    )
     org = result.scalar_one_or_none()
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
-    if not org.is_active:
+    if _public_blocked(org):
         raise HTTPException(status_code=403, detail=INACTIVE_DETAIL)
     return {
         "id": str(org.id),
@@ -39,9 +51,12 @@ async def get_club_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{slug}/sponsors")
 async def get_club_sponsors(slug: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Organisation).where(Organisation.slug == slug.lower()))
+    result = await db.execute(
+        select(Organisation).where(Organisation.slug == slug.lower())
+        .options(selectinload(Organisation.module_subscriptions))
+    )
     org = result.scalar_one_or_none()
-    if not org or not org.is_active:
+    if not org or _public_blocked(org):
         raise HTTPException(status_code=404, detail="Club not found")
 
     sponsors_result = await db.execute(

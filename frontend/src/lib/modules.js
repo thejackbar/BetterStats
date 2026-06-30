@@ -133,6 +133,9 @@ export function dashboardTiles() {
 // + comms + merch). `modules` are the backend entitlement keys (app/auth/modules.py
 // ALL_MODULES); Core (BetterStats) is always on and isn't a toggle.
 export const MODULE_TOGGLES = [
+  // BetterStats (Core) is the base every club gets — managed first, controls the
+  // public site (its trial/cancel gates the club, per the backend org_core_live).
+  { key: 'core',    label: 'BetterStats',   modules: ['core'] },
   { key: 'select',  label: 'BetterSelect',  modules: ['select'] },
   { key: 'socials', label: 'BetterSocials', modules: ['socials'] },
   { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms', 'merch'] },
@@ -143,6 +146,7 @@ export const MODULE_TOGGLES = [
 // Display name for a billable module key (BetterAdmin = the fees/comms/merch
 // umbrella). Mirrors the backend BILLABLE_MODULE_NAMES; covers the member keys too.
 export const BILLABLE_MODULE_NAME = {
+  core: 'BetterStats',
   select: 'BetterSelect',
   socials: 'BetterSocials',
   admin: 'BetterAdmin',

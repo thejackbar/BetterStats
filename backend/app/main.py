@@ -2023,6 +2023,20 @@ async def lifespan(app: FastAPI):
             "INSERT INTO platform_settings (id, settings) VALUES (1, '{\"default_trial_days\": 14}') "
             "ON CONFLICT (id) DO NOTHING"
         ))
+        # BetterStats (Core) as a managed module — backfill an active core subscription
+        # per club (migration 122). Inherits the club's org-wide status/renewal;
+        # paused/cancelled clubs get an active core row (the master switch gates those).
+        await conn.execute(text("""
+            INSERT INTO org_module_subscriptions
+                (organisation_id, module_key, status, renewal_date, started_at, created_at, updated_at)
+            SELECT
+                o.id, 'core',
+                CASE WHEN o.subscription_status IN ('active','trial','past_due')
+                     THEN o.subscription_status ELSE 'active' END,
+                o.renewal_date, NOW(), NOW(), NOW()
+            FROM organisations o
+            ON CONFLICT (organisation_id, module_key) DO NOTHING
+        """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

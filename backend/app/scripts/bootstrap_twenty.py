@@ -66,11 +66,12 @@ def _options(labels):
 # BetterAdmin umbrella, so Twenty shows one "BetterAdmin" (ADMIN) value, not the
 # three. value = the billing key the backend sends (see twenty_sync._twenty_modules).
 MODULE_OPTS = [
-    {"label": "BetterSelect", "value": "SELECT", "color": "purple", "position": 0},
-    {"label": "BetterSocials", "value": "SOCIALS", "color": "yellow", "position": 1},
-    {"label": "BetterAdmin", "value": "ADMIN", "color": "green", "position": 2},
-    {"label": "BetterIQ", "value": "IQ", "color": "blue", "position": 3},
-    {"label": "BetterFantasyCricket", "value": "FANTASY", "color": "pink", "position": 4},
+    {"label": "BetterStats", "value": "CORE", "color": "turquoise", "position": 0},
+    {"label": "BetterSelect", "value": "SELECT", "color": "purple", "position": 1},
+    {"label": "BetterSocials", "value": "SOCIALS", "color": "yellow", "position": 2},
+    {"label": "BetterAdmin", "value": "ADMIN", "color": "green", "position": 3},
+    {"label": "BetterIQ", "value": "IQ", "color": "blue", "position": 4},
+    {"label": "BetterFantasyCricket", "value": "FANTASY", "color": "pink", "position": 5},
 ]
 
 OBJECTS = [

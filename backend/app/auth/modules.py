@@ -41,6 +41,15 @@ MODULE_FANTASY = "fantasy"   # BetterFantasyCricket — internal club fantasy le
 # below), matching the public pricing (one $149 umbrella).
 ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS, MODULE_MERCH, MODULE_FANTASY)
 
+# BetterStats (Core) — the base product every synced club gets. It's NOT in
+# ALL_MODULES (which is the add-on gating set, so the add-on entitlement logic and
+# frontend counts stay unchanged), but it IS a managed, billable module with its own
+# subscription row: a super admin can trial it with dates and its lifecycle controls
+# whether the public club surfaces render (see org_core_live + the public routers).
+MODULE_CORE = "core"
+# Everything a super admin can manage as a subscription row (add-ons + Core).
+MANAGED_MODULES = ALL_MODULES + (MODULE_CORE,)
+
 # ─── Billable modules ─────────────────────────────────────────────────────────
 # A *billable* module maps to one or more *entitlement* keys. BetterAdmin is the
 # only group today (fees + comms + merch move together); everything else is 1:1.
@@ -50,8 +59,10 @@ MODULE_ADMIN = "admin"     # BetterAdmin umbrella
 MODULE_GROUPS: dict[str, tuple[str, ...]] = {
     MODULE_ADMIN: (MODULE_FEES, MODULE_COMMS, MODULE_MERCH),
 }
-BILLABLE_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_ADMIN, MODULE_IQ, MODULE_FANTASY)
+# Core leads — it's the base everything builds on.
+BILLABLE_MODULES = (MODULE_CORE, MODULE_SELECT, MODULE_SOCIALS, MODULE_ADMIN, MODULE_IQ, MODULE_FANTASY)
 BILLABLE_MODULE_NAMES = {
+    MODULE_CORE: "BetterStats",
     MODULE_SELECT: "BetterSelect",
     MODULE_SOCIALS: "BetterSocials",
     MODULE_ADMIN: "BetterAdmin",
@@ -191,6 +202,29 @@ def org_entitled_modules(org, now: datetime | None = None) -> set[str]:
 
 def org_has_module(org, module: str) -> bool:
     return module in org_entitled_modules(org)
+
+
+def org_core_live(org, now: datetime | None = None) -> bool:
+    """Whether BetterStats (Core) — and thus the public club surfaces — is live.
+
+    Returns True (visible) unless an explicit core subscription row says otherwise: a
+    cancelled/paused core, an expired core trial, or the org-level master switch being
+    off all gate the public site. **Fail-open**: a club whose subscriptions aren't
+    loaded, or that has no core row yet (legacy/pre-backfill), is never gated — so we
+    can't accidentally take a live club's site down. Callers that enforce eager-load
+    ``module_subscriptions``.
+    """
+    if org is None:
+        return False
+    subs = _loaded_subscriptions(org)
+    if not subs:
+        return True  # not loaded, or genuinely no subscriptions → fail-open
+    core = next((s for s in subs if s.module_key == MODULE_CORE), None)
+    if core is None:
+        return True  # not on the core-module scheme yet → fail-open
+    if not org_subscription_active(org):  # master switch gates everything, incl. Core
+        return False
+    return sub_is_live(core, now or _now())
 
 
 def _module_details(org, now: datetime | None = None) -> list[dict]:
