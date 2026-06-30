@@ -21,10 +21,13 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     module_overrides: [], subscription_status: 'active', renewal_date: '', billing_cycle: '',
-    default_trial_days: 14,
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [clubAdmins, setClubAdmins] = useState([])
+  // Global platform General Settings (currently just the default trial length).
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsForm, setSettingsForm] = useState({ default_trial_days: 14 })
+  const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
 
@@ -37,6 +40,30 @@ export default function SuperClubs() {
   const searchWrapRef = useRef(null)
 
   const load = () => api.superListClubs().then(setClubs).catch(() => {})
+
+  const openSettings = async () => {
+    setMsg('')
+    try {
+      const s = await api.superGetGeneralSettings()
+      setSettingsForm({ default_trial_days: s?.default_trial_days ?? 14 })
+    } catch { /* fall back to the default shown */ }
+    setShowSettings(true)
+  }
+
+  const saveSettings = async (e) => {
+    e.preventDefault()
+    setSettingsSaving(true)
+    setMsg('')
+    try {
+      await api.superUpdateGeneralSettings({ default_trial_days: Number(settingsForm.default_trial_days) || 14 })
+      setMsg('General settings saved')
+      setShowSettings(false)
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
   useEffect(() => { load() }, [])
 
   useEffect(() => {
@@ -132,7 +159,6 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
-      default_trial_days: club.default_trial_days || 14,
     })
     setClubAdmins([])
     api.superListClubAdmins(club.id).then(d => setClubAdmins(Array.isArray(d) ? d : [])).catch(() => {})
@@ -195,7 +221,6 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
-        default_trial_days: Number(editForm.default_trial_days) || 14,
       }
       await api.superPatchClub(editId, payload)
       setMsg('Club updated')
@@ -231,6 +256,12 @@ export default function SuperClubs() {
           <div className="flex items-center gap-3">
             {msg && <span className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</span>}
             <button
+              onClick={openSettings}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-faint bg-pb-surface2"
+            >
+              GENERAL SETTINGS
+            </button>
+            <button
               onClick={() => { setShowCreate(s => !s); resetCreate(); setMsg('') }}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
@@ -239,6 +270,40 @@ export default function SuperClubs() {
             </button>
           </div>
         </div>
+
+        {showSettings && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowSettings(false)}>
+            <form onSubmit={saveSettings} onClick={e => e.stopPropagation()}
+              className="pb-card p-5 w-full max-w-sm space-y-4 bg-pb-surface">
+              <div>
+                <h2 className="font-display font-bold text-lg text-pb-text">General Settings</h2>
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  Platform-wide defaults, applied across all clubs.
+                </p>
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Default trial days</label>
+                <input type="number" min="1" value={settingsForm.default_trial_days}
+                  onChange={e => setSettingsForm(f => ({ ...f, default_trial_days: e.target.value }))}
+                  className={INPUT_CLS} autoFocus />
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  The trial length used when a module trial is created for a club.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={settingsSaving}
+                  className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  {settingsSaving ? 'Saving…' : 'SAVE'}
+                </button>
+                <button type="button" onClick={() => setShowSettings(false)}
+                  className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {showCreate && (
           <form onSubmit={createClub} className="pb-card p-4 mb-5 space-y-3">
@@ -499,7 +564,7 @@ export default function SuperClubs() {
                                 <div className="ml-auto flex items-center gap-2">
                                   {!isTrial && (
                                     <button type="button" disabled={busy}
-                                      onClick={() => startModuleTrial(club.id, sub.module, club.default_trial_days)}
+                                      onClick={() => startModuleTrial(club.id, sub.module)}
                                       className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">
                                       Start trial
                                     </button>
@@ -543,12 +608,6 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
                         className={INPUT_CLS} />
                     </div>
-                    <div>
-                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Default trial days</label>
-                      <input type="number" min="1" value={editForm.default_trial_days}
-                        onChange={e => setEditForm(f => ({ ...f, default_trial_days: e.target.value }))}
-                        className={INPUT_CLS} />
-                    </div>
                     {clubAdmins.length > 0 && (
                       <div className="col-span-2">
                         <label className="font-mono text-[10px] text-pb-faint block mb-1">Primary / owner admin</label>
@@ -573,7 +632,7 @@ export default function SuperClubs() {
                     Core (BetterStats) is always on. Tick a module to grant it (or remove it). Each held module
                     carries its own status, renewal date and trial above. Subscription status is the whole-account
                     master switch — Paused / Cancelled fall back to Core only regardless of modules. A trial ends on
-                    its end date automatically. Default trial days seeds new trials (Club General Settings).
+                    its end date automatically; its length comes from General Settings (top of this page).
                   </p>
                   <div className="flex gap-2">
                     <button type="submit" disabled={saving}

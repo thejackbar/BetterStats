@@ -1522,6 +1522,38 @@ async def list_all_clubs(
     return [_club_payload(o) for o in result.scalars().all()]
 
 
+# ─── Global platform settings (super-admin General Settings) ──────────────────
+
+@router.get("/super/general-settings")
+async def get_general_settings(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide settings managed from the All Clubs page. Returns the resolved
+    values the UI edits."""
+    from app.services import platform_settings as ps
+    return {"default_trial_days": await ps.get_default_trial_days(db)}
+
+
+class GeneralSettingsUpdate(BaseModel):
+    default_trial_days: Optional[int] = None
+
+
+@router.patch("/super/general-settings")
+async def patch_general_settings(
+    body: GeneralSettingsUpdate,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import platform_settings as ps
+    patch = body.model_dump(exclude_unset=True)
+    try:
+        await ps.update_settings(db, patch)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"default_trial_days": await ps.get_default_trial_days(db)}
+
+
 @router.post("/super/clubs", status_code=201)
 async def create_club(
     data: ClubCreate,
@@ -1691,7 +1723,10 @@ async def start_module_trial(
         raise HTTPException(status_code=422, detail="days must be a positive integer")
     if body.start and body.end and body.end <= body.start:
         raise HTTPException(status_code=422, detail="Trial end must be after the start")
-    mod_subs.start_trial_billing(org, module_key, start=body.start, end=body.end, days=body.days)
+    # Use the global default trial length unless the caller overrides days/end.
+    from app.services import platform_settings as ps
+    days = body.days or await ps.get_default_trial_days(db)
+    mod_subs.start_trial_billing(org, module_key, start=body.start, end=body.end, days=days)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return _club_payload(org)
@@ -2048,8 +2083,10 @@ async def approve_module_request(
     if req.kind == "trial":
         if body.start and body.end and body.end <= body.start:
             raise HTTPException(status_code=422, detail="Trial end must be after the start")
+        from app.services import platform_settings as ps
+        days = body.days or await ps.get_default_trial_days(db)
         subs = mod_subs.start_trial_billing(
-            org, req.module_key, start=body.start, end=body.end, days=body.days, now=now,
+            org, req.module_key, start=body.start, end=body.end, days=days, now=now,
         )
         result_sub = subs[0] if subs else None
     elif req.kind == "subscribe":

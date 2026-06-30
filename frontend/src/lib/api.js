@@ -832,6 +832,9 @@ export const api = {
   switchClub: (clubId) =>
     request('/auth/switch-club', { method: 'POST', body: JSON.stringify({ club_id: clubId }) }),
   superListClubs: () => request('/club-admin/super/clubs'),
+  superGetGeneralSettings: () => request('/club-admin/super/general-settings'),
+  superUpdateGeneralSettings: (data) =>
+    request('/club-admin/super/general-settings', { method: 'PATCH', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

@@ -2007,6 +2007,18 @@ async def lifespan(app: FastAPI):
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_module_action_external_ref "
             "ON module_action_requests(external_ref) WHERE external_ref IS NOT NULL"
         ))
+        # Platform settings — global super-admin General Settings (migration 120).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS platform_settings (
+                id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                settings JSONB NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "INSERT INTO platform_settings (id, settings) VALUES (1, '{\"default_trial_days\": 14}') "
+            "ON CONFLICT (id) DO NOTHING"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

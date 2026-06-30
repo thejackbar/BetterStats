@@ -113,13 +113,17 @@ Mirrors the `club_onboarding_requests` pattern (super-admin actionable, lifecycl
 | completed_at     | timestamptz | nullable                                             |
 | result_sub_id    | uuid fk     | -> org_module_subscriptions, nullable (what it made) |
 
-### Club General Settings (new, per-club, extensible)
+### General Settings (global, extensible)
 
-Stored as `organisations.general_settings JSONB not null default '{}'` (matches the
-`theme_config` / `net_settings` precedent), with a typed accessor + validation service.
-First key: `default_trial_days` (int, defaults to 14 when absent). Super-admin managed via a
-new "Club General Settings" surface; designed to grow with more fields. When a trial is
-requested/started for a club, the prefilled length reads this club's `default_trial_days`.
+Platform-wide super-admin settings live in a single-row `platform_settings(id=1, settings
+JSONB)` table (migration 120), managed from a **General Settings** button at the top of the
+All Clubs page (`/admin/super/clubs`) — a modal, secondary-styled next to "+ New Club".
+First key: `default_trial_days` (int, default 14), the length used when any module trial is
+created (`services/platform_settings.get_default_trial_days`). The blob keeps it extensible
+(new settings need no migration). Endpoints: `GET`/`PATCH /club-admin/super/general-settings`.
+
+(`organisations.general_settings JSONB` was also added for future per-club settings, but the
+default-trial-length is global, not per-club — the UI surfaces only the global value.)
 
 ### `club_memberships` (altered)
 
