@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     # BetterCricket (source=twenty). Blank = the endpoint is a no-op (returns 200 and
     # ignores the payload), so it's safe to leave unconfigured.
     twenty_webhook_secret: str = ""
+    # Client-side request ceiling (requests/min) the export paces under, to stay below
+    # Twenty's server rate limit (default 100/60s). Raise this in lockstep if you raise
+    # Twenty's own API_RATE_LIMITING_* limit, else it becomes the bottleneck.
+    twenty_rate_per_min: int = 90
 
     @property
     def twenty_configured(self) -> bool:

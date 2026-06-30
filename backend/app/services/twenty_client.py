@@ -14,9 +14,12 @@ many-to-one relation is set with ``<fieldName>Id``.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time
+from collections import deque
 from typing import Optional
 
 import httpx
@@ -24,6 +27,40 @@ import httpx
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Twenty rate-limits the REST API (observed: 100 requests / 60 s per workspace key).
+# A burst export blows through it, so we (a) proactively pace to stay under a safe
+# ceiling and (b) retry a 429 honouring Retry-After. The limiter is process-global
+# (one workspace key), guarded by a lock so the pacing sleep serialises requests.
+_RL_MAX = 90            # headroom under Twenty's 100/60s
+_RL_WINDOW = 60.0
+_rl_lock = asyncio.Lock()
+_rl_hits: "deque[float]" = deque()
+
+
+def _rl_cap() -> int:
+    """The client-side ceiling. Configurable so it can track Twenty's server limit if
+    that's raised (settings.twenty_rate_per_min), else the safe default."""
+    try:
+        return int(getattr(settings, "twenty_rate_per_min", 0)) or _RL_MAX
+    except (TypeError, ValueError):
+        return _RL_MAX
+
+
+async def _rate_limit() -> None:
+    cap = _rl_cap()
+    async with _rl_lock:
+        now = time.monotonic()
+        while _rl_hits and now - _rl_hits[0] >= _RL_WINDOW:
+            _rl_hits.popleft()
+        if len(_rl_hits) >= cap:
+            wait = _RL_WINDOW - (now - _rl_hits[0]) + 0.1
+            if wait > 0:
+                await asyncio.sleep(wait)
+            now = time.monotonic()
+            while _rl_hits and now - _rl_hits[0] >= _RL_WINDOW:
+                _rl_hits.popleft()
+        _rl_hits.append(time.monotonic())
 
 
 class TwentyApiError(Exception):
@@ -82,9 +119,29 @@ class TwentyClient:
         return {"Authorization": f"Bearer {self.key}",
                 "Content-Type": "application/json"}
 
+    async def _send(self, http: httpx.AsyncClient, method: str, url: str,
+                    **kwargs) -> httpx.Response:
+        """One request, paced under the rate limit and retried on a 429 (honouring
+        Retry-After, else exponential backoff). Returns the response; callers handle
+        non-429 error codes as before."""
+        last = None
+        for attempt in range(6):
+            await _rate_limit()
+            last = await http.request(method, url, headers=self._headers, timeout=30, **kwargs)
+            if last.status_code != 429:
+                return last
+            ra = last.headers.get("retry-after")
+            try:
+                wait = float(ra) if ra else min(2 ** attempt, 30)
+            except ValueError:
+                wait = min(2 ** attempt, 30)
+            logger.warning("twenty 429 (%s %s) — retrying in %.0fs (attempt %d/6)",
+                           method, url.rsplit("/", 1)[-1], wait, attempt + 1)
+            await asyncio.sleep(wait)
+        return last  # exhausted retries — return the last 429 so the caller raises
+
     async def create(self, http: httpx.AsyncClient, plural: str, values: dict) -> dict:
-        r = await http.post(f"{self.base}/rest/{plural}", headers=self._headers,
-                            json=values, timeout=30)
+        r = await self._send(http, "POST", f"{self.base}/rest/{plural}", json=values)
         if r.status_code >= 400:
             _raise(r, "POST", plural)
         return _record(r.json())
@@ -101,8 +158,7 @@ class TwentyClient:
         # they reappear, instead of silently "updating" a hidden record.
         body = dict(values)
         body["deletedAt"] = None
-        r = await http.patch(f"{self.base}/rest/{plural}/{record_id}",
-                             headers=self._headers, json=body, timeout=30)
+        r = await self._send(http, "PATCH", f"{self.base}/rest/{plural}/{record_id}", json=body)
         if r.status_code == 404:
             return None
         if r.status_code >= 400:
@@ -122,8 +178,7 @@ class TwentyClient:
             params["starting_after"] = starting_after
         if filter:
             params["filter"] = filter
-        r = await http.get(f"{self.base}/rest/{plural}", headers=self._headers,
-                           params=params, timeout=30)
+        r = await self._send(http, "GET", f"{self.base}/rest/{plural}", params=params)
         if r.status_code >= 400:
             _raise(r, "GET", plural)
         return r.json()
@@ -134,9 +189,8 @@ class TwentyClient:
         fallback when the local link table has no row). Returns None on miss or
         error — the caller falls back to create."""
         try:
-            r = await http.get(f"{self.base}/rest/{plural}", headers=self._headers,
-                               params={"filter": f"{field}[eq]:{value}", "limit": 1},
-                               timeout=30)
+            r = await self._send(http, "GET", f"{self.base}/rest/{plural}",
+                                 params={"filter": f"{field}[eq]:{value}", "limit": 1})
             if r.status_code >= 400:
                 return None
             return _first(r.json())
