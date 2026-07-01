@@ -37,7 +37,7 @@ export default function Chips({ token, squad, round, onChange, flash, fail, nav 
             return (
               <div key={c.key} style={{ background: tintBg(14, 'var(--bg)'), border: `1px solid ${tintBg(40)}`, borderRadius: 15, padding: '14px 15px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--pb-accent, #8C82F0)', boxShadow: '0 0 8px var(--pb-accent, #8C82F0)' }} />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--pb-accent, #06B6D4)', boxShadow: '0 0 8px var(--pb-accent, #06B6D4)' }} />
                   <span style={{ font: `800 16px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)' }}>{c.name}</span>
                   <span style={{ marginLeft: 'auto', font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--accent-strong)' }}>{c.status}</span>
                 </div>

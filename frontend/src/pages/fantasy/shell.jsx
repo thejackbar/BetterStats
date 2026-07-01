@@ -56,7 +56,7 @@ export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread
               background: desktop ? 'var(--surface)' : tintBg(18, 'var(--surface)'), border: desktop ? '1px solid var(--hairline)' : 'none',
               color: 'var(--accent-strong)', font: `700 12px 'Hanken Grotesk'`, justifyContent: 'center',
             }}>
-              <span style={{ width: 24, height: 24, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: `800 10px ${DISP}`, background: `linear-gradient(135deg, ${mix('var(--pb-accent, #8C82F0)', 80, '#000')}, var(--pb-accent, #8C82F0))` }}>{mInitials}</span>
+              <span style={{ width: 24, height: 24, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: `800 10px ${DISP}`, background: `linear-gradient(135deg, ${mix('var(--pb-accent, #06B6D4)', 80, '#000')}, var(--pb-accent, #06B6D4))` }}>{mInitials}</span>
               {desktop && manager && <span style={{ lineHeight: 1.1, textAlign: 'left' }}><span style={{ display: 'block', color: 'var(--text)' }}>{manager.display_name}</span></span>}
             </button>
           </div>
@@ -76,7 +76,7 @@ export function NavPills({ items, value, onChange, inline }) {
           <button key={k} onClick={() => onChange(k)} style={{
             padding: '7px 13px', borderRadius: 9, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
             font: `${on ? 700 : 600} 12.5px 'Hanken Grotesk'`,
-            background: on ? 'var(--pb-accent, #8C82F0)' : (inline ? 'transparent' : 'var(--surface2)'), color: on ? 'var(--ink)' : 'var(--dim)',
+            background: on ? 'var(--pb-accent, #06B6D4)' : (inline ? 'transparent' : 'var(--surface2)'), color: on ? 'var(--ink)' : 'var(--dim)',
           }}>{label}</button>
         )
       })}

@@ -97,7 +97,7 @@ function PointsDesktop({ data, mine, head, roundSelect }) {
           <div style={{ marginLeft: 'auto' }}>{roundSelect}</div>
         </div>
       </div>
-      <div style={{ height: 3, background: 'linear-gradient(90deg, var(--pb-accent, #8C82F0), #22D3EE 40%, #00E58E 65%, #EC4899)' }} />
+      <div style={{ height: 3, background: 'linear-gradient(90deg, var(--pb-accent, #06B6D4), #22D3EE 40%, #00E58E 65%, #EC4899)' }} />
       {!mine ? <p style={{ padding: 26, font: `500 13px 'Hanken Grotesk'`, color: 'var(--faint)' }}>This round hasn't been scored yet.</p> : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px' }}>
           <div style={{ padding: '18px 26px', borderRight: '1px solid var(--hairline)' }}>

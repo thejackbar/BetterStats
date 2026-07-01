@@ -73,11 +73,11 @@ function MiniRow({ r }) {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 11, padding: '10px 13px',
       borderBottom: '1px solid var(--surface2)',
-      background: r.you ? tintBg(14) : 'transparent', borderLeft: r.you ? '3px solid var(--pb-accent, #8C82F0)' : '3px solid transparent',
+      background: r.you ? tintBg(14) : 'transparent', borderLeft: r.you ? '3px solid var(--pb-accent, #06B6D4)' : '3px solid transparent',
     }}>
       <span style={{ width: 18, textAlign: 'center', font: `700 15px ${DISP}`, color: r.you ? 'var(--text)' : 'var(--dim)' }}>{r.rank}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ font: `700 13px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name}{r.you && <span style={{ marginLeft: 6, font: `600 9px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #8C82F0)', padding: '1px 5px', borderRadius: 4 }}>YOU</span>}</div>
+        <div style={{ font: `700 13px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name}{r.you && <span style={{ marginLeft: 6, font: `600 9px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #06B6D4)', padding: '1px 5px', borderRadius: 4 }}>YOU</span>}</div>
         <div style={{ font: `500 10px 'Hanken Grotesk'`, color: r.you ? 'var(--accent-strong)' : 'var(--faint)' }}>{r.manager}</div>
       </div>
       <span style={{ font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.points)}</span>
@@ -114,7 +114,7 @@ function LeagueDetail({ token, leagueId, onBack, flash, fail }) {
         <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
           {[['standings', 'Standings'], ['matchups', 'Matchups'], ['about', 'About']].map(([k, l]) => {
             const on = tab === k
-            return <button key={k} onClick={() => setTab(k)} style={{ font: `${on ? 700 : 600} 11.5px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', padding: '7px 13px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
+            return <button key={k} onClick={() => setTab(k)} style={{ font: `${on ? 700 : 600} 11.5px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', padding: '7px 13px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
           })}
         </div>
       </div>

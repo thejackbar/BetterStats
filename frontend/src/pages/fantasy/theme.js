@@ -7,7 +7,7 @@
 // still white-labels everything. Mirrors docs/design_handoff_betterfantasy_redesign.
 
 export const THEME_KEY = 'bfc-theme-pref'   // 'dark' | 'light' | 'auto'
-export const DEFAULT_ACCENT = '#8C82F0'
+export const DEFAULT_ACCENT = '#06B6D4'
 
 // The token CSS, scoped to the fantasy root. color-mix keeps the accent-derived
 // text legible on either surface. Aurora keyframes live here too (global, but
@@ -18,7 +18,7 @@ const THEME_CSS = `
   --hairline:#1d2331; --hairline2:#262d3d;
   --text:#e6e8ef; --dim:#8a90a2; --faint:#5b6072; --faintest:#3a3f50;
   --grad-top:#171c2a; --bench:#0c0f17; --ink:#0a0d14; --aurora:.55;
-  --accent-strong:color-mix(in srgb, var(--pb-accent,#8C82F0) 74%, #ffffff);
+  --accent-strong:color-mix(in srgb, var(--pb-accent,#06B6D4) 74%, #ffffff);
   --frame-shadow:0 1px 3px rgba(0,0,0,.14), 0 22px 60px -22px rgba(0,0,0,.6);
 }
 .bfc-root[data-theme="light"]{
@@ -26,7 +26,7 @@ const THEME_CSS = `
   --hairline:#e6e8f0; --hairline2:#d6d9e4;
   --text:#1b1e2b; --dim:#5b6072; --faint:#9298ab; --faintest:#c2c6d2;
   --grad-top:#edeef7; --bench:#eef0f5; --ink:#16132a; --aurora:.42;
-  --accent-strong:color-mix(in srgb, var(--pb-accent,#8C82F0) 58%, #15132a);
+  --accent-strong:color-mix(in srgb, var(--pb-accent,#06B6D4) 58%, #15132a);
   --frame-shadow:0 1px 3px rgba(80,80,120,.12), 0 22px 60px -24px rgba(40,40,90,.28);
 }
 @keyframes bfcAuroraA{0%{transform:translate(0,0) scale(1)}100%{transform:translate(22%,16%) scale(1.3)}}

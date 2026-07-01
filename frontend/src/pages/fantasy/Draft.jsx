@@ -89,7 +89,7 @@ function DraftBoard({ state, ladder, onBack, onPick, onSaveWishlist, onManage })
         <>
           <div style={{ margin: '14px 0 0', background: tintBg(16, 'var(--bg)'), border: `1px solid ${tintBg(40)}`, borderRadius: 13, padding: '13px 14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--pb-accent, #8C82F0)', boxShadow: '0 0 10px var(--pb-accent, #8C82F0)' }} />
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--pb-accent, #06B6D4)', boxShadow: '0 0 10px var(--pb-accent, #06B6D4)' }} />
               <span style={{ font: `800 13px ${DISP}`, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text)' }}>
                 {state.my_turn ? "You're on the clock" : `On the clock: ${state.on_clock?.manager || '—'}`}
               </span>
@@ -203,7 +203,7 @@ function LotCard({ lot, onBid }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--accent-strong)' }}>Up for auction</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, font: `700 12px ${DISP}`, color: left === 'closing…' ? RED : 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--pb-accent, #8C82F0)', boxShadow: '0 0 8px var(--pb-accent, #8C82F0)' }} />
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--pb-accent, #06B6D4)', boxShadow: '0 0 8px var(--pb-accent, #06B6D4)' }} />
           {left}
         </span>
       </div>
@@ -530,7 +530,7 @@ function WaiverWire({ unowned, mySquad, myWaivers, onSubmit }) {
                     <button key={p.player_id} onClick={() => setDrop(p.player_id)} style={{
                       padding: '7px 11px', borderRadius: 9, cursor: 'pointer',
                       font: `600 12px 'Hanken Grotesk'`,
-                      background: drop === p.player_id ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)',
+                      background: drop === p.player_id ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)',
                       color: drop === p.player_id ? 'var(--ink)' : 'var(--dim)',
                       border: drop === p.player_id ? 'none' : '1px solid var(--hairline2)',
                     }}>{p.name}</button>
@@ -563,7 +563,7 @@ function TradeBuilder({ squads, mySquad, onPropose }) {
   const Chip = ({ p, on, onClick }) => (
     <button onClick={onClick} style={{
       padding: '7px 11px', borderRadius: 9, cursor: 'pointer', font: `600 12px 'Hanken Grotesk'`,
-      background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)',
+      background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)',
       border: on ? 'none' : '1px solid var(--hairline2)',
     }}>{p.name} <span style={{ opacity: 0.7 }}>{ROLE_LABEL[p.role]?.slice(0, 3)}</span></button>
   )
