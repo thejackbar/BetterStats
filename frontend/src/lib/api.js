@@ -837,6 +837,15 @@ export const api = {
   // Super admin
   superOverview: () => request('/club-admin/super/overview'),
   superListOnboarding: () => request('/club-admin/super/onboarding-requests'),
+  // Login-attempt audit log (super admin). opts: { limit, onlyFailures, q }
+  superListLoginAttempts: (opts = {}) => {
+    const p = new URLSearchParams()
+    if (opts.limit) p.set('limit', opts.limit)
+    if (opts.onlyFailures) p.set('only_failures', 'true')
+    if (opts.q) p.set('q', opts.q)
+    const qs = p.toString()
+    return request(`/club-admin/super/login-attempts${qs ? `?${qs}` : ''}`)
+  },
   superUpdateOnboarding: (id, status) =>
     request(`/club-admin/super/onboarding-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   // Re-scope the admin app to another club (super admin only). Pass null to

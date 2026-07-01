@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -754,6 +754,40 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_usage_events_source "
             "ON usage_events(traffic_source) WHERE traffic_source IS NOT NULL"
+        ))
+        # Login attempts — append-only audit of every sign-in attempt (success
+        # or failure), so we can see which username/email is being tried, from
+        # where, and whether it succeeded. IP is stored as a truncated SHA-256
+        # prefix (never raw); the password is never stored. Mirrors migration 124.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id BIGSERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                username TEXT NOT NULL,
+                success BOOLEAN NOT NULL DEFAULT false,
+                failure_reason TEXT,
+                user_id UUID,
+                org_id UUID,
+                ip_hash TEXT,
+                user_agent TEXT,
+                country TEXT
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_created "
+            "ON login_attempts(created_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created "
+            "ON login_attempts(username, created_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_created "
+            "ON login_attempts(ip_hash, created_at DESC) WHERE ip_hash IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_failures "
+            "ON login_attempts(created_at DESC) WHERE success = false"
         ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (
@@ -2213,6 +2247,7 @@ app.include_router(player_import.router)  # BetterImport (profiles) — bulk pla
 app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
 app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)
 app.include_router(usage.router)
+app.include_router(login_attempts.router)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers
