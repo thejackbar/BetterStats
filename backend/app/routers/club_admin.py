@@ -1590,7 +1590,12 @@ async def create_club(
         is_active=False,
     )
     db.add(org)
-    await db.flush()
+    # Append the Core subscription while `org` is still pending: accessing the
+    # collection now initialises it empty (no SQL). Doing it after a flush would
+    # lazy-load the unloaded collection on a now-persistent row, which raises
+    # MissingGreenlet on the async session (the 500 on club create). `org.id` is
+    # set explicitly above, so the subscription's FK is valid; the cascade inserts
+    # both rows on commit.
     mod_subs.ensure_core_subscription(org)  # Core tracked from day one
     await db.commit()
     return {"id": str(org.id), "slug": org.slug, "name": org.name}
