@@ -2,16 +2,19 @@
 it into `games` — split into "204/no data" (Grassroots doesn't have this
 match at all) vs "fetchable but missing" (a real gap in the sync itself).
 
-Why this exists: `sync_grassroots_game_level_data` in sync.py silently drops
-any match whose `/scores/matches/{id}` call 204s (see the loop at ~line 1585:
-`if not scorecard: stats["gr_games_skipped_no_data"] += 1; continue`). The
-docstring on that function claims 204s are "already handled by the PlayHQ
-Partner sync path" — but that fallback path (`sync_game_level_data`) was
-REMOVED from `sync_organisation` in the May 2026 Partner API audit (see
-CLAUDE.md). So today, a 204'd match is gone with no fallback, and a Full
-Rebuild re-hits the exact same 204 every time — it can never fix this class
-of gap, which is why a club can show fewer matches/wickets than PlayHQ's own
-count even right after a rebuild.
+Two known causes, both in `sync_grassroots_game_level_data` (sync.py):
+1. A genuine 204 from `/scores/matches/{id}` — Grassroots doesn't have the
+   match at all. No fallback exists for this today (the old PlayHQ Partner
+   sync path that used to cover it was removed in the May 2026 Partner API
+   audit — see CLAUDE.md), so this class of gap can't be fixed by re-syncing.
+2. (Fixed Jul 2026) A match shared with another club we also sync used to be
+   permanently skipped once that other club's sync created the `games` row
+   first, because the skip check only asked "does this row exist" instead of
+   "have OUR players been attached to it" — so the second club's own stats
+   for that match never landed, even across a Full Rebuild. Now fixed: the
+   sync attaches our team's data to the existing row when it's missing.
+   Re-run this script after a Full Rebuild post-fix to confirm the
+   "fetchable but missing" bucket has cleared for a given grade/season.
 
 This script is READ-ONLY (no DB writes) and mirrors sync.py's discovery loop
 closely enough to be trustworthy, but doesn't touch `games`/`players`/etc.

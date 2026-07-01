@@ -1593,18 +1593,56 @@ async def sync_grassroots_game_level_data(
             stats["gr_games_skipped_no_data"] += 1
             continue
 
+        # Teams / our roster, resolved up front (independent of whether a Game
+        # row already exists for this match) — needed below to tell "fully
+        # processed" apart from "row exists but our team's stats were never
+        # attached", since a shared match between two clubs we both sync
+        # would otherwise look identical to one we've already done ourselves.
+        teams_data = scorecard.get("teams") or []
+        our_team = next(
+            (t for t in teams_data if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()),
+            None,
+        )
+        our_team_name = ""
+        our_team_pids: set[uuid.UUID] = set()
+        if our_team:
+            our_team_name = our_team.get("displayName") or our_team.get("name") or ""
+            for roster_p in (our_team.get("players") or []):
+                rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
+                if rpid is not None:
+                    our_team_pids.add(rpid)
+
         # Open a fresh per-game session.
         try:
             async with async_session_maker() as session:
-                # Skip if game already processed (Game row exists). Pre-v6.2.5 we
-                # checked batting_innings only, which re-processed forfeits/abandons
-                # every sync — now those save with appearances but no stats rows.
+                # A match between two clubs we BOTH sync shares one games.id row
+                # (the raw CA match GUID) — whichever club synced it first
+                # created the row, but that sync only ever attaches ITS OWN
+                # team's players (our_team_pids gates every insert below). So
+                # gate the skip on whether OUR players already have an
+                # appearance row for this game, not on whether the Game row
+                # exists — otherwise the second club's stats for that match
+                # never land, even across a Full Rebuild (the same
+                # row-exists check would keep short-circuiting first).
                 existing = await session.execute(
                     text("SELECT venue, result FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 existing_row = existing.fetchone()
-                if existing_row is not None:
+                game_exists = existing_row is not None
+
+                our_appearances_done = True
+                if game_exists and our_team_pids:
+                    our_appear_check = await session.execute(
+                        text(
+                            "SELECT 1 FROM game_appearances "
+                            "WHERE game_id=:gid AND player_id = ANY(:pids) LIMIT 1"
+                        ),
+                        {"gid": match_id_str, "pids": list(our_team_pids)},
+                    )
+                    our_appearances_done = our_appear_check.first() is not None
+
+                if game_exists:
                     existing_venue, existing_result = existing_row
                     updates: dict[str, str] = {}
                     if existing_venue is None:
@@ -1627,8 +1665,12 @@ async def sync_grassroots_game_level_data(
                             {**updates, "gid": match_id_str},
                         )
                         await session.commit()
-                    stats["gr_games_skipped_done"] += 1
-                    continue
+                    if our_appearances_done:
+                        stats["gr_games_skipped_done"] += 1
+                        continue
+                    # else: the row exists (the other synced club created it)
+                    # but our own team's stats were never attached — fall
+                    # through and attach them below, without re-inserting Game.
 
                 season_id = match_to_season.get(match_id_str)
                 if not season_id and seasons:
@@ -1649,7 +1691,7 @@ async def sync_grassroots_game_level_data(
                     # own.
                     raw_guid = _parse_uuid(grade_guid_str)
                     if raw_guid is not None:
-                        existing = (await session.execute(
+                        existing_grade = (await session.execute(
                             select(Grade.id)
                             .join(Season, Grade.season_id == Season.id)
                             .where(
@@ -1657,8 +1699,8 @@ async def sync_grassroots_game_level_data(
                                 Grade.grassroots_id == grade_guid_str,
                             )
                         )).scalars().first()
-                        if existing is not None:
-                            grade_uuid = existing
+                        if existing_grade is not None:
+                            grade_uuid = existing_grade
                         else:
                             # Per-club mint only when another club already owns the
                             # raw GUID, mirroring _resolve_org_grade.
@@ -1691,12 +1733,6 @@ async def sync_grassroots_game_level_data(
                         except ValueError:
                             pass
 
-                # Teams
-                teams_data = scorecard.get("teams") or []
-                our_team = next(
-                    (t for t in teams_data if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()),
-                    None,
-                )
                 # isHome lives on matchSummary.teams, NOT on the top-level
                 # teams array (which has no isHome field at all). Bug from
                 # initial version: was reading from teams_data and getting
@@ -1717,47 +1753,42 @@ async def sync_grassroots_game_level_data(
                 winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
                 result_text = classify_match_result(scorecard, org_id_str)
 
-                # Game
-                venue_name = (scorecard.get("venue") or {}).get("name")
-                _opp_id, _opp_name = match_to_opp.get(match_id_str, (None, ""))
-                session.add(Game(
-                    id=match_uuid,
-                    grade_id=grade_uuid,
-                    played_at=played_at,
-                    home_team=home_team_name,
-                    away_team=away_team_name,
-                    home_club=strip_team_suffix(home_team_name),
-                    away_club=strip_team_suffix(away_team_name),
-                    opp_org_id=_opp_id,
-                    opp_club_name=_opp_name,
-                    result=result_text,
-                    winning_team=winner_name,
-                    is_final=match_to_is_final.get(match_id_str, False),
-                    venue=venue_name,
-                ))
-                try:
-                    await session.flush()
-                except Exception as e:
-                    logger.warning(f"GR-sync: game flush failed for {match_id_str}: {e}")
-                    continue  # session auto-rollback on context exit
+                # Game — only create the row the first time; when it already
+                # exists (the other synced club created it), just attach our
+                # own team's stats to it below instead of re-inserting it.
+                if not game_exists:
+                    venue_name = (scorecard.get("venue") or {}).get("name")
+                    _opp_id, _opp_name = match_to_opp.get(match_id_str, (None, ""))
+                    session.add(Game(
+                        id=match_uuid,
+                        grade_id=grade_uuid,
+                        played_at=played_at,
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        home_club=strip_team_suffix(home_team_name),
+                        away_club=strip_team_suffix(away_team_name),
+                        opp_org_id=_opp_id,
+                        opp_club_name=_opp_name,
+                        result=result_text,
+                        winning_team=winner_name,
+                        is_final=match_to_is_final.get(match_id_str, False),
+                        venue=venue_name,
+                    ))
+                    try:
+                        await session.flush()
+                    except Exception as e:
+                        logger.warning(f"GR-sync: game flush failed for {match_id_str}: {e}")
+                        continue  # session auto-rollback on context exit
 
                 bat_count = bowl_count = field_count = part_count = fow_count = appear_count = 0
 
-                # Build the set of canonical pids on OUR team for this specific
-                # game. Used as the gate for every per-innings stat insert
-                # below: a player who's currently in known_player_ids but
-                # played AGAINST us in this game (e.g. was on another club's
-                # roster that season) would otherwise have their opposition
-                # batting/bowling/fielding picked up as ours, inflating their
-                # match count and stats.
-                our_team_pids: set[uuid.UUID] = set()
-                our_team_name = ""
-                if our_team:
-                    our_team_name = our_team.get("displayName") or our_team.get("name") or ""
-                    for roster_p in (our_team.get("players") or []):
-                        rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
-                        if rpid is not None:
-                            our_team_pids.add(rpid)
+                # our_team_pids / our_team_name were resolved up front (used
+                # for the appearances-done gate above too), gating every
+                # per-innings stat insert below: a player who's currently in
+                # known_player_ids but played AGAINST us in this game (e.g. was
+                # on another club's roster that season) would otherwise have
+                # their opposition batting/bowling/fielding picked up as ours,
+                # inflating their match count and stats.
 
                 # Roster: insert one GameAppearance per club player listed in the
                 # team-sheet. Covers selected players who didn't bat/bowl/take a
