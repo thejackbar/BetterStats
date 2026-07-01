@@ -146,6 +146,9 @@ function ImportPanel({ orgId, onImported, players }) {
   const [colMap, setColMap] = useState({})
   const [pdfImporting, setPdfImporting] = useState(false)
   const [pdfDone, setPdfDone] = useState(null)
+  const [boardUrl, setBoardUrl] = useState('')
+  const [urlParsing, setUrlParsing] = useState(false)
+  const [boardFilename, setBoardFilename] = useState('Honour board')
   const [linkChoices, setLinkChoices] = useState({})   // name → chosen player_id
   const [linking, setLinking] = useState(false)
   const [history, setHistory] = useState([])
@@ -268,6 +271,21 @@ function ImportPanel({ orgId, onImported, players }) {
     return m ? `${m[1].toUpperCase()}. ${tc(m[2])}` : tc(s)
   }
 
+  // Shared by the PDF/photo reader and the web-page reader — both hand back the
+  // same { available, columns, rows } shape, so the review grid is identical.
+  const applyBoardResult = (res) => {
+    if (!res.available) {
+      setPdfResult(res)
+      return
+    }
+    const map = {}
+    for (const label of res.columns) {
+      map[label] = { include: true, category: guessCategory(label), achievement: tcLabel(label), subcategory: '' }
+    }
+    setColMap(map)
+    setPdfResult(res)
+  }
+
   const handleParsePdf = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -278,22 +296,29 @@ function ImportPanel({ orgId, onImported, players }) {
       return
     }
     setPdfParsing(true); setError(null); setPdfResult(null); setPdfDone(null)
+    setBoardFilename('Honour board')
     try {
-      const res = await api.parseAchievementsPdf(orgId, file)
-      if (!res.available) {
-        setPdfResult(res)
-      } else {
-        const map = {}
-        for (const label of res.columns) {
-          map[label] = { include: true, category: guessCategory(label), achievement: tcLabel(label), subcategory: '' }
-        }
-        setColMap(map)
-        setPdfResult(res)
-      }
+      applyBoardResult(await api.parseAchievementsPdf(orgId, file))
     } catch (err) {
       setError(err.message || 'Could not read the PDF')
     } finally {
       setPdfParsing(false)
+    }
+  }
+
+  const handleParseUrl = async () => {
+    const url = boardUrl.trim()
+    if (!url) { setError('Paste the link to the honour-board page.'); return }
+    setUrlParsing(true); setError(null); setPdfResult(null); setPdfDone(null)
+    let host = url
+    try { host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url}`).hostname } catch { /* keep raw */ }
+    setBoardFilename(`Web: ${host}`)
+    try {
+      applyBoardResult(await api.parseAchievementsUrl(orgId, url))
+    } catch (err) {
+      setError(err.message || 'Could not read that page')
+    } finally {
+      setUrlParsing(false)
     }
   }
 
@@ -316,9 +341,9 @@ function ImportPanel({ orgId, onImported, players }) {
     if (!rows.length) { setError('Tick at least one column to import.'); return }
     setPdfImporting(true); setError(null)
     try {
-      const res = await api.forceImportAchievements(orgId, rows, { filename: 'Honour board' })
+      const res = await api.forceImportAchievements(orgId, rows, { filename: boardFilename })
       setPdfDone({ created: res.created ?? rows.length })
-      setPdfResult(null); setColMap({})
+      setPdfResult(null); setColMap({}); setBoardUrl('')
       onImported()
       loadHistory()
     } catch (err) {
@@ -383,11 +408,30 @@ function ImportPanel({ orgId, onImported, players }) {
           <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" className="hidden" onChange={handleParsePdf} />
         </label>
       </div>
+      <div className="flex flex-wrap gap-2 items-center mt-3">
+        <input
+          type="url"
+          value={boardUrl}
+          onChange={e => setBoardUrl(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleParseUrl() } }}
+          placeholder="https://yourclub.org/honour-board"
+          className={`${INPUT_CLS} flex-1 min-w-[16rem]`}
+          disabled={urlParsing}
+        />
+        <button
+          onClick={handleParseUrl}
+          disabled={urlParsing || !boardUrl.trim()}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text transition-colors disabled:opacity-50 flex items-center gap-2"
+        >
+          🔗 {urlParsing ? 'Reading…' : 'Read from web page'}
+        </button>
+      </div>
       <p className="text-pb-faintest text-xs mt-2 leading-relaxed">
         Best on a board that's a table with the season down the rows and an award per column.
         A PDF exported from Word/Excel/Sheets reads exactly. A scan or a straight-on photo is
-        read by OCR, which is rougher, so check the names before importing. It all runs on the
-        server with no AI cost.
+        read by OCR, which is rougher, so check the names before importing. A web-page link reads
+        the HTML tables on the page (not boards drawn as an image or by a script). It all runs on
+        the server with no AI cost.
       </p>
 
       {pdfDone && (

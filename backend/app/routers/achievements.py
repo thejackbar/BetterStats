@@ -823,3 +823,43 @@ async def parse_pdf(
                 "or Google Sheets reads most reliably, or use the CSV template instead."
             ),
         }
+
+
+# ─── Parse an honour board from a web page URL (no API tokens) ─────────────────
+#
+# Many clubs publish their honour roll as an HTML table on the club website. This
+# reads that page's tables into the same review grid the PDF/photo reader uses, so
+# the admin maps columns to categories and imports through the normal flow.
+
+class ParseUrlBody(BaseModel):
+    url: str
+
+
+@router.post("/parse-url")
+async def parse_url(
+    org_id: str = Query(...),
+    body: ParseUrlBody = Body(...),
+):
+    from app.services.awards_url import parse_awards_url
+
+    url = (body.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Enter a web address.")
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url):
+        url = "https://" + url  # bare "gosnellscc.org/..." → https://…
+
+    try:
+        return await parse_awards_url(url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("parse_url: unexpected failure reading %s", url)
+        return {
+            "available": False,
+            "message": (
+                "Couldn't read that page. Check the address is the honour-board page itself, "
+                "or use the PDF/photo reader or the CSV template instead."
+            ),
+        }
