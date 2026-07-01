@@ -82,38 +82,133 @@ function MergeBuilder({ orgId, grades, onMerged }) {
   )
 }
 
-function GradeList({ grades }) {
+const GRADE_CATEGORIES = [
+  ['senior', 'Senior'],
+  ['junior', 'Junior'],
+  ['womens', "Women's"],
+  ['masters', 'Masters'],
+  ['mixed', 'Mixed / Other'],
+]
+
+function GradeList({ grades, onChanged }) {
+  const [savingName, setSavingName] = useState(null)
+  const [applyingAll, setApplyingAll] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function save(gradeName, patch) {
+    setSavingName(gradeName)
+    setError(null)
+    try {
+      await api.classifyGrade(gradeName, patch)
+      onChanged?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingName(null)
+    }
+  }
+
+  async function applyAll() {
+    setApplyingAll(true)
+    setError(null)
+    try {
+      await api.applyGradeSuggestions()
+      onChanged?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setApplyingAll(false)
+    }
+  }
+
   if (!grades.length) return <p className="font-mono text-[11px] text-pb-faint">No grades found for this club.</p>
+
+  const anyUnconfirmed = grades.some(g => !g.category_confirmed)
+
   return (
-    <div className="pb-card overflow-hidden">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
-            <th className="font-medium py-2.5 pl-5">GRADE</th>
-            <th className="font-medium py-2.5 text-right">GAMES</th>
-            <th className="font-medium py-2.5 pr-5 text-right">RUNS</th>
-          </tr>
-        </thead>
-        <tbody>
-          {grades.map((g, i) => (
-            <tr key={g.grade_name} className={`${i ? 'pb-hairline-t' : ''} align-top hover:bg-pb-surface2`}>
-              <td className="py-2.5 pl-5">
-                <div className="text-pb-text">{g.display_name}</div>
-                {g.display_name !== g.grade_name && (
-                  <div className="font-mono text-[10px] text-pb-faintest mt-0.5">raw: {g.grade_name}</div>
-                )}
-                {g.aliases?.length > 0 && (
-                  <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
-                    Includes: {g.aliases.join(', ')}
-                  </div>
-                )}
-              </td>
-              <td className="py-2.5 font-mono text-pb-dim text-right">{g.games}</td>
-              <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{g.runs}</td>
+    <div>
+      <p className="text-pb-dim text-sm mb-3 leading-relaxed">
+        Label each grade so the public site can split them (Senior / Junior / Women's ...), and choose which
+        ones to share. A hidden grade drops off the public grade filters, ladders and per-grade breakdowns;
+        your admin views and whole-club career totals are unchanged.
+      </p>
+      {anyUnconfirmed && (
+        <button
+          onClick={applyAll}
+          disabled={applyingAll}
+          className="mb-3 font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+        >
+          {applyingAll ? 'Applying…' : 'Confirm all suggestions'}
+        </button>
+      )}
+      {error && (
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
+      <div className="pb-card overflow-hidden">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-2.5 pl-5">GRADE</th>
+              <th className="font-medium py-2.5">CATEGORY</th>
+              <th className="font-medium py-2.5 text-center">PUBLIC</th>
+              <th className="font-medium py-2.5 text-right">GAMES</th>
+              <th className="font-medium py-2.5 pr-5 text-right">RUNS</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {grades.map((g, i) => {
+              const busy = savingName === g.grade_name
+              return (
+                <tr key={g.grade_name} className={`${i ? 'pb-hairline-t' : ''} align-top hover:bg-pb-surface2 ${g.is_public ? '' : 'opacity-60'}`}>
+                  <td className="py-2.5 pl-5">
+                    <div className="text-pb-text">{g.display_name}</div>
+                    {g.display_name !== g.grade_name && (
+                      <div className="font-mono text-[10px] text-pb-faintest mt-0.5">raw: {g.grade_name}</div>
+                    )}
+                    {g.aliases?.length > 0 && (
+                      <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
+                        Includes: {g.aliases.join(', ')}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={g.category || 'senior'}
+                        disabled={busy}
+                        onChange={e => save(g.grade_name, { category: e.target.value })}
+                        className="bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent disabled:opacity-50"
+                      >
+                        {GRADE_CATEGORIES.map(([key, label]) => (
+                          <option key={key} value={key}>{label}</option>
+                        ))}
+                      </select>
+                      {!g.category_confirmed && (
+                        <span className="font-mono text-[9px] text-pb-amber uppercase tracking-wide" title="Auto-detected from the grade name — pick to confirm">suggested</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-2.5 text-center">
+                    <button
+                      onClick={() => save(g.grade_name, { is_public: !g.is_public })}
+                      disabled={busy}
+                      className={`font-mono text-[10px] tracking-wide2 rounded px-2.5 py-1 border transition-colors disabled:opacity-50 ${
+                        g.is_public
+                          ? 'text-pb-positive border-pb-positive/40 hover:bg-pb-positive/10'
+                          : 'text-pb-faint pb-hairline hover:text-pb-text'
+                      }`}
+                    >
+                      {g.is_public ? 'Public' : 'Hidden'}
+                    </button>
+                  </td>
+                  <td className="py-2.5 font-mono text-pb-dim text-right">{g.games}</td>
+                  <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{g.runs}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -350,15 +445,16 @@ export default function AdminGrades() {
       <div className="max-w-3xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades</h1>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Merge grades that are the same competition under different names, or set display name overrides.
+          Label grades by type, choose which to share publicly, merge grades that are the same competition
+          under different names, or set display name overrides.
         </p>
 
         <MergeBuilder orgId={orgId} grades={grades || []} onMerged={refresh} />
 
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">
-          All Grades <span className="text-pb-faintest">({(grades || []).length})</span>
+          Labels &amp; Visibility <span className="text-pb-faintest">({(grades || []).length})</span>
         </p>
-        <GradeList grades={grades || []} />
+        <GradeList grades={grades || []} onChanged={refresh} />
 
         <MergeHistory orgId={orgId} refreshKey={historyKey} onChanged={refresh} />
 

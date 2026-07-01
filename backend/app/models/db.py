@@ -475,6 +475,16 @@ class Grade(Base):
     # One Day / T20 and can't be told apart from the men's competition;
     # 'exclude' drops a grade from match-fee accrual entirely.
     fee_format = Column(Text, nullable=True)
+    # Public-facing category (migration 123). One of the keys in
+    # app/services/grade_labels.GRADE_CATEGORIES: 'senior' | 'junior' | 'womens'
+    # | 'masters' | 'mixed'. NULL = uncategorised (readers fall back to the
+    # name-based suggestion). Attaches to a grade name club-wide, like the
+    # display-name override.
+    category = Column(Text, nullable=True)
+    # Whether this grade is shared on the club's public site (migration 123).
+    # Defaults true so nothing is hidden until a club explicitly opts a grade
+    # (e.g. their whole junior programme) out of public grade surfaces.
+    is_public = Column(Boolean, nullable=False, server_default="true", default=True)
 
     season = relationship("Season", back_populates="grades")
     games = relationship("Game", back_populates="grade")

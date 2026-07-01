@@ -23,8 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Grade, Organisation, Season, Team, get_db
-from app.routers.auth import get_current_club
+from app.models.db import Grade, Organisation, Season, Team, User, get_db
+from app.routers.auth import get_current_club, get_optional_user, user_can_view_org_private
 from app.routers.teams import ensure_team_grades, _grade_name_map
 from app.services import grassroots_scores_client
 from app.services.club_match import club_match_keys
@@ -93,7 +93,9 @@ def _parse_ladder_payload(raw, club_keys: list) -> list:
     return views
 
 
-async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: bool = True) -> dict:
+async def _compute_team_ladders(
+    db: AsyncSession, org: Organisation, auto_link: bool = True, public_only: bool = False
+) -> dict:
     if auto_link:
         await ensure_team_grades(db, org.id)  # self-link any teams missing a grade (admin only)
     teams = (await db.execute(
@@ -104,17 +106,20 @@ async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: 
     grade_names = await _grade_name_map(db, org.id)
     # grade_id -> raw CA grade GUID. The ladder API is keyed on the shared GUID,
     # while Team.grade_id may be a per-club uuid5 (grassroots_id == id for legacy).
-    grade_gr = {
-        str(gid): (gg or str(gid))
-        for gid, gg in (await db.execute(
-            select(Grade.id, Grade.grassroots_id)
-            .join(Season, Grade.season_id == Season.id)
-            .where(Season.organisation_id == org.id)
-        )).all()
-    }
+    grade_rows = (await db.execute(
+        select(Grade.id, Grade.grassroots_id, Grade.is_public)
+        .join(Season, Grade.season_id == Season.id)
+        .where(Season.organisation_id == org.id)
+    )).all()
+    grade_gr = {str(gid): (gg or str(gid)) for gid, gg, _pub in grade_rows}
+    grade_public = {str(gid): (pub is not False) for gid, _gg, pub in grade_rows}
     club_keys = club_match_keys(org)
 
-    linked = [t for t in teams if t.grade_id]
+    # A public club page hides grades the club opted out of sharing.
+    linked = [
+        t for t in teams
+        if t.grade_id and (not public_only or grade_public.get(str(t.grade_id), True))
+    ]
     unlinked = [{"team_id": str(t.id), "team_name": t.name} for t in teams if not t.grade_id]
 
     async def one(t: Team) -> dict:
@@ -153,13 +158,17 @@ async def public_team_ladders(slug: str, db: AsyncSession = Depends(get_db)):
     if not org.is_active:
         raise HTTPException(status_code=403, detail=INACTIVE_DETAIL)
     # Read-only on public GETs — linking happens on the admin side.
-    data = await _compute_team_ladders(db, org, auto_link=False)
+    data = await _compute_team_ladders(db, org, auto_link=False, public_only=True)
     # Public view: drop the admin-only "unlinked teams" hint.
     return {"teams": data["teams"]}
 
 
 @router.get("/grade/{grade_id}")
-async def grade_ladder(grade_id: str, db: AsyncSession = Depends(get_db)):
+async def grade_ladder(
+    grade_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     """Public ladder for a single grade — powers historical browsing (any
     season). Standings are public, so no auth; the grade just has to belong to
     an active club. Club rows are flagged via the owning org's name."""
@@ -173,6 +182,9 @@ async def grade_ladder(grade_id: str, db: AsyncSession = Depends(get_db)):
     season = await db.get(Season, grade.season_id) if grade.season_id else None
     org = await db.get(Organisation, season.organisation_id) if season else None
     if not org or not org.is_active:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    # Hidden grades are only browsable by the club's own admins / Better staff.
+    if grade.is_public is False and not await user_can_view_org_private(db, viewer, str(org.id)):
         raise HTTPException(status_code=404, detail="Grade not found")
     club_keys = club_match_keys(org)
     # Ladder API wants the shared raw CA grade GUID, not our (possibly per-club) PK.

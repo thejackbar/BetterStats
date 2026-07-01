@@ -10,7 +10,7 @@ from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services.fixtures_source import org_grassroots_fixtures
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private
 from app.auth.capabilities import require_cap, RUN_SYNC
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
@@ -170,12 +170,17 @@ async def get_org_grades(
     org_id: str,
     season_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     params = {"org_id": org_id}
     season_clause = ""
     if season_id:
         season_clause = "AND g.season_id = CAST(:season_id AS UUID)"
         params["season_id"] = season_id
+    # Public callers only see grades the club shares; its own admins see all.
+    public_clause = ""
+    if not await user_can_view_org_private(db, viewer, org_id):
+        public_clause = "AND g.is_public IS NOT FALSE"
     result = await db.execute(
         text(f"""
             SELECT display_name FROM (
@@ -184,6 +189,7 @@ async def get_org_grades(
                 JOIN seasons s ON s.id = g.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
                   {season_clause}
+                  {public_clause}
                   AND NOT EXISTS (
                       SELECT 1 FROM grade_merge_logs gml
                       WHERE gml.org_id = CAST(:org_id AS UUID)

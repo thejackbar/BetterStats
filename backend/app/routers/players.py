@@ -10,7 +10,7 @@ from app.models.db import (
     BattingInnings, BowlingSpell, FieldingStat, Game, Grade, Season,
     Fixture, FixtureLineup, PlayerAvailability, get_db,
 )
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import sync_squad_membership
 from app.services.name_format import name_sort_key
@@ -166,19 +166,31 @@ async def get_player_by_position(player_id: str, db: AsyncSession = Depends(get_
 
 
 @router.get("/{player_id}/by-grade")
-async def get_player_by_grade(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_by_grade(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_batting_by_grade(db, player_id, str(player.organisation_id))
+    org_id = str(player.organisation_id)
+    public_only = not await user_can_view_org_private(db, viewer, org_id)
+    return await get_batting_by_grade(db, player_id, org_id, public_only=public_only)
 
 
 @router.get("/{player_id}/bowling-by-grade")
-async def get_player_bowling_by_grade(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_bowling_by_grade(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_bowling_by_grade(db, player_id, str(player.organisation_id))
+    org_id = str(player.organisation_id)
+    public_only = not await user_can_view_org_private(db, viewer, org_id)
+    return await get_bowling_by_grade(db, player_id, org_id, public_only=public_only)
 
 
 @router.get("/{player_id}/bowling-dismissals")

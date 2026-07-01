@@ -16,6 +16,7 @@ from app.models.db import (
     SyncRun, async_session_maker
 )
 from app.services import playhq_client
+from app.services.grade_labels import suggest_category
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,10 @@ async def _resolve_org_grade(
         return None
     clash = await session.get(Grade, guid_uuid)
     new_id = uuid.uuid5(org_id, grassroots_guid) if clash is not None else guid_uuid
-    session.add(Grade(id=new_id, season_id=season_id, name=name, grassroots_id=grassroots_guid))
+    session.add(Grade(
+        id=new_id, season_id=season_id, name=name, grassroots_id=grassroots_guid,
+        category=suggest_category(name),
+    ))
     org_grade_map[grassroots_guid] = new_id
     return new_id
 
@@ -1654,12 +1658,14 @@ async def sync_grassroots_game_level_data(
                             # raw GUID, mirroring _resolve_org_grade.
                             clash = await session.get(Grade, raw_guid)
                             grade_uuid = uuid.uuid5(org_uuid, grade_guid_str) if clash is not None else raw_guid
+                            _gname = grade_data.get("name", "Unknown Grade")
                             session.add(Grade(
                                 id=grade_uuid,
                                 season_id=season_id,
-                                name=grade_data.get("name", "Unknown Grade"),
+                                name=_gname,
                                 grassroots_id=grade_guid_str,
                                 playhq_id=grade_guid_str,
+                                category=suggest_category(_gname),
                             ))
                             try:
                                 await session.flush()

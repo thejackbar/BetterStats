@@ -239,6 +239,15 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
+  // Grade category label + public visibility
+  classifyGrade: (gradeName, { category, is_public } = {}) =>
+    request('/admin/grades/classify', {
+      method: 'PATCH',
+      body: JSON.stringify({ grade_name: gradeName, category, is_public }),
+    }),
+  applyGradeSuggestions: () =>
+    request('/admin/grades/apply-suggestions', { method: 'POST' }),
+
   // Club admin — fees (Phase 1)
   feeListSchedule: (seasonId) => request(`/club-admin/fees/schedule?season_id=${seasonId}`),
   feeCreateSchedule: (data) =>

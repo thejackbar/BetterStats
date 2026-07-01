@@ -108,6 +108,16 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE bowler_wickets ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
         ))
+        # Grade category label + public visibility (migration 123) — clubs label
+        # grades (Senior/Junior/Women's/Masters/Mixed) and choose which to share
+        # publicly. Defensive idempotent adds so the API boots even if alembic lags.
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS category TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS "
+            "is_public BOOLEAN NOT NULL DEFAULT true"
+        ))
         # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
         # the ball-level read CA can't give us (vulnerable-to bowler types, a
         # length×line weakness grid, favoured shots, stock ball + variations).

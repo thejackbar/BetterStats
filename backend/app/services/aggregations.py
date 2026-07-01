@@ -757,11 +757,20 @@ async def get_batting_by_position(session: AsyncSession, player_id: str) -> list
     return [dict(r) for r in result.mappings()]
 
 
-async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Optional[str] = None) -> list[dict]:
+async def get_batting_by_grade(
+    session: AsyncSession,
+    player_id: str,
+    org_id: Optional[str] = None,
+    public_only: bool = False,
+) -> list[dict]:
+    # Public views drop grades a club has opted out of sharing; admin/internal
+    # callers (public_only=False) still see every grade.
+    public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                MAX(gr.category) AS category,
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
@@ -791,6 +800,7 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Op
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
               AND (bi.did_not_bat IS NOT TRUE)
+              {public_clause}
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY SUM(bi.runs) DESC
         """),
@@ -2144,12 +2154,19 @@ async def get_bowling_leaderboard_extended(
     return [dict(r) for r in result.mappings()]
 
 
-async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Optional[str] = None) -> list[dict]:
+async def get_bowling_by_grade(
+    session: AsyncSession,
+    player_id: str,
+    org_id: Optional[str] = None,
+    public_only: bool = False,
+) -> list[dict]:
+    public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
     result = await session.execute(
-        text("""
+        text(f"""
             WITH grade_spells AS (
                 SELECT
                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                    gr.category AS category,
                     bs.wickets,
                     bs.runs,
                     bs.overs,
@@ -2174,6 +2191,7 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
                 ) gdn ON TRUE
                 WHERE bs.player_id = :pid
                   AND bs.wickets IS NOT NULL
+                  {public_clause}
             ),
             best_per_grade AS (
                 SELECT DISTINCT ON (grade_name)
@@ -2185,6 +2203,7 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
             )
             SELECT
                 gs.grade_name,
+                MAX(gs.category) AS category,
                 COUNT(*) AS spells,
                 COALESCE(SUM(gs.wickets), 0) AS wickets,
                 COALESCE(SUM(gs.runs), 0) AS runs_conceded,

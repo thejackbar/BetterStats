@@ -61,6 +61,43 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     return user
 
 
+async def get_optional_user(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
+    """Like get_current_user, but returns None instead of 401 when there's no
+    valid session. For public endpoints that show more to a signed-in club admin
+    (e.g. hidden grades stay visible in their own admin-side views)."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+    except JWTError:
+        return None
+    try:
+        return await db.get(User, uuid.UUID(user_id))
+    except (ValueError, TypeError):
+        return None
+
+
+async def user_can_view_org_private(db: AsyncSession, user: User | None, org_id) -> bool:
+    """True if this user may see a club's non-public data (its own admins + Better
+    staff). Used to decide whether to filter hidden grades from a public surface."""
+    if user is None:
+        return False
+    res = await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == user.id)
+    )
+    membership = res.scalar_one_or_none()
+    if not membership:
+        return False
+    if membership.role == "super_admin":
+        return True
+    eff = _effective_club_id(membership, user)
+    return eff is not None and str(eff) == str(org_id)
+
+
 async def require_super_admin(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
