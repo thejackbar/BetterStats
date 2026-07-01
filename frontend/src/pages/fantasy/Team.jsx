@@ -44,7 +44,7 @@ export function Onboarding({ manager, season, onBuild }) {
             <div style={{
               width: 30, height: 30, borderRadius: 9, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
               font: `800 14px ${DISP}`, color: i === 0 ? 'var(--ink)' : 'var(--dim)',
-              background: i === 0 ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)',
+              background: i === 0 ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)',
             }}>{i + 1}</div>
             <div style={{ flex: 1 }}>
               <div style={{ font: `700 13.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{t}</div>
@@ -174,7 +174,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
         <div style={{
           width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: '#fff', font: `800 12px ${DISP}`,
-          background: `linear-gradient(135deg, ${mix('var(--pb-accent, #8C82F0)', 80, '#000')}, var(--pb-accent, #8C82F0))`,
+          background: `linear-gradient(135deg, ${mix('var(--pb-accent, #06B6D4)', 80, '#000')}, var(--pb-accent, #06B6D4))`,
         }}>{teamInitials(squad.team_name)}</div>
         <div style={{ lineHeight: 1.2 }}>
           <div style={{ font: `700 15px 'Hanken Grotesk'`, color: 'var(--text)' }}>{squad.team_name}</div>
@@ -283,11 +283,11 @@ function RightRail({ squad, lockText, captainId, gwPts, snapshot, active, locked
         <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)', marginBottom: 9 }}>Club ladder</div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14, overflow: 'hidden' }}>
           {(snapshot || []).slice(0, 5).map(r => (
-            <div key={r.rank} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px', borderBottom: '1px solid var(--surface2)', background: r.you ? tintBg(14) : 'transparent', borderLeft: r.you ? '3px solid var(--pb-accent, #8C82F0)' : '3px solid transparent' }}>
+            <div key={r.rank} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px', borderBottom: '1px solid var(--surface2)', background: r.you ? tintBg(14) : 'transparent', borderLeft: r.you ? '3px solid var(--pb-accent, #06B6D4)' : '3px solid transparent' }}>
               <span style={{ width: 16, textAlign: 'center', font: `700 14px ${DISP}`, color: r.you ? 'var(--text)' : 'var(--dim)' }}>{r.rank}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name}</span>
-                {r.you && <span style={{ marginLeft: 6, font: `600 8.5px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #8C82F0)', padding: '1px 5px', borderRadius: 4 }}>YOU</span>}
+                {r.you && <span style={{ marginLeft: 6, font: `600 8.5px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #06B6D4)', padding: '1px 5px', borderRadius: 4 }}>YOU</span>}
               </div>
               <span style={{ font: `700 15px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.points)}</span>
             </div>
@@ -305,7 +305,7 @@ function ChipBtn({ label, armed, onClick }) {
     <button onClick={onClick} style={{
       flex: 1, textAlign: 'center', borderRadius: 10, padding: 9, cursor: 'pointer',
       font: `700 11px 'Hanken Grotesk'`,
-      background: armed ? 'var(--pb-accent, #8C82F0)' : 'var(--bg)', color: armed ? 'var(--ink)' : 'var(--text)',
+      background: armed ? 'var(--pb-accent, #06B6D4)' : 'var(--bg)', color: armed ? 'var(--ink)' : 'var(--text)',
       border: armed ? 'none' : '1px solid var(--hairline)',
     }}>{label}</button>
   )

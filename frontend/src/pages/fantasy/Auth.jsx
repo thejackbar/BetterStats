@@ -30,7 +30,7 @@ export default function Auth({ token, season, onAuthed }) {
   return (
     <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 24 }}>
       <Aurora style={{ inset: '-15% -25% 30%', height: 'auto', bottom: '30%' }} blur={50} blobs={[
-        { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 18, pos: { width: '60%', height: '70%', left: '-8%', top: '-5%' } },
+        { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraA', s: 18, pos: { width: '60%', height: '70%', left: '-8%', top: '-5%' } },
         { c: '#22D3EE', a: 'bfcAuroraB', s: 22, pos: { width: '55%', height: '65%', right: '-6%', top: '0%' } },
         { c: '#EC4899', a: 'bfcAuroraC', s: 20, pos: { width: '55%', height: '60%', left: '18%', top: '18%' } },
       ]} />
@@ -42,7 +42,7 @@ export default function Auth({ token, season, onAuthed }) {
             }} />
           : <div style={{
               width: 64, height: 64, borderRadius: 19, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--pb-accent, #8C82F0)', color: 'var(--ink)', font: `800 22px ${DISP}`,
+              background: 'var(--pb-accent, #06B6D4)', color: 'var(--ink)', font: `800 22px ${DISP}`,
               boxShadow: `inset 0 0 0 1px rgba(255,255,255,.18), 0 12px 34px -8px ${tintBg(70)}`,
             }}>{(club?.short_name || club?.name || 'BFC').slice(0, 4).toUpperCase()}</div>}
         <div style={{ font: `800 25px ${DISP}`, textTransform: 'uppercase', letterSpacing: '.02em', color: 'var(--text)', marginTop: 16 }}>{club?.name || 'Fantasy Cricket'}</div>

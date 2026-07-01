@@ -114,7 +114,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
               <div style={{ display: 'flex', gap: 5, marginLeft: 6 }}>
                 {[['all', 'All'], ['batter', 'BAT'], ['allrounder', 'AR'], ['keeper', 'WK'], ['bowler', 'BWL']].map(([k, l]) => {
                   const on = roleFilter === k
-                  return <button key={k} onClick={() => setRoleFilter(k)} style={{ font: `${on ? 700 : 600} 10px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer' }}>{l}</button>
+                  return <button key={k} onClick={() => setRoleFilter(k)} style={{ font: `${on ? 700 : 600} 10px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer' }}>{l}</button>
                 })}
               </div>
               <div style={{ marginLeft: 'auto', width: 180 }}><Field placeholder="⌕ Search" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '7px 12px', fontSize: 11.5 }} /></div>
@@ -136,7 +136,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
                     <span style={{ textAlign: 'right', font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{p.selected_pct ?? 0}%</span>
                     <span style={{ textAlign: 'right', font: `700 13px ${DISP}`, color: 'var(--accent-strong)', fontVariantNumeric: 'tabular-nums' }}>{pts(p.total_points)}</span>
                     <span style={{ textAlign: 'right' }}>
-                      <button onClick={() => pick(p)} disabled={owned || (out && !ok)} style={{ width: 26, height: 26, borderRadius: 8, cursor: owned ? 'default' : 'pointer', font: `800 ${sel ? 13 : 15}px 'Hanken Grotesk'`, opacity: owned || (out && !ok) ? 0.35 : 1, background: sel ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: sel ? 'var(--ink)' : 'var(--dim)', border: sel ? 'none' : '1px solid var(--hairline2)' }}>{sel ? '✓' : '+'}</button>
+                      <button onClick={() => pick(p)} disabled={owned || (out && !ok)} style={{ width: 26, height: 26, borderRadius: 8, cursor: owned ? 'default' : 'pointer', font: `800 ${sel ? 13 : 15}px 'Hanken Grotesk'`, opacity: owned || (out && !ok) ? 0.35 : 1, background: sel ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: sel ? 'var(--ink)' : 'var(--dim)', border: sel ? 'none' : '1px solid var(--hairline2)' }}>{sel ? '✓' : '+'}</button>
                     </span>
                   </div>
                 )
@@ -197,7 +197,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
                   tone={on ? 'picked' : 'plain'} onClick={over ? undefined : () => setTin(p)}
                   right={<span style={{
                     width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', font: `800 ${on ? 13 : 16}px 'Hanken Grotesk'`,
-                    opacity: over ? 0.35 : 1, background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)', border: on ? 'none' : '1px solid var(--hairline2)',
+                    opacity: over ? 0.35 : 1, background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)', border: on ? 'none' : '1px solid var(--hairline2)',
                   }}>{on ? '✓' : '+'}</span>} />
               )
             })}

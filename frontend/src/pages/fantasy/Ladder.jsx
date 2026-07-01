@@ -13,7 +13,7 @@ export function LadderRow({ r, compact }) {
         <span style={{ width: 24, textAlign: 'center', font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{r.rank}</span>
         {!compact && <MoveArrow delta={r.rank_delta} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ font: `700 13.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name} <span style={{ font: `700 9px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #8C82F0)', padding: '1px 5px', borderRadius: 4, verticalAlign: 'middle' }}>YOU</span></div>
+          <div style={{ font: `700 13.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name} <span style={{ font: `700 9px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #06B6D4)', padding: '1px 5px', borderRadius: 4, verticalAlign: 'middle' }}>YOU</span></div>
           <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--accent-strong)' }}>{r.manager}</div>
         </div>
         {!compact && <span style={{ font: `600 12px ${DISP}`, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.gw)}</span>}

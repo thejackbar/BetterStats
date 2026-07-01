@@ -36,7 +36,7 @@ export default function Settings({ token, manager, squad, themePref, setThemePre
     <div>
       <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 16, padding: '12px 0' }}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 13 }}>
-          <div style={{ width: 54, height: 54, borderRadius: 15, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: `800 16px ${DISP}`, background: `linear-gradient(135deg, ${mix('var(--pb-accent, #8C82F0)', 80, '#000')}, var(--pb-accent, #8C82F0))` }}>{initials}</div>
+          <div style={{ width: 54, height: 54, borderRadius: 15, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: `800 16px ${DISP}`, background: `linear-gradient(135deg, ${mix('var(--pb-accent, #06B6D4)', 80, '#000')}, var(--pb-accent, #06B6D4))` }}>{initials}</div>
           <div>
             <div style={{ font: `800 18px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)' }}>{squad?.team_name || manager?.display_name}</div>
             <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{manager?.display_name}{manager?.email ? ` · ${manager.email}` : ''}</div>

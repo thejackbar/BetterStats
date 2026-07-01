@@ -6,7 +6,9 @@
 // The colours are drawn from the BetterSports palette (see styles/theme.css /
 // tailwind.config.js): green is the house brand (--pb-brand), blue is the
 // chart "wickets" series, amber is amber.cricket, violet is chart-4. Magenta
-// extends the same vivid chart family for BetterSocials.
+// extends the same vivid chart family for BetterSocials. Cyan is BetterFantasy,
+// matching its icon tile (betterfantasy.svg is a #22d3ee → #0891b2 gradient, so
+// the accent is the cyan-500 that sits in the middle of that ramp).
 import statsLogo from '../assets/modules/betterstats.svg'
 import selectLogo from '../assets/modules/betterselect.svg'
 import socialsLogo from '../assets/modules/bettersocials.svg'
@@ -24,7 +26,7 @@ export const MODULE_BRAND = {
   socials: { name: 'BetterSocials', accent: '#EC4899', accentRgb: '236 72 153', logo: socialsLogo },
   admin:   { name: 'BetterAdmin',   accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
   iq:      { name: 'BetterIQ',      accent: '#A855F7', accentRgb: '168 85 247', logo: iqLogo },
-  fantasy: { name: 'BetterFantasyCricket', accent: '#8C82F0', accentRgb: '140 130 240', logo: fantasyLogo },
+  fantasy: { name: 'BetterFantasyCricket', accent: '#06B6D4', accentRgb: '6 182 212', logo: fantasyLogo },
 }
 
 // The various registries key modules differently (marketing uses slugs, the

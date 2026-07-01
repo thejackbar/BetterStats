@@ -69,7 +69,7 @@ export default function Share({ token, squad, nav }) {
         <div style={{ overflowX: 'auto' }}>
           <div ref={gwRef} data-theme="dark" style={{ position: 'relative', width: 430, height: 430, background: '#0a0d14', borderRadius: 22, overflow: 'hidden', boxShadow: 'var(--frame-shadow)' }}>
             <Aurora style={{ inset: '-10%', height: 'auto', bottom: '-10%' }} opacity={0.7} blur={48} blobs={[
-              { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 17, pos: { width: '55%', height: '55%', left: '-6%', top: '-6%' } },
+              { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraA', s: 17, pos: { width: '55%', height: '55%', left: '-6%', top: '-6%' } },
               { c: '#22D3EE', a: 'bfcAuroraB', s: 21, pos: { width: '52%', height: '52%', right: '-6%', top: '8%' } },
               { c: '#EC4899', a: 'bfcAuroraC', s: 19, pos: { width: '55%', height: '55%', left: '20%', bottom: '-12%' } },
             ]} />
@@ -124,7 +124,7 @@ export default function Share({ token, squad, nav }) {
         <div style={{ overflowX: 'auto' }}>
           <div ref={storyRef} data-theme="dark" style={{ position: 'relative', width: 300, height: 533, background: '#0a0d14', borderRadius: 22, overflow: 'hidden', boxShadow: 'var(--frame-shadow)' }}>
             <Aurora style={{ inset: '-10%', height: 'auto', bottom: '-10%' }} opacity={0.72} blur={50} blobs={[
-              { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 18, pos: { width: '70%', height: '40%', left: '-10%', top: '-4%' } },
+              { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraA', s: 18, pos: { width: '70%', height: '40%', left: '-10%', top: '-4%' } },
               { c: '#22D3EE', a: 'bfcAuroraD', s: 23, pos: { width: '65%', height: '38%', right: '-10%', top: '34%' } },
               { c: '#EC4899', a: 'bfcAuroraC', s: 20, pos: { width: '75%', height: '40%', left: '0%', bottom: '-8%' } },
             ]} />
@@ -140,7 +140,7 @@ export default function Share({ token, squad, nav }) {
                 <div style={{ font: `800 30px ${DISP}`, letterSpacing: code ? '.18em' : '.02em', color: '#fff', marginTop: 4 }}>{code || (club?.name || 'Fantasy')}</div>
                 <div style={{ font: `600 11px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.65)', marginTop: 2 }}>{total ? `${total} playing` : 'Free to play'}</div>
               </div>
-              <div style={{ marginTop: 14, width: '100%', background: 'var(--pb-accent, #8C82F0)', color: '#11102a', padding: 13, borderRadius: 12, font: `800 14px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase' }}>Play free →</div>
+              <div style={{ marginTop: 14, width: '100%', background: 'var(--pb-accent, #06B6D4)', color: '#11102a', padding: 13, borderRadius: 12, font: `800 14px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase' }}>Play free →</div>
               <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.5)', marginTop: 10 }}>{host}/fantasy</div>
             </div>
           </div>
@@ -157,7 +157,7 @@ export default function Share({ token, squad, nav }) {
           <div style={{ overflowX: 'auto' }}>
             <div ref={draftRef} data-theme="dark" style={{ position: 'relative', width: 300, height: 533, background: '#0a0d14', borderRadius: 22, overflow: 'hidden', boxShadow: 'var(--frame-shadow)' }}>
               <Aurora style={{ inset: '-10%', height: 'auto', bottom: '-10%' }} opacity={0.72} blur={50} blobs={[
-                { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraC', s: 18, pos: { width: '70%', height: '40%', left: '-10%', top: '-4%' } },
+                { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraC', s: 18, pos: { width: '70%', height: '40%', left: '-10%', top: '-4%' } },
                 { c: '#00E58E', a: 'bfcAuroraB', s: 23, pos: { width: '65%', height: '38%', right: '-10%', top: '34%' } },
                 { c: '#22D3EE', a: 'bfcAuroraD', s: 20, pos: { width: '75%', height: '40%', left: '0%', bottom: '-8%' } },
               ]} />
@@ -174,7 +174,7 @@ export default function Share({ token, squad, nav }) {
                   <div style={{ font: `600 11px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.65)', marginTop: 4, textTransform: 'capitalize' }}>{draftLg.draft_type} draft · {draftLg.scoring_type === 'h2h' ? 'head to head' : 'total points'}</div>
                   <div style={{ font: `700 11px 'Hanken Grotesk'`, color: draftSpots > 0 ? '#00E58E' : 'rgba(255,255,255,.5)', marginTop: 6 }}>{draftSpots > 0 ? `${draftSpots} spot${draftSpots === 1 ? '' : 's'} left` : 'League full'}</div>
                 </div>
-                <div style={{ marginTop: 14, width: '100%', background: 'var(--pb-accent, #8C82F0)', color: '#11102a', padding: 13, borderRadius: 12, font: `800 14px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase' }}>Join in the app →</div>
+                <div style={{ marginTop: 14, width: '100%', background: 'var(--pb-accent, #06B6D4)', color: '#11102a', padding: 13, borderRadius: 12, font: `800 14px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase' }}>Join in the app →</div>
                 <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.5)', marginTop: 10 }}>{host}/fantasy</div>
               </div>
             </div>

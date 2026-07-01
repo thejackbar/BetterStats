@@ -176,7 +176,7 @@ export default function PublicFantasy() {
                     <button key={k} onClick={() => nav(k)} style={{
                       padding: '5px 11px', borderRadius: 8, border: '1px solid var(--hairline)', cursor: 'pointer', whiteSpace: 'nowrap',
                       font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`,
-                      background: on ? 'color-mix(in srgb, var(--pb-accent, #8C82F0) 14%, transparent)' : 'transparent',
+                      background: on ? 'color-mix(in srgb, var(--pb-accent, #06B6D4) 14%, transparent)' : 'transparent',
                       color: on ? 'var(--accent-strong)' : 'var(--dim)',
                     }}>{l}</button>
                   )

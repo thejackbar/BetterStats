@@ -73,7 +73,7 @@ export function PlayerProfile({ token, playerId, season, onBack, nav, desktop })
   const hero = (
     <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 16, padding: '10px 0 16px' }}>
       <Aurora style={{ inset: '-40% -20% auto', height: '160%' }} blur={46} blobs={[
-        { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 18, pos: { width: '55%', height: '60%', left: '6%', top: '0' } },
+        { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraA', s: 18, pos: { width: '55%', height: '60%', left: '6%', top: '0' } },
         { c: CYAN, a: 'bfcAuroraB', s: 22, pos: { width: '50%', height: '55%', right: '2%', top: '6%' } },
       ]} />
       <div style={{ position: 'relative' }}>
@@ -108,7 +108,7 @@ export function PlayerProfile({ token, playerId, season, onBack, nav, desktop })
             <div key={f.round} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, height: '100%', justifyContent: 'flex-end' }}>
               <div style={{ font: `700 11px ${DISP}`, color: 'var(--text)' }}>{pts(f.points)}</div>
               <div style={{ width: '100%', display: 'flex', alignItems: 'flex-end', height: 56 }}>
-                <div style={{ width: '100%', height: h, borderRadius: 5, background: hi ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)' }} />
+                <div style={{ width: '100%', height: h, borderRadius: 5, background: hi ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)' }} />
               </div>
               <div style={{ font: `600 9px 'Hanken Grotesk'`, color: 'var(--faint)' }}>R{f.round}</div>
             </div>
@@ -290,7 +290,7 @@ export function StatsExplorer({ pool, nav }) {
       <div style={{ display: 'flex', gap: 5, padding: '14px 0 0', flexWrap: 'wrap' }}>
         {[['all', 'All'], ['batter', 'BAT'], ['bowler', 'BWL'], ['allrounder', 'AR'], ['keeper', 'WK']].map(([k, l]) => {
           const on = role === k
-          return <button key={k} onClick={() => setRole(k)} style={{ font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', padding: '6px 11px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
+          return <button key={k} onClick={() => setRole(k)} style={{ font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', padding: '6px 11px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
         })}
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '10px 0 4px' }}>

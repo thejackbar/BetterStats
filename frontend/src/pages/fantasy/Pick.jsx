@@ -26,7 +26,7 @@ function SquadControls({ p, onCap, onRemove }) {
         return (
           <button key={key} onClick={() => onCap(p.player_id, key)} aria-label={key === 'is_captain' ? 'Captain' : 'Vice-captain'} style={{
             width: 28, height: 28, borderRadius: 8, border: 'none', cursor: 'pointer', font: `800 11px ${DISP}`,
-            background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--faint)',
+            background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--faint)',
           }}>{key === 'is_captain' ? 'C' : 'V'}</button>
         )
       })}
@@ -156,7 +156,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav, desktop }) {
           <button key={r} onClick={() => setFilter(r)} style={{
             flex: 1, textAlign: 'center', borderRadius: 10, padding: '7px 4px', border: 'none', cursor: 'pointer',
             font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`,
-            background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)',
+            background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)',
           }}>
             {ROLE_LABEL[r].replace('Wicketkeeper', 'Keeper')}<br /><span style={{ opacity: 0.75 }}>{byRole(r)}/{quota[r] || 0}</span>
           </button>
@@ -196,7 +196,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav, desktop }) {
             right={<span style={{
               width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
               font: `800 ${on ? 13 : 16}px 'Hanken Grotesk'`, opacity: blocked ? 0.35 : 1,
-              background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)',
+              background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)',
               color: on ? 'var(--ink)' : 'var(--dim)', border: on ? 'none' : '1px solid var(--hairline2)',
             }}>{on ? '✓' : '+'}</span>}
           />
@@ -302,5 +302,5 @@ function CaptainEditor({ token, squad, onSaved, fail, flash, nav }) {
 
 const capBtn = (on) => ({
   width: 28, height: 28, borderRadius: 8, border: 'none', cursor: 'pointer', font: `800 11px ${DISP}`,
-  background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--faint)',
+  background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--faint)',
 })

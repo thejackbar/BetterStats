@@ -41,7 +41,7 @@ export default function Live({ token, nav }) {
     <div>
       <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 16, padding: '14px 0 6px' }}>
         <Aurora style={{ inset: '-30% -15% auto', height: '180%' }} blur={46} blobs={[
-          { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 17, pos: { width: '55%', height: '60%', left: '6%', top: '0' } },
+          { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraA', s: 17, pos: { width: '55%', height: '60%', left: '6%', top: '0' } },
           { c: '#00E58E', a: 'bfcAuroraD', s: 21, pos: { width: '50%', height: '55%', right: '2%', top: '6%' } },
         ]} />
         <div style={{ position: 'relative' }}>

@@ -29,7 +29,7 @@ export function initialsOf(name) {
 }
 
 // Accent tint helpers (the soft `color-mix` washes used all over the design).
-export const tintBg = (pct, base = 'transparent') => `color-mix(in srgb, var(--pb-accent, #8C82F0) ${pct}%, ${base})`
+export const tintBg = (pct, base = 'transparent') => `color-mix(in srgb, var(--pb-accent, #06B6D4) ${pct}%, ${base})`
 export const tintBorder = (pct) => `1px solid ${tintBg(pct)}`
 export const mix = (color, pct, base = 'transparent') => `color-mix(in srgb, ${color} ${pct}%, ${base})`
 
@@ -82,7 +82,7 @@ export function crestText(club) {
 
 // ── aurora glow (CSS only; honours reduced-motion via .bfc-aurora-blob) ───────
 const DEFAULT_BLOBS = [
-  { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 18, pos: { width: '55%', height: '60%', left: '2%', top: '0' } },
+  { c: 'var(--pb-accent, #06B6D4)', a: 'bfcAuroraA', s: 18, pos: { width: '55%', height: '60%', left: '2%', top: '0' } },
   { c: CYAN, a: 'bfcAuroraB', s: 22, pos: { width: '50%', height: '55%', right: '2%', top: '6%' } },
   { c: PINK, a: 'bfcAuroraC', s: 20, pos: { width: '52%', height: '52%', left: '18%', top: '20%' } },
 ]
@@ -108,7 +108,7 @@ export function GradientRule({ className }) {
   return (
     <div className={className} style={{
       height: 3, borderRadius: 3, marginTop: 12,
-      background: 'linear-gradient(90deg, var(--pb-accent, #8C82F0), #22D3EE 50%, #00E58E 78%, #EC4899)',
+      background: 'linear-gradient(90deg, var(--pb-accent, #06B6D4), #22D3EE 50%, #00E58E 78%, #EC4899)',
     }} />
   )
 }
@@ -131,7 +131,7 @@ export function Crest({ size = 38, radius = 11, fontSize, text }) {
     <div style={{
       width: size, height: size, borderRadius: radius, flex: 'none',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--pb-accent, #8C82F0)', color: 'var(--ink)',
+      background: 'var(--pb-accent, #06B6D4)', color: 'var(--ink)',
       font: `800 ${fontSize || Math.round(size * 0.34)}px ${DISP}`,
       boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.18)',
     }}>{text || crest}</div>
@@ -157,7 +157,7 @@ export function CapBadge({ vice }) {
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: 16, height: 16, borderRadius: 5, font: `800 8.5px ${DISP}`,
-      background: vice ? 'var(--hairline2)' : 'var(--pb-accent, #8C82F0)',
+      background: vice ? 'var(--hairline2)' : 'var(--pb-accent, #06B6D4)',
       color: vice ? 'var(--dim)' : 'var(--ink)',
     }}>{vice ? 'V' : 'C'}</span>
   )
@@ -185,7 +185,7 @@ export function Btn({ children, onClick, variant = 'accent', full, disabled, typ
     border: 'none', width: full ? '100%' : undefined,
   }
   const variants = {
-    accent: { background: 'var(--pb-accent, #8C82F0)', color: 'var(--ink)' },
+    accent: { background: 'var(--pb-accent, #06B6D4)', color: 'var(--ink)' },
     soft: { background: 'var(--surface2)', color: 'var(--text)' },
     ghost: { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--hairline)' },
     danger: { background: mix(RED, 12, 'var(--surface)'), color: RED, border: `1px solid ${mix(RED, 30)}` },
@@ -216,7 +216,7 @@ export function Segmented({ options, value, onChange }) {
           <button key={k} onClick={() => onChange(k)} style={{
             flex: 1, textAlign: 'center', padding: 9, borderRadius: 9, border: 'none', cursor: 'pointer',
             font: `${on ? 700 : 600} 12.5px 'Hanken Grotesk'`,
-            background: on ? 'var(--pb-accent, #8C82F0)' : 'transparent', color: on ? 'var(--ink)' : 'var(--dim)',
+            background: on ? 'var(--pb-accent, #06B6D4)' : 'transparent', color: on ? 'var(--ink)' : 'var(--dim)',
           }}>{label}</button>
         )
       })}
@@ -228,7 +228,7 @@ export function Toggle({ on, onClick }) {
   return (
     <button onClick={onClick} aria-pressed={on} style={{
       width: 42, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', flex: 'none', position: 'relative',
-      background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)',
+      background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)',
     }}>
       <span style={{
         position: 'absolute', top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: '50%',

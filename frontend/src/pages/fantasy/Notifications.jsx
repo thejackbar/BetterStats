@@ -57,7 +57,7 @@ export default function Notifications({ token, onSeen }) {
                     <div style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{n.title}</div>
                     <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 2, lineHeight: 1.4 }}>{n.body}</div>
                   </div>
-                  {unread && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--pb-accent, #8C82F0)', flex: 'none', marginTop: 4 }} />}
+                  {unread && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--pb-accent, #06B6D4)', flex: 'none', marginTop: 4 }} />}
                 </div>
               )
             })}

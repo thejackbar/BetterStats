@@ -51,12 +51,20 @@ here but were **not** wired in the prototype. Build the behaviour from the
 - **Theme:** `frontend/src/lib/theme.js` (`BRAND`, `resolveTheme`, `buildThemeCss`) +
   `src/index.css`. Already emits `[data-theme="dark"]` / `[data-theme="light"]` token
   blocks — the redesign leans on exactly this; we mainly add a **member-facing toggle**.
-- **Module brand:** `frontend/src/lib/moduleBrand.js` — `fantasy` accent is currently
-  `#06B6D4` (cyan). **Change to `#8C82F0`** (see Design Tokens).
+- **Module brand:** `frontend/src/lib/moduleBrand.js` — `fantasy` accent is
+  `#06B6D4` (cyan). (This redesign changed it to `#8C82F0`, later reverted to the
+  cyan so it matches the icon. See the note under Design tokens.)
 
 ---
 
 ## Design tokens
+
+> **Update (Jul 2026): the accent was returned to the icon's cyan.** This redesign
+> switched the brand accent to periwinkle `#8C82F0`, but the module icon
+> (`betterfantasy.svg`) stayed cyan, so the accent and the mark never matched.
+> `moduleBrand.fantasy` and the member-app default (`pages/fantasy/theme.js`) are now
+> `#06B6D4` (cyan-500), the middle of the icon's `#22d3ee → #0891b2` gradient. Read the
+> `#8C82F0` values below as historical.
 
 ### Brand
 | Token | Value | Use |

@@ -43,7 +43,7 @@ export default function Fixtures({ token, season, nav, desktop }) {
                 }}>
                   <div style={{
                     width: 38, height: 38, borderRadius: 11, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', font: `800 15px ${DISP}`,
-                    background: live ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: live ? 'var(--ink)' : 'var(--dim)',
+                    background: live ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', color: live ? 'var(--ink)' : 'var(--dim)',
                   }}>{r.number}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
