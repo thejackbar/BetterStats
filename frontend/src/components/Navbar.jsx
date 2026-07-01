@@ -79,8 +79,12 @@ export default function Navbar() {
   // The BetterCricket marketing-outreach org is not a real club — it has no public
   // pages — so suppress the club nav/links and point the logo back at the admin app.
   const marketingAdmin = pathname.startsWith('/admin') && !!user?.is_marketing_org;
-  const slug = marketingAdmin ? '' : ((pathname.startsWith('/admin') && user?.club_slug) ? user.club_slug : urlSlug);
-  const { club } = useClub(slug);
+  const lookupSlug = marketingAdmin ? '' : ((pathname.startsWith('/admin') && user?.club_slug) ? user.club_slug : urlSlug);
+  const { club, inactive, notFound } = useClub(lookupSlug);
+  // A paused (403) or unknown (404) slug isn't a usable club — the page shows the
+  // "get your club online" CTA, so drop the club nav/links and leave just the
+  // BetterCricket brand header to match it.
+  const slug = (inactive || notFound) ? '' : lookupSlug;
 
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
