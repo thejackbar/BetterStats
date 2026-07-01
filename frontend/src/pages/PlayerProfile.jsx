@@ -961,10 +961,142 @@ const ANALYSIS_SUBTABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'team',     label: 'TEAM' },
+  { key: 'teammates', label: 'TEAMMATES' },
   { key: 'captain',  label: 'CAPTAIN' },
   { key: 'venue',    label: 'VENUE' },
   { key: 'opposition', label: 'OPPOSITION' },
 ]
+
+// ── Teammates: who a player has played alongside, and the with-vs-without split.
+// Self-fetching (public /players/{id}/teammates), so it doesn't touch the
+// parent's data flow — mirrors AchievementsSection.
+function TeammateSplitPanel({ playerId, teammate }) {
+  const [split, setSplit] = useState(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let alive = true
+    setLoading(true); setSplit(null)
+    api.getPlayerTeammateSplit(playerId, teammate.player_id)
+      .then(d => { if (alive) setSplit(d) })
+      .catch(() => { if (alive) setSplit({ error: true }) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [playerId, teammate.player_id])
+
+  if (loading) return <div className="py-4 text-pb-faint font-mono text-xs">Working out the split…</div>
+  if (!split || split.error) return <div className="py-4 text-pb-faint font-mono text-xs">Couldn’t load the split.</div>
+
+  const w = split.with, o = split.without
+  const num2 = (v) => (v === null || v === undefined ? '—' : Number(v).toFixed(2))
+  const pct = (v) => (v === null || v === undefined ? '—' : `${Math.round(v)}%`)
+  const bowled = (w.bowling.wickets || o.bowling.wickets)
+  const batted = (w.batting.innings || o.batting.innings)
+  // dir: 'hi' higher-is-better, 'lo' lower-is-better, null neutral.
+  const rows = [
+    { label: 'Games', a: w.record.games, b: o.record.games, dir: null, show: true },
+    { label: 'Win %', a: w.record.win_pct, b: o.record.win_pct, dir: 'hi', fmt: pct, show: true },
+    { label: 'Bat avg', a: w.batting.average, b: o.batting.average, dir: 'hi', fmt: num2, show: batted },
+    { label: 'Runs', a: w.batting.runs, b: o.batting.runs, dir: null, show: batted },
+    { label: 'Wickets', a: w.bowling.wickets, b: o.bowling.wickets, dir: null, show: bowled },
+    { label: 'Bowl avg', a: w.bowling.average, b: o.bowling.average, dir: 'lo', fmt: num2, show: bowled },
+  ].filter(r => r.show)
+  const better = (a, b, dir) => {
+    if (dir == null || a == null || b == null || a === b) return null
+    return (dir === 'hi' ? a > b : a < b) ? 'a' : 'b'
+  }
+  const surnameU = (teammate.name || '').split(',')[0].trim().toUpperCase()
+
+  return (
+    <div className="py-2">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
+        <div className="text-right font-mono text-[10px] tracking-wide2 font-bold" style={{ color: 'var(--pb-accent)' }}>WITH {surnameU}</div>
+        <div style={{ minWidth: 88 }} />
+        <div className="font-mono text-[10px] tracking-wide2 font-bold text-pb-faint">WITHOUT {surnameU}</div>
+      </div>
+      {rows.map(r => {
+        const win = better(r.a, r.b, r.dir)
+        const fa = r.fmt ? r.fmt(r.a) : (r.a ?? '—')
+        const fb = r.fmt ? r.fmt(r.b) : (r.b ?? '—')
+        return (
+          <div key={r.label} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-1.5 border-t border-pb-hairline">
+            <div className="font-mono font-bold text-right pb-num" style={{ color: win === 'a' ? 'var(--pb-brand)' : 'var(--pb-text)' }}>{fa}</div>
+            <div className="font-mono text-[9px] tracking-wide3 text-pb-faint text-center" style={{ minWidth: 88 }}>{r.label.toUpperCase()}</div>
+            <div className="font-mono font-bold pb-num" style={{ color: win === 'b' ? 'var(--pb-brand)' : 'var(--pb-text)' }}>{fb}</div>
+          </div>
+        )
+      })}
+      <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-3">Games both played versus games this player turned out and {teammate.name} did not. Green is the stronger side. All career.</p>
+    </div>
+  )
+}
+
+function TeammatesSection({ playerId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true); setData(null); setSelected(null)
+    api.getPlayerTeammates(playerId)
+      .then(d => { if (alive) setData(d) })
+      .catch(() => { if (alive) setData({ error: true }) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [playerId])
+
+  if (loading) return <div className="p-4 text-pb-faint font-mono text-sm">Loading teammates…</div>
+  if (data?.error) return <p className="text-pb-faint text-sm py-4 font-mono">Couldn’t load teammates.</p>
+  const mates = data?.teammates || []
+  if (!mates.length) return <p className="text-pb-faint text-sm py-4 font-mono">No shared games on record yet.</p>
+
+  const sel = mates.find(m => m.player_id === selected)
+  const winColor = (v) => (v == null ? 'var(--pb-dim)' : v >= 50 ? 'var(--pb-brand)' : 'var(--pb-text)')
+
+  return (
+    <div className="space-y-6">
+      <Card title="TEAMMATES" pad="p-0">
+        <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4 pb-2">Everyone this player has shared a side with, most games together first. Tap a name to see how they go with and without them. Record is the team’s W–L–D in those shared games.</p>
+        <div className="overflow-x-auto pb-scroll">
+          <table className="w-full min-w-[560px] text-[13px]">
+            <thead>
+              <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                <th className="py-3 pl-5 pb-2">TEAMMATE</th>
+                <th className="py-3 text-right pb-2">GAMES</th>
+                <th className="py-3 text-right pb-2">W</th>
+                <th className="py-3 text-right pb-2">L</th>
+                <th className="py-3 text-right pb-2">D</th>
+                <th className="py-3 pr-5 text-right pb-2">WIN%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mates.map((m, i) => (
+                <tr key={m.player_id} onClick={() => setSelected(selected === m.player_id ? null : m.player_id)}
+                    className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 cursor-pointer`}
+                    style={selected === m.player_id ? { background: 'var(--pb-surface2)' } : undefined}>
+                  <td className="py-2.5 pl-5 text-pb-text max-w-[240px] truncate">
+                    {m.name}{m.bowling_style ? <span className="text-pb-faint font-mono text-[10px] ml-2">{m.bowling_style}</span> : null}
+                  </td>
+                  <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{m.games}</td>
+                  <td className="py-2.5 font-mono text-pb-text text-right">{m.wins}</td>
+                  <td className="py-2.5 font-mono text-pb-dim text-right">{m.losses}</td>
+                  <td className="py-2.5 font-mono text-pb-dim text-right">{m.draws}</td>
+                  <td className="py-2.5 pr-5 font-mono text-right" style={{ color: winColor(m.win_pct) }}>{m.win_pct != null ? `${Math.round(m.win_pct)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {sel && (
+        <Card title={`WITH VS WITHOUT ${(sel.name || '').split(',')[0].trim().toUpperCase()}`}>
+          <TeammateSplitPanel playerId={playerId} teammate={sel} />
+        </Card>
+      )}
+    </div>
+  )
+}
 
 function CaptainTab({ captainStats }) {
   if (!captainStats) {
@@ -1456,6 +1588,8 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           )}
         </div>
       )}
+
+      {subTab === 'teammates' && <TeammatesSection playerId={playerId} />}
 
       {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
 

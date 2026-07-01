@@ -130,6 +130,10 @@ export const api = {
   getPlayerBowlingByBatterPosition: (playerId) => request(`/players/${playerId}/bowling-by-batter-position`),
   getPlayerByVenue: (playerId) => request(`/players/${playerId}/by-venue`),
   getPlayerByOpposition: (playerId) => request(`/players/${playerId}/by-opposition`),
+  // Public teammates: who this player has shared a side with, and the with-vs-
+  // without split of the player's output alongside one teammate.
+  getPlayerTeammates: (playerId) => request(`/players/${playerId}/teammates`),
+  getPlayerTeammateSplit: (playerId, teammateId) => request(`/players/${playerId}/teammates/${teammateId}`),
   getPlayerTeamBreakdown: (playerId, { seasonId } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

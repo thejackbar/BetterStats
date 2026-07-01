@@ -28,6 +28,7 @@ from app.services.aggregations import (
 from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
+from app.services import iq_teammates
 
 router = APIRouter(prefix="/players", tags=["players"])
 
@@ -223,6 +224,30 @@ async def get_player_by_opposition_endpoint(player_id: str, db: AsyncSession = D
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     return await get_player_by_opposition(db, player_id)
+
+
+@router.get("/{player_id}/teammates")
+async def get_player_teammates(player_id: str, db: AsyncSession = Depends(get_db)):
+    """Every player this player has shared a side with, most games together first,
+    with the team's record over those shared games. Public (career)."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    result = await iq_teammates.teammates(db, str(player.organisation_id), player_id)
+    return result or {"player": {"player_id": player_id, "name": player.name}, "teammates": []}
+
+
+@router.get("/{player_id}/teammates/{teammate_id}")
+async def get_player_teammate_split(player_id: str, teammate_id: str, db: AsyncSession = Depends(get_db)):
+    """This player's batting, bowling and the team's record split by whether the
+    teammate was also in the side (the with-vs-without comparison). Public."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    result = await iq_teammates.with_split(db, str(player.organisation_id), player_id, teammate_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player or teammate not found")
+    return result
 
 
 @router.get("/{player_id}/team-breakdown")
