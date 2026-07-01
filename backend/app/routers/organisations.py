@@ -191,18 +191,34 @@ async def get_org_grades(
     result = await db.execute(
         text(f"""
             SELECT display_name FROM (
-                SELECT DISTINCT COALESCE(g.display_name_override, g.name) AS display_name
+                SELECT DISTINCT COALESCE(gdn.display_name_override, am.canonical_name, g.name) AS display_name
                 FROM grades g
                 JOIN seasons s ON s.id = g.season_id
+                LEFT JOIN LATERAL (
+                    -- A grade merge renames an alias (e.g. CA's newer "Men's
+                    -- First Grade") to a canonical name (e.g. "1st Grade") for
+                    -- continuity of records. Map aliased rows to their
+                    -- canonical name rather than dropping them, or a season
+                    -- whose grade row only exists under the alias name (like
+                    -- the current one, post CA rename) loses the grade
+                    -- entirely instead of showing it under its canonical name.
+                    SELECT canonical_name FROM grade_merge_logs gml
+                    WHERE gml.org_id = CAST(:org_id AS UUID)
+                      AND gml.alias_name = g.name
+                      AND gml.undone_at IS NULL
+                    LIMIT 1
+                ) am ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT g2.display_name_override FROM grades g2
+                    JOIN seasons s2 ON s2.id = g2.season_id
+                    WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                      AND g2.name = COALESCE(am.canonical_name, g.name)
+                      AND g2.display_name_override IS NOT NULL
+                    LIMIT 1
+                ) gdn ON TRUE
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
                   {season_clause}
                   {public_clause}
-                  AND NOT EXISTS (
-                      SELECT 1 FROM grade_merge_logs gml
-                      WHERE gml.org_id = CAST(:org_id AS UUID)
-                        AND gml.alias_name = g.name
-                        AND gml.undone_at IS NULL
-                  )
             ) sub
             ORDER BY
                 NULLIF(regexp_replace(display_name, '[^0-9].*', ''), '')::int NULLS LAST,
