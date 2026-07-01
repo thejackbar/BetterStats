@@ -15,6 +15,7 @@ import {
 
 const ACCENT = 'var(--pb-accent)'
 const GREEN = 'var(--pb-brand)'
+const AMBER = 'var(--pb-amber)'
 const pctTxt = (v) => fmtPct(v)
 const dash = (v) => (v === null || v === undefined ? '—' : v)
 
@@ -50,7 +51,7 @@ function PlayerSearch({ players, onPick, placeholder = 'Search a player…' }) {
 
 /* ── One teammate row in the list (click → load split) ───────────────────── */
 function TeammateRow({ m, active, onClick }) {
-  const sub = [m.role, m.bowling_style].filter(Boolean).join(' · ')
+  const sub = m.bowling_style || ''
   return (
     <button type="button" onClick={onClick}
       className="w-full flex items-center gap-3 px-2.5 py-2 text-left transition" style={{
@@ -97,42 +98,88 @@ function better(a, b, dir) {
   return a < b ? 'with' : 'without'
 }
 
+// A plain two-column stat row (no "better" colouring) — for the combine section.
+function StatLine({ label, a, b }) {
+  return (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-1.5" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+      <div className="iq-num font-semibold text-right text-[14px]">{a}</div>
+      <div className="iq-eyebrow text-center" style={{ fontSize: 9, minWidth: 92 }}>{label}</div>
+      <div className="iq-num font-semibold text-[14px]">{b}</div>
+    </div>
+  )
+}
+
 function WithWithout({ data }) {
   const w = data.with, o = data.without
+  const tog = data.together
   const nameX = surname(data.teammate?.name || '')
   const nameP = surname(data.player?.name || '')
+  const n2 = (v) => (v == null ? '—' : a2(v))
+  const batted = (w.batting.innings || o.batting.innings)
+  const bowled = (w.bowling.wickets || o.bowling.wickets || w.bowling.economy != null || o.bowling.economy != null)
+
   const rows = [
     { label: 'Games', a: w.record.games, b: o.record.games, dir: null, fmt: fmtCount },
     { label: 'Win %', a: w.record.win_pct, b: o.record.win_pct, dir: 'hi', fmt: pctTxt },
-    { label: 'Bat avg', a: w.batting.average, b: o.batting.average, dir: 'hi', fmt: a2 },
-    { label: 'Strike rate', a: w.batting.strike_rate, b: o.batting.strike_rate, dir: 'hi', fmt: (v) => (v == null ? '—' : a2(v)) },
-    { label: 'Runs', a: w.batting.runs, b: o.batting.runs, dir: null, fmt: fmtCount },
-    { label: 'Wickets', a: w.bowling.wickets, b: o.bowling.wickets, dir: null, fmt: fmtCount },
-    { label: 'Bowl avg', a: w.bowling.average, b: o.bowling.average, dir: 'lo', fmt: a2 },
-    { label: 'Economy', a: w.bowling.economy, b: o.bowling.economy, dir: 'lo', fmt: a2 },
+    ...(batted ? [
+      { label: 'Bat avg', a: w.batting.average, b: o.batting.average, dir: 'hi', fmt: n2 },
+      { label: 'Strike rate', a: w.batting.strike_rate, b: o.batting.strike_rate, dir: 'hi', fmt: n2 },
+      { label: 'Runs', a: w.batting.runs, b: o.batting.runs, dir: null, fmt: fmtCount },
+      { label: 'High score', a: w.batting.high, b: o.batting.high, dir: 'hi', fmt: (v) => (v == null ? '—' : v) },
+      { label: '50s / 100s', a: `${w.batting.fifties}/${w.batting.hundreds}`, b: `${o.batting.fifties}/${o.batting.hundreds}`, dir: null, fmt: (v) => v },
+    ] : []),
+    ...(bowled ? [
+      { label: 'Wickets', a: w.bowling.wickets, b: o.bowling.wickets, dir: null, fmt: fmtCount },
+      { label: 'Bowl avg', a: w.bowling.average, b: o.bowling.average, dir: 'lo', fmt: n2 },
+      { label: 'Economy', a: w.bowling.economy, b: o.bowling.economy, dir: 'lo', fmt: n2 },
+      { label: 'Bowl SR', a: w.bowling.strike_rate, b: o.bowling.strike_rate, dir: 'lo', fmt: n2 },
+    ] : []),
   ]
-  // Hide the bowling rows entirely if the player never bowled either way.
-  const bowled = (w.bowling.wickets || o.bowling.wickets || w.bowling.economy != null || o.bowling.economy != null)
-  const batted = (w.batting.innings || o.batting.innings)
-  const shown = rows.filter(r => {
-    if (['Bat avg', 'Strike rate', 'Runs'].includes(r.label) && !batted) return false
-    if (['Wickets', 'Bowl avg', 'Economy'].includes(r.label) && !bowled) return false
-    return true
-  })
+
+  // "How they combine" — each player's own output in the games they shared.
+  const tp = tog?.player, tx = tog?.teammate
+  const togRows = []
+  if (tp && tx) {
+    if (tp.batting.innings || tx.batting.innings) {
+      togRows.push({ label: 'Runs', a: fmtCount(tp.batting.runs), b: fmtCount(tx.batting.runs) })
+      togRows.push({ label: 'Bat avg', a: n2(tp.batting.average), b: n2(tx.batting.average) })
+      togRows.push({ label: 'High', a: tp.batting.high ?? '—', b: tx.batting.high ?? '—' })
+    }
+    if (tp.bowling.wickets || tx.bowling.wickets) {
+      togRows.push({ label: 'Wickets', a: fmtCount(tp.bowling.wickets), b: fmtCount(tx.bowling.wickets) })
+      togRows.push({ label: 'Bowl avg', a: n2(tp.bowling.average), b: n2(tx.bowling.average) })
+      togRows.push({ label: 'Economy', a: n2(tp.bowling.economy), b: n2(tx.bowling.economy) })
+    }
+  }
+
   return (
-    <Card eyebrow="with vs without" title={<span><span style={{ color: ACCENT }}>{nameP}</span> alongside {nameX}</span>}>
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
-        <div className="text-right font-bold iq-display truncate" style={{ color: ACCENT }}>With {nameX}</div>
-        <div style={{ minWidth: 92 }} />
-        <div className="font-bold iq-display truncate text-pb-dim">Without {nameX}</div>
-      </div>
-      {shown.map(r => (
-        <SplitRow key={r.label} label={r.label}
-          withVal={r.fmt(r.a)} withoutVal={r.fmt(r.b)}
-          better={better(r.a, r.b, r.dir)} />
-      ))}
-      <Note>{nameP}’s own batting and bowling, and the team’s win rate, in the games {nameX} also played versus the games {nameX} did not. {data.note}</Note>
-    </Card>
+    <div className="space-y-5">
+      <Card eyebrow="with vs without" title={<span><span style={{ color: ACCENT }}>{nameP}</span> alongside {nameX}</span>}>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
+          <div className="text-right font-bold iq-display truncate" style={{ color: ACCENT }}>With {nameX}</div>
+          <div style={{ minWidth: 92 }} />
+          <div className="font-bold iq-display truncate text-pb-dim">Without {nameX}</div>
+        </div>
+        {rows.map(r => (
+          <SplitRow key={r.label} label={r.label}
+            withVal={r.fmt(r.a)} withoutVal={r.fmt(r.b)}
+            better={better(r.a, r.b, r.dir)} />
+        ))}
+        <Note>{nameP}’s own batting and bowling, and the team’s win rate, in the games {nameX} also played versus the games {nameX} did not. {data.note}</Note>
+      </Card>
+
+      {togRows.length > 0 && (
+        <Card eyebrow="how they combine" title={`In the ${fmtCount(tog.games)} games together`}>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
+            <div className="text-right font-bold iq-display truncate" style={{ color: ACCENT }}>{nameP}</div>
+            <div style={{ minWidth: 92 }} />
+            <div className="font-bold iq-display truncate" style={{ color: AMBER }}>{nameX}</div>
+          </div>
+          {togRows.map(r => <StatLine key={r.label} label={r.label} a={r.a} b={r.b} />)}
+          <Note>Each player’s own output in the {fmtCount(tog.games)} games they were both in the side.</Note>
+        </Card>
+      )}
+    </div>
   )
 }
 

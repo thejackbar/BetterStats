@@ -115,6 +115,25 @@ async def with_split(session: AsyncSession, org_id: str, player_id: str, teammat
         return None
     params = {"org": org_id, "p": player_id, "x": teammate_id}
 
+    # Column lists shared by the focal split and the teammate's shared-games line,
+    # so one block-builder formats both.
+    _BAT_COLS = """
+        COALESCE(SUM(bi.runs), 0) AS runs,
+        COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS inns,
+        COUNT(*) FILTER (WHERE bi.not_out) AS not_outs,
+        COALESCE(SUM(bi.balls), 0) AS balls,
+        COALESCE(SUM(bi.fours), 0) AS fours,
+        COALESCE(SUM(bi.sixes), 0) AS sixes,
+        MAX(bi.runs) AS high,
+        COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
+        COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundreds
+    """
+    _BOWL_COLS = """
+        COALESCE(SUM(bs.wickets), 0) AS wkts,
+        COALESCE(SUM(bs.runs), 0) AS conceded,
+        COALESCE(SUM((FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10))::int), 0) AS balls
+    """
+
     rec = {bool(r["with_x"]): r for r in (await session.execute(
         text(_SPLIT_CTES + """
             SELECT with_x,
@@ -128,15 +147,8 @@ async def with_split(session: AsyncSession, org_id: str, player_id: str, teammat
     )).mappings()}
 
     bat = {bool(r["with_x"]): r for r in (await session.execute(
-        text(_SPLIT_CTES + """
-            SELECT pgm.with_x,
-                   COALESCE(SUM(bi.runs), 0) AS runs,
-                   COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS inns,
-                   COUNT(*) FILTER (WHERE bi.not_out) AS not_outs,
-                   COALESCE(SUM(bi.balls), 0) AS balls,
-                   COALESCE(SUM(bi.fours), 0) AS fours,
-                   COALESCE(SUM(bi.sixes), 0) AS sixes,
-                   MAX(bi.runs) AS high
+        text(_SPLIT_CTES + f"""
+            SELECT pgm.with_x, {_BAT_COLS}
             FROM v_effective_batting_innings bi
             JOIN pgames pgm ON pgm.id = bi.game_id
             WHERE bi.player_id = CAST(:p AS UUID) AND bi.did_not_bat IS NOT TRUE
@@ -146,11 +158,8 @@ async def with_split(session: AsyncSession, org_id: str, player_id: str, teammat
     )).mappings()}
 
     bowl = {bool(r["with_x"]): r for r in (await session.execute(
-        text(_SPLIT_CTES + """
-            SELECT pgm.with_x,
-                   COALESCE(SUM(bs.wickets), 0) AS wkts,
-                   COALESCE(SUM(bs.runs), 0) AS conceded,
-                   COALESCE(SUM((FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10))::int), 0) AS balls
+        text(_SPLIT_CTES + f"""
+            SELECT pgm.with_x, {_BOWL_COLS}
             FROM v_effective_bowling_spells bs
             JOIN pgames pgm ON pgm.id = bs.game_id
             WHERE bs.player_id = CAST(:p AS UUID) AND bs.overs IS NOT NULL
@@ -159,44 +168,77 @@ async def with_split(session: AsyncSession, org_id: str, player_id: str, teammat
         params,
     )).mappings()}
 
-    def _side(flag: bool) -> dict:
-        rc = rec.get(flag)
-        b = bat.get(flag)
-        bo = bowl.get(flag)
-        games = int(rc["games"]) if rc else 0
-        wins = int(rc["wins"]) if rc else 0
-        losses = int(rc["losses"]) if rc else 0
-        draws = int(rc["draws"]) if rc else 0
+    # The teammate's own output over the games they shared (both played).
+    tbat = (await session.execute(
+        text(_SPLIT_CTES + f"""
+            SELECT {_BAT_COLS}
+            FROM v_effective_batting_innings bi
+            JOIN pgames pgm ON pgm.id = bi.game_id AND pgm.with_x IS TRUE
+            WHERE bi.player_id = CAST(:x AS UUID) AND bi.did_not_bat IS NOT TRUE
+        """),
+        params,
+    )).mappings().first()
+    tbowl = (await session.execute(
+        text(_SPLIT_CTES + f"""
+            SELECT {_BOWL_COLS}
+            FROM v_effective_bowling_spells bs
+            JOIN pgames pgm ON pgm.id = bs.game_id AND pgm.with_x IS TRUE
+            WHERE bs.player_id = CAST(:x AS UUID) AND bs.overs IS NOT NULL
+        """),
+        params,
+    )).mappings().first()
+
+    def _bat_block(b) -> dict:
         runs = int(b["runs"]) if b else 0
         inns = int(b["inns"]) if b else 0
-        outs = inns - (int(b["not_outs"]) if b else 0)
-        bballs = int(b["balls"]) if b else 0
-        wkts = int(bo["wkts"]) if bo else 0
-        conceded = int(bo["conceded"]) if bo else 0
-        oballs = int(bo["balls"]) if bo else 0
+        no = int(b["not_outs"]) if b else 0
+        outs = inns - no
+        balls = int(b["balls"]) if b else 0
         return {
-            "record": {
-                "games": games, "wins": wins, "losses": losses, "draws": draws,
-                "win_pct": _win_pct(wins, wins + losses),
-            },
-            "batting": {
-                "innings": inns, "runs": runs,
-                "average": round(runs / outs, 1) if outs > 0 else None,
-                "strike_rate": round(100 * runs / bballs, 1) if bballs > 0 else None,
-                "high": int(b["high"]) if (b and b["high"] is not None) else None,
-                "fours": int(b["fours"]) if b else 0, "sixes": int(b["sixes"]) if b else 0,
-            },
-            "bowling": {
-                "wickets": wkts, "runs": conceded, "overs": _overs_str(oballs),
-                "average": round(conceded / wkts, 1) if wkts > 0 else None,
-                "economy": round(conceded * 6 / oballs, 2) if oballs > 0 else None,
-            },
+            "innings": inns, "runs": runs, "not_outs": no,
+            "average": round(runs / outs, 1) if outs > 0 else None,
+            "strike_rate": round(100 * runs / balls, 1) if balls > 0 else None,
+            "high": int(b["high"]) if (b and b["high"] is not None) else None,
+            "fifties": int(b["fifties"]) if b else 0, "hundreds": int(b["hundreds"]) if b else 0,
+            "fours": int(b["fours"]) if b else 0, "sixes": int(b["sixes"]) if b else 0,
         }
 
+    def _bowl_block(bo) -> dict:
+        wkts = int(bo["wkts"]) if bo else 0
+        conceded = int(bo["conceded"]) if bo else 0
+        balls = int(bo["balls"]) if bo else 0
+        return {
+            "wickets": wkts, "runs": conceded, "overs": _overs_str(balls),
+            "average": round(conceded / wkts, 1) if wkts > 0 else None,
+            "economy": round(conceded * 6 / balls, 2) if balls > 0 else None,
+            "strike_rate": round(balls / wkts, 1) if wkts > 0 else None,
+        }
+
+    def _side(flag: bool) -> dict:
+        rc = rec.get(flag)
+        wins = int(rc["wins"]) if rc else 0
+        losses = int(rc["losses"]) if rc else 0
+        return {
+            "record": {
+                "games": int(rc["games"]) if rc else 0,
+                "wins": wins, "losses": losses, "draws": int(rc["draws"]) if rc else 0,
+                "win_pct": _win_pct(wins, wins + losses),
+            },
+            "batting": _bat_block(bat.get(flag)),
+            "bowling": _bowl_block(bowl.get(flag)),
+        }
+
+    with_side = _side(True)
     return {
         "player": {"player_id": player_id, "name": name_p},
         "teammate": {"player_id": teammate_id, "name": name_x},
-        "with": _side(True),
+        "with": with_side,
         "without": _side(False),
+        # How they combine in the games they shared — both players' output.
+        "together": {
+            "games": with_side["record"]["games"],
+            "player": {"batting": with_side["batting"], "bowling": with_side["bowling"]},
+            "teammate": {"batting": _bat_block(tbat), "bowling": _bowl_block(tbowl)},
+        },
         "note": "All-time, this club only. 'With' is games the teammate also played; 'without' is games the player turned out and the teammate did not.",
     }
