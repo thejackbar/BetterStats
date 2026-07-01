@@ -296,7 +296,7 @@ export default function SuperClubs() {
 
   return (
     <AdminLayout>
-      <div className="max-w-3xl">
+      <div className="max-w-5xl">
         <div className="flex items-center justify-between mb-5">
           <h1 className="font-display font-bold text-2xl text-pb-text">All Clubs</h1>
           <div className="flex items-center gap-3">
@@ -587,7 +587,9 @@ export default function SuperClubs() {
                                     {SUBSCRIPTION_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                                   </select>
                                   {trialView ? (
-                                    <>
+                                    // Keep Start / End / Apply together on one line: they're one
+                                    // nowrap flex group, so they wrap as a unit within the row, never split.
+                                    <div className="flex items-center gap-2">
                                       <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">Start
                                         <input type="datetime-local" value={draft.start} disabled={busy}
                                           onChange={e => setTrialEdit(t => ({ ...t, [key]: { ...draft, start: e.target.value } }))}
@@ -600,14 +602,14 @@ export default function SuperClubs() {
                                       </label>
                                       <button type="button" disabled={busy}
                                         onClick={() => applyTrial(club.id, key, draft)}
-                                        className="font-mono text-[10px] px-2 py-1 rounded border transition-colors disabled:opacity-50"
+                                        className="font-mono text-[10px] px-2 py-1 rounded border transition-colors disabled:opacity-50 shrink-0"
                                         style={{ color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' }}>
                                         {editingTrial ? 'Apply trial' : 'Update'}
                                       </button>
                                       {sub?.status === 'trial' && sub?.is_trial_expired && (
                                         <span className="font-mono text-[10px] text-pb-red">expired</span>
                                       )}
-                                    </>
+                                    </div>
                                   ) : (
                                     <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">Renews
                                       <input type="date" value={sub.renewal_date || ''} disabled={busy}
