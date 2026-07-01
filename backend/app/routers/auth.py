@@ -168,18 +168,35 @@ class UserOut(BaseModel):
 
 
 @router.post("/login")
-async def login(data: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.username == data.username.lower()))
+async def login(data: LoginRequest, response: Response, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.services import login_audit
+
+    username = (data.username or "").lower()
+    ip = login_audit.client_ip(request)
+    user_agent = request.headers.get("user-agent")
+    country = request.headers.get("cf-ipcountry")
+
+    async def _log(success: bool, reason: str | None = None,
+                   user_id=None, org_id=None) -> None:
+        await login_audit.record_login_attempt(
+            username=username, success=success, failure_reason=reason,
+            user_id=user_id, org_id=org_id, ip=ip, user_agent=user_agent,
+            country=country,
+        )
+
+    result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
     # Generic error — do not leak which field was wrong
     if not user or not user.password_hash:
+        await _log(False, login_audit.REASON_UNKNOWN_USER)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     now = datetime.now(timezone.utc)
 
     # Check lockout
     if user.locked_until and user.locked_until.replace(tzinfo=timezone.utc) > now:
+        await _log(False, login_audit.REASON_LOCKED, user_id=user.id)
         raise HTTPException(status_code=429, detail="Account temporarily locked. Try again later.")
 
     if not _verify_password(data.password, user.password_hash):
@@ -187,6 +204,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
         if user.failed_login_count >= MAX_FAILED_ATTEMPTS:
             user.locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
         await db.commit()
+        await _log(False, login_audit.REASON_BAD_PASSWORD, user_id=user.id)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # Check user has an active club membership (super_admin bypasses the is_active check)
@@ -195,11 +213,14 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     )
     membership = membership_res.scalar_one_or_none()
     if not membership:
+        await _log(False, login_audit.REASON_NO_MEMBERSHIP, user_id=user.id)
         raise HTTPException(status_code=403, detail="No club membership found")
 
     club = await db.get(Organisation, membership.club_id)
     if membership.role != "super_admin":
         if not club or not club.is_active:
+            await _log(False, login_audit.REASON_CLUB_INACTIVE,
+                       user_id=user.id, org_id=membership.club_id)
             raise HTTPException(status_code=403, detail="Club is not active")
 
     # Success — reset counters, update last login
@@ -207,6 +228,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     user.locked_until = None
     user.last_login_at = now
     await db.commit()
+    await _log(True, user_id=user.id, org_id=membership.club_id)
 
     token = _create_token(str(user.id))
     _set_session_cookie(response, token)

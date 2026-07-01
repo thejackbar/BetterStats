@@ -80,6 +80,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
+  { to: '/admin/super/login-attempts', label: 'Login Attempts' },
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/announce', label: 'Club Announcements' },
   { to: '/admin/usage', label: 'Usage' },
