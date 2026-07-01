@@ -421,10 +421,6 @@ function summarizeContextChips(ctx, seasons, grades) {
     const s = (seasons || []).find(x => x.id === ctx.season_id)
     push('season_id', `Season: ${s?.name || ctx.season_id}`)
   }
-  if (ctx.grade_id) {
-    const g = (grades || []).find(x => x.id === ctx.grade_id)
-    push('grade_id', `Grade: ${g?.display_name || g?.name || ctx.grade_id}`)
-  }
   if (ctx.grade_name) push('grade_name', `Grade: ${ctx.grade_name}`)
   if (ctx.opposition) push('opposition', `Vs: ${ctx.opposition}`)
   if (ctx.date_from)  push('date_from', `From: ${ctx.date_from}`)
@@ -644,9 +640,9 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
       </div>
       <div>
         <Label>Grade</Label>
-        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.grade_id) ? activeFieldCls : ''}`} value={ctx.grade_id || ''} onChange={e => set('grade_id', e.target.value)}>
+        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.grade_name) ? activeFieldCls : ''}`} value={ctx.grade_name || ''} onChange={e => set('grade_name', e.target.value)}>
           <option value="">All grades</option>
-          {(grades || []).map(g => <option key={g.id} value={g.id}>{g.display_name || g.name}</option>)}
+          {(grades || []).map(g => <option key={g.name} value={g.name}>{g.display_name || g.name}</option>)}
         </select>
       </div>
       <div className="grid grid-cols-2 gap-1.5">

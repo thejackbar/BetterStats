@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Optional
 from datetime import date
+import uuid
 
 # ─── Operators ─────────────────────────────────────────────────────────────────
 
@@ -249,6 +250,7 @@ def _coerce_value(kind: str, value_str: str):
         if kind == "date":
             return date.fromisoformat(value_str)
         if kind == "uuid":
+            uuid.UUID(str(value_str))
             return str(value_str)
         if kind == "text":
             return str(value_str)
@@ -387,8 +389,17 @@ def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
         if v is None or v == "":
             return []
         if isinstance(v, (list, tuple, set)):
-            return [str(x) for x in v if x not in (None, "")]
-        return [s.strip() for s in str(v).split(",") if s.strip()]
+            raw = [str(x) for x in v if x not in (None, "")]
+        else:
+            raw = [s.strip() for s in str(v).split(",") if s.strip()]
+        valid = []
+        for s in raw:
+            try:
+                uuid.UUID(s)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            valid.append(s)
+        return valid
 
     clauses: list[str] = []
     params: dict = {}
