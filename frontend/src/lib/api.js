@@ -933,6 +933,11 @@ export const api = {
       return data
     })
   },
+  parseAchievementsUrl: (orgId, url) =>
+    request(`/achievements/parse-url?org_id=${orgId}`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
 
   // Yearbooks
   listYearbooks: (orgId) => request(`/yearbooks/${orgId}`),
