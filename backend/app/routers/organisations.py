@@ -10,6 +10,7 @@ from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services.fixtures_source import org_grassroots_fixtures
+from app.services.season_aliases import resolve_season_filter
 from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private
 from app.auth.capabilities import require_cap, RUN_SYNC
 
@@ -175,8 +176,14 @@ async def get_org_grades(
     params = {"org_id": org_id}
     season_clause = ""
     if season_id:
-        season_clause = "AND g.season_id = CAST(:season_id AS UUID)"
-        params["season_id"] = season_id
+        # A club's real-world season can be split across several Season rows
+        # (one per competition/grassroots season GUID — e.g. an Over 60s comp
+        # reports under a different season id than the mainline grades even
+        # though it's "the same year"), so scope to every season row sharing
+        # the picked season's year/aliases, not just its exact id.
+        season_ids = await resolve_season_filter(db, org_id, season_id)
+        season_clause = "AND g.season_id = ANY(:season_ids)"
+        params["season_ids"] = season_ids
     # Public callers only see grades the club shares; its own admins see all.
     public_clause = ""
     if not await user_can_view_org_private(db, viewer, org_id):

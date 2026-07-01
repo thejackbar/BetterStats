@@ -86,7 +86,26 @@ async def resolve_season_filter(
         ),
         {"org": str(_as_uuid(org_id)), "c": canonical},
     )
-    return [canonical] + [str(r[0]) for r in aliases.all()]
+    ids = {canonical, *(str(r[0]) for r in aliases.all())}
+
+    # A club's real-world season can be split across several Season rows —
+    # one per competition/grassroots season GUID (e.g. an Over 60s / masters
+    # comp reports under a different CA season id than the mainline grades
+    # even though it's "the same year"). Pull in sibling rows sharing the
+    # canonical season's year so a year split across comps is fully counted
+    # (same fix as iq_team.player_impact's year-based MVP scope).
+    year_row = await session.execute(
+        text("SELECT year FROM seasons WHERE id = CAST(:sid AS UUID)"),
+        {"sid": canonical},
+    )
+    year = year_row.scalar()
+    if year is not None:
+        siblings = await session.execute(
+            text("SELECT id FROM seasons WHERE organisation_id = CAST(:org AS UUID) AND year = :year"),
+            {"org": str(_as_uuid(org_id)), "year": year},
+        )
+        ids |= {str(r[0]) for r in siblings.all()}
+    return list(ids)
 
 
 async def org_id_for_season(session: AsyncSession, season_id: str) -> Optional[str]:
