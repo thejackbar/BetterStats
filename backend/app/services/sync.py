@@ -1372,8 +1372,14 @@ async def sync_grassroots_game_level_data(
     """Pull game-level scorecards from the Grassroots /scores/* API.
 
     Covers pre-PlayHQ-migration history (~2002 onwards). Post-migration games
-    return 204 and are silently skipped — they're already handled by the
-    PlayHQ Partner sync path.
+    can return 204 (Grassroots doesn't have them) and are silently skipped.
+    NOTE (Jul 2026): this comment used to say those 204s were "already handled
+    by the PlayHQ Partner sync path" — that path (`sync_game_level_data`) was
+    REMOVED from `sync_organisation` in the May 2026 Partner API audit, so a
+    204'd match today has NO fallback and stays missing across every future
+    sync, including a Full Rebuild (it hits the exact same 204 every time).
+    Use `app.scripts.list_skipped_matches` to see which matches this affects
+    for a given club/grade.
 
     Each game is processed in its OWN short-lived DB session. Holding one
     session across thousands of inserts has been observed to deadlock with
