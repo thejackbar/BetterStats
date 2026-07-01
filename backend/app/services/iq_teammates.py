@@ -58,7 +58,7 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
             ),
             mine AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)),
             shared AS (SELECT og.id, og.result FROM og JOIN mine ON mine.game_id = og.id)
-            SELECT ga.player_id::text AS id,
+            SELECT p.id::text AS id,
                    COALESCE(p.display_name_override, p.name) AS name,
                    p.player_role, p.bowling_action, p.bowling_type,
                    COUNT(*) AS games,
@@ -68,7 +68,7 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
             FROM shared
             JOIN game_appearances ga ON ga.game_id = shared.id AND ga.player_id <> CAST(:pid AS UUID)
             JOIN players p ON p.id = ga.player_id
-            GROUP BY ga.player_id, name, p.player_role, p.bowling_action, p.bowling_type
+            GROUP BY p.id
             ORDER BY games DESC, wins DESC, name
             """
         ),
