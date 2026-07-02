@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import logging
 from typing import Optional
@@ -122,10 +123,10 @@ async def get_grades(org_id: str, season_id: str) -> list:
 async def get_teams(org_id: str, season_id: str) -> list:
     async with httpx.AsyncClient() as client:
         try:
-            r = await client.get(
+            r = await _get_with_retry(
+                client,
                 f"{BASE_URL}/fixturesladders/organisations/{org_id}/teams",
-                params=_base_params({"seasonId": season_id}),
-                timeout=DEFAULT_TIMEOUT,
+                _base_params({"seasonId": season_id}),
             )
             r.raise_for_status()
             data = r.json()
@@ -135,36 +136,59 @@ async def get_teams(org_id: str, season_id: str) -> list:
             return []
 
 
+async def _get_with_retry(client: "httpx.AsyncClient", url: str, params: dict, retries: int = 3):
+    """GET with backoff on transient connection failures (DNS blips, refused
+    connections, etc). A hard refresh wipes game-level data before this runs,
+    so a single dropped connection shouldn't be allowed to abort the whole
+    resync and leave the club with no games — retry a few times before giving
+    up and letting the caller treat it as "no data this page"."""
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return await client.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+            last_exc = e
+            if attempt < retries - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
+    raise last_exc
+
+
 async def _paginate_stats(url: str, season_id: str, extra_params: dict = None, grade_id: Optional[str] = None) -> list:
     results = []
     offset = 1
     limit = 100
-    async with httpx.AsyncClient() as client:
-        while True:
-            params = _base_params({"seasonId": season_id, "offset": offset, "limit": limit})
-            if grade_id:
-                params["gradeId"] = grade_id
-            if extra_params:
-                params.update(extra_params)
-            r = await client.get(url, params=params, timeout=DEFAULT_TIMEOUT)
-            r.raise_for_status()
-            # A season with no stats returns 204 / an empty body — that's a
-            # valid "nothing here", not an error. Calling .json() on it raises
-            # "Expecting value: line 1 column 1 (char 0)".
-            if r.status_code == 204 or not r.content:
-                break
-            try:
-                data = r.json()
-            except ValueError:
-                logger.warning(f"_paginate_stats: non-JSON body from {url} (status {r.status_code})")
-                break
-            items = data.get("data", data.get("participants", data if isinstance(data, list) else []))
-            if not items:
-                break
-            results.extend(items)
-            if len(items) < limit:
-                break
-            offset += limit
+    try:
+        async with httpx.AsyncClient() as client:
+            while True:
+                params = _base_params({"seasonId": season_id, "offset": offset, "limit": limit})
+                if grade_id:
+                    params["gradeId"] = grade_id
+                if extra_params:
+                    params.update(extra_params)
+                r = await _get_with_retry(client, url, params)
+                r.raise_for_status()
+                # A season with no stats returns 204 / an empty body — that's a
+                # valid "nothing here", not an error. Calling .json() on it raises
+                # "Expecting value: line 1 column 1 (char 0)".
+                if r.status_code == 204 or not r.content:
+                    break
+                try:
+                    data = r.json()
+                except ValueError:
+                    logger.warning(f"_paginate_stats: non-JSON body from {url} (status {r.status_code})")
+                    break
+                items = data.get("data", data.get("participants", data if isinstance(data, list) else []))
+                if not items:
+                    break
+                results.extend(items)
+                if len(items) < limit:
+                    break
+                offset += limit
+    except Exception as e:
+        # Don't let a mid-pagination failure (upstream blip after retries
+        # exhausted) crash the whole sync — surface what was gathered so far
+        # and let the caller's usual "no data" handling take it from here.
+        logger.warning(f"_paginate_stats: {url} failed at offset={offset}: {e}")
     return results
 
 

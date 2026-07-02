@@ -2585,6 +2585,7 @@ _hard_refresh_running: set = set()
 async def hard_refresh_org(
     current_user: User = Depends(require_cap(RUN_HARD_REFRESH)),
     club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
 ):
     """Trigger a full historical re-sync of the org.
 
@@ -2606,12 +2607,21 @@ async def hard_refresh_org(
     # the in-progress guard below blocks a *concurrent* second call, but
     # nothing stops a user clicking the button repeatedly during the run or
     # right after it finishes. This window covers both cases.
-    enforce(
-        f"hard-refresh:{org_id_str}",
-        limit=1,
-        window_sec=3600,
-        detail="Hard refresh is allowed once per hour. Try again later.",
-    )
+    # Super admins are exempt — they're the ones who need to immediately
+    # retry after a failed rebuild (e.g. a transient upstream connection
+    # error), and the in-progress guard already prevents a genuinely
+    # concurrent double-run.
+    membership = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_super_admin = bool(membership and membership.role == "super_admin")
+    if not is_super_admin:
+        enforce(
+            f"hard-refresh:{org_id_str}",
+            limit=1,
+            window_sec=3600,
+            detail="Hard refresh is allowed once per hour. Try again later.",
+        )
 
     if org_id_str in _hard_refresh_running:
         return {"status": "already_running", "org_id": org_id_str}
