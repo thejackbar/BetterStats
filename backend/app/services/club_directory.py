@@ -664,6 +664,18 @@ def _assoc_match(name: str):
                func.lower(cast(MarketingClub.associations, Text)).like(f"%{nl}%"))
 
 
+def _contact_exists(*conds):
+    """A correlated EXISTS over a club's contacts, pinned to correlate ONLY against
+    MarketingClub. Without the explicit correlate, an enclosing query that also selects
+    MarketingClubContact (the CSV export and the BetterComms export are two-table
+    selects) auto-correlates the subquery's own FROM away, and SQLAlchemy raises
+    "returned no FROM clauses due to auto-correlation". Correct for the single-table
+    list query too (MarketingClub is still the correlated table)."""
+    return (exists()
+            .where(MarketingClubContact.marketing_club_id == MarketingClub.id, *conds)
+            .correlate(MarketingClub))
+
+
 def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  association: Optional[str] = None, status: Optional[str] = None,
                  postcode_from: Optional[str] = None, postcode_to: Optional[str] = None,
@@ -700,12 +712,10 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(MarketingClub.emailed_at.isnot(None))
     if exclude_exported:
         # Only clubs that still have an emailable contact not yet in BetterComms.
-        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
-                                    C.email.isnot(None), C.exported_at.is_(None)))
+        conds.append(_contact_exists(C.email.isnot(None), C.exported_at.is_(None)))
     if exclude_suppressed:
         # Only clubs that still have an emailable, subscribed (non-opted-out) contact.
-        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
-                                    C.email.isnot(None), C.subscribed.is_(True)))
+        conds.append(_contact_exists(C.email.isnot(None), C.subscribed.is_(True)))
     if visited:
         # Only clubs where someone has visited the public site from a link tagged
         # with this club's UTM code — resolved through utm_code matches AND manual
@@ -714,8 +724,7 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(text(_visited_in_sql("marketing_clubs")))
     if person:
         p = f"%{person.lower()}%"
-        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
-                                    func.lower(C.full_name).like(p)))
+        conds.append(_contact_exists(func.lower(C.full_name).like(p)))
     if status:
         conds.append(MarketingClub.status == status)
     if q:
@@ -740,15 +749,12 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
     if postcode_to:
         conds.append(and_(pc_ok, MarketingClub.postcode <= str(postcode_to).zfill(4)))
     if contact_filter == "any_email":
-        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
-                                    C.email.isnot(None)))
+        conds.append(_contact_exists(C.email.isnot(None)))
     elif contact_filter == "named_email":
-        conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
-                                    _named_email_cond()))
+        conds.append(_contact_exists(_named_email_cond()))
     elif contact_filter == "pst":
         for role in _PST_ROLES:
-            conds.append(exists().where(C.marketing_club_id == MarketingClub.id,
-                                        _named_email_cond(), C.role == role))
+            conds.append(_contact_exists(_named_email_cond(), C.role == role))
     return conds
 
 

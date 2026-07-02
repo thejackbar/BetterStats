@@ -4,6 +4,6 @@ export default {
   sortKey: '2026-07-02T16:00:00Z',
   title: 'Fix: Club Directory CSV download error',
   items: [
-    'Downloading the Club Directory as CSV could fail with a server error when a matching club had a malformed association entry. The export now skips the bad entry instead of failing the whole download.',
+    'Downloading the Club Directory as CSV failed with a server error when certain filters were on (for example "exclude already exported" or "exclude suppressed"). The contact filters now build correctly for the CSV and BetterComms exports, so the download works with any filter combination.',
   ],
 }
