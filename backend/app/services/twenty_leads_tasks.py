@@ -115,10 +115,12 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         select(MarketingClub).where(MarketingClub.grassroots_guid.in_(guids)))).scalars().all()}
 
     snaps = []
+    scanned = 0
     for guid in guids:
         club = clubs.get(guid)
         if club is None:
             continue
+        scanned += 1
         org = (await session.get(Organisation, club.existing_org_id)
                if club.existing_org_id else None)
         eng = await _engagement(session, club, org)
@@ -126,6 +128,10 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         if sig is None:
             continue
         snaps.append((guid, tid_by_guid[guid], _lead_values(sig), sig["status"]))
+    # Diagnostics so the caller/UI can see WHY the result is what it is — a cold list
+    # with no interest signals reads 0 qualified, which is correct, not a failure.
+    stats["clubs_scanned"] += scanned
+    stats["leads_qualified"] += len(snaps)
 
     for guid, company_tid, values, status in snaps:
         try:
@@ -191,6 +197,7 @@ async def _mirror_requests_to_tasks(session, http, stats) -> None:
         JOIN twenty_links tl ON tl.entity_type = 'club' AND tl.bc_id = mc.grassroots_guid
         WHERE r.status = 'outstanding'
     """))).all()
+    stats["requests_outstanding"] += len(rows)
     for req_id, module_key, kind, sub_status, guid, name in rows:
         ext_ref = f"req:{req_id}"
         # A brand-new club (no live subscription yet) needs a sync + BetterStats trial
@@ -220,6 +227,7 @@ async def _scan_trials_and_renewals(session, http, stats) -> None:
         WHERE s.status = 'trial' AND s.trial_ends_at IS NOT NULL
           AND s.trial_ends_at BETWEEN :now AND :horizon
     """), {"now": now, "horizon": now + datetime.timedelta(days=TRIAL_REMINDER_DAYS)})).all()
+    stats["trials_in_window"] += len(trial_rows)
     for sub_id, module_key, ends_at, guid, name in trial_rows:
         ext_ref = f"trial_end:{sub_id}:{ends_at.date()}"
         title = (f"Trial ending {ends_at.date()}: {(module_key or '').upper()} for {name} "
@@ -239,6 +247,7 @@ async def _scan_trials_and_renewals(session, http, stats) -> None:
           AND s.renewal_date BETWEEN :today AND :horizon
     """), {"today": now.date(),
            "horizon": (now + datetime.timedelta(days=RENEWAL_REMINDER_DAYS)).date()})).all()
+    stats["renewals_in_window"] += len(renewal_rows)
     for sub_id, module_key, renewal_date, guid, name in renewal_rows:
         ext_ref = f"renewal:{sub_id}:{renewal_date}"
         title = (f"Renewal due {renewal_date}: {(module_key or '').upper()} for {name} "
