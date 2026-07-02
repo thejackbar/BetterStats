@@ -860,7 +860,10 @@ export default function SuperMarketing() {
       if (r.error) { setError(r.error); return }
       const leads = (r.leads_created || 0) + (r.leads_updated || 0) + (r.leads_adopted || 0)
       const tasks = (r.tasks_request || 0) + (r.tasks_trial_expiry || 0) + (r.tasks_renewal || 0)
-      setMsg(`Twenty leads/tasks refreshed: ${leads} lead(s), ${tasks} new task(s).`
+      setMsg(`Twenty leads/tasks: scanned ${r.clubs_scanned || 0} exported club(s), `
+        + `${r.leads_qualified || 0} qualified → ${leads} lead(s). Pending: `
+        + `${r.requests_outstanding || 0} request(s), ${r.trials_in_window || 0} expiring trial(s), `
+        + `${r.renewals_in_window || 0} renewal(s) → ${tasks} new task(s).`
         + ((r.leads_errored || r.tasks_errored) ? ' Some errored (see logs).' : ''))
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
