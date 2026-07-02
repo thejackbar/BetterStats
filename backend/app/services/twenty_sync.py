@@ -304,6 +304,9 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
         "publicProfileUrl": link(club.website_url),
         "existingKpCustomer": "YES" if club.existing_org_id else "NO",
         "lastSyncedAt": _now_iso(),
+        # Association membership as a read-only multi-value array (replaces the
+        # clubAssociation junction): every association the club plays in, by name.
+        "associations": [name for _g, name, _p in _club_assocs(club)],
     }
     if org is not None:
         status = (org.subscription_status or "").lower()
@@ -847,8 +850,9 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                         stats["clubs_" + cact] += 1
                         logger.info("twenty export: club %r -> company %s id=%s (%d officers)",
                                     snap["name"], cact, ctid, len(snap["people"]))
-                        await _sync_memberships(session, http, snap["guid"], snap["name"],
-                                                snap["assocs"], ctid, assoc_cache, stats)
+                        # Association membership is now a read-only array on the Company
+                        # (set in _company_values), so there's no clubAssociation junction
+                        # to sync here any more.
                         for off in snap["people"]:
                             bc_id = off["bc_id"]
                             try:
@@ -893,28 +897,34 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                     await _link_put(session, "person_email", email, pid, "")
                                 if nkey:
                                     await _link_put(session, "person_name", nkey, pid, "")
-                                # The personClub membership is what makes this officer show
-                                # under THIS club (with this club's role), shared or not.
-                                _, ract = await _upsert(session, http, "officer_role", bc_id,
-                                                        "personClubs", "bcContactId",
-                                                        {**off["role"], "personId": pid,
-                                                         "companyId": ctid})
-                                stats["officer_roles_" + ract] += 1
-                                # Track the set of clubs this Contact holds a role in, so
-                                # we can flag a multi-club officer (the native single
-                                # Company can't show it). Only PATCH the flag when the set
-                                # grows, so it costs nothing on steady-state re-exports.
+                                # Per-club officer detail now lives as read-only arrays on
+                                # the Contact (replaces the personClub junction):
+                                #   clubRoles = "<role> — <club>" for every club served,
+                                #   multiClub / clubCount = a shared-officer flag.
+                                # Merged across clubs via our link table (a Twenty ARRAY
+                                # write replaces the whole array, so we accumulate locally)
+                                # and only PATCHed when the set grows, so steady-state
+                                # re-exports cost nothing.
+                                role_title = off["role"].get("roleTitle")
+                                role_str = (f"{role_title} — {snap['name']}"
+                                            if role_title else snap["name"])
                                 cl_row = await _link_get(session, "person_clubs", pid)
                                 clubs = set(json.loads(cl_row[1]) if cl_row and cl_row[1] else [])
-                                if ctid not in clubs:
+                                pr_row = await _link_get(session, "person_roles", pid)
+                                roles = set(json.loads(pr_row[1]) if pr_row and pr_row[1] else [])
+                                if ctid not in clubs or role_str not in roles:
                                     clubs.add(ctid)
+                                    roles.add(role_str)
                                     await _link_put(session, "person_clubs", pid, pid,
                                                     json.dumps(sorted(clubs)))
+                                    await _link_put(session, "person_roles", pid, pid,
+                                                    json.dumps(sorted(roles)))
                                     await client.update(http, "people", pid,
                                                         {"multiClub": len(clubs) > 1,
-                                                         "clubCount": len(clubs)})
-                                logger.info("twenty export:   officer %s -> %s id=%s (role %s, %d club(s))",
-                                            bc_id, pact, pid, ract, len(clubs))
+                                                         "clubCount": len(clubs),
+                                                         "clubRoles": sorted(roles)})
+                                logger.info("twenty export:   officer %s -> %s id=%s (%d club(s))",
+                                            bc_id, pact, pid, len(clubs))
                             except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
                                 stats["people_errored"] += 1
                                 logger.exception(

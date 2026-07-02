@@ -127,7 +127,9 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         sig = _lead_signal(club, org, eng)
         if sig is None:
             continue
-        snaps.append((guid, tid_by_guid[guid], _lead_values(sig), sig["status"]))
+        values = _lead_values(sig)
+        values["name"] = club.name          # the Lead's display name = the club name
+        snaps.append((guid, tid_by_guid[guid], values, sig["status"]))
     # Diagnostics so the caller/UI can see WHY the result is what it is — a cold list
     # with no interest signals reads 0 qualified, which is correct, not a failure.
     stats["clubs_scanned"] += scanned

@@ -84,18 +84,10 @@ OBJECTS = [
     dict(nameSingular="bcEmail", namePlural="bcEmails", labelSingular="Email",
          labelPlural="Emails", icon="IconMail",
          description="A named BetterComms bulk email (campaign)"),
-    # Junction for the many-to-many between clubs and associations (Twenty's
-    # metadata API has no native many-to-many). One row per club-in-association.
-    dict(nameSingular="clubAssociation", namePlural="clubAssociations",
-         labelSingular="Membership", labelPlural="Memberships", icon="IconUsersGroup",
-         description="A club's membership of an association (club <-> association link)"),
-    # Junction for the many-to-many between people and clubs. Twenty enforces one
-    # Person per email, so a shared officer (same email across clubs) is one Person;
-    # this junction is how they show under EVERY club they serve, each row carrying
-    # that officer's role at that club. One row per club-officer post.
-    dict(nameSingular="personClub", namePlural="personClubs",
-         labelSingular="Officer role", labelPlural="Officer roles", icon="IconUserCheck",
-         description="An officer's role at a club (person <-> club link)"),
+    # Club<->association and person<->club are now read-only multi-value ARRAY fields
+    # (Company.associations, Person.clubRoles), so the clubAssociation ("Memberships")
+    # and personClub ("Officer roles") junction objects are retired. Delete them in
+    # Twenty (Settings > Data model) once a re-export has populated the arrays.
     # A telemetry-raised interest signal for triage. Passive: a human converts it to
     # an Opportunity by setting modulesToPursue. One Lead per targeted club.
     dict(nameSingular="lead", namePlural="leads", labelSingular="Lead",
@@ -203,21 +195,11 @@ FIELDS = [
     ("association", "assocState", "State", "TEXT", None),
     ("association", "assocCountry", "Country", "TEXT", None),
     ("association", "clubCount", "Club count", "NUMBER", None),
-    # ---- Membership (clubAssociation junction) ----
-    ("clubAssociation", "isPrimary", "Is primary", "BOOLEAN", None),
-    # ---- Officer role (personClub junction) ----
-    ("personClub", "bcContactId", "BC Contact Id", "TEXT", None),
-    ("personClub", "clubRole", "Club role", "SELECT",
-     _options(["President", "Vice President", "Secretary", "Treasurer", "Registrar",
-               "Coordinator", "Club contact", "Sponsor", "Other"])),
-    ("personClub", "roleTitle", "Role title", "TEXT", None),
-    ("personClub", "roleRank", "Role rank", "NUMBER", None),
-    ("personClub", "outreachSelected", "Outreach selected", "BOOLEAN", None),
-    # Per-club email + phone, so a club-specific contact detail is preserved on the
-    # membership (and the "Officer roles" view shows role, email and mobile together)
-    # even when it differs from the shared Contact's single canonical one.
-    ("personClub", "email", "Email", "EMAILS", None),
-    ("personClub", "phone", "Mobile", "PHONES", None),
+    # Club<->association and person<->club are now read-only multi-value ARRAY fields
+    # (set by the export), replacing the clubAssociation ("Memberships") and personClub
+    # ("Officer roles") junction objects, which are retired.
+    ("company", "associations", "Associations", "ARRAY", None),
+    ("person", "clubRoles", "Club roles", "ARRAY", None),
     # ---- Touchpoint ----
     ("touchpoint", "touchpointType", "Type", "SELECT",
      _options(["Email sent", "Email delivered", "Email opened", "Email clicked",
@@ -261,16 +243,8 @@ RELATIONS = [
     ("touchpoint", "person", "Officer", "person", "MANY_TO_ONE", "Touchpoints"),
     ("touchpoint", "bcEmail", "Email", "bcEmail", "MANY_TO_ONE", "Touchpoints"),
     ("bcEmail", "company", "Club", "company", "MANY_TO_ONE", "Emails"),
-    # Many-to-many between clubs and associations via the clubAssociation junction:
-    # each membership links one club and one association. The inverse lists give the
-    # two views — a company's "Memberships" and an association's "Member clubs".
-    ("clubAssociation", "company", "Club", "company", "MANY_TO_ONE", "Memberships"),
-    ("clubAssociation", "association", "Association", "association", "MANY_TO_ONE", "Member clubs"),
-    # Many-to-many between people and clubs via the personClub junction: one row per
-    # officer-at-a-club. Inverse lists give a club's "Officer roles" and a person's
-    # "Club roles", so a shared officer is reachable from every club they serve.
-    ("personClub", "person", "Officer", "person", "MANY_TO_ONE", "Club roles"),
-    ("personClub", "company", "Club", "company", "MANY_TO_ONE", "Officer roles"),
+    # (clubAssociation / personClub junction relations retired — club associations and
+    # officer roles are now read-only ARRAY fields on Company / Person.)
     # A Lead belongs to one club; a club's inverse list is its "Leads".
     ("lead", "company", "Club", "company", "MANY_TO_ONE", "Leads"),
 ]
