@@ -853,6 +853,18 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const refreshTwentyLeadsTasks = async () => {
+    setBusy('twenty-leads-tasks'); setMsg('')
+    try {
+      const r = await api.mktRefreshTwentyLeadsTasks()
+      if (r.error) { setError(r.error); return }
+      const leads = (r.leads_created || 0) + (r.leads_updated || 0) + (r.leads_adopted || 0)
+      const tasks = (r.tasks_request || 0) + (r.tasks_trial_expiry || 0) + (r.tasks_renewal || 0)
+      setMsg(`Twenty leads/tasks refreshed: ${leads} lead(s), ${tasks} new task(s).`
+        + ((r.leads_errored || r.tasks_errored) ? ' Some errored (see logs).' : ''))
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
   const bulkEmailed = async (value) => {
     if (!window.confirm(
       `${value ? 'Mark' : 'Unmark'} all ${total} club(s) in the current filtered list as `
@@ -1195,6 +1207,10 @@ export default function SuperMarketing() {
             <button className={BTN} disabled={busy === 'twenty-refresh'} onClick={refreshTwentyEngagement}
                     title="Recompute the engagement score for every club already in Twenty from the latest usage breadcrumbs (runs daily too)">
               {busy === 'twenty-refresh' ? 'Refreshing...' : 'Refresh Twenty scores'}
+            </button>
+            <button className={BTN} disabled={busy === 'twenty-leads-tasks'} onClick={refreshTwentyLeadsTasks}
+                    title="Seed/refresh Leads from telemetry and raise follow-up Tasks (module requests, expiring trials, upcoming renewals) in Twenty (runs daily too)">
+              {busy === 'twenty-leads-tasks' ? 'Refreshing...' : 'Refresh Twenty leads/tasks'}
             </button>
             <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}

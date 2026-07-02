@@ -96,6 +96,11 @@ OBJECTS = [
     dict(nameSingular="personClub", namePlural="personClubs",
          labelSingular="Officer role", labelPlural="Officer roles", icon="IconUserCheck",
          description="An officer's role at a club (person <-> club link)"),
+    # A telemetry-raised interest signal for triage. Passive: a human converts it to
+    # an Opportunity by setting modulesToPursue. One Lead per targeted club.
+    dict(nameSingular="lead", namePlural="leads", labelSingular="Lead",
+         labelPlural="Leads", icon="IconTargetArrow",
+         description="A club interest signal for triage; converts to an Opportunity"),
 ]
 
 # (object nameSingular, field name, label, type, options-or-None)
@@ -176,6 +181,22 @@ FIELDS = [
      _options(["Inbound form", "Outbound campaign", "Referral", "Directory"])),
     ("opportunity", "lostReason", "Lost reason", "SELECT",
      _options(["Not interested", "No budget", "Competitor", "No response", "Other"])),
+    # ---- Lead ----
+    # bcLeadKey = the club's grassroots_guid (one Lead per targeted club). The signal
+    # fields are refreshed every run; leadStatus + modulesToPursue are human-owned
+    # (set once at create, never overwritten) so triage decisions survive a re-sync.
+    ("lead", "bcLeadKey", "BC Lead key", "TEXT", None),
+    ("lead", "leadSource", "Source", "SELECT",
+     _options(["Outbound campaign", "Website", "Email engagement", "Contact us"])),
+    ("lead", "signalSummary", "Signal", "TEXT", None),
+    ("lead", "engagementTier", "Engagement tier", "SELECT",
+     _options(["Cold", "Warm", "Hot", "Not interested"])),
+    ("lead", "modulesOfInterest", "Modules of interest", "MULTI_SELECT", MODULE_OPTS),
+    ("lead", "leadStatus", "Status", "SELECT",
+     _options(["New", "Working", "Converted", "Discarded"])),
+    # Setting this in Twenty is the convert trigger: it both flags "pursue" and carries
+    # which modules go into the resulting Opportunity's scope.
+    ("lead", "modulesToPursue", "Modules to pursue", "MULTI_SELECT", MODULE_OPTS),
     # ---- Association ----
     ("association", "bcAssociationId", "BC Association Id", "TEXT", None),
     ("association", "shortCode", "Short code", "TEXT", None),
@@ -250,6 +271,8 @@ RELATIONS = [
     # "Club roles", so a shared officer is reachable from every club they serve.
     ("personClub", "person", "Officer", "person", "MANY_TO_ONE", "Club roles"),
     ("personClub", "company", "Club", "company", "MANY_TO_ONE", "Officer roles"),
+    # A Lead belongs to one club; a club's inverse list is its "Leads".
+    ("lead", "company", "Club", "company", "MANY_TO_ONE", "Leads"),
 ]
 
 

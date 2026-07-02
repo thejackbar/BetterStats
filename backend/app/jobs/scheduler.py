@@ -108,6 +108,21 @@ async def refresh_twenty_engagement():
         logger.error(f"Twenty engagement refresh failed: {e}")
 
 
+async def refresh_twenty_leads_tasks():
+    """Seed/refresh Leads from telemetry, mirror outstanding module requests to Tasks,
+    and scan trials + renewals into follow-up Tasks. Idempotent; the first run also
+    backfills whatever already qualifies. Skipped unless Twenty is configured."""
+    if not settings.twenty_configured:
+        return
+    from app.services import twenty_leads_tasks
+    logger.info("Starting scheduled Twenty leads/tasks refresh")
+    try:
+        stats = await twenty_leads_tasks.refresh_leads_and_tasks()
+        logger.info(f"Twenty leads/tasks refresh done: {stats}")
+    except Exception as e:
+        logger.error(f"Twenty leads/tasks refresh failed: {e}")
+
+
 async def crawl_marketing_clubs():
     """Detail the next slice of the marketing club directory frontier. Off-peak,
     small nightly cap, opt-in (marketing_crawl_enabled). Resumable through the
@@ -198,6 +213,17 @@ def start_scheduler():
         hour=6,
         minute=0,
         id="daily_twenty_engagement",
+        replace_existing=True,
+    )
+    # BetterCricket CRM — seed/refresh Leads from telemetry and raise follow-up Tasks
+    # (outstanding module requests, expiring trials, upcoming renewals) daily. No-op
+    # when Twenty isn't configured.
+    scheduler.add_job(
+        refresh_twenty_leads_tasks,
+        trigger="cron",
+        hour=7,
+        minute=0,
+        id="daily_twenty_leads_tasks",
         replace_existing=True,
     )
     # BetterFantasyCricket — advance lapsed draft clocks every 15 minutes.
