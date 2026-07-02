@@ -490,6 +490,8 @@ export const api = {
   mktExportTwentyStatus: () => request('/club-admin/marketing/export-twenty/status'),
   mktRefreshTwentyEngagement: () =>
     request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
+  mktRefreshTwentyLeadsTasks: () =>
+    request('/club-admin/marketing/refresh-twenty-leads-tasks', { method: 'POST' }),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktUpdateContact: (contactId, patch) =>

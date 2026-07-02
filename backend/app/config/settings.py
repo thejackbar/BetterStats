@@ -139,6 +139,10 @@ class Settings(BaseSettings):
     # Twenty's server rate limit (default 100/60s). Raise this in lockstep if you raise
     # Twenty's own API_RATE_LIMITING_* limit, else it becomes the bottleneck.
     twenty_rate_per_min: int = 90
+    # Optional Twenty workspaceMember id to assign auto-created Tasks to (the
+    # back-office follow-up owner). Blank = Tasks are created unassigned. Find the id
+    # in Twenty under Settings > Members, or via GET /rest/workspaceMembers.
+    twenty_task_assignee_id: str = ""
 
     @property
     def twenty_configured(self) -> bool:

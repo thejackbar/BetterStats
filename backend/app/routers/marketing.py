@@ -389,6 +389,17 @@ async def refresh_twenty_engagement(_=Depends(require_super_admin)):
     return await twenty_sync.refresh_engagement()
 
 
+@router.post("/refresh-twenty-leads-tasks")
+async def refresh_twenty_leads_tasks(_=Depends(require_super_admin)):
+    """Seed/refresh Leads from telemetry and raise follow-up Tasks for outstanding
+    module requests, expiring trials and upcoming renewals. Runs daily on a schedule
+    too; this is the on-demand trigger. Idempotent — the first run backfills whatever
+    already qualifies, later runs only add what's new. Only touches clubs already in
+    the CRM (a twenty_links row)."""
+    from app.services import twenty_leads_tasks
+    return await twenty_leads_tasks.refresh_leads_and_tasks()
+
+
 class EmailedBody(BaseModel):
     emailed: bool
     note: Optional[str] = None
