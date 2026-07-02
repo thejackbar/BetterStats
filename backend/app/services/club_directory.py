@@ -636,7 +636,11 @@ async def _resolve_outreach_org(session: AsyncSession, organisation_id: Optional
 
 
 def _assoc_names(club: MarketingClub) -> list[str]:
-    return [a.get("name") for a in (club.associations or []) if a.get("name")]
+    # Guard non-dict entries (a null / stray string in the associations JSONB would
+    # otherwise AttributeError and 500 the whole CSV export) — same guard as
+    # twenty_sync._club_assocs.
+    return [a["name"] for a in (club.associations or [])
+            if isinstance(a, dict) and a.get("name")]
 
 
 # Contact-presence filters offered on the directory page.
