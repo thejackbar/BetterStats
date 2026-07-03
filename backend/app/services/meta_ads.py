@@ -299,6 +299,46 @@ async def run_snapshot(db: AsyncSession) -> dict:
     }
 
 
+async def get_leads_adjustment_total(db: AsyncSession) -> int:
+    """Running sum of every manual reconciliation delta ever recorded."""
+    total = (await db.execute(text(
+        "SELECT COALESCE(SUM(delta), 0) FROM meta_lead_adjustments"
+    ))).scalar()
+    return int(total or 0)
+
+
+async def add_lead_adjustment(db: AsyncSession, delta: int, note: str | None, created_by_email: str | None) -> int:
+    """Record a manual +/- correction to the Meta-reported lead count. Returns
+    the new running total (does not touch ``meta_ad_snapshots.leads`` itself,
+    so the next snapshot pull can't silently wipe the correction)."""
+    await db.execute(text("""
+        INSERT INTO meta_lead_adjustments (delta, note, created_by_email)
+        VALUES (:delta, :note, :created_by_email)
+    """), {"delta": delta, "note": (note or None), "created_by_email": created_by_email})
+    await db.commit()
+    return await get_leads_adjustment_total(db)
+
+
+async def get_lead_adjustments(db: AsyncSession, limit: int = 20) -> list[dict]:
+    """Recent manual reconciliation entries, newest first — the audit trail
+    behind the effective lead count."""
+    rows = (await db.execute(text("""
+        SELECT delta, note, created_by_email, created_at
+        FROM meta_lead_adjustments
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """), {"limit": limit})).mappings().all()
+    return [
+        {
+            "delta": int(r["delta"]),
+            "note": r["note"],
+            "created_by_email": r["created_by_email"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
 async def get_latest_summary(db: AsyncSession) -> dict:
     """Read back the most recent snapshot set (used for the fast page-load path,
     as opposed to /refresh which does a live pull)."""
@@ -309,9 +349,12 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         LIMIT 1
     """))).mappings().first()
 
+    adjustment = await get_leads_adjustment_total(db)
+
     if not campaign_row:
         return {"campaign": None, "ads": [], "recommendation": None,
-                "recommendation_status": None, "last_updated": None}
+                "recommendation_status": None, "last_updated": None,
+                "leads_adjustment": adjustment}
 
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
@@ -334,6 +377,12 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         }
 
     campaign = _row_to_dict(campaign_row)
+    campaign["leads_adjustment"] = adjustment
+    campaign["leads_effective"] = max(0.0, campaign["leads"] + adjustment)
+    campaign["cost_per_lead"] = (
+        round(campaign["spend"] / campaign["leads_effective"], 2) if campaign["leads_effective"] > 0 else None
+    )
+
     ads = [_row_to_dict(r) for r in ad_rows]
     for ad in ads:
         meta = AD_DESTINATIONS.get(ad["ad_id"], {})
@@ -341,6 +390,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         ad["destination"] = meta.get("destination")
         ad["utm_content"] = meta.get("utm_content")
         ad["status"] = ad_status(ad, ads)
+        ad["cost_per_lead"] = round(ad["spend"] / ad["leads"], 2) if ad["leads"] > 0 else None
 
     return {
         "campaign": campaign,
@@ -348,6 +398,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         "recommendation": campaign_row["recommendation"],
         "recommendation_status": campaign_row["recommendation_status"],
         "last_updated": campaign_row["created_at"].isoformat() if campaign_row["created_at"] else None,
+        "leads_adjustment": adjustment,
     }
 
 
