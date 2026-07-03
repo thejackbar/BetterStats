@@ -5,13 +5,13 @@ sending is isolated to its own tenant (reputation + pause). Populated by the
 tenant provisioner (services/ses_tenants). Idempotent raw SQL, mirrored in the
 main.py lifespan.
 
-Revision ID: 126
-Revises: 125
+Revision ID: 127
+Revises: 126
 """
 from alembic import op
 
-revision = "126"
-down_revision = "125"
+revision = "127"
+down_revision = "126"
 branch_labels = None
 depends_on = None
 
