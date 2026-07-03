@@ -1240,6 +1240,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_sender_footer TEXT"
         ))
+        # Configurable From local-part (migration 128), decoupled from the slug.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_from_local TEXT"
+        ))
         # BetterComms sending tiers (migration 125): per-club sandbox→production
         # send tier + optional daily-cap override, the tier-increase request
         # queue, and the generic club→BetterCricket request telemetry (feeds a

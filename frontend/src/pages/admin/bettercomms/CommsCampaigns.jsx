@@ -43,6 +43,16 @@ export default function CommsCampaigns() {
     }
   }
 
+  const remove = async (c) => {
+    const label = c.subject?.trim() || 'this email'
+    if (!window.confirm(`Delete ${c.status === 'draft' ? 'draft' : ''} "${label}"? This can't be undone.`)) return
+    setError('')
+    try {
+      await api.commsDeleteCampaign(c.id)
+      setCampaigns(list => list.filter(x => x.id !== c.id))
+    } catch (e) { setError(e.message) }
+  }
+
   const live = settings?.provider?.live
 
   return (
@@ -83,9 +93,9 @@ export default function CommsCampaigns() {
           {campaigns.map((c, i) => {
             const st = c.stats || {}
             return (
-              <button key={c.id} onClick={() => navigate(`/admin/comms/${c.id}`)}
-                className={`w-full text-left flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                <div className="min-w-0">
+              <div key={c.id}
+                className={`w-full flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                <button onClick={() => navigate(`/admin/comms/${c.id}`)} className="min-w-0 flex-1 text-left">
                   <div className="text-pb-text text-sm truncate">{c.subject || <span className="text-pb-faintest italic">(no subject)</span>}</div>
                   {c.utm?.utm_campaign && (
                     <div className="text-[11px] font-mono mt-0.5 truncate" title={`utm_campaign=${c.utm.utm_campaign}`}>
@@ -103,11 +113,17 @@ export default function CommsCampaigns() {
                       ⚠ {c.warnings.length} consistency warning{c.warnings.length === 1 ? '' : 's'}
                     </div>
                   )}
+                </button>
+                <div className="shrink-0 flex items-center gap-3">
+                  <span className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${STATUS_STYLE[c.status] || STATUS_STYLE.draft}`}>
+                    {c.status}
+                  </span>
+                  {c.status !== 'sending' && (
+                    <button onClick={() => remove(c)} title="Delete"
+                      className="text-pb-faintest hover:text-pb-red text-sm px-1">✕</button>
+                  )}
                 </div>
-                <span className={`shrink-0 font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${STATUS_STYLE[c.status] || STATUS_STYLE.draft}`}>
-                  {c.status}
-                </span>
-              </button>
+              </div>
             )
           })}
         </div>

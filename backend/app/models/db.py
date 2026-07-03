@@ -146,6 +146,10 @@ class Organisation(Base):
     comms_from_name = Column(Text, nullable=True)
     comms_reply_to = Column(Text, nullable=True)
     comms_sender_footer = Column(Text, nullable=True)
+    # The local-part of the SES From address (before the @), decoupled from the
+    # slug so the public From can be set without touching the org's URL. NULL ⇒
+    # fall back to the slug. See _from_address in routers/comms.py (migration 128).
+    comms_from_local = Column(Text, nullable=True)
     # ─── BetterComms sending tier (migration 125, AWS-sandbox-style) ──────────
     # A new club starts in 'sandbox' with a low daily send cap; a super admin
     # lifts it to 'production' after a clean request. The bounce/complaint

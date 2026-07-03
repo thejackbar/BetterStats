@@ -177,7 +177,10 @@ def _from_address(org: Organisation) -> str:
     AWS setup is needed; other providers keep the configured platform address."""
     if (settings.email_provider or "").strip().lower() == "ses":
         domain = settings.ses_marketing_domain if org_is_outreach(org) else settings.ses_club_domain
-        local = re.sub(r"[^a-z0-9._-]", "", (org.slug or "club").lower()) or "club"
+        # A configured local-part wins; otherwise fall back to the slug. Sanitised
+        # to the chars valid before an @ (SES rejects the send otherwise).
+        raw = getattr(org, "comms_from_local", None) or org.slug or "club"
+        local = re.sub(r"[^a-z0-9._-]", "", str(raw).lower()) or "club"
         if domain:
             return f"{local}@{domain}"
     return settings.email_from_address
@@ -1437,6 +1440,10 @@ async def get_settings(
         "from_name": club.comms_from_name or club.name,
         "reply_to": club.comms_reply_to or club.contact_email or "",
         "sender_footer": club.comms_sender_footer or "",
+        # The From local-part (before the @) and the full address it resolves to,
+        # so the Settings screen can show a live "from x@domain" preview.
+        "from_local": club.comms_from_local or "",
+        "from_address": _from_address(club),
         "provider": provider_status(),
         "subscribed_contacts": total,
     }
@@ -1446,6 +1453,7 @@ class SettingsIn(BaseModel):
     from_name: Optional[str] = None
     reply_to: Optional[str] = None
     sender_footer: Optional[str] = None
+    from_local: Optional[str] = None
 
 
 @router.put("/settings")
@@ -1465,8 +1473,12 @@ async def update_settings(
         org.comms_reply_to = rt or None
     if data.sender_footer is not None:
         org.comms_sender_footer = data.sender_footer.strip() or None
+    if data.from_local is not None:
+        # Sanitise to valid local-part chars; blank reverts to the slug default.
+        cleaned = re.sub(r"[^a-z0-9._-]", "", (data.from_local or "").strip().lower())
+        org.comms_from_local = cleaned or None
     await db.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "from_address": _from_address(org)}
 
 
 class TestEmailIn(BaseModel):

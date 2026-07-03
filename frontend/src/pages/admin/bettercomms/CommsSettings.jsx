@@ -11,6 +11,7 @@ const SUPPRESSION_LABEL = {
 export default function CommsSettings() {
   const [s, setS] = useState(null)
   const [fromName, setFromName] = useState('')
+  const [fromLocal, setFromLocal] = useState('')
   const [replyTo, setReplyTo] = useState('')
   const [footer, setFooter] = useState('')
   const [msg, setMsg] = useState(null)
@@ -28,6 +29,7 @@ export default function CommsSettings() {
     api.commsGetSettings().then(d => {
       setS(d)
       setFromName(d.from_name || '')
+      setFromLocal(d.from_local || '')
       setReplyTo(d.reply_to || '')
       setFooter(d.sender_footer || '')
     }).catch(e => setMsg({ kind: 'error', text: e.message }))
@@ -83,7 +85,8 @@ export default function CommsSettings() {
   const save = async () => {
     setSaving(true); setMsg(null)
     try {
-      await api.commsSetSettings({ from_name: fromName, reply_to: replyTo, sender_footer: footer })
+      const r = await api.commsSetSettings({ from_name: fromName, reply_to: replyTo, sender_footer: footer, from_local: fromLocal })
+      if (r?.from_address) setS(prev => prev ? { ...prev, from_address: r.from_address } : prev)
       setMsg({ kind: 'ok', text: 'Saved.' })
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setSaving(false) }
@@ -228,6 +231,20 @@ export default function CommsSettings() {
           <label className="block text-xs text-pb-faint mb-1">From name</label>
           <input value={fromName} onChange={e => setFromName(e.target.value)} placeholder={s.from_name}
             className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-3" />
+          {p.live && p.provider === 'ses' && (
+            <>
+              <label className="block text-xs text-pb-faint mb-1">Sending address</label>
+              <div className="flex items-center gap-2 mb-1">
+                <input value={fromLocal} onChange={e => setFromLocal(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
+                  placeholder={(s.from_address || '').split('@')[0] || 'hello'}
+                  className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+                <span className="text-pb-faint text-sm shrink-0">@{(s.from_address || '').split('@')[1] || ''}</span>
+              </div>
+              <div className="text-pb-faintest text-xs mb-3">
+                The part before the @. Blank uses your club's short code. Currently sending from <span className="text-pb-faint">{s.from_address}</span>.
+              </div>
+            </>
+          )}
           <label className="flex items-center gap-2 mb-2 text-xs text-pb-faint cursor-pointer">
             <input type="checkbox" checked={noReply}
               onChange={e => setReplyTo(e.target.checked ? 'noreply@betteradmin-comms.work' : '')} />

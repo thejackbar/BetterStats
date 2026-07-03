@@ -42,6 +42,7 @@ export default function CommsCompose() {
   const [busy, setBusy] = useState('')          // 'save' | 'test' | 'send'
   const [msg, setMsg] = useState(null)          // { kind, text }
   const [loading, setLoading] = useState(true)
+  const [sentHtml, setSentHtml] = useState(null)   // rendered HTML for a sent email view
   const pollRef = useRef(null)
 
   const load = useCallback(async () => {
@@ -59,6 +60,11 @@ export default function CommsCompose() {
     load()
       .then(c => {
         if (c.status === 'sending') startPolling()
+        // For a sent/sending email, render it exactly as recipients see it
+        // (through the same server render path), not the raw source.
+        if (c.status !== 'draft') {
+          api.commsPreviewCampaign(id, 0).then(r => setSentHtml(r.html)).catch(() => {})
+        }
       })
       .catch(e => setMsg({ kind: 'error', text: e.message }))
       .finally(() => setLoading(false))
@@ -177,9 +183,11 @@ export default function CommsCompose() {
     try {
       await save()
       const r = await api.commsSendCampaign(id)
-      setCampaign(c => ({ ...c, status: 'sending', stats: { recipients: r.recipients, sent: 0, failed: 0 } }))
-      startPolling()
-      setMsg({ kind: 'ok', text: r.live ? `Sending to ${r.recipients}…` : `Sending ${r.recipients} (preview mode — not delivered)…` })
+      // Sending runs in the background; return to the Emails list where the
+      // campaign shows its live sending → sent status (don't leave the user
+      // stuck on the compose page).
+      navigate('/admin/comms', { state: { sent: r.recipients } })
+      return
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setBusy('') }
   }
@@ -222,7 +230,10 @@ export default function CommsCompose() {
             {campaign.status === 'sending' && <div className="text-pb-faint text-sm mt-3">Sending in progress…</div>}
             {campaign.error && <div className="text-pb-red text-sm mt-3">{campaign.error}</div>}
             <div className="mt-4 pt-4 pb-hairline-t" />
-            <div className="text-pb-faint text-sm whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: bodyToHtml(campaign.body_html || '') }} />
+            <div className="text-pb-faintest text-xs mb-2">Email as recipients see it</div>
+            {sentHtml
+              ? <iframe title="sent email" srcDoc={sentHtml} className="w-full rounded border pb-hairline bg-white" style={{ height: 520 }} />
+              : <div className="text-pb-faint text-sm">Loading preview…</div>}
           </div>
         ) : (
           // ── Draft editor ────────────────────────────────────────────────
