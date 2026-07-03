@@ -395,6 +395,23 @@ def _send_vars(c: "CommsContact", mc: "Optional[MarketingClub]") -> dict:
     return merged
 
 
+async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict]:
+    """Directory merge vars for a preview / test in the BetterCricket outreach
+    context. Uses a REAL club from the Clubs Directory when one exists, so
+    {{club}} / {{association}} / {{utm_code}} render as a real club instead of a
+    made-up 'Sample Cricket Club' (a real send resolves these per recipient). Only
+    applies to the outreach org; a normal club has no directory vars."""
+    if not org_is_outreach(org):
+        return None
+    mc = (await db.execute(
+        select(MarketingClub).where(MarketingClub.detail_fetched_at.isnot(None))
+        .order_by(MarketingClub.name).limit(1))).scalars().first()
+    if mc:
+        return _marketing_vars(mc)
+    return {"club": "Sample Cricket Club", "association": "Sample Association",
+            "utm_code": "sample-cricket-club", "state": "WA", "website": "https://example.com"}
+
+
 def _context_var_keys(org: Organisation) -> list:
     """The merge variables that apply in this org's context, in display order.
     The club/association/utm_code set only makes sense for BetterCricket directory
@@ -880,9 +897,7 @@ async def preview_campaign(
     total = len(contacts)
     _, _, _, footer = _sender(club)
     if total == 0:
-        sample = ({"club": "Sample Cricket Club", "association": "Sample Association",
-                   "utm_code": "sample-cricket-club", "state": "WA",
-                   "website": "https://example.com"} if org_is_outreach(club) else None)
+        sample = await _sample_dir_vars(db, club)
         unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
         subject, html, _ = _render_parts(
             club, subject=c.subject or "", body_html=c.body_html or "", utm=c.utm or {},
@@ -1028,12 +1043,20 @@ async def send_test(
     # Synthetic unsubscribe token (no contact yet) — the public route handles a
     # missing contact gracefully, so the test still shows a real working link.
     unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
-    # In the BetterCricket marketing context, fill the directory vars with a sample
-    # so a test send shows {{club}} / {{utm_code}} rather than blanks.
-    sample = ({"club": "Sample Cricket Club", "association": "Sample Association",
-               "utm_code": "sample-cricket-club", "state": "WA",
-               "website": "https://example.com"} if org_is_outreach(club) else None)
-    msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer, extra_vars=sample)
+    # In the BetterCricket marketing context, render {{club}} etc. the way the real
+    # send will: use the FIRST actual recipient of this campaign's audience (their
+    # own linked club), falling back to a real directory club, then a labelled
+    # sample only if there's nothing to show.
+    extra = None
+    if org_is_outreach(club):
+        audience = await _resolve_audience(db, club, c.audience or {"type": "all"})
+        if audience:
+            first = audience[0]
+            mc = await db.get(MarketingClub, first.marketing_club_id) if first.marketing_club_id else None
+            extra = _send_vars(first, mc)
+        if not extra:
+            extra = await _sample_dir_vars(db, club)
+    msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer, extra_vars=extra)
     msg.subject = f"[TEST] {msg.subject}"
     res = await get_email_provider().send(msg)
     if not res.ok:
@@ -2329,9 +2352,7 @@ async def preview_template(
     footer injected), so the editor can show a true preview."""
     _, _, _, footer = _sender(club)
     unsub = _unsub_url(_unsub_token(club.id, uuid.uuid4()))
-    sample = ({"club": "Sample Cricket Club", "association": "Sample Association",
-               "utm_code": "sample-cricket-club", "state": "WA",
-               "website": "https://example.com"} if org_is_outreach(club) else None)
+    sample = await _sample_dir_vars(db, club)
     _, html, _ = _render_parts(
         club, subject="", body_html=data.html or "", utm=data.utm or {},
         email="sample@example.com", name="Sam Example", unsub_url=unsub, footer=footer,
