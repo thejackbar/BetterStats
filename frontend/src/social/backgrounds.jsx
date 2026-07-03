@@ -4,12 +4,20 @@
 // (Grain / Halftone / Stripes). Picked once in the Style panel, applied via
 // <BackgroundLayer style={key} palette={...} width={...} height={...} />.
 //
+// Several styles are inspired by fffuel.co's SVG generator suite (ffflux,
+// uuundulate, rrrainbow, hhhorizon, sssplatter) — fffuel doesn't publish an
+// API or source code, so these are our own procedural implementations of the
+// same visual idea, not a port of their code. Colour-customisable styles
+// take a `colors` array (falls back to a palette-derived default); several
+// also take a `seed` number for the "Randomize" control.
+//
 // Every shape uses fixed or deterministically-derived coordinates — never
 // Math.random() at render time — because the Post Designer mounts two
 // separate instances of the same template (a scaled-down live preview + a
 // full-size hidden node used for the PNG export). Real randomness would let
 // the two instances diverge, so the exported image wouldn't match what the
-// club saw on screen.
+// club saw on screen. The seed itself is just a stored integer bumped by a
+// click handler (not Math.random), so it stays reproducible.
 
 import { useId } from 'react'
 
@@ -37,209 +45,50 @@ function Svg({ width, height, children, style }) {
   )
 }
 
-// ── 1. Grunge Spray — spray-can blots in two opposing corners + fine droplets ──
-function GrungeSpray({ palette, width: w, height: h }) {
-  const ink = palette.ink
-  const blots = [
-    { x: 0.05, y: 0.08, r: 70, o: 0.4, b: 4 },
-    { x: 0.12, y: 0.05, r: 34, o: 0.5, b: 2 },
-    { x: 0.03, y: 0.2, r: 26, o: 0.45, b: 1.5 },
-    { x: 0.94, y: 0.9, r: 76, o: 0.4, b: 4 },
-    { x: 0.88, y: 0.95, r: 32, o: 0.5, b: 2 },
-    { x: 0.97, y: 0.8, r: 24, o: 0.45, b: 1.5 },
-  ]
-  const droplets = Array.from({ length: 46 }, (_, i) => {
-    const corner = i % 2 === 0 ? { x: 0.08, y: 0.1 } : { x: 0.92, y: 0.9 }
-    const spread = 0.32
-    return {
-      x: corner.x + (prand(i * 3.1 + 1) - 0.5) * spread,
-      y: corner.y + (prand(i * 5.7 + 4) - 0.5) * spread,
-      r: 1.5 + prand(i * 7.3 + 2) * 5,
-      o: 0.12 + prand(i * 2.9 + 6) * 0.35,
-    }
-  })
-  return (
-    <Svg width={w} height={h}>
-      <g fill={ink}>
-        {blots.map((b, i) => (
-          <circle key={`b${i}`} cx={b.x * w} cy={b.y * h} r={b.r} opacity={b.o} style={{ filter: `blur(${b.b}px)` }} />
-        ))}
-        {droplets.map((d, i) => (
-          <circle key={`d${i}`} cx={d.x * w} cy={d.y * h} r={d.r} opacity={Math.max(0, Math.min(1, d.o))} />
-        ))}
-      </g>
-    </Svg>
-  )
-}
-
-// ── 2. Torn Paper — a jagged deckle-edge line near the top & bottom ──
-// (Drawn as ink-coloured strokes rather than paint-over shapes, since a
-// "cut-out" flap the same colour as the background is invisible on most
-// templates — a stroke reads on any palette by construction.)
-function TornPaper({ palette, width: w, height: h }) {
-  const ink = palette.ink
-  const teeth = 26
-  const jag = 14
-  const edgeLine = (baseY, seedOffset) => {
-    const pts = []
-    for (let i = 0; i <= teeth; i++) {
-      const x = (i / teeth) * w
-      const y = baseY + (prand(i * 4.4 + seedOffset) - 0.5) * jag
-      pts.push(`${x},${y}`)
-    }
-    return pts.join(' ')
+// ── Small hex/HSL helpers, used to derive a multi-hue default for Rainbow ──
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  let h = 0, s = 0
+  const l = (max + min) / 2
+  const d = max - min
+  if (d !== 0) {
+    s = d / (1 - Math.abs(2 * l - 1))
+    if (max === r) h = ((g - b) / d) % 6
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+    if (h < 0) h += 360
   }
-  return (
-    <Svg width={w} height={h}>
-      <polyline points={edgeLine(28, 11)} fill="none" stroke={ink} strokeWidth={2.5} opacity={0.3} strokeLinejoin="round" strokeLinecap="round" />
-      <polyline points={edgeLine(h - 28, 91)} fill="none" stroke={ink} strokeWidth={2.5} opacity={0.3} strokeLinejoin="round" strokeLinecap="round" />
-    </Svg>
-  )
+  return [h, s, l]
 }
-
-// ── 3. Scratch / Distress — thin random scratches + coarse dust ──
-function ScratchDistress({ palette, width: w, height: h }) {
-  const ink = palette.ink
-  const filterId = useFilterId('bg-distress-dust')
-  const lines = Array.from({ length: 16 }, (_, i) => {
-    const x1 = prand(i * 3.3 + 1) * w
-    const len = 60 + prand(i * 6.6 + 2) * 220
-    const angle = (prand(i * 9.1 + 3) - 0.5) * 50
-    const y1 = prand(i * 4.7 + 5) * h
-    const rad = (angle * Math.PI) / 180
-    const x2 = x1 + Math.cos(rad) * len
-    const y2 = y1 + Math.sin(rad) * len
-    return { x1, y1, x2, y2, o: 0.16 + prand(i * 8.2 + 7) * 0.2 }
-  })
-  return (
-    <Svg width={w} height={h}>
-      <filter id={filterId}>
-        <feTurbulence type="fractalNoise" baseFrequency="0.35" numOctaves="2" stitchTiles="stitch" />
-        <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0" />
-      </filter>
-      <rect width={w} height={h} filter={`url(#${filterId})`} opacity={0.22} />
-      <g stroke={ink} strokeLinecap="round">
-        {lines.map((l, i) => (
-          <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} strokeWidth={1.4} opacity={l.o} />
-        ))}
-      </g>
-    </Svg>
-  )
+function hslToHex(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  let r = 0, g = 0, b = 0
+  if (h < 60) [r, g, b] = [c, x, 0]
+  else if (h < 120) [r, g, b] = [x, c, 0]
+  else if (h < 180) [r, g, b] = [0, c, x]
+  else if (h < 240) [r, g, b] = [0, x, c]
+  else if (h < 300) [r, g, b] = [x, 0, c]
+  else [r, g, b] = [c, 0, x]
+  const to255 = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return `#${to255(r)}${to255(g)}${to255(b)}`
 }
-
-// ── 4. Confetti Burst — scattered celebratory shapes ──
-function ConfettiBurst({ palette, width: w, height: h }) {
-  const colors = [palette.accent, palette.ink]
-  const shapes = Array.from({ length: 44 }, (_, i) => ({
-    x: prand(i * 2.13 + 1),
-    y: prand(i * 3.71 + 7),
-    size: 5 + prand(i * 5.5 + 3) * 9,
-    rot: prand(i * 6.1 + 9) * 360,
-    kind: Math.floor(prand(i * 1.7 + 2) * 3),
-    color: colors[i % colors.length],
-    o: 0.35 + prand(i * 7.7 + 2) * 0.4,
-  }))
-  return (
-    <Svg width={w} height={h}>
-      {shapes.map((s, i) => {
-        const cx = s.x * w, cy = s.y * h
-        const t = `rotate(${s.rot} ${cx} ${cy})`
-        if (s.kind === 0) return <circle key={i} cx={cx} cy={cy} r={s.size / 2} fill={s.color} opacity={s.o} />
-        if (s.kind === 1) return <rect key={i} x={cx - s.size / 2} y={cy - s.size / 2} width={s.size} height={s.size} fill={s.color} opacity={s.o} transform={t} />
-        return <polygon key={i} points={`${cx},${cy - s.size / 2} ${cx + s.size / 2},${cy + s.size / 2} ${cx - s.size / 2},${cy + s.size / 2}`} fill={s.color} opacity={s.o} transform={t} />
-      })}
-    </Svg>
-  )
-}
-
-// ── 5. Geometric Shards — bold translucent triangles anchored at corners ──
-function GeometricShards({ palette, width: w, height: h }) {
-  const accent = palette.accent
-  const ink = palette.ink
-  return (
-    <Svg width={w} height={h}>
-      <polygon points={`0,0 ${w * 0.34},0 0,${h * 0.28}`} fill={accent} opacity={0.14} />
-      <polygon points={`${w},${h} ${w * 0.62},${h} ${w},${h * 0.7}`} fill={accent} opacity={0.14} />
-      <polygon points={`${w},0 ${w},${h * 0.16} ${w * 0.84},0`} fill={ink} opacity={0.08} />
-      <polygon points={`0,${h} 0,${h * 0.84} ${w * 0.16},${h}`} fill={ink} opacity={0.08} />
-    </Svg>
-  )
-}
-
-// ── 6. Chalkboard Dust — soft chalky haze + hand-drawn arcs ──
-function ChalkboardDust({ palette, width: w, height: h }) {
-  // Chalk marks drawn in the ink colour (not primary/background) so they
-  // actually contrast — a "chalk" stroke the same shade as the board is
-  // invisible regardless of how chalky it looks up close.
-  const chalk = palette.ink
-  const filterId = useFilterId('bg-chalk-dust')
-  return (
-    <Svg width={w} height={h}>
-      <filter id={filterId}>
-        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="2" stitchTiles="stitch" />
-        <feColorMatrix values="0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0.16 0" />
-      </filter>
-      <rect width={w} height={h} filter={`url(#${filterId})`} opacity={0.6} />
-      <path d={`M ${w * 0.06} ${h * 0.9} Q ${w * 0.16} ${h * 0.82} ${w * 0.28} ${h * 0.9}`} stroke={chalk} strokeWidth={2.5} fill="none" opacity={0.24} strokeDasharray="1 4" strokeLinecap="round" />
-      <path d={`M ${w * 0.72} ${h * 0.1} Q ${w * 0.84} ${h * 0.18} ${w * 0.94} ${h * 0.08}`} stroke={chalk} strokeWidth={2.5} fill="none" opacity={0.24} strokeDasharray="1 4" strokeLinecap="round" />
-      <circle cx={w * 0.14} cy={h * 0.18} r={30} stroke={chalk} strokeWidth={2} fill="none" opacity={0.16} strokeDasharray="1 5" />
-    </Svg>
-  )
-}
-
-// ── 7. Halftone Pop — comic-style dot burst radiating from one corner ──
-function HalftonePop({ palette, width: w, height: h }) {
-  const accent = palette.accent
-  const cols = 14, rows = 9
-  const originX = w, originY = 0
-  const maxR = Math.hypot(w, h) * 0.55
-  const dots = []
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const cx = (c + 0.5) * (w / cols)
-      const cy = (r + 0.5) * (h / rows * 0.6)
-      const dist = Math.hypot(cx - originX, cy - originY)
-      const radius = Math.max(0, 9 - (dist / maxR) * 9)
-      if (radius > 0.6) dots.push({ cx, cy, radius })
-    }
+function rotateHue(hex, deg) {
+  try {
+    const [h, s, l] = hexToHsl(hex)
+    return hslToHex((h + deg + 360) % 360, s, l)
+  } catch {
+    return hex
   }
-  return (
-    <Svg width={w} height={h}>
-      <g fill={accent} opacity={0.4}>
-        {dots.map((d, i) => <circle key={i} cx={d.cx} cy={d.cy} r={d.radius} />)}
-      </g>
-    </Svg>
-  )
 }
 
-// ── 8. Vintage Vignette — worn-photograph edges + faint noise + scratches ──
-function VintageVignette({ palette, width: w, height: h }) {
-  const ink = palette.ink
-  const filterId = useFilterId('bg-vintage-grain')
-  const lines = Array.from({ length: 5 }, (_, i) => ({
-    x: prand(i * 4.1 + 3) * w,
-    o: 0.08 + prand(i * 6.6 + 8) * 0.09,
-  }))
-  return (
-    <>
-      <div style={{ ...overlayBox, background: `radial-gradient(ellipse at center, transparent 50%, ${ink}38 100%)` }} />
-      <Svg width={w} height={h}>
-        <filter id={filterId}>
-          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" stitchTiles="stitch" />
-          <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.4 0" />
-        </filter>
-        <rect width={w} height={h} filter={`url(#${filterId})`} opacity={0.2} />
-        {lines.map((l, i) => (
-          <line key={i} x1={l.x} y1={0} x2={l.x} y2={h} stroke={ink} strokeWidth={0.8} opacity={l.o} />
-        ))}
-      </Svg>
-    </>
-  )
-}
-
-// ── 9. Splatter — sharp-edged ink-splat blobs + droplet trail ──
-// (Distinct from Grunge Spray's soft airbrush blur: a splat is a crisp,
-// jagged-silhouette shape, closer to spilled ink than a spray can.)
+// ── 1. Splatter — sharp-edged ink-splat blobs + droplet trail, randomizable ──
+// (fffuel sssplatter: "organic splattered liquid forms" — our version.)
 function splatPoints(cx, cy, baseR, spikes, seed) {
   const pts = []
   for (let i = 0; i < spikes; i++) {
@@ -249,27 +98,28 @@ function splatPoints(cx, cy, baseR, spikes, seed) {
   }
   return pts.join(' ')
 }
-function Splatter({ palette, width: w, height: h }) {
+function Splatter({ palette, width: w, height: h, seed = 0 }) {
   const ink = palette.ink
+  const s = seed * 991
   const splats = [
-    { x: 0.1, y: 0.12, r: 46, spikes: 11, seed: 4 },
-    { x: 0.9, y: 0.88, r: 58, spikes: 13, seed: 22 },
+    { x: 0.14, y: 0.16, r: 130, spikes: 12, seed: 4 + s },
+    { x: 0.86, y: 0.84, r: 155, spikes: 14, seed: 22 + s },
   ]
-  const droplets = Array.from({ length: 30 }, (_, i) => {
-    const corner = i % 2 === 0 ? { x: 0.1, y: 0.12 } : { x: 0.9, y: 0.88 }
-    const spread = 0.22
+  const droplets = Array.from({ length: 26 }, (_, i) => {
+    const corner = i % 2 === 0 ? { x: 0.14, y: 0.16 } : { x: 0.86, y: 0.84 }
+    const spread = 0.3
     return {
-      x: corner.x + (prand(i * 4.2 + 3) - 0.5) * spread,
-      y: corner.y + (prand(i * 6.1 + 9) - 0.5) * spread,
-      r: 2 + prand(i * 3.4 + 5) * 6,
-      o: 0.25 + prand(i * 8.8 + 1) * 0.35,
+      x: corner.x + (prand(i * 4.2 + 3 + s) - 0.5) * spread,
+      y: corner.y + (prand(i * 6.1 + 9 + s) - 0.5) * spread,
+      r: 3 + prand(i * 3.4 + 5 + s) * 9,
+      o: 0.25 + prand(i * 8.8 + 1 + s) * 0.35,
     }
   })
   return (
     <Svg width={w} height={h}>
       <g fill={ink}>
-        {splats.map((s, i) => (
-          <polygon key={`s${i}`} points={splatPoints(s.x * w, s.y * h, s.r, s.spikes, s.seed)} opacity={0.4} />
+        {splats.map((sp, i) => (
+          <polygon key={`s${i}`} points={splatPoints(sp.x * w, sp.y * h, sp.r, sp.spikes, sp.seed)} opacity={0.4} />
         ))}
         {droplets.map((d, i) => (
           <circle key={`d${i}`} cx={d.x * w} cy={d.y * h} r={d.r} opacity={Math.max(0, Math.min(1, d.o))} />
@@ -279,7 +129,7 @@ function Splatter({ palette, width: w, height: h }) {
   )
 }
 
-// ── 10. Chaos Waves — energetic overlapping wave bands, match-day motion ──
+// ── 2. Chaos Waves — energetic overlapping wave bands, match-day motion ──
 function waveLine(w, baseY, amp, freq, phase) {
   const steps = 24
   const pts = []
@@ -301,9 +151,9 @@ function ChaosWaves({ palette, width: w, height: h }) {
   const accent = palette.accent
   const ink = palette.ink
   const bands = [
-    { y: h * 0.82, amp: 30, freq: 3.4, phase: 0.4, fill: accent, o: 0.16, anchor: 'bottom' },
-    { y: h * 0.9, amp: 22, freq: 4.1, phase: 1.6, fill: ink, o: 0.1, anchor: 'bottom' },
-    { y: h * 0.15, amp: 18, freq: 3.8, phase: 2.4, fill: accent, o: 0.1, anchor: 'top' },
+    { y: h * 0.8, amp: 38, freq: 3.4, phase: 0.4, fill: accent, o: 0.16, anchor: 'bottom' },
+    { y: h * 0.9, amp: 26, freq: 4.1, phase: 1.6, fill: ink, o: 0.1, anchor: 'bottom' },
+    { y: h * 0.16, amp: 24, freq: 3.8, phase: 2.4, fill: accent, o: 0.1, anchor: 'top' },
   ]
   return (
     <Svg width={w} height={h}>
@@ -314,7 +164,7 @@ function ChaosWaves({ palette, width: w, height: h }) {
   )
 }
 
-// ── 11. Scribble — dense hand-drawn scribble clusters, playful energy ──
+// ── 3. Scribble — dense hand-drawn scribble clusters, playful energy ──
 function scribblePath(cx, cy, size, seed) {
   const points = 18
   let d = `M ${cx} ${cy}`
@@ -328,12 +178,12 @@ function scribblePath(cx, cy, size, seed) {
 function Scribble({ palette, width: w, height: h }) {
   const ink = palette.ink
   const clusters = [
-    { x: 0.12, y: 0.14, size: 60, seed: 6 },
-    { x: 0.88, y: 0.86, size: 70, seed: 31 },
+    { x: 0.14, y: 0.16, size: 110, seed: 6 },
+    { x: 0.86, y: 0.84, size: 130, seed: 31 },
   ]
   return (
     <Svg width={w} height={h}>
-      <g stroke={ink} strokeWidth={1.6} fill="none" opacity={0.28} strokeLinecap="round" strokeLinejoin="round">
+      <g stroke={ink} strokeWidth={2} fill="none" opacity={0.26} strokeLinecap="round" strokeLinejoin="round">
         {clusters.map((c, i) => (
           <path key={i} d={scribblePath(c.x * w, c.y * h, c.size, c.seed)} />
         ))}
@@ -342,14 +192,14 @@ function Scribble({ palette, width: w, height: h }) {
   )
 }
 
-// ── 12. Blurry Blobs — soft, modern gradient-mesh-style abstract blobs ──
+// ── 4. Blurry Blobs — soft, modern gradient-mesh-style abstract blobs ──
 function BlurryBlobs({ palette, width: w, height: h }) {
   const accent = palette.accent
   const ink = palette.ink
   const blobs = [
-    { x: 0.18, y: 0.22, r: 210, fill: accent, o: 0.18, b: 60 },
-    { x: 0.85, y: 0.2, r: 170, fill: ink, o: 0.08, b: 60 },
-    { x: 0.75, y: 0.85, r: 230, fill: accent, o: 0.14, b: 70 },
+    { x: 0.18, y: 0.22, r: 240, fill: accent, o: 0.18, b: 65 },
+    { x: 0.85, y: 0.2, r: 190, fill: ink, o: 0.08, b: 65 },
+    { x: 0.75, y: 0.85, r: 260, fill: accent, o: 0.14, b: 75 },
   ]
   return (
     <Svg width={w} height={h}>
@@ -362,28 +212,180 @@ function BlurryBlobs({ palette, width: w, height: h }) {
   )
 }
 
+// ── 5. Flux — fluid, organic gradient-mesh blobs, 2 user colours (ffflux) ──
+function Flux({ width: w, height: h, colors, seed = 0 }) {
+  const [c1, c2] = colors
+  const filterId = useFilterId('bg-flux')
+  const s = seed * 991
+  const blobs = [
+    { x: 0.22 + (prand(1 + s) - 0.5) * 0.15, y: 0.28 + (prand(2 + s) - 0.5) * 0.15, r: 260, fill: c1, o: 0.38 },
+    { x: 0.78 + (prand(3 + s) - 0.5) * 0.15, y: 0.32 + (prand(4 + s) - 0.5) * 0.15, r: 230, fill: c2, o: 0.34 },
+    { x: 0.5 + (prand(5 + s) - 0.5) * 0.15, y: 0.78 + (prand(6 + s) - 0.5) * 0.15, r: 280, fill: c1, o: 0.3 },
+    { x: 0.85 + (prand(7 + s) - 0.5) * 0.1, y: 0.82 + (prand(8 + s) - 0.5) * 0.1, r: 200, fill: c2, o: 0.32 },
+  ]
+  return (
+    <Svg width={w} height={h}>
+      <filter id={filterId}>
+        <feGaussianBlur stdDeviation="70" />
+      </filter>
+      <g filter={`url(#${filterId})`}>
+        {blobs.map((b, i) => (
+          <circle key={i} cx={b.x * w} cy={b.y * h} r={b.r} fill={b.fill} opacity={b.o} />
+        ))}
+      </g>
+    </Svg>
+  )
+}
+
+// ── 6. Undulate — repeated organic ripple lines, 2 user colours (uuundulate) ──
+function undulatePath(w, baseY, amp, freq, phase, seedOffset) {
+  const steps = 30
+  let d = `M 0 ${baseY}`
+  for (let i = 1; i <= steps; i++) {
+    const x = (i / steps) * w
+    const wobble = (prand(seedOffset + i * 1.7) - 0.5) * amp * 0.4
+    const y = baseY + Math.sin((i / steps) * Math.PI * freq + phase) * amp + wobble
+    d += ` L ${x} ${y}`
+  }
+  return d
+}
+function Undulate({ width: w, height: h, colors, seed = 0 }) {
+  const [c1, c2] = colors
+  const s = seed * 991
+  const lines = Array.from({ length: 7 }, (_, i) => ({
+    y: h * (0.1 + i * 0.13),
+    amp: 30 + prand(i * 3.3 + s) * 16,
+    freq: 2 + prand(i * 5.1 + s) * 1.5,
+    phase: prand(i * 7.7 + s) * 6,
+    color: i % 2 === 0 ? c1 : c2,
+    o: 0.16 + prand(i * 2.2 + s) * 0.14,
+  }))
+  return (
+    <Svg width={w} height={h}>
+      <g fill="none" strokeLinecap="round">
+        {lines.map((l, i) => (
+          <path key={i} d={undulatePath(w, l.y, l.amp, l.freq, l.phase, i * 11 + s)} stroke={l.color} strokeWidth={3.5} opacity={l.o} />
+        ))}
+      </g>
+    </Svg>
+  )
+}
+
+// ── 7. Rainbow — big packed multi-hue circles, user colours (rrrainbow) ──
+function Rainbow({ width: w, height: h, colors, seed = 0 }) {
+  const s = seed * 991
+  const n = 9
+  const circles = Array.from({ length: n }, (_, i) => ({
+    x: prand(i * 3.3 + 1 + s),
+    y: prand(i * 4.7 + 5 + s),
+    r: 40 + prand(i * 6.1 + 2 + s) * 70,
+    color: colors[i % colors.length],
+    o: 0.3 + prand(i * 2.9 + 7 + s) * 0.25,
+  }))
+  return (
+    <Svg width={w} height={h}>
+      {circles.map((c, i) => (
+        <circle key={i} cx={c.x * w} cy={c.y * h} r={c.r} fill={c.color} opacity={c.o} />
+      ))}
+    </Svg>
+  )
+}
+
+// ── 8. Horizon — cyberpunk sun + receding stripes, 2 user colours (hhhorizon) ──
+function Horizon({ width: w, height: h, colors }) {
+  const [c1, c2] = colors
+  const gradId = useFilterId('bg-horizon-sun')
+  const cx = w * 0.5, cy = h * 0.32, r = Math.min(w, h) * 0.22
+  const stripes = Array.from({ length: 10 }, (_, i) => {
+    const t = i / 9
+    return { y: cy + t * (h - cy) * 1.05, width: 2 + t * 11, o: 0.5 - t * 0.35 }
+  })
+  return (
+    <Svg width={w} height={h}>
+      <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={c1} />
+        <stop offset="100%" stopColor={c2} />
+      </linearGradient>
+      <circle cx={cx} cy={cy} r={r} fill={`url(#${gradId})`} opacity={0.35} />
+      <line x1={0} y1={cy} x2={w} y2={cy} stroke={c2} strokeWidth={2} opacity={0.4} />
+      <g stroke={c2} strokeLinecap="round">
+        {stripes.map((st, i) => (
+          <line key={i} x1={0} y1={st.y} x2={w} y2={st.y} strokeWidth={st.width} opacity={st.o} />
+        ))}
+      </g>
+    </Svg>
+  )
+}
+
+// ── 9. Grunge Vintage — bold mottled wear + vignette (tttexture-inspired) ──
+// (fffuel's tttexture is real macro-photography, not a generator — no
+// algorithm to port. This is our own procedural stand-in: bigger, bolder
+// mottled patches than a fine grain, closer to that worn/vintage read.)
+function GrungeVintage({ palette, width: w, height: h, seed = 0 }) {
+  const ink = palette.ink
+  const filterId = useFilterId('bg-grunge-vintage')
+  const s = seed * 991
+  const patches = Array.from({ length: 6 }, (_, i) => ({
+    x: prand(i * 3.1 + 1 + s),
+    y: prand(i * 4.4 + 3 + s),
+    r: 150 + prand(i * 5.7 + 2 + s) * 170,
+    o: 0.08 + prand(i * 2.2 + 6 + s) * 0.14,
+    b: 45 + prand(i * 6.6 + 4 + s) * 40,
+  }))
+  return (
+    <>
+      <div style={{ ...overlayBox, background: `radial-gradient(ellipse at center, transparent 45%, ${ink}30 100%)` }} />
+      <Svg width={w} height={h}>
+        <filter id={filterId}>
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
+          <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.5 0" />
+        </filter>
+        <rect width={w} height={h} filter={`url(#${filterId})`} opacity={0.18} />
+        <g fill={ink}>
+          {patches.map((p, i) => (
+            <circle key={i} cx={p.x * w} cy={p.y * h} r={p.r} opacity={p.o} style={{ filter: `blur(${p.b}px)` }} />
+          ))}
+        </g>
+      </Svg>
+    </>
+  )
+}
+
 export const BACKGROUND_STYLES = [
   { key: 'none', label: 'Clean', hint: 'No extra texture — just the template default' },
-  { key: 'grunge', label: 'Grunge Spray', hint: 'Spray-can blots in the corners', Component: GrungeSpray },
-  { key: 'torn', label: 'Torn Paper', hint: 'Ragged torn edge, top & bottom', Component: TornPaper },
-  { key: 'scratch', label: 'Scratch & Distress', hint: 'Fine scratches + dust', Component: ScratchDistress },
-  { key: 'confetti', label: 'Confetti Burst', hint: 'Celebratory scattered shapes', Component: ConfettiBurst },
-  { key: 'geometric', label: 'Geometric Shards', hint: 'Bold angular corner blocks', Component: GeometricShards },
-  { key: 'chalk', label: 'Chalkboard Dust', hint: 'Soft chalky haze + doodles', Component: ChalkboardDust },
-  { key: 'halftonepop', label: 'Halftone Pop', hint: 'Comic-style dot burst', Component: HalftonePop },
-  { key: 'vintage', label: 'Vintage Vignette', hint: 'Worn-photo edges + grain', Component: VintageVignette },
-  { key: 'splatter', label: 'Splatter', hint: 'Sharp-edged ink-splat blobs', Component: Splatter },
+  { key: 'splatter', label: 'Splatter', hint: 'Sharp-edged ink-splat blobs', Component: Splatter, randomizable: true },
   { key: 'chaoswaves', label: 'Chaos Waves', hint: 'Energetic overlapping wave bands', Component: ChaosWaves },
   { key: 'scribble', label: 'Scribble', hint: 'Dense hand-drawn scribble clusters', Component: Scribble },
   { key: 'blurryblobs', label: 'Blurry Blobs', hint: 'Soft modern gradient-mesh blobs', Component: BlurryBlobs },
+  {
+    key: 'flux', label: 'Flux', hint: 'Fluid organic gradient mesh', Component: Flux, randomizable: true,
+    customColors: { count: 2, labels: ['Colour 1', 'Colour 2'], defaultFrom: (pal) => [pal.accent, pal.ink] },
+  },
+  {
+    key: 'undulate', label: 'Undulate', hint: 'Repeated organic ripple lines', Component: Undulate, randomizable: true,
+    customColors: { count: 2, labels: ['Colour 1', 'Colour 2'], defaultFrom: (pal) => [pal.accent, pal.ink] },
+  },
+  {
+    key: 'rainbow', label: 'Rainbow', hint: 'Big packed multi-hue circles', Component: Rainbow, randomizable: true,
+    customColors: {
+      count: 4, labels: ['Colour 1', 'Colour 2', 'Colour 3', 'Colour 4'],
+      defaultFrom: (pal) => [pal.accent, rotateHue(pal.accent, 90), rotateHue(pal.accent, 180), rotateHue(pal.accent, 270)],
+    },
+  },
+  {
+    key: 'horizon', label: 'Horizon', hint: 'Cyberpunk sun + receding stripes', Component: Horizon,
+    customColors: { count: 2, labels: ['Fill 1', 'Fill 2'], defaultFrom: (pal) => [pal.accent, pal.ink] },
+  },
+  { key: 'grungevintage', label: 'Grunge Vintage', hint: 'Bold mottled wear + vignette', Component: GrungeVintage, randomizable: true },
 ]
 
 // Renders the chosen texture (or nothing, for 'none') on top of a template's
 // own content. Sits as the last child of the 1080×1080 (or 1920×1080, for
 // scorecards) post so it reads as a finish over the whole design.
-export function BackgroundLayer({ styleKey, palette, width = 1080, height = 1080 }) {
+export function BackgroundLayer({ styleKey, palette, width = 1080, height = 1080, colors, seed = 0 }) {
   const entry = BACKGROUND_STYLES.find((s) => s.key === styleKey)
   if (!entry || !entry.Component || !palette) return null
   const Texture = entry.Component
-  return <Texture palette={palette} width={width} height={height} />
+  const resolvedColors = entry.customColors ? (colors && colors.length === entry.customColors.count ? colors : entry.customColors.defaultFrom(palette)) : undefined
+  return <Texture palette={palette} width={width} height={height} colors={resolvedColors} seed={seed} />
 }
