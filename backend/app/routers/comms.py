@@ -53,6 +53,7 @@ from app.services import comms_segments
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
+from app.services import name_format
 from app.services.send_rate_limiter import send_limiter
 from app.services.email_service import EmailMessage, get_email_provider, provider_status, email_is_live
 
@@ -78,9 +79,11 @@ def _norm_email(raw: Optional[str]) -> Optional[str]:
 
 
 def _first_name(name: Optional[str], email: str) -> str:
-    n = (name or "").strip()
-    if n:
-        return n.split()[0]
+    # A club stores players surname-first ("Barendse, Elton"), so derive the given
+    # name format-aware (the part after the comma) rather than the first token.
+    fn = name_format.first_name(name)
+    if fn:
+        return fn
     return (email.split("@", 1)[0] or "there").replace(".", " ").split()[0].title()
 
 

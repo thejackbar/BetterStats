@@ -14,6 +14,26 @@ from __future__ import annotations
 import re
 
 
+def first_name(name: str | None) -> str:
+    """Extract the given (first) name, preserving case, from either stored shape:
+    - ``"Last, First"`` (canonical / synced)  → ``"First"`` (the part after the comma)
+    - free-text ``"First Last"``              → ``"First"`` (the first token)
+    - a single token (e.g. a nickname)        → that token
+
+    This is what powers ``{{first_name}}`` — a club stores players surname-first,
+    so a naive first-token split would return the surname. Empty/None → ``""``.
+    """
+    n = (name or "").strip()
+    if not n:
+        return ""
+    if "," in n:
+        _, _, given = n.partition(",")
+        toks = given.strip().split()
+        return toks[0] if toks else ""
+    words = [w for w in re.split(r"\s+", n) if w]
+    return words[0] if words else ""
+
+
 def name_sort_key(name: str | None) -> tuple[str, str]:
     """Return a ``(surname, given)`` sort key for a player name.
 
