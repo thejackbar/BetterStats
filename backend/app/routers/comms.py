@@ -42,7 +42,7 @@ from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership, Team,
     CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
-    CommsList, CommsListMember, EmailSuppression, EmailEvent,
+    CommsList, CommsListMember, EmailSuppression, EmailEvent, CommsLimitRequest,
     MarketingClub, MarketingClubContact,
     async_session_maker, get_db,
 )
@@ -50,6 +50,9 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
+from app.services import comms_limits
+from app.services import club_requests
+from app.services.send_rate_limiter import send_limiter
 from app.services.email_service import EmailMessage, get_email_provider, provider_status, email_is_live
 
 logger = logging.getLogger(__name__)
@@ -1054,20 +1057,39 @@ async def send_campaign(
     if not contacts:
         raise HTTPException(status_code=422, detail="No subscribed contacts match this audience")
 
+    # Sending guards: a suspended club or one whose bounce/complaint rate has
+    # tripped the breaker is refused outright (don't even queue). A club that has
+    # merely reached its daily cap is allowed — the send loop sends what today's
+    # allowance covers and defers the rest to tomorrow (auto-resumed).
+    pf = await comms_limits.preflight(db, club)
+    if pf["tier"] == comms_limits.TIER_SUSPENDED:
+        raise HTTPException(status_code=403, detail=pf["blocked"] or
+                            "Sending is suspended for this club pending review.")
+    if pf["breaker_reason"]:
+        raise HTTPException(status_code=403,
+                            detail=f"Sending is paused: {pf['breaker_reason']}. "
+                                   "Contact BetterCricket to review.")
+    if pf["account_remaining"] <= 0:
+        raise HTTPException(status_code=429,
+                            detail="The platform's daily send limit is reached — try again tomorrow.")
+
     for ct in contacts:
         db.add(CommsRecipient(
             campaign_id=c.id, organisation_id=club.id, contact_id=ct.id,
             email=ct.email, name=ct.name, status="queued",
         ))
     c.status = "sending"
-    c.stats = {"recipients": len(contacts), "sent": 0, "failed": 0}
+    c.stats = {"recipients": len(contacts), "sent": 0, "failed": 0, "deferred": 0}
     c.error = None
     await db.commit()
 
     task = asyncio.create_task(_run_send(str(c.id), str(club.id)))
     _SEND_TASKS.add(task)
     task.add_done_callback(_SEND_TASKS.discard)
-    return {"status": "sending", "recipients": len(contacts), "live": get_email_provider().name != "console"}
+    return {"status": "sending", "recipients": len(contacts),
+            "allowance": pf["allowance"], "daily_cap": pf["daily_cap"],
+            "sent_today": pf["sent_today"],
+            "live": get_email_provider().name != "console"}
 
 
 @router.get("/campaigns/{campaign_id}/status")
@@ -1084,7 +1106,13 @@ async def campaign_status(
 async def _run_send(campaign_id: str, org_id: str) -> None:
     """Detached send loop. Reads recipient data first, performs the provider
     sends concurrently OUTSIDE the session (async sessions aren't concurrency
-    safe), then writes results back sequentially."""
+    safe), then writes results back sequentially.
+
+    Daily-cap aware: only today's remaining allowance (the tighter of the club
+    cap and the account ceiling) is sent now; the overflow is marked ``deferred``
+    and the campaign stays ``sending`` so the daily resume job finishes it
+    tomorrow. Every provider send is paced through the account-wide rate limiter
+    so we stay under the AWS per-second ceiling across all clubs at once."""
     try:
         async with async_session_maker() as s:
             camp = await s.get(CommsCampaign, uuid.UUID(campaign_id))
@@ -1092,9 +1120,33 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
             if not camp or not org or camp.status != "sending":
                 return
             _, _, _, footer = _sender(org)
+            # Both 'queued' (first run) and 'deferred' (resumed) are sendable;
+            # oldest first so a deferred batch keeps its place in line.
             recips = (await s.execute(select(CommsRecipient).where(
-                CommsRecipient.campaign_id == camp.id, CommsRecipient.status == "queued"
-            ))).scalars().all()
+                CommsRecipient.campaign_id == camp.id,
+                CommsRecipient.status.in_(("queued", "deferred")),
+            ).order_by(CommsRecipient.created_at))).scalars().all()
+            # Cap to today's allowance; defer the rest to tomorrow.
+            allowance = await comms_limits.send_allowance(s, org)
+            deferred_rows = recips[allowance:] if allowance < len(recips) else []
+            recips = recips[:allowance]
+            deferred_count = len(deferred_rows)
+            if deferred_rows:
+                await s.execute(
+                    update(CommsRecipient)
+                    .where(CommsRecipient.id.in_([r.id for r in deferred_rows]))
+                    .values(status="deferred"))
+                await s.commit()
+            if not recips:
+                # Nothing sendable today (cap already spent) — leave the campaign
+                # 'sending' with its deferred tally; the resume job picks it up.
+                st = dict(camp.stats or {})
+                st["deferred"] = deferred_count
+                camp.stats = st
+                await s.commit()
+                logger.info("BetterComms: campaign %s deferred all %d (cap reached)",
+                            campaign_id, deferred_count)
+                return
             # Per-recipient directory vars (club / association / utm_code) for any
             # contact exported from the Clubs Directory — one batched lookup.
             mc_vars: dict = {}
@@ -1133,6 +1185,10 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
 
         async def _send_one(rid, msg):
             async with sem:
+                # Pace under the account-wide SES rate ceiling before every send,
+                # so all clubs sending at once still can't exceed AWS's per-second
+                # limit. The concurrency cap (sem) and the rate cap compose.
+                await send_limiter.acquire()
                 res = await provider.send(msg)
                 return rid, res
 
@@ -1156,12 +1212,27 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     failed += 1
             camp = await s.get(CommsCampaign, uuid.UUID(campaign_id))
             if camp:
-                camp.status = "sent"
-                camp.sent_at = now
-                camp.stats = {"recipients": sent + failed, "sent": sent, "failed": failed}
-                if failed and not sent:
-                    camp.status = "error"
-                    camp.error = "All sends failed — check the email provider configuration."
+                # Cumulative tallies across runs (a resumed campaign adds to what
+                # earlier runs already sent). Recompute from the recipient rows so
+                # the numbers stay right regardless of how many resume passes ran.
+                totals = (await s.execute(select(
+                    func.count(CommsRecipient.id),
+                    func.count(CommsRecipient.id).filter(CommsRecipient.status == "sent"),
+                    func.count(CommsRecipient.id).filter(CommsRecipient.status == "failed"),
+                    func.count(CommsRecipient.id).filter(CommsRecipient.status == "deferred"),
+                ).where(CommsRecipient.campaign_id == camp.id))).one()
+                total_all, total_sent, total_failed, total_deferred = (int(x) for x in totals)
+                camp.stats = {"recipients": total_all, "sent": total_sent,
+                              "failed": total_failed, "deferred": total_deferred}
+                if total_deferred > 0:
+                    # More to go tomorrow — stay 'sending' so the resume job finds it.
+                    camp.status = "sending"
+                else:
+                    camp.status = "sent"
+                    camp.sent_at = now
+                    if total_failed and not total_sent:
+                        camp.status = "error"
+                        camp.error = "All sends failed — check the email provider configuration."
             # Reflect a marketing-outreach send back onto the directory: any club
             # whose exported contact was just sent to is flagged emailed_via=
             # 'campaign' so it isn't re-exported. No-op for ordinary club sends
@@ -1188,6 +1259,124 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     await s.commit()
         except Exception:
             pass
+
+
+async def resume_deferred_campaigns() -> int:
+    """Re-dispatch campaigns that still have deferred recipients (daily job).
+
+    Runs after the AWS quota window rolls over, so each club gets a fresh daily
+    allowance. Re-uses ``_run_send`` per campaign, which re-caps to the new
+    allowance and defers anything still over — so a very large campaign drains
+    over several days without ever breaching a cap. Returns the number of
+    campaigns it kicked."""
+    kicked = 0
+    async with async_session_maker() as s:
+        rows = (await s.execute(text("""
+            SELECT DISTINCT c.id, c.organisation_id
+            FROM comms_campaigns c
+            JOIN comms_recipients r ON r.campaign_id = c.id
+            WHERE c.status = 'sending' AND r.status = 'deferred'
+        """))).all()
+    for cid, org_id in rows:
+        try:
+            await _run_send(str(cid), str(org_id))
+            kicked += 1
+        except Exception as e:
+            logger.error("BetterComms resume failed for %s: %s", cid, e, exc_info=True)
+    if kicked:
+        logger.info("BetterComms: resumed %d deferred campaign(s)", kicked)
+    return kicked
+
+
+# ─── Sending limits + tier-increase request ──────────────────────────────────
+
+def _limit_request_out(r: CommsLimitRequest) -> dict:
+    return {
+        "id": str(r.id),
+        "current_tier": r.current_tier,
+        "requested_tier": r.requested_tier,
+        "requested_cap": r.requested_cap,
+        "reason": r.reason,
+        "status": r.status,
+        "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "decision_note": r.decision_note,
+    }
+
+
+@router.get("/limits")
+async def get_limits(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's current sending tier, today's usage, deliverability and any open
+    request — powers the 'Sending limits' card in BetterComms settings."""
+    pf = await comms_limits.preflight(db, club)
+    open_req = (await db.execute(select(CommsLimitRequest).where(
+        CommsLimitRequest.organisation_id == club.id,
+        CommsLimitRequest.status == "pending",
+    ).order_by(CommsLimitRequest.requested_at.desc()))).scalars().first()
+    history = (await db.execute(select(CommsLimitRequest).where(
+        CommsLimitRequest.organisation_id == club.id,
+    ).order_by(CommsLimitRequest.requested_at.desc()).limit(10))).scalars().all()
+    return {
+        **pf,
+        "can_request": pf["tier"] == comms_limits.TIER_SANDBOX and open_req is None,
+        "open_request": _limit_request_out(open_req) if open_req else None,
+        "history": [_limit_request_out(r) for r in history],
+    }
+
+
+class LimitRequestIn(BaseModel):
+    reason: Optional[str] = None
+    requested_cap: Optional[int] = None
+
+
+@router.post("/limits/request")
+async def request_limit_increase(
+    data: LimitRequestIn,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """A club asks BetterCricket to lift it out of the sandbox. Queues a
+    super-admin decision, records telemetry, and raises an automated Twenty task.
+    One open request at a time."""
+    tier = comms_limits.normalise_tier(getattr(club, "comms_tier", None))
+    if tier == comms_limits.TIER_PRODUCTION:
+        raise HTTPException(status_code=409, detail="This club is already on the production tier.")
+    if tier == comms_limits.TIER_SUSPENDED:
+        raise HTTPException(status_code=409,
+                            detail="Sending is suspended pending review — contact BetterCricket directly.")
+    existing = (await db.execute(select(CommsLimitRequest).where(
+        CommsLimitRequest.organisation_id == club.id,
+        CommsLimitRequest.status == "pending",
+    ))).scalars().first()
+    if existing:
+        raise HTTPException(status_code=409, detail="A request is already pending review.")
+
+    req = CommsLimitRequest(
+        organisation_id=club.id, current_tier=tier,
+        requested_tier=comms_limits.TIER_PRODUCTION,
+        requested_cap=(int(data.requested_cap) if data.requested_cap else None),
+        reason=(data.reason or "").strip() or None,
+        requested_by=user.id,
+    )
+    db.add(req)
+    await db.flush()
+    # Telemetry + automated Twenty CRM task (uniform across every club→BC request).
+    metrics = await comms_limits.deliverability_metrics(db, club.id)
+    ev = await club_requests.add_request_event(
+        db, org_id=club.id, request_type="comms_tier_increase",
+        summary=f"BetterComms: {club.name} requests production sending limit",
+        detail={"reason": req.reason, "requested_cap": req.requested_cap,
+                "current_tier": tier, "metrics": metrics},
+        source="bettercomms", requested_by=user.id,
+        ref_table="comms_limit_requests", ref_id=req.id)
+    await db.commit()
+    club_requests.fire_twenty_task(ev.id)
+    return {"status": "pending", "request": _limit_request_out(req)}
 
 
 # ─── Settings ────────────────────────────────────────────────────────────────

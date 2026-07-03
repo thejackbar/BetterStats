@@ -23,6 +23,7 @@ so mail authenticates and lands in the inbox.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import hmac
@@ -41,6 +42,25 @@ from app.config.settings import settings
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
+# SES send retry (throttling / transient 5xx only). Kept small — the pacer keeps
+# us under the rate ceiling, so retries are the exception, not the rule.
+_SES_MAX_RETRIES = 3
+_SES_BACKOFF_BASE = 0.5   # seconds; doubles each attempt
+_SES_BACKOFF_MAX = 8.0
+
+
+def _retry_after_seconds(resp: "httpx.Response") -> float:
+    """Honour a Retry-After header (SES/ELB sometimes sends one on a throttle).
+    Returns 0 when absent or unparseable, letting the caller fall back to its
+    exponential backoff."""
+    raw = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+    if not raw:
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @dataclass
@@ -308,18 +328,37 @@ class SesEmailProvider(EmailProvider):
         if cfg:
             payload["ConfigurationSetName"] = cfg
         body = json.dumps(payload)
-        headers = _sigv4_headers(
-            service="ses", region=self.region, host=self.host, path=self.path,
-            body=body, access_key=self.access_key, secret_key=self.secret_key)
-        try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                resp = await client.post(f"https://{self.host}{self.path}", content=body, headers=headers)
-            if resp.status_code >= 400:
-                return SendResult(ok=False, error=f"ses {resp.status_code}: {resp.text[:300]}")
-            data = resp.json() if resp.content else {}
-            return SendResult(ok=True, message_id=str(data.get("MessageId") or ""))
-        except Exception as e:
-            return SendResult(ok=False, error=f"ses error: {e}")
+        # A throttle (429) or a transient 5xx means "slow down / try again", not
+        # "this address is bad" — retry with backoff so a momentary rate blip or
+        # server error doesn't permanently drop the recipient. The account-wide
+        # pacer (services/send_rate_limiter) already keeps us under the per-second
+        # ceiling; this is the belt-and-braces for the edges. SigV4 is re-signed
+        # each attempt (the signature is time-bound).
+        last_err = "ses error"
+        for attempt in range(_SES_MAX_RETRIES + 1):
+            headers = _sigv4_headers(
+                service="ses", region=self.region, host=self.host, path=self.path,
+                body=body, access_key=self.access_key, secret_key=self.secret_key)
+            try:
+                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                    resp = await client.post(f"https://{self.host}{self.path}", content=body, headers=headers)
+                if resp.status_code < 400:
+                    data = resp.json() if resp.content else {}
+                    return SendResult(ok=True, message_id=str(data.get("MessageId") or ""))
+                last_err = f"ses {resp.status_code}: {resp.text[:300]}"
+                # Retry throttling + server errors; a 4xx that isn't 429 is a real
+                # rejection (bad address / not verified) — fail fast, no retry.
+                retryable = resp.status_code == 429 or resp.status_code >= 500
+                if not retryable or attempt >= _SES_MAX_RETRIES:
+                    return SendResult(ok=False, error=last_err)
+                delay = _retry_after_seconds(resp) or (_SES_BACKOFF_BASE * (2 ** attempt))
+                await asyncio.sleep(min(delay, _SES_BACKOFF_MAX))
+            except Exception as e:  # network / timeout
+                last_err = f"ses error: {e}"
+                if attempt >= _SES_MAX_RETRIES:
+                    return SendResult(ok=False, error=last_err)
+                await asyncio.sleep(min(_SES_BACKOFF_BASE * (2 ** attempt), _SES_BACKOFF_MAX))
+        return SendResult(ok=False, error=last_err)
 
 
 def get_email_provider() -> EmailProvider:

@@ -121,6 +121,35 @@ class Settings(BaseSettings):
     ses_club_domain: str = "betteradmin-comms.work"
     ses_marketing_domain: str = "betteratcricket-comms.work"
 
+    # ─── BetterComms — send-rate + quota guards (keep us inside the AWS grant) ──
+    # AWS granted this account 14 messages/second and 50,000/day. We pace every
+    # send through a process-global token bucket set a touch under the ceiling, so
+    # ALL campaigns (every club + the marketing org + any future transactional
+    # send) share one account-wide rate. Single uvicorn worker ⇒ the in-process
+    # bucket bounds the whole account; if the box ever runs multiple workers,
+    # divide ses_max_send_rate by the worker count (or move the bucket to Redis).
+    ses_max_send_rate: int = 13                    # per second, under AWS's 14/s
+    # Account-wide daily send ceiling we hold ourselves to. Kept under the 50,000
+    # AWS grant with headroom reserved for transactional / retries.
+    ses_daily_quota: int = 50000
+    ses_daily_quota_headroom: int = 5000           # reserve → 45,000 usable for campaigns
+
+    # ─── BetterComms — per-club sending tiers (AWS-sandbox-style onboarding) ────
+    # A new club starts in 'sandbox' with a low daily cap; once it has sent
+    # cleanly it requests a lift to 'production' (a super admin approves). A club
+    # whose bounce/complaint rate crosses the AWS danger line is auto-moved to
+    # 'suspended' (cap 0) until a super admin reinstates it. Caps are per-club per
+    # day; an explicit per-org override (organisations.comms_daily_limit) wins.
+    comms_sandbox_daily_cap: int = 50
+    comms_production_daily_cap: int = 2000
+    # Bounce/complaint circuit breaker. AWS reviews accounts over ~5% bounce or
+    # ~0.1% complaint; we trip below that to stay safe, but only once a club has
+    # sent enough to judge (min_sample) over the trailing window (days).
+    comms_bounce_rate_threshold: float = 0.05
+    comms_complaint_rate_threshold: float = 0.001
+    comms_metrics_window_days: int = 30
+    comms_metrics_min_sample: int = 50
+
     # ─── Twenty CRM integration (super-admin GTM workspace) ───────────────────
     # Self-hosted Twenty instance that holds the BetterCricket sales/CRM model.
     # The export pushes the *targeted subset* of the Clubs Directory (filtered
