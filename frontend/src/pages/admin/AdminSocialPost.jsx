@@ -237,7 +237,7 @@ function DesignSwatch({ design, selected, onClick }) {
       }}
     >
       <div style={{ width: 1080, height: 1080, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute' }}>
-        <BackgroundLayer styleKey={design.bgStyle} palette={pal} width={1080} height={1080} />
+        <BackgroundLayer styleKey={design.bgStyle} palette={pal} width={1080} height={1080} colors={design.bgColors} seed={design.bgSeed || 0} />
       </div>
       <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 8, background: design.accent }} />
     </button>
@@ -547,6 +547,15 @@ export default function AdminSocialPost() {
   const [bgStyle, setBgStyle] = useState(() =>
     localStorage.getItem('bs_social_bg') || 'none'
   )
+  // Per-style custom colours (Flux/Undulate/Rainbow/Horizon) and per-style
+  // random seed (for the "🎲 Randomize" control on the randomizable styles),
+  // keyed by bgStyle key so switching styles doesn't lose either setting.
+  const [bgColors, setBgColors] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_bg_colors') || '{}') } catch { return {} }
+  })
+  const [bgSeeds, setBgSeeds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_bg_seeds') || '{}') } catch { return {} }
+  })
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
   const patchMatch = patch => setMatch(m => ({ ...m, ...patch }))
@@ -662,6 +671,8 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_dark', JSON.stringify(darkMode)) }, [darkMode])
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
+  useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
+  useEffect(() => { localStorage.setItem('bs_social_bg_seeds', JSON.stringify(bgSeeds)) }, [bgSeeds])
 
   useEffect(() => {
     Promise.all([api.adminGetSettings(), api.adminListPlayers(), api.adminListSponsors()])
@@ -1077,6 +1088,10 @@ export default function AdminSocialPost() {
 
   const themedPalette = applyTheme(activePalette, darkMode)
 
+  const bgEntry = BACKGROUND_STYLES.find(s => s.key === bgStyle)
+  const bgActiveColors = bgEntry?.customColors ? (bgColors[bgStyle] || bgEntry.customColors.defaultFrom(themedPalette)) : undefined
+  const bgActiveSeed = bgSeeds[bgStyle] || 0
+
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const isScorecard = !!(tmpl.isScorecard)
@@ -1372,7 +1387,39 @@ export default function AdminSocialPost() {
                 {BACKGROUND_STYLES.map(s => (
                   <BgStyleSwatch key={s.key} entry={s} palette={renderPalette} selected={bgStyle === s.key} onClick={() => setBgStyle(s.key)} />
                 ))}
+                {bgEntry?.randomizable && (
+                  <button
+                    onClick={() => setBgSeeds(s => ({ ...s, [bgStyle]: (s[bgStyle] || 0) + 1 }))}
+                    title="Shuffle this texture's shape"
+                    className="px-2.5 py-1 rounded border pb-hairline text-[11px] font-mono text-pb-faint hover:text-pb-text transition-colors"
+                  >🎲 Randomize</button>
+                )}
               </div>
+              {bgEntry?.customColors && (
+                <div className="flex gap-3 flex-wrap items-center mt-2">
+                  {bgEntry.customColors.labels.map((label, i) => (
+                    <label key={i} className="flex items-center gap-1.5 text-[11px] text-pb-faint font-mono">
+                      <input
+                        type="color"
+                        value={(bgActiveColors[i] || '#000000')}
+                        onChange={e => setBgColors(c => {
+                          const cur = c[bgStyle] || bgEntry.customColors.defaultFrom(themedPalette)
+                          const next = [...cur]; next[i] = e.target.value
+                          return { ...c, [bgStyle]: next }
+                        })}
+                        className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                  {bgColors[bgStyle] && (
+                    <button
+                      onClick={() => setBgColors(c => { const next = { ...c }; delete next[bgStyle]; return next })}
+                      className="text-pb-faintest hover:text-pb-text text-[10px] font-mono underline"
+                    >Reset to club colours</button>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
                 <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Saved Designs</span>
                 {savedDesigns.map(d => (
@@ -1385,6 +1432,8 @@ export default function AdminSocialPost() {
                         setBgStyle(d.bgStyle)
                         setFontKey(d.fontKey)
                         setDarkMode(d.dark)
+                        if (d.bgColors) setBgColors(c => ({ ...c, [d.bgStyle]: d.bgColors }))
+                        if (d.bgSeed) setBgSeeds(s => ({ ...s, [d.bgStyle]: d.bgSeed }))
                       }}
                     />
                     <button
@@ -1420,7 +1469,10 @@ export default function AdminSocialPost() {
                       const nextPalettes = [...savedPalettes, pal]
                       setSavedPalettes(nextPalettes)
                       localStorage.setItem('bs_social_palettes', JSON.stringify(nextPalettes))
-                      const design = { key, name, primary: activePalette.primary, secondary: activePalette.secondary, accent: activePalette.accent, ink: activePalette.ink, bgStyle, fontKey, dark: darkMode }
+                      const design = {
+                        key, name, primary: activePalette.primary, secondary: activePalette.secondary, accent: activePalette.accent, ink: activePalette.ink,
+                        bgStyle, fontKey, dark: darkMode, bgColors: bgColors[bgStyle] || null, bgSeed: bgSeeds[bgStyle] || 0,
+                      }
                       const nextDesigns = [...savedDesigns, design]
                       setSavedDesigns(nextDesigns)
                       localStorage.setItem('bs_social_designs', JSON.stringify(nextDesigns))
@@ -2296,7 +2348,7 @@ export default function AdminSocialPost() {
                   <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                     <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
                       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
-                      <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} />
+                      <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} colors={bgActiveColors} seed={bgActiveSeed} />
                     </div>
                   </div>
                 )
@@ -2334,7 +2386,7 @@ export default function AdminSocialPost() {
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                       <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
                         <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
-                        <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} />
+                        <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} colors={bgActiveColors} seed={bgActiveSeed} />
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
@@ -2353,7 +2405,7 @@ export default function AdminSocialPost() {
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
         <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
-          <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} />
+          <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} colors={bgActiveColors} seed={bgActiveSeed} />
         </div>
       </div>
 
