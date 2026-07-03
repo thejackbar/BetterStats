@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2081,6 +2081,36 @@ async def lifespan(app: FastAPI):
             FROM organisations o
             ON CONFLICT (organisation_id, module_key) DO NOTHING
         """))
+        # Meta Ads dashboard (migration 125): daily campaign/ad snapshots for the
+        # super-admin HQ page. Defensive idempotent create so the API boots even
+        # if alembic 125 hasn't run yet.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS meta_ad_snapshots (
+                id BIGSERIAL PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                level TEXT NOT NULL,
+                ad_id TEXT,
+                ad_name TEXT,
+                spend NUMERIC NOT NULL DEFAULT 0,
+                impressions NUMERIC NOT NULL DEFAULT 0,
+                link_clicks NUMERIC NOT NULL DEFAULT 0,
+                link_ctr NUMERIC NOT NULL DEFAULT 0,
+                landing_page_views NUMERIC NOT NULL DEFAULT 0,
+                cost_per_lpv NUMERIC,
+                leads NUMERIC NOT NULL DEFAULT 0,
+                recommendation TEXT,
+                recommendation_status TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_meta_ad_snapshots_date_level_ad "
+            "ON meta_ad_snapshots(snapshot_date, level, COALESCE(ad_id, ''))"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_meta_ad_snapshots_date "
+            "ON meta_ad_snapshots(snapshot_date DESC)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -2248,6 +2278,7 @@ app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migratio
 app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
+app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

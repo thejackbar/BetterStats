@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -140,6 +141,24 @@ async def crawl_marketing_clubs():
             logger.error(f"Marketing club crawl failed: {e}")
 
 
+async def snapshot_meta_ads():
+    """Pull the Meta Ads campaign/ad totals and store today's snapshot, so the HQ
+    dashboard reads instantly without hitting Meta on every page load. No-op
+    (logged, not raised) when the token isn't configured or Meta is unreachable —
+    a bad snapshot day must never take the scheduler down."""
+    if not settings.meta_ads_configured:
+        return
+    from app.services import meta_ads
+    logger.info("Starting scheduled Meta Ads snapshot")
+    async with async_session_maker() as session:
+        try:
+            await meta_ads.run_snapshot(session)
+            logger.info("Meta Ads snapshot done")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Meta Ads snapshot failed: {e}")
+
+
 async def sweep_module_trials():
     """Refresh the held-modules cache for any club whose module trial has passed
     its end, so the synchronous gate drops it even where the per-module rows aren't
@@ -226,6 +245,17 @@ def start_scheduler():
         id="daily_twenty_leads_tasks",
         replace_existing=True,
     )
+    # Meta Ads HQ dashboard — daily campaign/ad snapshot at 09:00 Perth time (the
+    # spec's "refreshed by a daily 9am job"). No-op when the token isn't set.
+    scheduler.add_job(
+        snapshot_meta_ads,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        timezone=ZoneInfo("Australia/Perth"),
+        id="daily_meta_ads_snapshot",
+        replace_existing=True,
+    )
     # BetterFantasyCricket — advance lapsed draft clocks every 15 minutes.
     scheduler.add_job(
         resolve_all_drafts,
@@ -267,7 +297,7 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
                 "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
-                "draft tick /15min", marketing_mode)
+                "Meta Ads snapshot 09:00 Perth, draft tick /15min", marketing_mode)
 
 
 def stop_scheduler():

@@ -144,6 +144,21 @@ class Settings(BaseSettings):
     # in Twenty under Settings > Members, or via GET /rest/workspaceMembers.
     twenty_task_assignee_id: str = ""
 
+    # ─── Meta Ads dashboard (super-admin HQ — BetterCricket's own ad spend) ────
+    # System-user token (ads_read + read_insights) for the Meta Marketing API,
+    # read-only against one campaign in the platform's own ad account. Blank
+    # token = the HQ page shows a friendly "configure token" state, not a crash.
+    # See docs handed to Jack for how to generate the token (Business Settings >
+    # Users > System users > Assign assets > Generate new token).
+    meta_access_token: str = ""
+    meta_ad_account_id: str = "1030195476512456"
+    meta_campaign_id: str = "120249237210710121"
+    meta_api_version: str = "v21.0"
+
+    @property
+    def meta_ads_configured(self) -> bool:
+        return bool(self.meta_access_token and self.meta_ad_account_id)
+
     @property
     def twenty_configured(self) -> bool:
         return bool(self.twenty_api_url and self.twenty_api_key)
