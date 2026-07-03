@@ -97,6 +97,7 @@ const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
 const SuperLoginAttempts = lazy(() => import('./pages/admin/SuperLoginAttempts'))
 const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests'))
+const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
 const SuperMarketing = lazy(() => import('./pages/admin/SuperMarketing'))
 const SuperAnnounce = lazy(() => import('./pages/admin/SuperAnnounce'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
@@ -278,6 +279,7 @@ export default function App() {
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
           <Route path="/admin/super/login-attempts" element={<ProtectedRoute requireRole="super_admin"><SuperLoginAttempts /></ProtectedRoute>} />
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
+          <Route path="/admin/super/comms-limits" element={<ProtectedRoute requireRole="super_admin"><SuperCommsLimits /></ProtectedRoute>} />
           <Route path="/admin/super/marketing" element={<ProtectedRoute requireRole="super_admin"><SuperMarketing /></ProtectedRoute>} />
           <Route path="/admin/super/announce" element={<ProtectedRoute requireRole="super_admin"><SuperAnnounce /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />

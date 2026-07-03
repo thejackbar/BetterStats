@@ -27,6 +27,7 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    comms_tier: 'sandbox', comms_daily_limit: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [clubAdmins, setClubAdmins] = useState([])
@@ -171,6 +172,8 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
+      comms_tier: club.comms_tier || 'sandbox',
+      comms_daily_limit: club.comms_daily_limit ?? '',
     })
     setClubAdmins([])
     api.superListClubAdmins(club.id).then(d => setClubAdmins(Array.isArray(d) ? d : [])).catch(() => {})
@@ -267,6 +270,7 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
+        comms_daily_limit: editForm.comms_daily_limit === '' ? null : Number(editForm.comms_daily_limit),
       }
       await api.superPatchClub(editId, payload)
       setMsg('Club updated')
@@ -650,6 +654,22 @@ export default function SuperClubs() {
                       <input type="date" value={editForm.renewal_date}
                         onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
                         className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">BetterComms sending tier</label>
+                      <select value={editForm.comms_tier}
+                        onChange={e => setEditForm(f => ({ ...f, comms_tier: e.target.value }))}
+                        className={INPUT_CLS}>
+                        <option value="sandbox">Sandbox (low daily cap)</option>
+                        <option value="production">Production</option>
+                        <option value="suspended">Suspended (blocked)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Daily send cap (blank = tier default)</label>
+                      <input type="number" min="0" value={editForm.comms_daily_limit}
+                        onChange={e => setEditForm(f => ({ ...f, comms_daily_limit: e.target.value }))}
+                        placeholder="tier default" className={INPUT_CLS} />
                     </div>
                     {clubAdmins.length > 0 && (
                       <div className="col-span-2">

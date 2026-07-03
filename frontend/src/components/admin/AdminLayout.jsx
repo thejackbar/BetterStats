@@ -82,6 +82,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
   { to: '/admin/super/login-attempts', label: 'Login Attempts' },
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
+  { to: '/admin/super/comms-limits', label: 'Comms Limits', badge: 'commsRequests' },
   { to: '/admin/super/announce', label: 'Club Announcements' },
   { to: '/admin/usage', label: 'Usage' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
@@ -98,6 +99,9 @@ export default function AdminLayout({ children }) {
     api.superCountModuleRequests()
       .then(d => { if (alive) setModuleReqCount(d?.outstanding || 0) })
       .catch(() => {})
+    api.superCountCommsRequests()
+      .then(d => { if (alive) setCommsReqCount(d?.total || 0) })
+      .catch(() => {})
     return () => { alive = false }
   }, [user?.role])
   const location = useLocation()
@@ -105,6 +109,8 @@ export default function AdminLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   // Outstanding module requests (super-admin queue badge).
   const [moduleReqCount, setModuleReqCount] = useState(0)
+  // Pending BetterComms tier requests + breaker-suspended clubs (badge).
+  const [commsReqCount, setCommsReqCount] = useState(0)
   const [bellOpen, setBellOpen] = useState(false)
   const [bellSummary, setBellSummary] = useState(null)
   const [bellError, setBellError] = useState(null)
@@ -343,6 +349,11 @@ export default function AdminLayout({ children }) {
                     {link.badge === 'moduleRequests' && moduleReqCount > 0 && (
                       <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
                         {moduleReqCount}
+                      </span>
+                    )}
+                    {link.badge === 'commsRequests' && commsReqCount > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
+                        {commsReqCount}
                       </span>
                     )}
                   </Link>
