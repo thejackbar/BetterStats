@@ -18,6 +18,7 @@ import {
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
 import { exportNodeToPng } from '../../social/exportImage'
+import { BACKGROUND_STYLES, BackgroundLayer } from '../../social/backgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 
@@ -189,6 +190,32 @@ function PaletteSwatch({ pal, selected, onClick }) {
       style={{ background: pal.primary, border: `2px solid ${selected ? pal.accent : 'transparent'}`, borderRadius: 6, width: 36, height: 36, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
     >
       <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 10, background: pal.accent }} />
+    </button>
+  )
+}
+
+// Background-texture picker swatch — renders a live miniature of the actual
+// texture (scaled down from its real 1080×1080 render) so clubs can see what
+// they're picking, not just a label.
+const BG_SWATCH_SIZE = 40
+function BgStyleSwatch({ entry, palette, selected, onClick }) {
+  const scale = BG_SWATCH_SIZE / 1080
+  return (
+    <button
+      onClick={onClick}
+      title={`${entry.label}${entry.hint ? ` — ${entry.hint}` : ''}`}
+      style={{
+        width: BG_SWATCH_SIZE, height: BG_SWATCH_SIZE, borderRadius: 6, cursor: 'pointer', overflow: 'hidden', position: 'relative',
+        background: palette.primary, border: `2px solid ${selected ? palette.accent : 'transparent'}`, flexShrink: 0,
+      }}
+    >
+      {entry.Component ? (
+        <div style={{ width: 1080, height: 1080, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute' }}>
+          <BackgroundLayer styleKey={entry.key} palette={palette} width={1080} height={1080} />
+        </div>
+      ) : (
+        <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 8, color: palette.ink, opacity: 0.5 }}>✕</span>
+      )}
     </button>
   )
 }
@@ -491,6 +518,11 @@ export default function AdminSocialPost() {
   const [fontKey, setFontKey] = useState(() =>
     localStorage.getItem('bs_social_font') || 'barlow'
   )
+  // Background texture, layered over any template — persisted like the other
+  // Style controls so a club's preferred "finish" carries between posts.
+  const [bgStyle, setBgStyle] = useState(() =>
+    localStorage.getItem('bs_social_bg') || 'none'
+  )
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
   const patchMatch = patch => setMatch(m => ({ ...m, ...patch }))
@@ -594,6 +626,7 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_palette', paletteKey) }, [paletteKey])
   useEffect(() => { localStorage.setItem('bs_social_dark', JSON.stringify(darkMode)) }, [darkMode])
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
+  useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
 
   useEffect(() => {
     Promise.all([api.adminGetSettings(), api.adminListPlayers(), api.adminListSponsors()])
@@ -1299,6 +1332,12 @@ export default function AdminSocialPost() {
                   </div>
                 </div>
               )}
+              <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
+                <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Background</span>
+                {BACKGROUND_STYLES.map(s => (
+                  <BgStyleSwatch key={s.key} entry={s} palette={renderPalette} selected={bgStyle === s.key} onClick={() => setBgStyle(s.key)} />
+                ))}
+              </div>
             </section>
 
             {/* Tab bar */}
@@ -2157,8 +2196,9 @@ export default function AdminSocialPost() {
                 const scale = mobileW / W
                 return (
                   <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                    <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
+                    <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
                       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
+                      <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} />
                     </div>
                   </div>
                 )
@@ -2194,8 +2234,9 @@ export default function AdminSocialPost() {
                 return (
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
+                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
                         <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
+                        <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} />
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
@@ -2212,8 +2253,9 @@ export default function AdminSocialPost() {
 
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-        <div ref={renderRef} style={{ ...fontStyle, width: W, height: H }}>
+        <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
+          <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} />
         </div>
       </div>
 
