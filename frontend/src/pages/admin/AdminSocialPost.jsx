@@ -14,7 +14,7 @@ import {
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
   ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket,
-  ResultsList, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
+  ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
 import { exportNodeToPng } from '../../social/exportImage'
@@ -54,6 +54,7 @@ const TEMPLATES = [
   { id: 'FX6', name: 'Schedule',       component: FixtureSchedule,    desc: 'Match-day timeline',              maxPlayers: 0, kind: 'fixtures' },
   // Results roundup — one post, all grades, win/loss coded.
   { id: 'RR1', name: 'Weekend Wrap',   component: ResultsList,        desc: 'Win/loss list',                   maxPlayers: 0, kind: 'results' },
+  { id: 'RR7', name: 'Wrap + Leaders', component: ResultsListLeaders, desc: 'Win/loss list + our top scorers & wicket takers', maxPlayers: 0, kind: 'results', hasLeaders: true },
   { id: 'RR2', name: 'W/L Scoreboard', component: ResultsScoreboard,  desc: '2×3 result cards',                maxPlayers: 0, kind: 'results' },
   { id: 'RR3', name: 'Record Strip',   component: ResultsRecord,      desc: 'W–L record summary',              maxPlayers: 0, kind: 'results' },
   { id: 'RR4', name: 'Headline',       component: ResultsHeadline,    desc: 'Feature result + others',         maxPlayers: 0, kind: 'results' },
@@ -73,7 +74,7 @@ const TAB_MAP = {
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
-  RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results',
+  RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
@@ -1866,6 +1867,34 @@ export default function AdminSocialPost() {
                           <input value={r.margin} onChange={e => set({ margin: e.target.value })} placeholder="BY 4 WICKETS"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                         </div>
+                        {tmpl.hasLeaders && (
+                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                            {['topBat', 'topBowl'].map((key) => (
+                              <div key={key} className="flex flex-col gap-1">
+                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{key === 'topBat' ? 'Our top scorers' : 'Our top wickets'}</span>
+                                {[0, 1].map((slot) => {
+                                  const entry = (r[key] || [])[slot] || { name: '', line: '' }
+                                  const setSlot = (patch) => setResults(rows => rows.map((x, j) => {
+                                    if (j !== i) return x
+                                    const arr = [{ ...(x[key]?.[0] || {}) }, { ...(x[key]?.[1] || {}) }]
+                                    arr[slot] = { name: '', line: '', ...arr[slot], ...patch }
+                                    return { ...x, [key]: arr }
+                                  }))
+                                  return (
+                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: '1fr 76px' }}>
+                                      <input value={entry.name || ''} onChange={e => setSlot({ name: e.target.value.toUpperCase() })}
+                                        placeholder={key === 'topBat' ? 'J. BARENDSE' : 'A. ALLISON'}
+                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                      <input value={entry.line || ''} onChange={e => setSlot({ line: e.target.value })}
+                                        placeholder={key === 'topBat' ? '64 (71)' : '4/29 (9.4)'}
+                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
