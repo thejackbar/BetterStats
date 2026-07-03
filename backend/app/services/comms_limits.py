@@ -50,10 +50,22 @@ def normalise_tier(tier: Optional[str]) -> str:
     return t if t in TIERS else TIER_SANDBOX
 
 
-def _utc_day_start() -> _dt.datetime:
-    """Midnight today, UTC — the boundary AWS's daily quota resets on."""
-    now = _dt.datetime.now(_dt.timezone.utc)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+def _now() -> _dt.datetime:
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def _day_window_start() -> _dt.datetime:
+    """Start of the daily send window. AWS's daily quota is a ROLLING 24-hour
+    window (not a calendar midnight), so we mirror that — it also sidesteps every
+    timezone boundary bug (a club sending in the morning no longer sees 0 because
+    UTC midnight hasn't rolled)."""
+    return _now() - _dt.timedelta(hours=24)
+
+
+def _month_window_start() -> _dt.datetime:
+    """Start of the monthly send window — a rolling 30 days, same reasoning as the
+    daily window."""
+    return _now() - _dt.timedelta(days=30)
 
 
 # ─── tier → per-day cap ──────────────────────────────────────────────────────
@@ -70,35 +82,83 @@ def _org_cap(org: Organisation, attr: str) -> Optional[int]:
         return None
 
 
-def tier_daily_cap(org: Organisation) -> Optional[int]:
+def tier_daily_cap(org: Organisation, defaults: Optional[dict] = None) -> Optional[int]:
     """The club's per-day send cap for its current tier. ``None`` means uncapped
-    (the marketing outreach org). The per-club override for the tier wins over
-    the global settings default; ``suspended`` is a hard 0."""
+    (the marketing outreach org). The per-club override for the tier wins over the
+    global default; ``suspended`` is a hard 0.
+
+    ``defaults`` are the super-admin-managed tier defaults (from
+    platform_settings.get_comms_tier_defaults); when omitted, the env seed
+    defaults are used (fine for the breaker sweep, which only reads the value)."""
     if org_is_outreach(org):
         return None
     tier = normalise_tier(getattr(org, "comms_tier", None))
     if tier == TIER_SUSPENDED:
         return 0
+    d = defaults or {}
     if tier == TIER_PRODUCTION:
         override = _org_cap(org, "comms_production_cap")
-        return override if override is not None else int(settings.comms_production_daily_cap)
+        return override if override is not None else int(d.get("production_daily", settings.comms_production_daily_cap))
     override = _org_cap(org, "comms_sandbox_cap")
-    return override if override is not None else int(settings.comms_sandbox_daily_cap)
+    return override if override is not None else int(d.get("sandbox_daily", settings.comms_sandbox_daily_cap))
+
+
+def monthly_cap(org: Organisation, defaults: Optional[dict] = None) -> Optional[int]:
+    """The club's monthly send ceiling. ``None`` = uncapped (outreach org, or an
+    explicit 0 override = no monthly limit). Per-club ``comms_monthly_cap`` wins
+    over the global default."""
+    if org_is_outreach(org):
+        return None
+    tier = normalise_tier(getattr(org, "comms_tier", None))
+    if tier == TIER_SUSPENDED:
+        return 0
+    raw = getattr(org, "comms_monthly_cap", None)
+    if raw is not None and str(raw).strip() != "":
+        try:
+            val = int(raw)
+            return None if val <= 0 else val  # explicit 0 = no monthly limit
+        except (TypeError, ValueError):
+            pass
+    d = defaults or {}
+    default_val = int(d.get("monthly", getattr(settings, "comms_monthly_send_default", 10000)))
+    return None if default_val <= 0 else default_val
+
+
+async def _tier_defaults(session: AsyncSession) -> dict:
+    """The super-admin-managed tier defaults, with a safe fallback to env seeds."""
+    from app.services import platform_settings
+    try:
+        return await platform_settings.get_comms_tier_defaults(session)
+    except Exception:
+        return {
+            "sandbox_daily": int(settings.comms_sandbox_daily_cap),
+            "production_daily": int(settings.comms_production_daily_cap),
+            "monthly": int(getattr(settings, "comms_monthly_send_default", 10000)),
+        }
 
 
 # ─── daily send counts (from comms_recipients) ───────────────────────────────
 
-async def sends_today(session: AsyncSession, org_id=None) -> int:
-    """Count of recipients actually sent since midnight UTC. Account-wide when
-    ``org_id`` is None, else scoped to that club. Deferred/failed rows don't
-    count — only ``status='sent'``."""
+async def _sends_since(session: AsyncSession, since: _dt.datetime, org_id=None) -> int:
+    """Count recipients sent since ``since``. Account-wide when ``org_id`` is None,
+    else scoped to that club. Only ``status='sent'`` counts."""
     stmt = select(func.count(CommsRecipient.id)).where(
         CommsRecipient.status == "sent",
-        CommsRecipient.sent_at >= _utc_day_start(),
+        CommsRecipient.sent_at >= since,
     )
     if org_id is not None:
         stmt = stmt.where(CommsRecipient.organisation_id == org_id)
     return int((await session.scalar(stmt)) or 0)
+
+
+async def sends_today(session: AsyncSession, org_id=None) -> int:
+    """Count of recipients sent in the trailing 24h (the rolling daily window)."""
+    return await _sends_since(session, _day_window_start(), org_id=org_id)
+
+
+async def sends_this_month(session: AsyncSession, org_id=None) -> int:
+    """Count of recipients sent in the trailing 30 days (rolling monthly window)."""
+    return await _sends_since(session, _month_window_start(), org_id=org_id)
 
 
 async def account_daily_remaining(session: AsyncSession) -> int:
@@ -114,22 +174,41 @@ async def account_daily_remaining(session: AsyncSession) -> int:
     return max(0, usable - used)
 
 
-async def club_daily_remaining(session: AsyncSession, org: Organisation) -> Optional[int]:
+async def club_daily_remaining(session: AsyncSession, org: Organisation,
+                               defaults: Optional[dict] = None) -> Optional[int]:
     """How many more sends this club may make today. ``None`` = uncapped."""
-    cap = tier_daily_cap(org)
+    cap = tier_daily_cap(org, defaults)
     if cap is None:
         return None
     used = await sends_today(session, org_id=org.id)
     return max(0, cap - used)
 
 
-async def send_allowance(session: AsyncSession, org: Organisation) -> int:
-    """The number of recipients a campaign for this club may send RIGHT NOW —
-    the tighter of the club cap and the account ceiling. The send loop caps the
-    audience to this and defers the rest to tomorrow."""
-    account = await account_daily_remaining(session)
-    club = await club_daily_remaining(session, org)
-    return account if club is None else min(account, club)
+async def club_monthly_remaining(session: AsyncSession, org: Organisation,
+                                 defaults: Optional[dict] = None) -> Optional[int]:
+    """How many more sends this club may make this month. ``None`` = uncapped."""
+    cap = monthly_cap(org, defaults)
+    if cap is None:
+        return None
+    used = await sends_this_month(session, org_id=org.id)
+    return max(0, cap - used)
+
+
+async def send_allowance(session: AsyncSession, org: Organisation,
+                         defaults: Optional[dict] = None) -> int:
+    """The number of recipients a campaign for this club may send RIGHT NOW — the
+    tightest of the club daily cap, the club monthly cap and the account ceiling.
+    The send loop caps the audience to this and defers the rest to tomorrow."""
+    if defaults is None:
+        defaults = await _tier_defaults(session)
+    limits = [await account_daily_remaining(session)]
+    day = await club_daily_remaining(session, org, defaults)
+    month = await club_monthly_remaining(session, org, defaults)
+    if day is not None:
+        limits.append(day)
+    if month is not None:
+        limits.append(month)
+    return min(limits)
 
 
 # ─── deliverability metrics + circuit breaker (from email_events) ────────────
@@ -156,17 +235,19 @@ async def deliverability_metrics(session: AsyncSession, org_id, *,
         SELECT
           COUNT(*) FILTER (WHERE event_type = 'bounce'
                              AND lower(coalesce(event_subtype,'')) = 'permanent') AS hard_bounces,
-          COUNT(*) FILTER (WHERE event_type = 'complaint')                        AS complaints
+          COUNT(*) FILTER (WHERE event_type = 'complaint')                        AS complaints,
+          COUNT(DISTINCT recipient_id) FILTER (WHERE event_type = 'delivery')     AS delivered
         FROM email_events
         WHERE organisation_id = :org AND created_at >= :since
     """), {"org": org_id, "since": since})).one()
-    hard_bounces, complaints = int(row[0] or 0), int(row[1] or 0)
+    hard_bounces, complaints, delivered = int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
 
     bounce_rate = (hard_bounces / sent) if sent else 0.0
     complaint_rate = (complaints / sent) if sent else 0.0
     return {
         "window_days": days,
         "sent": sent,
+        "delivered": delivered,
         "hard_bounces": hard_bounces,
         "complaints": complaints,
         "bounce_rate": round(bounce_rate, 5),
@@ -195,13 +276,19 @@ async def preflight(session: AsyncSession, org: Organisation) -> dict:
     """One call the send handler uses before starting a campaign: the club's
     tier, today's usage, remaining allowance, deliverability, and whether sending
     is currently blocked (suspended, or the breaker is tripped)."""
+    defaults = await _tier_defaults(session)
     tier = normalise_tier(getattr(org, "comms_tier", None))
-    cap = tier_daily_cap(org)
+    cap = tier_daily_cap(org, defaults)
+    mcap = monthly_cap(org, defaults)
     used = await sends_today(session, org_id=org.id)
+    used_month = await sends_this_month(session, org_id=org.id)
     account_remaining = await account_daily_remaining(session)
-    allowance = await send_allowance(session, org)
+    allowance = await send_allowance(session, org, defaults)
     metrics = await deliverability_metrics(session, org.id)
     tripped = breaker_reason(metrics)
+
+    daily_remaining = None if cap is None else max(0, cap - used)
+    monthly_remaining = None if mcap is None else max(0, mcap - used_month)
 
     blocked = None
     if getattr(org, "ses_tenant_paused", False):
@@ -215,11 +302,18 @@ async def preflight(session: AsyncSession, org: Organisation) -> dict:
     elif cap is not None and used >= cap:
         blocked = (f"This club's daily limit of {cap} is reached — the rest will "
                    f"send tomorrow, or request a higher limit.")
+    elif mcap is not None and used_month >= mcap:
+        blocked = (f"This club's monthly limit of {mcap} is reached — the rest will "
+                   f"send once the 30-day window frees up, or request a higher limit.")
 
     return {
         "tier": tier,
         "daily_cap": cap,
         "sent_today": used,
+        "daily_remaining": daily_remaining,
+        "monthly_cap": mcap,
+        "sent_this_month": used_month,
+        "monthly_remaining": monthly_remaining,
         "account_remaining": account_remaining,
         "allowance": allowance,
         "metrics": metrics,

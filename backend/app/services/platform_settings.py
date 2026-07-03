@@ -62,6 +62,62 @@ def default_daily_send_limit() -> int:
         return 45000
 
 
+def default_sandbox_daily() -> int:
+    try:
+        return int(getattr(app_settings, "comms_sandbox_daily_cap", 50)) or 50
+    except (TypeError, ValueError):
+        return 50
+
+
+def default_production_daily() -> int:
+    try:
+        return int(getattr(app_settings, "comms_production_daily_cap", 2000)) or 2000
+    except (TypeError, ValueError):
+        return 2000
+
+
+def default_monthly() -> int:
+    try:
+        return int(getattr(app_settings, "comms_monthly_send_default", 10000)) or 10000
+    except (TypeError, ValueError):
+        return 10000
+
+
+async def get_comms_tier_defaults(db: AsyncSession) -> dict:
+    """The super-admin-managed per-club tier defaults (sandbox daily, production
+    daily, monthly), falling back to the env seed defaults when unset. These are
+    the defaults a club uses when it has no per-club override."""
+    s = await get_settings(db)
+    return {
+        "sandbox_daily": _as_int(s.get("comms_sandbox_daily"), default_sandbox_daily()),
+        "production_daily": _as_int(s.get("comms_production_daily"), default_production_daily()),
+        "monthly": _as_int(s.get("comms_monthly_default"), default_monthly()),
+        "default_sandbox_daily": default_sandbox_daily(),
+        "default_production_daily": default_production_daily(),
+        "default_monthly": default_monthly(),
+    }
+
+
+async def update_comms_tier_defaults(db: AsyncSession, *, sandbox_daily=None,
+                                     production_daily=None, monthly=None) -> dict:
+    """Set any of the per-club tier defaults. Each is a positive whole number.
+    Commits. Returns the resulting defaults."""
+    s = await get_settings(db)
+    out = dict(s)
+    if sandbox_daily is not None:
+        out["comms_sandbox_daily"] = _pos_int(sandbox_daily, "sandbox_daily")
+    if production_daily is not None:
+        out["comms_production_daily"] = _pos_int(production_daily, "production_daily")
+    if monthly is not None:
+        out["comms_monthly_default"] = _pos_int(monthly, "monthly")
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(out)},
+    )
+    await db.commit()
+    return await get_comms_tier_defaults(db)
+
+
 async def get_settings(db: AsyncSession) -> dict:
     """The platform settings blob (ensures the singleton row exists)."""
     row = (await db.execute(

@@ -29,7 +29,8 @@ export default function SuperCommsLimits() {
   const [edits, setEdits] = useState({})   // per-request { daily_limit, note }
   // Account send rate (AWS ceiling + our pacing rate).
   const [rates, setRates] = useState(null)
-  const [rateForm, setRateForm] = useState({ aws_max_send_rate: '', send_rate: '', aws_daily_quota: '', daily_send_limit: '' })
+  const [rateForm, setRateForm] = useState({ aws_max_send_rate: '', send_rate: '', aws_daily_quota: '', daily_send_limit: '',
+    sandbox_daily_default: '', production_daily_default: '', monthly_default: '' })
   const [rateMsg, setRateMsg] = useState(null)
   const [rateBusy, setRateBusy] = useState(false)
 
@@ -42,9 +43,11 @@ export default function SuperCommsLimits() {
   }
   const loadRates = () => {
     api.superGetCommsRates()
-      .then((d) => { setRates(d); setRateForm({
+      .then((d) => { setRates(d); const td = d.tier_defaults || {}; setRateForm({
         aws_max_send_rate: d.aws_max_send_rate, send_rate: d.send_rate,
-        aws_daily_quota: d.aws_daily_quota, daily_send_limit: d.daily_send_limit }) })
+        aws_daily_quota: d.aws_daily_quota, daily_send_limit: d.daily_send_limit,
+        sandbox_daily_default: td.sandbox_daily ?? '', production_daily_default: td.production_daily ?? '',
+        monthly_default: td.monthly ?? '' }) })
       .catch(() => setRates(null))
   }
   useEffect(() => { load(); loadRates() }, [])
@@ -57,6 +60,9 @@ export default function SuperCommsLimits() {
         send_rate: Number(rateForm.send_rate),
         aws_daily_quota: Number(rateForm.aws_daily_quota),
         daily_send_limit: Number(rateForm.daily_send_limit),
+        sandbox_daily_default: Number(rateForm.sandbox_daily_default),
+        production_daily_default: Number(rateForm.production_daily_default),
+        monthly_default: Number(rateForm.monthly_default),
       })
       setRates(d)
       setRateMsg({ kind: 'ok', text: 'Send limits updated.' })
@@ -158,6 +164,35 @@ export default function SuperCommsLimits() {
               {dailyBad && (
                 <p className="text-[11px] text-amber-400 mt-2">Our daily max must be a positive number at or below the AWS daily max.</p>
               )}
+
+              {/* Per-club tier defaults — the caps a club uses when it has no own override. */}
+              <div className="mt-4 pt-4 border-t pb-hairline">
+                <div className="text-xs text-pb-text font-medium mb-1">Per-club default limits</div>
+                <p className="text-xs text-pb-dim mb-3 leading-relaxed">
+                  What a new club can send while it has no per-club override. Every club starts on the
+                  sandbox daily limit and earns the production limit by request. The monthly limit is a
+                  rolling 30-day ceiling on top of the daily one. A super admin can override any of these
+                  for a single club on that club's BetterAdmin page.
+                </p>
+                <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+                  <label className="text-[10px] text-pb-faint">
+                    <span className="block mb-1">Sandbox daily</span>
+                    <input type="number" min="1" value={rateForm.sandbox_daily_default}
+                      onChange={e => setRateForm(f => ({ ...f, sandbox_daily_default: e.target.value }))} className={INP} />
+                  </label>
+                  <label className="text-[10px] text-pb-faint">
+                    <span className="block mb-1">Production daily</span>
+                    <input type="number" min="1" value={rateForm.production_daily_default}
+                      onChange={e => setRateForm(f => ({ ...f, production_daily_default: e.target.value }))} className={INP} />
+                  </label>
+                  <label className="text-[10px] text-pb-faint">
+                    <span className="block mb-1">Monthly (all clubs)</span>
+                    <input type="number" min="1" value={rateForm.monthly_default}
+                      onChange={e => setRateForm(f => ({ ...f, monthly_default: e.target.value }))} className={INP} />
+                  </label>
+                </div>
+              </div>
+
               {rateMsg && (
                 <p className={`text-[11px] mt-2 ${rateMsg.kind === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>{rateMsg.text}</p>
               )}

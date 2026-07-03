@@ -1510,6 +1510,7 @@ def _club_payload(org) -> dict:
         "comms_tier": getattr(org, "comms_tier", None) or "sandbox",
         "comms_sandbox_cap": getattr(org, "comms_sandbox_cap", None),
         "comms_production_cap": getattr(org, "comms_production_cap", None),
+        "comms_monthly_cap": getattr(org, "comms_monthly_cap", None),
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }
 
@@ -1628,6 +1629,7 @@ class ClubUpdate(BaseModel):
     comms_tier: Optional[str] = None
     comms_sandbox_cap: Optional[int] = None
     comms_production_cap: Optional[int] = None
+    comms_monthly_cap: Optional[int] = None
 
 
 @router.patch("/super/clubs/{club_id}")
@@ -1674,7 +1676,7 @@ async def patch_club(
         if fields["comms_tier"] not in comms_limits.TIERS:
             raise HTTPException(status_code=422,
                                 detail=f"Comms tier must be one of: {', '.join(comms_limits.TIERS)}")
-    for cap_field in ("comms_sandbox_cap", "comms_production_cap"):
+    for cap_field in ("comms_sandbox_cap", "comms_production_cap", "comms_monthly_cap"):
         if fields.get(cap_field) is not None and int(fields[cap_field]) < 0:
             raise HTTPException(status_code=422, detail=f"{cap_field} must be >= 0")
 
@@ -1826,9 +1828,12 @@ async def get_comms_rates(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """The live AWS per-second ceiling + our pacing rate (super-admin managed)."""
+    """The live AWS per-second ceiling + our pacing rate, plus the per-club tier
+    defaults (all super-admin managed)."""
     from app.services import platform_settings as ps
-    return await ps.get_ses_rates(db)
+    rates = await ps.get_ses_rates(db)
+    tier_defaults = await ps.get_comms_tier_defaults(db)
+    return {**rates, "tier_defaults": tier_defaults}
 
 
 class CommsRatesIn(BaseModel):
@@ -1836,6 +1841,10 @@ class CommsRatesIn(BaseModel):
     send_rate: Optional[int] = None           # our pacing rate (must stay < ceiling)
     aws_daily_quota: Optional[int] = None      # AWS's granted daily ceiling
     daily_send_limit: Optional[int] = None     # our practical daily max (≤ AWS daily)
+    # Per-club tier defaults (used when a club has no own override).
+    sandbox_daily_default: Optional[int] = None
+    production_daily_default: Optional[int] = None
+    monthly_default: Optional[int] = None
 
 
 @router.patch("/super/comms/rates")
@@ -1844,14 +1853,19 @@ async def update_comms_rates(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set the AWS ceilings and/or our practical limits. Our send rate must stay
-    strictly below the AWS per-second ceiling, and our daily limit at or below the
-    AWS daily ceiling — the update is rejected otherwise."""
+    """Set the AWS ceilings, our practical limits, and/or the per-club tier
+    defaults. Our send rate must stay strictly below the AWS per-second ceiling,
+    and our daily limit at or below the AWS daily ceiling — the update is rejected
+    otherwise."""
     from app.services import platform_settings as ps
     try:
-        return await ps.update_ses_rates(
+        rates = await ps.update_ses_rates(
             db, aws_max_send_rate=data.aws_max_send_rate, send_rate=data.send_rate,
             aws_daily_quota=data.aws_daily_quota, daily_send_limit=data.daily_send_limit)
+        tier_defaults = await ps.update_comms_tier_defaults(
+            db, sandbox_daily=data.sandbox_daily_default,
+            production_daily=data.production_daily_default, monthly=data.monthly_default)
+        return {**rates, "tier_defaults": tier_defaults}
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

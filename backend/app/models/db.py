@@ -161,6 +161,10 @@ class Organisation(Base):
     comms_tier = Column(Text, nullable=False, server_default="sandbox", default="sandbox")
     comms_sandbox_cap = Column(Integer, nullable=True)
     comms_production_cap = Column(Integer, nullable=True)
+    # A monthly ceiling on top of the daily cap (NULL = use the settings default;
+    # 0 = no monthly limit). Set per-club by a super admin on BetterAdmin. Counted
+    # over a rolling 30-day window. See services/comms_limits.py.
+    comms_monthly_cap = Column(Integer, nullable=True)
     # ─── SES per-club tenant (migration 126, multi-tenancy) ──────────────────
     # The club's Amazon SES tenant, auto-provisioned so its reputation is isolated
     # and pausable. ses_tenant_name is the deterministic slugified name (the send

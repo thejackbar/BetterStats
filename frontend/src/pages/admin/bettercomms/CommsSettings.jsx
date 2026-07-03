@@ -161,9 +161,23 @@ export default function CommsSettings() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mb-3">
                 <div className="flex justify-between gap-2"><span className="text-pb-faint">Sent today</span><span className="text-pb-text">{limits.sent_today}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-pb-faint">Daily limit</span><span className="text-pb-text">{limits.daily_cap == null ? 'Unlimited' : limits.daily_cap}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-pb-faint">Bounce rate</span><span className="text-pb-text">{m.sufficient_sample ? pct(m.bounce_rate) : '—'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-pb-faint">Spam rate</span><span className="text-pb-text">{m.sufficient_sample ? pct(m.complaint_rate) : '—'}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Remaining today</span><span className="text-pb-text">{limits.daily_remaining == null ? 'Unlimited' : limits.daily_remaining}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Delivered (30d)</span><span className="text-pb-text">{m.delivered ?? 0}</span></div>
+                {limits.monthly_cap != null && (
+                  <>
+                    <div className="flex justify-between gap-2"><span className="text-pb-faint">Sent this month</span><span className="text-pb-text">{limits.sent_this_month ?? 0}</span></div>
+                    <div className="flex justify-between gap-2"><span className="text-pb-faint">Monthly limit</span><span className="text-pb-text">{limits.monthly_cap}</span></div>
+                  </>
+                )}
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Bounce rate</span><span className={`${m.bounce_rate >= 0.05 ? 'text-pb-red' : 'text-pb-text'}`}>{pct(m.bounce_rate)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Spam rate</span><span className={`${m.complaint_rate >= 0.001 ? 'text-pb-red' : 'text-pb-text'}`}>{pct(m.complaint_rate)}</span></div>
               </div>
+              {!m.sufficient_sample && (m.sent ?? 0) < (m.min_sample ?? 50) && (
+                <div className="text-pb-faintest text-[11px] leading-relaxed mb-2">
+                  Bounce and spam rates are over the last {m.window_days || 30} days ({m.sent ?? 0} sent). They settle
+                  into a reliable read once you've sent past {m.min_sample ?? 50}.
+                </div>
+              )}
               <div className="text-pb-faintest text-xs leading-relaxed mb-3">
                 {limits.tier === 'sandbox'
                   ? `New clubs start with a ${limits.daily_cap}-a-day limit while your sending settles in. Once you've sent cleanly, ask BetterCricket to lift it.`

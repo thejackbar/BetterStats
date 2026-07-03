@@ -1247,8 +1247,11 @@ async def lifespan(app: FastAPI):
         # BetterComms sending tiers (migration 125): per-club sandbox→production
         # send tier + optional daily-cap override, the tier-increase request
         # queue, and the generic club→BetterCricket request telemetry (feeds a
-        # Twenty CRM task). Existing clubs promoted to 'production' so the new
-        # sandbox cap can't throttle a live club on deploy.
+        # Twenty CRM task). Every club starts in 'sandbox' and EARNS production by
+        # request + super-admin approval — so there is deliberately NO boot-time
+        # promotion here (an earlier version blanket-set every club to production
+        # on each boot, which is why every club showed 'production'; migration 129
+        # resets them and this mirror no longer re-applies it).
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "comms_tier TEXT NOT NULL DEFAULT 'sandbox'"
@@ -1258,6 +1261,10 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_production_cap INTEGER"
+        ))
+        # Per-club monthly send ceiling (migration 129); NULL = global default.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_monthly_cap INTEGER"
         ))
         # SES per-club tenants (migration 126) — isolate each club's sending
         # reputation to its own Amazon SES tenant.

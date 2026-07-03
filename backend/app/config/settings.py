@@ -174,6 +174,12 @@ class Settings(BaseSettings):
     # when onboarding the club on BetterAdmin), which wins over these.
     comms_sandbox_daily_cap: int = 50
     comms_production_daily_cap: int = 2000
+    # A per-club monthly ceiling on top of the daily cap — a second guard rail so a
+    # club can't churn through a huge volume across a month even while staying under
+    # the daily cap each day. Single default for every club; a club can carry its
+    # own override in organisations.comms_monthly_cap. 0/None on both = no monthly
+    # limit. Counted over a rolling 30-day window.
+    comms_monthly_send_default: int = 10000
     # Bounce/complaint circuit breaker. AWS reviews accounts over ~5% bounce or
     # ~0.1% complaint; we trip below that to stay safe, but only once a club has
     # sent enough to judge (min_sample) over the trailing window (days).

@@ -27,7 +27,7 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
-    comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '',
+    comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [clubAdmins, setClubAdmins] = useState([])
@@ -175,6 +175,7 @@ export default function SuperClubs() {
       comms_tier: club.comms_tier || 'sandbox',
       comms_sandbox_cap: club.comms_sandbox_cap ?? '',
       comms_production_cap: club.comms_production_cap ?? '',
+      comms_monthly_cap: club.comms_monthly_cap ?? '',
     })
     setClubAdmins([])
     api.superListClubAdmins(club.id).then(d => setClubAdmins(Array.isArray(d) ? d : [])).catch(() => {})
@@ -273,6 +274,7 @@ export default function SuperClubs() {
         billing_cycle: editForm.billing_cycle || null,
         comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
         comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
+        comms_monthly_cap: editForm.comms_monthly_cap === '' ? null : Number(editForm.comms_monthly_cap),
       }
       await api.superPatchClub(editId, payload)
       setMsg('Club updated')
@@ -677,6 +679,12 @@ export default function SuperClubs() {
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Production daily cap (blank = default)</label>
                       <input type="number" min="0" value={editForm.comms_production_cap}
                         onChange={e => setEditForm(f => ({ ...f, comms_production_cap: e.target.value }))}
+                        placeholder="global default" className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Monthly cap (blank = default, 0 = none)</label>
+                      <input type="number" min="0" value={editForm.comms_monthly_cap}
+                        onChange={e => setEditForm(f => ({ ...f, comms_monthly_cap: e.target.value }))}
                         placeholder="global default" className={INPUT_CLS} />
                     </div>
                     {clubAdmins.length > 0 && (
