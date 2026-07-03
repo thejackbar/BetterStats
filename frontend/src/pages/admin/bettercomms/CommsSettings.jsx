@@ -116,7 +116,9 @@ export default function CommsSettings() {
               <div className="text-sm text-pb-text font-medium">Email delivery</div>
               <div className="text-pb-faint text-sm mt-0.5">
                 {p.live
-                  ? <>Connected{isPlatform && <> via <span className="text-pb-text capitalize">{p.provider}</span></>} · sending from <span className="text-pb-text">{p.from_address}</span></>
+                  ? (isPlatform
+                      ? <>Connected via <span className="text-pb-text capitalize">{p.provider}</span> · sending from <span className="text-pb-text">{s.from_address || p.from_address}</span></>
+                      : <>Your club's outbound email is live and being delivered.</>)
                   : <>Preview mode — emails are rendered and logged but <strong>not delivered</strong>.</>}
               </div>
             </div>
