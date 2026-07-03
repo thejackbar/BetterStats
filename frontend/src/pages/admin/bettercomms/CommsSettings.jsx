@@ -43,7 +43,12 @@ export default function CommsSettings() {
     setTenantBusy(true); setMsg(null)
     try {
       const r = await api.commsProvisionTenants(false)
-      setMsg({ kind: 'ok', text: `Tenants: ${r.provisioned || 0} provisioned, ${r.failed || 0} failed of ${r.total || 0}.` })
+      let text = `Tenants: ${r.provisioned || 0} provisioned, ${r.failed || 0} failed of ${r.total || 0}.`
+      if (r.failed && r.errors?.length) {
+        const e0 = r.errors[0]
+        text += ` First failure — ${e0.club}: ${e0.reason || 'see logs'}. ${r.failed > 1 ? 'Run again to retry the rest.' : ''}`
+      }
+      setMsg({ kind: r.failed ? 'error' : 'ok', text })
       api.commsSesStatus().then(setSes).catch(() => {})
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setTenantBusy(false) }

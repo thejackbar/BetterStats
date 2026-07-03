@@ -28,6 +28,7 @@ enabling ``ses_tenant_sends_enabled``.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import hmac
@@ -137,19 +138,41 @@ def _sigv4_headers(*, path: str, body: str) -> dict:
     }
 
 
+_MAX_RETRIES = 4
+
+
+def _is_throttle(status: int, data: dict) -> bool:
+    if status == 429 or status >= 500:
+        return True
+    blob = json.dumps(data).lower()
+    return "throttl" in blob or "toomanyrequests" in blob or "limitexceeded" in blob and "rate" in blob
+
+
 async def _post(path: str, payload: dict) -> tuple[int, dict]:
+    """POST to the SES management API, retrying throttles / 5xx with backoff. SES
+    tenant operations rate-limit aggressively, so a bulk backfill needs this."""
     body = json.dumps(payload)
     host = f"email.{settings.ses_region}.amazonaws.com"
-    headers = _sigv4_headers(path=path, body=body)
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(f"https://{host}{path}", content=body, headers=headers)
-    data: dict = {}
-    if resp.content:
+    status, data = 0, {}
+    for attempt in range(_MAX_RETRIES + 1):
+        headers = _sigv4_headers(path=path, body=body)  # re-sign (time-bound) each try
         try:
-            data = resp.json()
-        except Exception:  # noqa: BLE001
-            data = {"_raw": resp.text[:500]}
-    return resp.status_code, data
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(f"https://{host}{path}", content=body, headers=headers)
+            status = resp.status_code
+            data = {}
+            if resp.content:
+                try:
+                    data = resp.json()
+                except Exception:  # noqa: BLE001
+                    data = {"_raw": resp.text[:500]}
+        except Exception as e:  # noqa: BLE001 — network/timeout
+            status, data = 0, {"_error": str(e)}
+        if attempt < _MAX_RETRIES and _is_throttle(status, data):
+            await asyncio.sleep(min(0.5 * (2 ** attempt), 8.0))
+            continue
+        break
+    return status, data
 
 
 def _is_already_exists(status: int, data: dict) -> bool:
@@ -239,12 +262,20 @@ async def provision_all(session: AsyncSession, *, only_unprovisioned: bool = Tru
         stmt = stmt.where(Organisation.ses_tenant_provisioned_at.is_(None))
     orgs = (await session.execute(stmt)).scalars().all()
     done = failed = 0
-    for org in orgs:
+    errors: list[dict] = []
+    for i, org in enumerate(orgs):
         res = await ensure_tenant(session, org)
         if res.get("ok"):
             done += 1
         elif "skipped" not in res:
             failed += 1
-    result = {"provisioned": done, "failed": failed, "total": len(orgs)}
-    logger.info("SES provision_all: %s", result)
+            if len(errors) < 20:  # surface the first few reasons for the UI
+                errors.append({"club": org.name, "tenant": res.get("tenant"),
+                               "reason": res.get("error"), "detail": res.get("detail")})
+        # Pace the loop so a large backfill doesn't trip the SES management
+        # rate limit (each org is up to 3 API calls).
+        if i + 1 < len(orgs):
+            await asyncio.sleep(0.4)
+    result = {"provisioned": done, "failed": failed, "total": len(orgs), "errors": errors}
+    logger.info("SES provision_all: provisioned=%d failed=%d total=%d", done, failed, len(orgs))
     return result
