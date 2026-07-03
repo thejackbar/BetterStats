@@ -123,6 +123,35 @@ All in `backend/app/config/settings.py`, overridable via the server `.env`:
 After an AWS increase, raise the AWS rate ceiling, our send rate, the AWS daily
 ceiling and our daily limit from the BetterComms limits page (no redeploy).
 
+## Per-club SES tenants (reputation isolation)
+
+Each club is its own Amazon SES **tenant**, so its sending reputation is isolated
+and can be paused independently. A club's tenant is auto-provisioned
+(`services/ses_tenants.py`) on onboarding and via a backfill over all clubs
+(super-admin "Provision club tenants" button, or
+`python -m app.scripts.provision_ses_tenants [--all]`). Provisioning uses a
+SEPARATE admin credential (`ses_provision_*`); the everyday send key stays
+send-only.
+
+- **Naming**: a normal club maps to the slugified club name; the outreach org
+  maps to the fixed `ses_marketing_tenant_name` (`bettercricket-marketing`).
+- **Wiring**: the provisioner associates the shared sending identity for the silo
+  plus the club's context configuration set. **Config set by context**: a normal
+  club sends on the transactional stream (`ses_configuration_set_transactional`),
+  the outreach org on the campaign stream (`ses_configuration_set`). Both carry an
+  SNS event destination, so bounce/complaint feedback flows either way.
+- **Send attribution** is gated behind `ses_tenant_sends_enabled` (default off).
+  Provisioning, storage and the config-set split all ship independently; flip the
+  flag only after confirming the SES send-time tenant mechanism, so it can't
+  affect live sends before it's verified.
+- **Pause**: an SES tenant paused for reputation is reflected onto the club
+  (`ses_tenant_paused`), which blocks its sends until resumed. Tenant status
+  events arrive via EventBridge → SNS to the same events webhook (that wiring is
+  the remaining ops step; the handler is defensive about the event shape).
+- **IAM**: provisioning needs `ses:CreateTenant`, `ses:CreateTenantResourceAssociation`,
+  `ses:GetTenant`, `ses:ListTenantResources` (see the deploy notes); the send key
+  needs `ses:SendEmail` on both identities and both configuration sets.
+
 ## Acceptable use (the club's obligations)
 
 A club may email only its own members and associates, or contacts who have asked

@@ -1659,6 +1659,8 @@ export const api = {
   commsSendTestEmail: (email) =>
     request('/club-admin/comms/test-email', { method: 'POST', body: JSON.stringify({ email }) }),
   commsSesStatus: () => request('/club-admin/comms/ses-status'), // super admin only
+  commsProvisionTenants: (all = false) =>
+    request(`/club-admin/comms/ses/provision-tenants${all ? '?all=true' : ''}`, { method: 'POST' }),
   // Super-admin: club vs BetterCricket marketing-outreach context.
   commsGetContext: () => request('/club-admin/comms/context'),
   commsSetMarketingOrg: (organisationId) =>

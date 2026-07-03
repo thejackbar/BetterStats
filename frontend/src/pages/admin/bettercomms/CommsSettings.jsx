@@ -22,6 +22,7 @@ export default function CommsSettings() {
   const [limits, setLimits] = useState(null)      // sending tier + usage + deliverability
   const [reqReason, setReqReason] = useState('')
   const [reqBusy, setReqBusy] = useState(false)
+  const [tenantBusy, setTenantBusy] = useState(false)
 
   useEffect(() => {
     api.commsGetSettings().then(d => {
@@ -35,6 +36,16 @@ export default function CommsSettings() {
     api.commsSesStatus().then(setSes).catch(() => setSes(null))
     api.commsGetLimits().then(setLimits).catch(() => setLimits(null))
   }, [])
+
+  const provisionTenants = async () => {
+    setTenantBusy(true); setMsg(null)
+    try {
+      const r = await api.commsProvisionTenants(false)
+      setMsg({ kind: 'ok', text: `Tenants: ${r.provisioned || 0} provisioned, ${r.failed || 0} failed of ${r.total || 0}.` })
+      api.commsSesStatus().then(setSes).catch(() => {})
+    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
+    finally { setTenantBusy(false) }
+  }
 
   const requestLimit = async () => {
     setReqBusy(true); setMsg(null)
@@ -189,13 +200,25 @@ export default function CommsSettings() {
               ['Transactional configuration set', ses.ses?.configuration_set_transactional || 'not set'],
               ['SNS signature verification', ses.ses?.sns_signature_verification ? 'on' : 'off'],
               ['Event webhook token', ses.ses?.event_webhook_token_set ? 'set' : 'not set'],
-              ['Per-club tenants', ses.tenants_enabled ? 'enabled' : 'not built yet'],
+              ['Per-club tenants', ses.tenants?.provisioning_configured
+                ? `${ses.tenants.provisioned_clubs} provisioned${ses.tenants.paused_clubs ? `, ${ses.tenants.paused_clubs} paused` : ''}`
+                : 'not configured'],
+              ['Tenant sends', ses.tenants?.sends_enabled ? 'enabled' : 'off (provisioning only)'],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3 py-0.5 text-sm">
                 <span className="text-pb-faint">{k}</span>
                 <span className="text-pb-text truncate">{String(v ?? '—')}</span>
               </div>
             ))}
+            {ses.tenants?.provisioning_configured && (
+              <div className="mt-3 pt-3 border-t pb-hairline flex items-center gap-2">
+                <button onClick={provisionTenants} disabled={tenantBusy}
+                  className="px-3 py-1.5 rounded text-xs border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
+                  {tenantBusy ? 'Provisioning…' : 'Provision club tenants'}
+                </button>
+                <span className="text-pb-faintest text-xs">Creates an SES tenant for every club (idempotent).</span>
+              </div>
+            )}
           </div>
         )}
 

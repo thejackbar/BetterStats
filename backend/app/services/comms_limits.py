@@ -204,7 +204,9 @@ async def preflight(session: AsyncSession, org: Organisation) -> dict:
     tripped = breaker_reason(metrics)
 
     blocked = None
-    if tier == TIER_SUSPENDED:
+    if getattr(org, "ses_tenant_paused", False):
+        blocked = "This club's SES tenant is paused (reputation) — sending is on hold."
+    elif tier == TIER_SUSPENDED:
         blocked = "Sending is suspended for this club pending review."
     elif tripped:
         blocked = f"Sending is paused: {tripped}."

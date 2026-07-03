@@ -34,6 +34,7 @@ from app.config.settings import settings
 from app.models.db import EmailEvent, CommsContact, CommsRecipient, CommsCampaign
 from app.services.email_suppression import add_suppression
 from app.services import twenty_sync
+from app.services import ses_tenants
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +110,42 @@ async def handle_sns_message(session: AsyncSession, msg: dict) -> dict:
     return {"status": "ignored", "reason": f"type {typ}"}
 
 
+async def _maybe_tenant_status(session: AsyncSession, event: dict) -> "dict | None":
+    """Recognise an SES tenant status-change event (EventBridge → SNS) and reflect
+    a paused/resumed tenant onto the owning club. Returns a result dict when it's a
+    tenant event, else None so normal per-email ingest continues. Defensive about
+    field names — confirm the exact detail shape against a live event."""
+    source = (event.get("source") or "").lower()
+    dtype = (event.get("detail-type") or event.get("detailType") or "").lower()
+    detail = event.get("detail") or {}
+    if source != "aws.ses" and "tenant" not in dtype:
+        return None
+    if "tenant" not in dtype and "tenant" not in json.dumps(detail).lower():
+        return None
+    name = (detail.get("tenantName") or detail.get("TenantName")
+            or detail.get("tenant") or event.get("tenantName"))
+    if not name:
+        return None
+    status = str(detail.get("sendingStatus") or detail.get("status")
+                 or detail.get("sendingPaused") or "").lower()
+    paused = ("paus" in status or detail.get("sendingEnabled") is False
+              or detail.get("sendingPaused") is True)
+    matched = await ses_tenants.set_tenant_paused(session, str(name), bool(paused))
+    return {"status": "ok", "event": "tenant_status", "tenant": name,
+            "paused": bool(paused), "matched": matched}
+
+
 async def ingest_ses_event(session: AsyncSession, event: dict) -> dict:
     """Parse one SES event (config-set ``eventType`` or feedback
     ``notificationType``) and record it per recipient."""
+    # SES tenant status change (multi-tenancy). Delivered via EventBridge → SNS to
+    # this same webhook. Shape isn't a per-email event; recognise it first and
+    # reflect a paused/resumed tenant onto the owning club. (EventBridge → SNS
+    # wiring is the ops step; confirm the exact detail shape on first event.)
+    tenant_result = await _maybe_tenant_status(session, event)
+    if tenant_result is not None:
+        return tenant_result
+
     etype = (event.get("eventType") or event.get("notificationType") or "").strip().lower()
     if not etype:
         return {"status": "ignored", "reason": "no event type"}

@@ -81,6 +81,9 @@ class EmailMessage:
     # the bounce/complaint webhook) and reputation stream the send belongs to.
     # Ignored by non-SES providers.
     configuration_set: Optional[str] = None
+    # SES tenant to send on behalf of (multi-tenancy). Set by the caller only when
+    # ses_tenant_sends_enabled. Ignored by non-SES providers. See services/ses_tenants.
+    tenant: Optional[str] = None
 
 
 @dataclass
@@ -327,6 +330,12 @@ class SesEmailProvider(EmailProvider):
         cfg = msg.configuration_set or self.default_config_set
         if cfg:
             payload["ConfigurationSetName"] = cfg
+        # Multi-tenancy: attribute the send to the club's SES tenant. Only set by
+        # the caller when ses_tenant_sends_enabled. NOTE: verify this field against
+        # current SES docs before enabling the flag — it's the one send-time tenant
+        # mechanism to confirm; everything else (provisioning) is independent.
+        if msg.tenant:
+            payload["TenantName"] = msg.tenant
         body = json.dumps(payload)
         # A throttle (429) or a transient 5xx means "slow down / try again", not
         # "this address is bad" — retry with backoff so a momentary rate blip or

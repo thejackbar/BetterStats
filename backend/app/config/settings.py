@@ -120,6 +120,24 @@ class Settings(BaseSettings):
     ses_configuration_set_transactional: str = ""  # transactional stream, kept apart
     ses_club_domain: str = "betteradmin-comms.work"
     ses_marketing_domain: str = "betteratcricket-comms.work"
+    # Config-set-by-context (Jun 2026): a normal club's member email sends on the
+    # transactional stream; BetterCricket's own cold outreach sends on the campaign
+    # stream. Both config sets carry an SNS event destination so bounces/complaints
+    # feed the suppression list + breaker either way. See _config_set_for in comms.
+
+    # ─── BetterComms — SES per-club tenants (multi-tenancy) ────────────────────
+    # Each club is an SES tenant so its sending reputation is isolated and can be
+    # paused independently. Tenants are auto-provisioned (services/ses_tenants) via
+    # a SEPARATE admin credential (send stays on ses_access_key_id). Provisioning
+    # associates the shared sending identity + the club's context config set with
+    # the tenant. Sending "as" the tenant is gated behind ses_tenant_sends_enabled
+    # so it can be verified before it touches live sends.
+    ses_account_id: str = ""                       # AWS account id, for building resource ARNs
+    ses_provision_access_key_id: str = ""          # provisioning-only IAM key (ses:CreateTenant …)
+    ses_provision_secret_access_key: str = ""
+    ses_reputation_policy: str = ""                # optional named reputation policy (blank = SES default)
+    ses_marketing_tenant_name: str = "bettercricket-marketing"  # fixed tenant for the outreach org
+    ses_tenant_sends_enabled: bool = False         # include the tenant on each send (flip after verifying)
 
     # ─── BetterComms — send-rate + quota guards (keep us inside the AWS grant) ──
     # AWS granted this account 14 messages/second and 50,000/day. We pace every

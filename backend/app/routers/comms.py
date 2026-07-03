@@ -52,6 +52,7 @@ from app.services import email_suppression as suppress
 from app.services import comms_segments
 from app.services import comms_limits
 from app.services import club_requests
+from app.services import ses_tenants
 from app.services.send_rate_limiter import send_limiter
 from app.services.email_service import EmailMessage, get_email_provider, provider_status, email_is_live
 
@@ -502,6 +503,20 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     return subject, html, text
 
 
+def _ses_config_set(org: Organisation) -> str:
+    """The configuration set this org sends on (context-based). Same rule the
+    tenant provisioner associates: outreach → campaigns, club → transactional."""
+    return ses_tenants.config_set_for(org)
+
+
+def _ses_tenant(org: Organisation) -> Optional[str]:
+    """The SES tenant to attribute the send to, only when tenant sends are enabled
+    and the org has been provisioned. Off ⇒ None ⇒ an untenanted (account) send."""
+    if settings.ses_tenant_sends_enabled and getattr(org, "ses_tenant_name", None):
+        return org.ses_tenant_name
+    return None
+
+
 def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Optional[str],
             unsub_url: str, footer: str, extra_vars: Optional[dict] = None) -> EmailMessage:
     subject, html, text = _render_parts(
@@ -517,9 +532,10 @@ def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Opt
             "List-Unsubscribe": f"<{unsub_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         },
-        # Campaigns are the bulk (news / marketing) stream — keep them on the
-        # campaign configuration set, apart from transactional sends.
-        configuration_set=(settings.ses_configuration_set or None),
+        # Context config set: the outreach org sends on the campaign stream, a
+        # normal club on the transactional stream (both carry event destinations).
+        configuration_set=(_ses_config_set(org) or None),
+        tenant=_ses_tenant(org),
     )
 
 
@@ -1085,6 +1101,9 @@ async def send_campaign(
     # merely reached its daily cap is allowed — the send loop sends what today's
     # allowance covers and defers the rest to tomorrow (auto-resumed).
     pf = await comms_limits.preflight(db, club)
+    if getattr(club, "ses_tenant_paused", False):
+        raise HTTPException(status_code=403, detail=pf["blocked"] or
+                            "This club's SES tenant is paused — sending is on hold.")
     if pf["tier"] == comms_limits.TIER_SUSPENDED:
         raise HTTPException(status_code=403, detail=pf["blocked"] or
                             "Sending is suspended for this club pending review.")
@@ -1479,7 +1498,8 @@ async def send_test_email(
         from_email=from_email, from_name=from_name, reply_to=reply_to,
         headers={"List-Unsubscribe": f"<{unsub}>",
                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"},
-        configuration_set=(settings.ses_configuration_set or None))
+        configuration_set=(_ses_config_set(club) or None),
+        tenant=_ses_tenant(club))
     res = await get_email_provider().send(msg)
     if not res.ok:
         raise HTTPException(status_code=502, detail=f"Test send failed: {res.error}")
@@ -1511,9 +1531,30 @@ async def ses_status(
             "sns_signature_verification": bool(s.ses_sns_verify_signatures),
             "event_webhook_token_set": bool((s.ses_event_token or "").strip()),
         },
-        # Tenant-per-club provisioning is not built yet (design only).
-        "tenants_enabled": False,
+        # Per-club SES tenants (multi-tenancy).
+        "tenants": {
+            "provisioning_configured": ses_tenants.provisioning_configured(),
+            "sends_enabled": bool(s.ses_tenant_sends_enabled),
+            "provisioned_clubs": int((await db.execute(select(func.count(Organisation.id)).where(
+                Organisation.ses_tenant_provisioned_at.isnot(None)))).scalar() or 0),
+            "paused_clubs": int((await db.execute(select(func.count(Organisation.id)).where(
+                Organisation.ses_tenant_paused.is_(True)))).scalar() or 0),
+        },
+        # Back-compat flag for the current UI panel.
+        "tenants_enabled": ses_tenants.provisioning_configured(),
     }
+
+
+@router.post("/ses/provision-tenants")
+async def provision_tenants(
+    all: bool = False,
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Backfill SES tenants across clubs (super admin). Default only provisions
+    clubs without a tenant yet; ``all=true`` re-runs the resource associations for
+    every club (safe / idempotent)."""
+    return await ses_tenants.provision_all(db, only_unprovisioned=not all)
 
 
 # ─── Context: club vs BetterCricket marketing (super admin) ──────────────────

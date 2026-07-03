@@ -157,6 +157,15 @@ class Organisation(Base):
     comms_tier = Column(Text, nullable=False, server_default="sandbox", default="sandbox")
     comms_sandbox_cap = Column(Integer, nullable=True)
     comms_production_cap = Column(Integer, nullable=True)
+    # ─── SES per-club tenant (migration 126, multi-tenancy) ──────────────────
+    # The club's Amazon SES tenant, auto-provisioned so its reputation is isolated
+    # and pausable. ses_tenant_name is the deterministic slugified name (the send
+    # key); ses_tenant_id is what SES returned at creation (informational).
+    # ses_tenant_paused mirrors an SES tenant-paused event. See services/ses_tenants.
+    ses_tenant_name = Column(Text, nullable=True)
+    ses_tenant_id = Column(Text, nullable=True)
+    ses_tenant_provisioned_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    ses_tenant_paused = Column(Boolean, nullable=False, server_default="false", default=False)
     # ─── BetterComms: BetterCricket marketing-outreach designation (migration
     # 108) ─── which org runs BetterCricket's own Clubs Directory campaigns. A
     # super admin flags it from the BetterComms UI (no env change); the

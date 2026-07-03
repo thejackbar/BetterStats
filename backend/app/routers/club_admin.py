@@ -1603,6 +1603,10 @@ async def create_club(
     # both rows on commit.
     mod_subs.ensure_core_subscription(org)  # Core tracked from day one
     await db.commit()
+    # Provision the club's SES tenant in the background (best-effort, no-op when
+    # tenant provisioning isn't configured). Never blocks club creation.
+    from app.services import ses_tenants
+    asyncio.create_task(ses_tenants.ensure_tenant_bg(org.id))
     return {"id": str(org.id), "slug": org.slug, "name": org.name}
 
 

@@ -1255,6 +1255,21 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_production_cap INTEGER"
         ))
+        # SES per-club tenants (migration 126) — isolate each club's sending
+        # reputation to its own Amazon SES tenant.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS ses_tenant_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS ses_tenant_id TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS ses_tenant_provisioned_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "ses_tenant_paused BOOLEAN NOT NULL DEFAULT false"
+        ))
         await conn.execute(text(
             "UPDATE organisations SET comms_tier = 'production' WHERE comms_tier = 'sandbox'"
         ))
