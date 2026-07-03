@@ -156,8 +156,8 @@ export const COMPARISONS = {
     heading: 'Your stats deserve better than a spreadsheet.',
     sub: 'BetterStats is included in every plan: your full reconciled history and a public site to be proud of. Here is how it sits next to the dedicated cricket-stats tools.',
     columns: [
-      { key: 'clubstats', name: 'ClubStats', tag: 'Stats site', sub: 'clubstats.cricket' },
-      { key: 'cstatz', name: 'CricketStatz', tag: 'Stats software', sub: 'Long-running desktop package' },
+      { key: 'clubstats', name: 'Cricket stats site', tag: 'ClubStats', sub: 'clubstats.cricket' },
+      { key: 'cstatz', name: 'Desktop stats software', tag: 'CricketStatz', sub: 'Long-running desktop package' },
       US_COL,
     ],
     sections: [
