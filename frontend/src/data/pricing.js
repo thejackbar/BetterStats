@@ -75,7 +75,7 @@ export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total          
 // pays more on the competitors and the gap only widens. BetterCricket replaces
 // the lot for one flat ALL_IN price, so the saving is the difference.
 export const COMPETITOR_STACK = [
-  { tool: 'ClubStats', plan: 'Medium', forJob: 'Cricket stats & public site', replacedBy: 'BetterStats', cost: 399, note: '$299 to $599 by team count' },
+  { tool: 'Cricket stats platform', plan: 'Medium', forJob: 'Cricket stats & public site', replacedBy: 'BetterStats', cost: 399, note: '$299 to $599 by team count' },
   { tool: 'Squarespace', forJob: 'Club website', replacedBy: 'BetterSocials', cost: 300 },
   { tool: 'Mailchimp', forJob: 'Member emails', replacedBy: 'BetterAdmin', cost: 240 },
   { tool: 'Canva Pro', forJob: 'Match-day social graphics', replacedBy: 'BetterSocials', cost: 165 },

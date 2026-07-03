@@ -290,12 +290,11 @@ def _marketing_body() -> str:
         "it into an automatic public website with player profiles, leaderboards, "
         "all-time records and season yearbooks. It adds modules for team "
         "selection, social posts, club admin and opposition analytics.</p>"
-        "<p>BetterCricket reads the match data your club already records through "
-        '<a href="https://www.playhq.com" rel="noopener">PlayHQ</a> and '
-        '<a href="https://www.cricket.com.au" rel="noopener">Cricket Australia</a>, '
-        "so the figures match your official competition results. See the full "
-        '<a href="/features">feature list</a> and <a href="/pricing">pricing</a>, '
-        'or <a href="/contact">request access for your club</a>.</p>'
+        "<p>BetterCricket keeps your club's match history online and updates it "
+        "automatically after every match, so the figures match your official "
+        'competition results. See the full <a href="/features">feature list</a> '
+        'and <a href="/pricing">pricing</a>, or <a href="/contact">request access '
+        'for your club</a>.</p>'
     )
     faq = "".join(f"<h2>{_esc(q)}</h2><p>{_esc(a)}</p>" for q, a in MARKETING_FAQ)
     return intro + faq

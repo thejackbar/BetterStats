@@ -192,7 +192,7 @@ BLOG_POSTS: list[dict] = [
                 ["Pricing", "Registration and transaction fees", "Flat annual rate per club"],
             ]},
             {"type": "h2", "text": "Do they overlap?"},
-            {"type": "p", "text": "Only a little. Both show fixtures and results. PlayHQ is the source of that data; BetterCricket reads it and turns it into a website, a history and analytics. You keep scoring in PlayHQ exactly as you do now."},
+            {"type": "p", "text": "Only a little. Both show fixtures and results. BetterCricket brings that data across and turns it into a website, a history and analytics. You keep scoring in PlayHQ exactly as you do now."},
             {"type": "h2", "text": "Which do you need?"},
             {"type": "p", "text": "You do not choose PlayHQ. Your association runs on it, so your club uses it whatever else you do. The question worth asking is whether you also want a proper club website, your full history online, and the tools to run selection, fees and match-day from the same data. That is the part BetterCricket adds."},
             {"type": "links", "heading": "Related", "items": [
@@ -202,11 +202,11 @@ BLOG_POSTS: list[dict] = [
                 {"label": "PlayHQ", "href": "https://www.playhq.com", "external": True},
                 {"label": "Cricket Australia", "href": "https://www.cricket.com.au", "external": True},
             ]},
-            {"type": "callout", "text": "BetterCricket reads your PlayHQ and Cricket Australia match data and turns it into a club website, a full history and analytics. Bring your club online and we handle the first full historical sync."},
+            {"type": "callout", "text": "BetterCricket turns your club's match data into a full website, a full history and analytics. Bring your club online and we handle the first full historical sync."},
         ],
         "faq": [
             {"q": "Is BetterCricket a replacement for PlayHQ?", "a": "No. PlayHQ is the official competition platform for registration, fixtures and scoring. BetterCricket sits on top of it and adds the club website, history, stats and analytics."},
-            {"q": "Can BetterCricket read my PlayHQ data?", "a": "Yes. BetterCricket imports your club's match history and keeps it current from the competition data, so you do not enter anything twice."},
+            {"q": "Can BetterCricket read my PlayHQ data?", "a": "BetterCricket brings your club's match history in and keeps it current automatically, so you never have to enter anything twice."},
             {"q": "How much does each one cost?", "a": "PlayHQ has no mandatory club setup fee and is funded through registration and small transaction fees, including a National Registration Fee. BetterCricket is a flat annual rate per club, from $399 for the Core, the same for one team or fifty."},
             {"q": "Do I still score in PlayHQ?", "a": "Yes. Nothing about your match day changes. BetterCricket reads the finished scorecards and updates your stats after every game."},
         ],
@@ -229,7 +229,7 @@ BLOG_POSTS: list[dict] = [
                 ["Main job", "Cricket statistics", "Running the club"],
                 ["Statistical depth", "Very deep, 190+ reports", "Deep, focused on what clubs use"],
                 ["Live scoring", "Yes", "Reads finished scorecards"],
-                ["Imports from PlayHQ", "Yes", "Yes, automatic"],
+                ["Imports match history", "Yes", "Yes, automatic"],
                 ["Public club website", "Generated stat pages", "Full branded club site"],
                 ["History import", "You load the matches", "Decades imported on setup"],
                 ["Selection, fees, socials, scouting", "No", "Yes, the modules"],
@@ -251,7 +251,7 @@ BLOG_POSTS: list[dict] = [
         ],
         "faq": [
             {"q": "Is BetterCricket like CricketStatz?", "a": "Both do cricket stats. CricketStatz is a dedicated statistics tool with a deep report library. BetterCricket is a club platform with stats plus a public website and modules for selection, fees, socials and scouting."},
-            {"q": "Does BetterCricket import from PlayHQ automatically?", "a": "Yes. It imports your full history on setup and updates after every game, so you do not load matches by hand."},
+            {"q": "Does BetterCricket import my club's history automatically?", "a": "Yes. It imports your full history on setup and updates after every game, so you do not load matches by hand."},
             {"q": "Which is better for a club statistician?", "a": "CricketStatz suits a statistician who wants the maximum number of reports and full control. BetterCricket suits a club that wants the stats automated and the rest of the club run from the same data."},
             {"q": "How is the pricing different?", "a": "CricketStatz charges annual plans sized by the number of matches played in a year. BetterCricket charges a flat annual rate per club, the same for one team or fifty."},
         ],
@@ -344,7 +344,7 @@ BLOG_POSTS: list[dict] = [
         "faq": [
             {"q": "Can you analyse cricket opposition without ball-by-ball data?", "a": "Yes. Club scorecards give you form, averages, how players get out, partnerships and head-to-head history. You miss ball-level match-ups, but that is more than enough to plan selection and tactics."},
             {"q": "What should a club captain look for in the opposition?", "a": "Their danger batters and bowlers, who is in form, how the key batters get out, the partnerships that have done damage, and your own record against them."},
-            {"q": "Where does the opposition data come from?", "a": "The scorecards published through PlayHQ and Cricket Australia's community cricket, the same matches your club already plays in."},
+            {"q": "Where does the opposition data come from?", "a": "The same scorecards your matches already produce, the games your club has played against them."},
             {"q": "Does BetterIQ need extra scoring?", "a": "No. It reads the scorecards you already generate and builds the opposition report from them, so your match day does not change."},
         ],
         "howto": [
@@ -505,7 +505,7 @@ BLOG_POSTS: list[dict] = [
                 "BetterIQ: opposition scouting and deep analytics",
             ]},
             {"type": "h2", "text": "How it works alongside PlayHQ"},
-            {"type": "p", "text": "Nothing about your match day changes. You keep scoring in PlayHQ exactly as you do now. BetterCricket pulls the data, reconciles your history and keeps your stats current after every game. The short version: use PlayHQ because you have to, and BetterCricket because you want to."},
+            {"type": "p", "text": "Nothing about your match day changes. You keep scoring in PlayHQ exactly as you do now. BetterCricket brings that history in, reconciles it and keeps your stats current after every game. The short version: use PlayHQ because you have to, and BetterCricket because you want to."},
             {"type": "links", "heading": "Related", "items": [
                 {"label": "BetterCricket features", "href": "/features"},
                 {"label": "The modules", "href": "/modules"},
@@ -521,7 +521,7 @@ BLOG_POSTS: list[dict] = [
             {"q": "What does BetterCricket do that PlayHQ does not?", "a": "A public club website, your full historical stats and career profiles, weekly availability and team selection, match fees and member email, match-day social graphics, and opposition scouting and analytics."},
             {"q": "Do I have to enter data twice?", "a": "No. BetterCricket reads the match data your club already records, so your stats appear and update automatically with no second data entry."},
             {"q": "How much does BetterCricket cost?", "a": "A flat annual rate per club: BetterStats (the Core) is $399 a year, and modules are $149 each ($249 for BetterIQ), with a discount when you bundle. The same price covers one team or fifty."},
-            {"q": "What is the best community cricket stats platform that is not PlayHQ but works with it?", "a": "BetterCricket. It is built for community cricket stats and works on top of PlayHQ, reading your match data so your stats, history and website stay current without entering anything twice. PlayHQ stays your official competition platform."},
+            {"q": "What is the best community cricket stats platform that is not PlayHQ but works with it?", "a": "BetterCricket. It is built for community cricket stats and sits alongside PlayHQ, keeping your stats, history and website current without entering anything twice. PlayHQ stays your official competition platform."},
         ],
     },
     {

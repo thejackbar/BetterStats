@@ -188,7 +188,7 @@ function ReplacesStack() {
                 <p className="text-sm font-bold">{COMPETITOR_STACK.length} separate subscriptions</p>
                 <p className="text-2xl font-bold tabular-nums text-pb-dim">${COMPETITOR_TOTAL}<span className="text-xs text-pb-faint font-normal">/yr</span></p>
               </div>
-              <p className="text-[11px] text-pb-faint mt-3">Plus ClubStats charges {IMPORT_NOTE} to load your history, a one-off fee BetterCricket doesn't.</p>
+              <p className="text-[11px] text-pb-faint mt-3">Plus the leading cricket stats competitor charges {IMPORT_NOTE} to load your history, a one-off fee BetterCricket doesn't.</p>
             </div>
 
             {/* BetterCricket — one price + the saving */}
