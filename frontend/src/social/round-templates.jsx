@@ -857,13 +857,13 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
   const rows = results
   const rec = record(rows)
   const n = rows.length || 1
-  const gradeF = n >= 8 ? 16 : n >= 6 ? 19 : n >= 4 ? 22 : 26
-  const scoreF = n >= 8 ? 18 : n >= 6 ? 21 : n >= 4 ? 24 : 28
-  const oppF = n >= 8 ? 12 : n >= 6 ? 14 : n >= 4 ? 16 : 18
-  const badgeF = n >= 8 ? 11 : n >= 6 ? 13 : 15
-  const nameF = n >= 8 ? 12 : n >= 6 ? 13 : 15
-  const lineF = n >= 8 ? 11 : n >= 6 ? 12 : 14
-  const bar = n >= 8 ? 30 : n >= 6 ? 40 : 54
+  const gradeF = n >= 8 ? 20 : n >= 6 ? 24 : n >= 4 ? 28 : 32
+  const scoreF = n >= 8 ? 23 : n >= 6 ? 27 : n >= 4 ? 32 : 36
+  const oppF = n >= 8 ? 15 : n >= 6 ? 18 : n >= 4 ? 21 : 23
+  const badgeF = n >= 8 ? 13 : n >= 6 ? 15 : 18
+  const nameF = n >= 8 ? 16 : n >= 6 ? 18 : 20
+  const lineF = n >= 8 ? 15 : n >= 6 ? 17 : 19
+  const bar = n >= 8 ? 36 : n >= 6 ? 46 : 60
   return (
     <Post palette={pal}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
@@ -884,8 +884,8 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
       <div style={{ position: 'absolute', left: 56, right: 56, top: 158, bottom: 138, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, marginBottom: 8 }}>
           <div />
-          <Kicker color={pal.ink} size={10} style={{ opacity: 0.5 }}>TOP RUN SCORERS</Kicker>
-          <Kicker color={pal.ink} size={10} style={{ opacity: 0.5 }}>TOP WICKET TAKERS</Kicker>
+          <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>TOP RUN SCORERS</Kicker>
+          <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>TOP WICKET TAKERS</Kicker>
         </div>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
@@ -899,18 +899,18 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
                 <div style={{ fontFamily: DISPLAY, fontSize: gradeF, letterSpacing: 0.5, lineHeight: 0.95, overflow: 'hidden' }}>{r.grade}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pal.ink, opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.2, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.2, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85 }}>{r.opp} {r.them}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
-                  <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: pal.ink, opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: pal.primary, background: c, padding: '4px 10px', minWidth: 56, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: pal.primary, background: c, padding: '5px 12px', minWidth: 60, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
                 </div>
               </div>
               {(bats.length > 0 || bowls.length > 0) && (
                 <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, paddingLeft: 0 }}>
                   <div />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {bats.map((p, k) => (
                       <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
                         <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pal.accent, flexShrink: 0 }}>▸</span>
@@ -919,7 +919,7 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
                       </div>
                     ))}
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {bowls.map((p, k) => (
                       <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
                         <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pal.accent, flexShrink: 0 }}>▸</span>
