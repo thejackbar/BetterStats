@@ -18,7 +18,7 @@ import {
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
 import { exportNodeToPng } from '../../social/exportImage'
-import { BACKGROUND_STYLES, BackgroundLayer } from '../../social/backgrounds'
+import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 
@@ -95,6 +95,18 @@ const TAB_FIRST = {
   lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1',
 }
+
+// Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
+// Print / Geometric), in first-seen order from SOCIAL_BACKGROUNDS itself so
+// the picker stays in sync if that list changes.
+const BG_GROUPS = [...new Set(SOCIAL_BACKGROUNDS.map(s => s.group))]
+const BG_COLOR_KEYS = [
+  { key: 'primary', label: 'Primary' },
+  { key: 'secondary', label: 'Secondary' },
+  { key: 'tertiary', label: 'Tertiary' },
+  { key: 'paper', label: 'Paper' },
+  { key: 'ink', label: 'Ink' },
+]
 
 const DISPLAY_FONTS = [
   { key: 'barlow',       name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif", weight: 800 },
@@ -180,6 +192,70 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BACKGROUND COLOUR HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+// SocialBackgrounds' variants share one 5-key colour set (primary/secondary/
+// tertiary/paper/ink) regardless of which of the 18 they are — this derives
+// a sensible default from the post's own palette (which only has one accent),
+// generating a "tertiary" highlight by rotating that accent's hue.
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  let h = 0, s = 0
+  const l = (max + min) / 2
+  const d = max - min
+  if (d !== 0) {
+    s = d / (1 - Math.abs(2 * l - 1))
+    if (max === r) h = ((g - b) / d) % 6
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+    if (h < 0) h += 360
+  }
+  return [h, s, l]
+}
+function hslToHex(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  let r = 0, g = 0, b = 0
+  if (h < 60) [r, g, b] = [c, x, 0]
+  else if (h < 120) [r, g, b] = [x, c, 0]
+  else if (h < 180) [r, g, b] = [0, c, x]
+  else if (h < 240) [r, g, b] = [0, x, c]
+  else if (h < 300) [r, g, b] = [x, 0, c]
+  else [r, g, b] = [c, 0, x]
+  const to255 = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return `#${to255(r)}${to255(g)}${to255(b)}`
+}
+function rotateHue(hex, deg) {
+  try {
+    const [h, s, l] = hexToHsl(hex)
+    return hslToHex((h + deg + 360) % 360, s, l)
+  } catch {
+    return hex
+  }
+}
+function paletteToBgColors(pal) {
+  return {
+    primary: pal.primary,
+    secondary: pal.accent,
+    tertiary: rotateHue(pal.accent, 35),
+    paper: BG_DEFAULT_COLORS.paper,
+    ink: pal.ink,
+  }
+}
+// Adds an alpha channel to a plain #rrggbb so a template's own opaque canvas
+// fill becomes a translucent "window" onto the SocialBackground graphic
+// sitting behind it — the only way to reveal the new backgrounds without
+// touching background fills hardcoded across ~40 individual templates.
+function withAlpha(hex, alphaHex) {
+  return (typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex)) ? `${hex}${alphaHex}` : hex
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // UI COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
 function PaletteSwatch({ pal, selected, onClick }) {
@@ -195,26 +271,23 @@ function PaletteSwatch({ pal, selected, onClick }) {
 }
 
 // Background-texture picker swatch — renders a live miniature of the actual
-// texture (scaled down from its real 1080×1080 render) so clubs can see what
-// they're picking, not just a label.
+// SocialBackground variant so clubs can see what they're picking, not just a
+// label. 'none' renders a plain ✕ placeholder (no SocialBackground entry).
 const BG_SWATCH_SIZE = 40
-function BgStyleSwatch({ entry, palette, selected, onClick }) {
-  const scale = BG_SWATCH_SIZE / 1080
+function BgStyleSwatch({ entry, colors, selected, onClick }) {
   return (
     <button
       onClick={onClick}
-      title={`${entry.label}${entry.hint ? ` — ${entry.hint}` : ''}`}
+      title={entry.label}
       style={{
         width: BG_SWATCH_SIZE, height: BG_SWATCH_SIZE, borderRadius: 6, cursor: 'pointer', overflow: 'hidden', position: 'relative',
-        background: palette.primary, border: `2px solid ${selected ? palette.accent : 'transparent'}`, flexShrink: 0,
+        background: colors.primary, border: `2px solid ${selected ? colors.secondary : 'transparent'}`, flexShrink: 0,
       }}
     >
-      {entry.Component ? (
-        <div style={{ width: 1080, height: 1080, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute' }}>
-          <BackgroundLayer styleKey={entry.key} palette={palette} width={1080} height={1080} />
-        </div>
+      {entry.key === 'none' ? (
+        <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 8, color: colors.ink, opacity: 0.5 }}>✕</span>
       ) : (
-        <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 8, color: palette.ink, opacity: 0.5 }}>✕</span>
+        <SocialBackground variant={entry.key} colors={colors} size={BG_SWATCH_SIZE} style={{ position: 'absolute', inset: 0 }} />
       )}
     </button>
   )
@@ -225,21 +298,21 @@ function BgStyleSwatch({ entry, palette, selected, onClick }) {
 // separately re-picking a palette, a texture and a font each time.
 const DESIGN_SWATCH_SIZE = 44
 function DesignSwatch({ design, selected, onClick }) {
-  const scale = DESIGN_SWATCH_SIZE / 1080
-  const pal = { primary: design.primary, secondary: design.secondary, accent: design.accent, ink: design.ink }
+  const bgColors = { primary: design.primary, secondary: design.accent, tertiary: rotateHue(design.accent, 35), paper: BG_DEFAULT_COLORS.paper, ink: design.ink, ...(design.bgColors || {}) }
   return (
     <button
       onClick={onClick}
-      title={`${design.name} — ${BACKGROUND_STYLES.find(s => s.key === design.bgStyle)?.label || 'Clean'}`}
+      title={`${design.name} — ${SOCIAL_BACKGROUNDS.find(s => s.key === design.bgStyle)?.label || 'Clean'}`}
       style={{
         width: DESIGN_SWATCH_SIZE, height: DESIGN_SWATCH_SIZE, borderRadius: 6, cursor: 'pointer', overflow: 'hidden', position: 'relative',
         background: design.primary, border: `2px solid ${selected ? design.accent : 'transparent'}`, flexShrink: 0,
       }}
     >
-      <div style={{ width: 1080, height: 1080, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute' }}>
-        <BackgroundLayer styleKey={design.bgStyle} palette={pal} width={1080} height={1080} colors={design.bgColors} seed={design.bgSeed || 0} />
-      </div>
-      <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 8, background: design.accent }} />
+      {design.bgStyle && design.bgStyle !== 'none' ? (
+        <SocialBackground variant={design.bgStyle} colors={bgColors} size={DESIGN_SWATCH_SIZE} style={{ position: 'absolute', inset: 0 }} />
+      ) : (
+        <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 8, background: design.accent }} />
+      )}
     </button>
   )
 }
@@ -547,14 +620,12 @@ export default function AdminSocialPost() {
   const [bgStyle, setBgStyle] = useState(() =>
     localStorage.getItem('bs_social_bg') || 'none'
   )
-  // Per-style custom colours (Flux/Undulate/Rainbow/Horizon) and per-style
-  // random seed (for the "🎲 Randomize" control on the randomizable styles),
-  // keyed by bgStyle key so switching styles doesn't lose either setting.
+  // Per-style colour overrides — every SocialBackgrounds variant shares the
+  // same 5-key colour set (primary/secondary/tertiary/paper/ink), so this is
+  // keyed by bgStyle -> partial colour object, merged over the club-palette
+  // default (paletteToBgColors) when not customised.
   const [bgColors, setBgColors] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bs_social_bg_colors') || '{}') } catch { return {} }
-  })
-  const [bgSeeds, setBgSeeds] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('bs_social_bg_seeds') || '{}') } catch { return {} }
   })
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
@@ -672,7 +743,6 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
-  useEffect(() => { localStorage.setItem('bs_social_bg_seeds', JSON.stringify(bgSeeds)) }, [bgSeeds])
 
   useEffect(() => {
     Promise.all([api.adminGetSettings(), api.adminListPlayers(), api.adminListSponsors()])
@@ -1088,10 +1158,6 @@ export default function AdminSocialPost() {
 
   const themedPalette = applyTheme(activePalette, darkMode)
 
-  const bgEntry = BACKGROUND_STYLES.find(s => s.key === bgStyle)
-  const bgActiveColors = bgEntry?.customColors ? (bgColors[bgStyle] || bgEntry.customColors.defaultFrom(themedPalette)) : undefined
-  const bgActiveSeed = bgSeeds[bgStyle] || 0
-
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const isScorecard = !!(tmpl.isScorecard)
@@ -1101,6 +1167,22 @@ export default function AdminSocialPost() {
   // a paper/ink pair rather than the dark-mode palette; eventPaletteFor is a
   // no-op for everything else, so the render path stays unchanged otherwise.
   const renderPalette = tmpl.kind === 'event' ? eventPaletteFor(tmpl.surface, themedPalette) : themedPalette
+
+  // bgColors[bgStyle] is a *partial* override merged over the palette's own
+  // derived defaults, so switching palette still updates an uncustomised
+  // background instead of freezing it at whatever it looked like when picked.
+  // Kept separate from isScorecard so the colour pickers still work while a
+  // Scorecard template is selected (the 1920×1080 layout just doesn't render
+  // it — SocialBackgrounds variants are square-only).
+  const bgColorsMerged = bgStyle !== 'none' ? { ...paletteToBgColors(renderPalette), ...(bgColors[bgStyle] || {}) } : null
+  const bgActive = bgStyle !== 'none' && !isScorecard
+  const bgResolvedColors = bgActive ? bgColorsMerged : null
+  // The template's own opaque canvas fill is given an alpha channel so the
+  // SocialBackground sitting behind it (same coordinate space, lower in the
+  // DOM) shows through — the templates' hardcoded `background: palette.primary`
+  // fills can't be touched individually (~40 of them), so this is done by
+  // feeding them a translucent palette instead.
+  const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, '99') } : renderPalette
 
   const filteredPlayers = allPlayers.filter(p => {
     if (!playerSearch) return true
@@ -1286,6 +1368,7 @@ export default function AdminSocialPost() {
 
   return (
     <BetterSocialsLayout>
+      <SocialBackgroundDefs />
       <div className="max-w-full">
         <div className="flex gap-5 items-start">
 
@@ -1382,31 +1465,32 @@ export default function AdminSocialPost() {
                   </div>
                 </div>
               )}
-              <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
-                <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Background</span>
-                {BACKGROUND_STYLES.map(s => (
-                  <BgStyleSwatch key={s.key} entry={s} palette={renderPalette} selected={bgStyle === s.key} onClick={() => setBgStyle(s.key)} />
-                ))}
-                {bgEntry?.randomizable && (
-                  <button
-                    onClick={() => setBgSeeds(s => ({ ...s, [bgStyle]: (s[bgStyle] || 0) + 1 }))}
-                    title="Shuffle this texture's shape"
-                    className="px-2.5 py-1 rounded border pb-hairline text-[11px] font-mono text-pb-faint hover:text-pb-text transition-colors"
-                  >🎲 Randomize</button>
-                )}
+              <div className="mt-2 pt-2 border-t pb-hairline">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Background</span>
+                  {isScorecard && bgStyle !== 'none' && (
+                    <span className="font-mono text-[9px] text-pb-faintest">Scorecards stay plain — 1920×1080 isn't square</span>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap items-center mb-1">
+                  <BgStyleSwatch entry={{ key: 'none', label: 'Clean' }} colors={paletteToBgColors(renderPalette)} selected={bgStyle === 'none'} onClick={() => setBgStyle('none')} />
+                  {BG_GROUPS.map(group => (
+                    <div key={group} className="flex gap-2 flex-wrap items-center">
+                      {SOCIAL_BACKGROUNDS.filter(s => s.group === group).map(s => (
+                        <BgStyleSwatch key={s.key} entry={s} colors={paletteToBgColors(renderPalette)} selected={bgStyle === s.key} onClick={() => setBgStyle(s.key)} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
-              {bgEntry?.customColors && (
+              {bgStyle !== 'none' && (
                 <div className="flex gap-3 flex-wrap items-center mt-2">
-                  {bgEntry.customColors.labels.map((label, i) => (
-                    <label key={i} className="flex items-center gap-1.5 text-[11px] text-pb-faint font-mono">
+                  {BG_COLOR_KEYS.map(({ key, label }) => (
+                    <label key={key} className="flex items-center gap-1.5 text-[11px] text-pb-faint font-mono">
                       <input
                         type="color"
-                        value={(bgActiveColors[i] || '#000000')}
-                        onChange={e => setBgColors(c => {
-                          const cur = c[bgStyle] || bgEntry.customColors.defaultFrom(themedPalette)
-                          const next = [...cur]; next[i] = e.target.value
-                          return { ...c, [bgStyle]: next }
-                        })}
+                        value={bgColorsMerged[key] || '#000000'}
+                        onChange={e => setBgColors(c => ({ ...c, [bgStyle]: { ...paletteToBgColors(renderPalette), ...(c[bgStyle] || {}), [key]: e.target.value } }))}
                         className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0"
                       />
                       {label}
@@ -1433,7 +1517,6 @@ export default function AdminSocialPost() {
                         setFontKey(d.fontKey)
                         setDarkMode(d.dark)
                         if (d.bgColors) setBgColors(c => ({ ...c, [d.bgStyle]: d.bgColors }))
-                        if (d.bgSeed) setBgSeeds(s => ({ ...s, [d.bgStyle]: d.bgSeed }))
                       }}
                     />
                     <button
@@ -1471,7 +1554,7 @@ export default function AdminSocialPost() {
                       localStorage.setItem('bs_social_palettes', JSON.stringify(nextPalettes))
                       const design = {
                         key, name, primary: activePalette.primary, secondary: activePalette.secondary, accent: activePalette.accent, ink: activePalette.ink,
-                        bgStyle, fontKey, dark: darkMode, bgColors: bgColors[bgStyle] || null, bgSeed: bgSeeds[bgStyle] || 0,
+                        bgStyle, fontKey, dark: darkMode, bgColors: bgColors[bgStyle] || null,
                       }
                       const nextDesigns = [...savedDesigns, design]
                       setSavedDesigns(nextDesigns)
@@ -2347,8 +2430,8 @@ export default function AdminSocialPost() {
                 return (
                   <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                     <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
-                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
-                      <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} colors={bgActiveColors} seed={bgActiveSeed} />
+                      {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} style={{ position: 'absolute', inset: 0 }} />}
+                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
                     </div>
                   </div>
                 )
@@ -2385,8 +2468,8 @@ export default function AdminSocialPost() {
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                       <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
-                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
-                        <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} colors={bgActiveColors} seed={bgActiveSeed} />
+                        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} style={{ position: 'absolute', inset: 0 }} />}
+                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
@@ -2404,8 +2487,8 @@ export default function AdminSocialPost() {
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
         <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={renderPalette} headline={headline} {...extraProps} />
-          <BackgroundLayer styleKey={bgStyle} palette={renderPalette} width={W} height={H} colors={bgActiveColors} seed={bgActiveSeed} />
+          {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} style={{ position: 'absolute', inset: 0 }} />}
+          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
         </div>
       </div>
 
