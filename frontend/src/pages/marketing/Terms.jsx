@@ -59,7 +59,23 @@ export default function Terms() {
           </section>
 
           <section>
-            <h2 className="font-display font-bold text-xl text-pb-text mb-3">5. Subscription &amp; payment</h2>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">5. Email and BetterComms</h2>
+            <p>
+              BetterComms lets your club email its members. You may email only your own members and associates,
+              or people who have asked to hear from you. You must not use bought, scraped or shared lists.
+              Every email includes a one-click unsubscribe and identifies your club, as the Spam Act 2003 requires,
+              and we honour unsubscribes across your club automatically.
+            </p>
+            <p className="mt-3">
+              All BetterComms mail goes out through a shared email service, so we set sending limits to keep it
+              healthy for everyone. A new club starts with a small daily limit and can ask us to raise it once its
+              sending looks clean. We may pace, cap or pause sending to protect the service, and we may suspend a
+              club whose emails bounce or get marked as spam too often, until the problem is fixed.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">6. Subscription &amp; payment</h2>
             <p>
               The Service is offered on flat per-club plans: the <strong className="text-pb-text">Core</strong> (BetterStats)
               is $399 per year, and you can add modules (<strong className="text-pb-text">BetterSelect</strong>,{' '}
@@ -78,7 +94,7 @@ export default function Terms() {
           </section>
 
           <section>
-            <h2 className="font-display font-bold text-xl text-pb-text mb-3">6. Your data</h2>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">7. Your data</h2>
             <p>
               Your club's data remains yours. We process it to provide the Service, and you can export your club's
               data as CSV at any time. The statistics shown in the Service are derived from your club's own match
@@ -90,7 +106,7 @@ export default function Terms() {
           </section>
 
           <section>
-            <h2 className="font-display font-bold text-xl text-pb-text mb-3">7. Availability &amp; support</h2>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">8. Availability &amp; support</h2>
             <p>
               We aim to keep the Service available and up to date, and we provide support by email at{' '}
               <a href="mailto:cricket@bettersports.com.au" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>cricket@bettersports.com.au</a>.
@@ -101,7 +117,7 @@ export default function Terms() {
           </section>
 
           <section>
-            <h2 className="font-display font-bold text-xl text-pb-text mb-3">8. Limitation of liability</h2>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">9. Limitation of liability</h2>
             <p>
               Nothing in these terms excludes, restricts or modifies any rights or remedies you have under the
               Australian Consumer Law or other laws that cannot lawfully be excluded. Subject to that, and to the
@@ -113,7 +129,7 @@ export default function Terms() {
           </section>
 
           <section>
-            <h2 className="font-display font-bold text-xl text-pb-text mb-3">9. Changes to these terms</h2>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">10. Changes to these terms</h2>
             <p>
               We may update these terms from time to time. If we make a material change, we'll let subscribers know
               by email or through the Service. Continuing to use the Service after a change takes effect means your
@@ -122,7 +138,7 @@ export default function Terms() {
           </section>
 
           <section>
-            <h2 className="font-display font-bold text-xl text-pb-text mb-3">10. Contact</h2>
+            <h2 className="font-display font-bold text-xl text-pb-text mb-3">11. Contact</h2>
             <p>
               BetterCricket is provided by BetterSports (ABN 32 624 335 397), Perth, Western Australia. Questions
               about these terms? Email{' '}

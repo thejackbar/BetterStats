@@ -15,7 +15,7 @@ from pathlib import Path
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
     PlayerSyncRequest, Sponsor, ClubOnboardingRequest, OrgModuleSubscription,
-    ModuleActionRequest, get_db
+    ModuleActionRequest, CommsLimitRequest, get_db
 )
 from sqlalchemy import text as _text
 from sqlalchemy.orm import selectinload, aliased as _orm_aliased
@@ -32,6 +32,8 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for,
 )
 from app.services import module_subscriptions as mod_subs
+from app.services import comms_limits
+from app.services import club_requests
 from datetime import date as _date, datetime as _datetime, timezone as _timezone
 from app.services import playhq_client
 from app.services.name_format import name_sort_key
@@ -1505,6 +1507,9 @@ def _club_payload(org) -> dict:
         "renewal_date": org.renewal_date.isoformat() if org.renewal_date else None,
         "billing_cycle": org.billing_cycle,
         "default_trial_days": org_default_trial_days(org),
+        "comms_tier": getattr(org, "comms_tier", None) or "sandbox",
+        "comms_sandbox_cap": getattr(org, "comms_sandbox_cap", None),
+        "comms_production_cap": getattr(org, "comms_production_cap", None),
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }
 
@@ -1615,6 +1620,10 @@ class ClubUpdate(BaseModel):
     billing_cycle: Optional[str] = None
     # Club General Settings — the configurable default trial length (days).
     default_trial_days: Optional[int] = None
+    # BetterComms sending tier + optional per-club daily-cap overrides per tier.
+    comms_tier: Optional[str] = None
+    comms_sandbox_cap: Optional[int] = None
+    comms_production_cap: Optional[int] = None
 
 
 @router.patch("/super/clubs/{club_id}")
@@ -1657,6 +1666,14 @@ async def patch_club(
     if fields.get("billing_cycle") is not None and fields["billing_cycle"] not in ALL_BILLING_CYCLES:
         raise HTTPException(status_code=422, detail=f"Billing cycle must be one of: {', '.join(ALL_BILLING_CYCLES)}")
 
+    if "comms_tier" in fields and fields["comms_tier"] is not None:
+        if fields["comms_tier"] not in comms_limits.TIERS:
+            raise HTTPException(status_code=422,
+                                detail=f"Comms tier must be one of: {', '.join(comms_limits.TIERS)}")
+    for cap_field in ("comms_sandbox_cap", "comms_production_cap"):
+        if fields.get(cap_field) is not None and int(fields[cap_field]) < 0:
+            raise HTTPException(status_code=422, detail=f"{cap_field} must be >= 0")
+
     # Club General Settings (default_trial_days) lives in the general_settings blob,
     # not a column — merge it in rather than setattr.
     if "default_trial_days" in fields:
@@ -1686,6 +1703,153 @@ async def patch_club(
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return _club_payload(org)
+
+
+# ─── BetterComms sending-tier requests (super admin) ──────────────────────────
+
+async def _comms_request_out(db: AsyncSession, r: CommsLimitRequest, org: Organisation) -> dict:
+    """A tier request enriched with the club's live deliverability + current tier,
+    so the super admin can judge the ask on the same screen."""
+    metrics = await comms_limits.deliverability_metrics(db, org.id)
+    return {
+        "id": str(r.id),
+        "organisation_id": str(org.id),
+        "club_name": org.name,
+        "club_slug": org.slug,
+        "current_tier": getattr(org, "comms_tier", None) or "sandbox",
+        "requested_tier": r.requested_tier,
+        "requested_cap": r.requested_cap,
+        "reason": r.reason,
+        "status": r.status,
+        "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "decision_note": r.decision_note,
+        "metrics": metrics,
+        "breaker_reason": comms_limits.breaker_reason(metrics),
+    }
+
+
+@router.get("/super/comms/requests")
+async def list_comms_requests(
+    status: str = "pending",
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(CommsLimitRequest, Organisation).join(
+        Organisation, Organisation.id == CommsLimitRequest.organisation_id)
+    if status and status != "all":
+        stmt = stmt.where(CommsLimitRequest.status == status)
+    stmt = stmt.order_by(CommsLimitRequest.requested_at.desc()).limit(200)
+    rows = (await db.execute(stmt)).all()
+    return [await _comms_request_out(db, r, org) for r, org in rows]
+
+
+class CommsRequestDecision(BaseModel):
+    daily_limit: Optional[int] = None   # optional explicit cap on approve
+    note: Optional[str] = None
+
+
+@router.post("/super/comms/requests/{request_id}/approve")
+async def approve_comms_request(
+    request_id: str,
+    data: CommsRequestDecision,
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve a tier lift: move the club to production (with an optional explicit
+    daily cap) and close the request."""
+    req = await db.get(CommsLimitRequest, uuid.UUID(request_id))
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Request already {req.status}")
+    org = await db.get(Organisation, req.organisation_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    org.comms_tier = comms_limits.TIER_PRODUCTION
+    # An explicit approved cap becomes this club's production-tier override.
+    cap = data.daily_limit if data.daily_limit is not None else req.requested_cap
+    if cap is not None:
+        org.comms_production_cap = max(0, int(cap))
+    req.status = "approved"
+    req.decided_by = user.id
+    req.decided_at = _datetime.now(_timezone.utc)
+    req.decision_note = (data.note or "").strip() or None
+    await db.commit()
+    return {"status": "approved", "comms_tier": org.comms_tier,
+            "comms_production_cap": org.comms_production_cap}
+
+
+@router.post("/super/comms/requests/{request_id}/deny")
+async def deny_comms_request(
+    request_id: str,
+    data: CommsRequestDecision,
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    req = await db.get(CommsLimitRequest, uuid.UUID(request_id))
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Request already {req.status}")
+    req.status = "denied"
+    req.decided_by = user.id
+    req.decided_at = _datetime.now(_timezone.utc)
+    req.decision_note = (data.note or "").strip() or None
+    await db.commit()
+    return {"status": "denied"}
+
+
+@router.post("/super/clubs/{club_id}/comms/reinstate")
+async def reinstate_comms(
+    club_id: str,
+    data: CommsRequestDecision,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lift a suspension (breaker trip): move the club back to production sending.
+    The metrics that tripped it stay in history; the super admin owns the call."""
+    org = await db.get(Organisation, uuid.UUID(club_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    org.comms_tier = comms_limits.TIER_PRODUCTION
+    await db.commit()
+    return {"status": "ok", "comms_tier": org.comms_tier}
+
+
+@router.get("/super/comms/rates")
+async def get_comms_rates(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """The live AWS per-second ceiling + our pacing rate (super-admin managed)."""
+    from app.services import platform_settings as ps
+    return await ps.get_ses_rates(db)
+
+
+class CommsRatesIn(BaseModel):
+    aws_max_send_rate: Optional[int] = None   # AWS's granted per-second ceiling
+    send_rate: Optional[int] = None           # our pacing rate (must stay < ceiling)
+    aws_daily_quota: Optional[int] = None      # AWS's granted daily ceiling
+    daily_send_limit: Optional[int] = None     # our practical daily max (≤ AWS daily)
+
+
+@router.patch("/super/comms/rates")
+async def update_comms_rates(
+    data: CommsRatesIn,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the AWS ceilings and/or our practical limits. Our send rate must stay
+    strictly below the AWS per-second ceiling, and our daily limit at or below the
+    AWS daily ceiling — the update is rejected otherwise."""
+    from app.services import platform_settings as ps
+    try:
+        return await ps.update_ses_rates(
+            db, aws_max_send_rate=data.aws_max_send_rate, send_rate=data.send_rate,
+            aws_daily_quota=data.aws_daily_quota, daily_send_limit=data.daily_send_limit)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 # ─── Per-module subscription management (super admin) ─────────────────────────
@@ -1997,7 +2161,17 @@ async def create_module_request(
                 mc.requested_trial_modules = sorted(wanted)
         except Exception:
             pass
+    # Uniform club→BetterCricket request telemetry + automated Twenty task (same
+    # helper the BetterComms tier request uses), so every ask is tracked and
+    # surfaces in the CRM action queue.
+    ev = await club_requests.add_request_event(
+        db, org_id=club.id, request_type="module_request",
+        summary=f"{club.name} requests {body.kind} of {body.module_key}",
+        detail={"module_key": body.module_key, "kind": body.kind, "note": body.note},
+        source="app", requested_by=current_user.id,
+        ref_table="module_action_requests", ref_id=req.id)
     await db.commit()
+    club_requests.fire_twenty_task(ev.id)
     await db.refresh(req)
     return _request_payload(req, org_name=club.name, requester=current_user.username)
 
@@ -2054,6 +2228,25 @@ async def count_module_requests(
         .where(ModuleActionRequest.status == "outstanding")
     )).scalar_one()
     return {"outstanding": int(n or 0)}
+
+
+@router.get("/super/comms/requests/count")
+async def count_comms_requests(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pending tier-lift requests + clubs currently suspended by the breaker —
+    the badge on the super-admin 'Comms limits' nav entry."""
+    pending = (await db.execute(
+        select(func.count()).select_from(CommsLimitRequest)
+        .where(CommsLimitRequest.status == "pending")
+    )).scalar_one()
+    suspended = (await db.execute(
+        select(func.count()).select_from(Organisation)
+        .where(Organisation.comms_tier == "suspended")
+    )).scalar_one()
+    return {"pending": int(pending or 0), "suspended": int(suspended or 0),
+            "total": int((pending or 0) + (suspended or 0))}
 
 
 class RequestApproval(BaseModel):

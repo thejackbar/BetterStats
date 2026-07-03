@@ -897,6 +897,24 @@ export const api = {
     request(`/club-admin/super/module-requests/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
   superDismissModuleRequest: (id) =>
     request(`/club-admin/super/module-requests/${id}/dismiss`, { method: 'POST' }),
+  // BetterComms sending tiers (migration 125). Club-facing:
+  commsGetLimits: () => request('/club-admin/comms/limits'),
+  commsRequestLimit: (body = {}) =>
+    request('/club-admin/comms/limits/request', { method: 'POST', body: JSON.stringify(body) }),
+  // Super-admin tier-request queue + suspensions.
+  superListCommsRequests: (status) =>
+    request(`/club-admin/super/comms/requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  superCountCommsRequests: () => request('/club-admin/super/comms/requests/count'),
+  superApproveCommsRequest: (id, body = {}) =>
+    request(`/club-admin/super/comms/requests/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  superDenyCommsRequest: (id, body = {}) =>
+    request(`/club-admin/super/comms/requests/${id}/deny`, { method: 'POST', body: JSON.stringify(body) }),
+  superReinstateComms: (clubId, body = {}) =>
+    request(`/club-admin/super/clubs/${clubId}/comms/reinstate`, { method: 'POST', body: JSON.stringify(body) }),
+  // Account send rate (AWS ceiling + our pacing rate), super-admin managed.
+  superGetCommsRates: () => request('/club-admin/super/comms/rates'),
+  superUpdateCommsRates: (body = {}) =>
+    request('/club-admin/super/comms/rates', { method: 'PATCH', body: JSON.stringify(body) }),
   superListUsers: () => request('/club-admin/super/users'),
   superCreateUser: (data) =>
     request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(data) }),

@@ -15,6 +15,38 @@ const CARD = 'rounded-xl border pb-hairline bg-pb-surface2/40 px-3 py-2.5 mb-2.5
 const SECTION = 'text-[11px] uppercase tracking-wide text-pb-faint font-semibold'
 const FIELD_LABEL = 'block text-[10px] uppercase tracking-wide text-pb-faint mb-0.5'
 
+// The tri-state directory filters. Each can be Off, Include (keep only matching)
+// or Exclude (drop matching). Keys match the backend club_filters modes.
+const MODE_FILTERS = [
+  { key: 'junior', label: 'Juniors', title: 'Club name contains "junior"' },
+  { key: 'carnival', label: 'Carnivals', title: 'Club name contains "carnival"' },
+  { key: 'school', label: 'Schools', title: 'Club name contains "school"' },
+  { key: 'rep', label: 'Rep orgs', title: 'Club name is a representative team (Rep / Representative)' },
+  { key: 'cricket_au', label: 'Cricket Australia orgs', title: 'A club or officer email is on a Cricket Australia / state-body domain' },
+  { key: 'emailed', label: 'Already-emailed', title: 'Club has an outreach send recorded' },
+  { key: 'exported', label: 'Exported', title: 'Include = nothing left to export; Exclude = still has an emailable contact not yet in BetterComms' },
+  { key: 'suppressed', label: 'Suppressed', title: 'Include = no subscribed emailable contact left; Exclude = still has a subscribed contact' },
+]
+const MODE_CYCLE = { '': 'exclude', exclude: 'include', include: '' }
+const MODE_STYLE = {
+  '': 'border-pb-hairline text-pb-faint hover:text-pb-text',
+  exclude: 'border-red-500/50 text-red-300 bg-red-500/10',
+  include: 'border-emerald-500/50 text-emerald-300 bg-emerald-500/10',
+}
+const MODE_PREFIX = { '': '', exclude: '✕ ', include: '✓ ' }
+
+// A filter chip whose click cycles Off → Exclude → Include → Off.
+function FilterChip({ label, title, mode, onChange }) {
+  const m = mode || ''
+  return (
+    <button type="button" title={title}
+      onClick={() => onChange(MODE_CYCLE[m])}
+      className={`px-2 py-0.5 rounded border text-xs transition ${MODE_STYLE[m]}`}>
+      {MODE_PREFIX[m]}{label}
+    </button>
+  )
+}
+
 // Short, local date/time so a visit's recency reads at a glance.
 function fmtWhen(iso) {
   if (!iso) return ''
@@ -717,9 +749,11 @@ export default function SuperMarketing() {
   const [filters, setFilters] = useState({
     q: '', state: '', association: '', associations: [], countries: [],
     postcode_from: '', postcode_to: '',
-    contact: '', person: '', exclude_junior: false, exclude_emailed: false,
-    exclude_carnival: false, exclude_school: false,
-    exclude_exported: false, exclude_suppressed: false, visited: false, emailed: false,
+    contact: '', person: '',
+    // Tri-state directory filters: '' (off) | 'include' | 'exclude'.
+    junior: '', carnival: '', school: '', rep: '', cricket_au: '',
+    emailed: '', exported: '', suppressed: '',
+    visited: false,
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
@@ -1046,17 +1080,14 @@ export default function SuperMarketing() {
             {(filters.q || filters.association || filters.associations.length || filters.countries.length
               || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
-              || filters.exclude_junior || filters.exclude_emailed || filters.exclude_carnival
-              || filters.exclude_school || filters.exclude_exported || filters.exclude_suppressed
-              || filters.visited || filters.emailed) && (
+              || filters.visited || MODE_FILTERS.some(mf => filters[mf.key])) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                   countries: [],
                                                   postcode_from: '', postcode_to: '', contact: '',
-                                                  person: '', exclude_junior: false, exclude_emailed: false,
-                                                  exclude_carnival: false, exclude_school: false,
-                                                  exclude_exported: false, exclude_suppressed: false,
-                                                  visited: false, emailed: false })}>
+                                                  person: '', junior: '', carnival: '', school: '',
+                                                  rep: '', cricket_au: '', emailed: '', exported: '',
+                                                  suppressed: '', visited: false })}>
                 Clear all
               </button>
             )}
@@ -1138,40 +1169,18 @@ export default function SuperMarketing() {
               />
             </Field>
           </div>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 mt-2.5 pt-2.5 border-t pb-hairline">
-            <span className="text-[10px] uppercase tracking-wide text-pb-faint">Exclude</span>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-              <input type="checkbox" checked={filters.exclude_junior}
-                     onChange={(e) => setFilters(f => ({ ...f, exclude_junior: e.target.checked }))} />
-              Juniors
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-              <input type="checkbox" checked={filters.exclude_carnival}
-                     onChange={(e) => setFilters(f => ({ ...f, exclude_carnival: e.target.checked }))} />
-              Carnivals
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-              <input type="checkbox" checked={filters.exclude_school}
-                     onChange={(e) => setFilters(f => ({ ...f, exclude_school: e.target.checked }))} />
-              Schools
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim">
-              <input type="checkbox" checked={filters.exclude_emailed}
-                     onChange={(e) => setFilters(f => ({ ...f, exclude_emailed: e.target.checked }))} />
-              Already-emailed
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
-                   title="Hide clubs with no emailable contact left that isn't already in BetterComms">
-              <input type="checkbox" checked={filters.exclude_exported}
-                     onChange={(e) => setFilters(f => ({ ...f, exclude_exported: e.target.checked }))} />
-              Exported
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
-                   title="Hide clubs with no subscribed (non-opted-out) emailable contact">
-              <input type="checkbox" checked={filters.exclude_suppressed}
-                     onChange={(e) => setFilters(f => ({ ...f, exclude_suppressed: e.target.checked }))} />
-              Suppressed
-            </label>
+          <div className="mt-2.5 pt-2.5 border-t pb-hairline">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-pb-faint">Filters</span>
+              <span className="text-[10px] text-pb-faintest">click to cycle: off → <span className="text-red-300">exclude</span> → <span className="text-emerald-300">include</span></span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {MODE_FILTERS.map(mf => (
+                <FilterChip key={mf.key} label={mf.label} title={mf.title}
+                  mode={filters[mf.key]}
+                  onChange={(v) => setFilters(f => ({ ...f, [mf.key]: v }))} />
+              ))}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 mt-2.5 pt-2.5 border-t pb-hairline">
             <span className="text-[10px] uppercase tracking-wide text-pb-faint">Show only</span>
@@ -1180,12 +1189,6 @@ export default function SuperMarketing() {
               <input type="checkbox" checked={filters.visited}
                      onChange={(e) => setFilters(f => ({ ...f, visited: e.target.checked }))} />
               Visited the site (via their UTM)
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-pb-dim"
-                   title="Only clubs that have been emailed (outreach send recorded)">
-              <input type="checkbox" checked={filters.emailed}
-                     onChange={(e) => setFilters(f => ({ ...f, emailed: e.target.checked }))} />
-              Emailed
             </label>
           </div>
         </section>

@@ -174,6 +174,27 @@ async def sweep_module_trials():
             logger.error(f"Module trial sweep failed: {e}")
 
 
+async def comms_daily_maintenance():
+    """BetterComms daily housekeeping, run just after the AWS quota window rolls
+    over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
+    club over the danger line, then (2) resume campaigns whose overflow was
+    deferred, now that every club has a fresh daily allowance."""
+    from app.services import comms_limits
+    from app.routers.comms import resume_deferred_campaigns
+    try:
+        summary = await comms_limits.sweep_breaker()
+        if summary.get("suspended"):
+            logger.warning("BetterComms breaker suspended %d club(s): %s",
+                           len(summary["suspended"]),
+                           ", ".join(s["name"] for s in summary["suspended"]))
+    except Exception as e:
+        logger.error(f"BetterComms breaker sweep failed: {e}")
+    try:
+        await resume_deferred_campaigns()
+    except Exception as e:
+        logger.error(f"BetterComms deferred resume failed: {e}")
+
+
 # Hold a reference to the continuous-crawl task so it isn't garbage-collected.
 _marketing_continuous_task: "asyncio.Task | None" = None
 
@@ -272,6 +293,18 @@ def start_scheduler():
         hour=1,
         minute=30,
         id="daily_module_trial_sweep",
+        replace_existing=True,
+    )
+    # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send
+    # quota resets at midnight UTC: trip the bounce/complaint breaker, then resume
+    # any campaigns whose overflow was deferred to today's fresh allowance.
+    scheduler.add_job(
+        comms_daily_maintenance,
+        trigger="cron",
+        hour=0,
+        minute=15,
+        timezone="UTC",
+        id="comms_daily_maintenance",
         replace_existing=True,
     )
     # BetterCricket outreach — crawl the national club directory. Two modes, both

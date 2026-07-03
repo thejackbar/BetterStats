@@ -146,6 +146,17 @@ class Organisation(Base):
     comms_from_name = Column(Text, nullable=True)
     comms_reply_to = Column(Text, nullable=True)
     comms_sender_footer = Column(Text, nullable=True)
+    # ─── BetterComms sending tier (migration 125, AWS-sandbox-style) ──────────
+    # A new club starts in 'sandbox' with a low daily send cap; a super admin
+    # lifts it to 'production' after a clean request. The bounce/complaint
+    # circuit breaker auto-moves a club to 'suspended' (cap 0) until reinstated.
+    # comms_sandbox_cap / comms_production_cap are per-club overrides of the
+    # global default caps for each tier (NULL = use the settings default). A
+    # super admin sets these when onboarding the club on BetterAdmin. See
+    # services/comms_limits.py.
+    comms_tier = Column(Text, nullable=False, server_default="sandbox", default="sandbox")
+    comms_sandbox_cap = Column(Integer, nullable=True)
+    comms_production_cap = Column(Integer, nullable=True)
     # ─── BetterComms: BetterCricket marketing-outreach designation (migration
     # 108) ─── which org runs BetterCricket's own Clubs Directory campaigns. A
     # super admin flags it from the BetterComms UI (no env change); the
@@ -433,6 +444,60 @@ class ModuleActionRequest(Base):
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     result_subscription_id = Column(UUID(as_uuid=True), ForeignKey("org_module_subscriptions.id", ondelete="SET NULL"), nullable=True)
     external_ref = Column(Text, nullable=True)          # dedupe key for a Twenty-origin request
+
+
+class CommsLimitRequest(Base):
+    """A club's request to lift its BetterComms sending tier (migration 125),
+    actioned by a super admin — the AWS-sandbox-out-of-sandbox flow, one level up.
+
+    Mirrors ModuleActionRequest: a request never changes the tier on its own, it
+    queues a decision. The super admin approves (which sets the club's
+    ``comms_tier`` / per-club cap) or denies. Creating one also emits a
+    ClubRequestEvent (telemetry + a Twenty task) via services/club_requests.py.
+    """
+    __tablename__ = "comms_limit_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    current_tier = Column(Text, nullable=True)
+    requested_tier = Column(Text, nullable=False, server_default="production", default="production")
+    requested_cap = Column(Integer, nullable=True)      # optional explicit daily cap ask
+    reason = Column(Text, nullable=True)                # the club's justification
+    status = Column(Text, nullable=False, server_default="pending", default="pending")  # pending | approved | denied
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    requested_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    decided_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    decision_note = Column(Text, nullable=True)
+
+
+class ClubRequestEvent(Base):
+    """Telemetry for EVERY club→BetterCricket request across the platform
+    (migration 125): a BetterComms tier lift, a module trial/subscribe, and
+    future asks. One durable audit row per request, and the hook that fires an
+    automated Twenty CRM task so the back office actions it. Written by the
+    shared helper services/club_requests.py::record_club_request.
+
+    ``request_type`` is a stable slug (comms_tier_increase | module_request | …);
+    ``ref_table`` / ``ref_id`` point back at the domain row (e.g. the
+    comms_limit_requests row) so the CRM task and the workflow queue stay linked.
+    ``twenty_task_status`` tracks the best-effort CRM push (pending → created /
+    failed / skipped) without ever blocking the request itself.
+    """
+    __tablename__ = "club_request_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    request_type = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    detail = Column(JSONB, nullable=True)
+    source = Column(Text, nullable=False, server_default="app", default="app")  # bettercomms | app | super_admin | twenty
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    ref_table = Column(Text, nullable=True)
+    ref_id = Column(UUID(as_uuid=True), nullable=True)
+    twenty_task_id = Column(Text, nullable=True)
+    twenty_task_status = Column(Text, nullable=False, server_default="pending", default="pending")  # pending | created | failed | skipped
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 class Season(Base):

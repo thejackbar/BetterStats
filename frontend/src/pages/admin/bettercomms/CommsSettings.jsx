@@ -19,6 +19,9 @@ export default function CommsSettings() {
   const [ses, setSes] = useState(null)            // super-admin SES status (null = not loaded / not super)
   const [testEmail, setTestEmail] = useState('')
   const [testBusy, setTestBusy] = useState(false)
+  const [limits, setLimits] = useState(null)      // sending tier + usage + deliverability
+  const [reqReason, setReqReason] = useState('')
+  const [reqBusy, setReqBusy] = useState(false)
 
   useEffect(() => {
     api.commsGetSettings().then(d => {
@@ -30,7 +33,20 @@ export default function CommsSettings() {
     api.commsListSuppressions().then(setSuppressions).catch(() => setSuppressions([]))
     // Super-admin only; a 403 for club admins just leaves the panel hidden.
     api.commsSesStatus().then(setSes).catch(() => setSes(null))
+    api.commsGetLimits().then(setLimits).catch(() => setLimits(null))
   }, [])
+
+  const requestLimit = async () => {
+    setReqBusy(true); setMsg(null)
+    try {
+      await api.commsRequestLimit({ reason: reqReason.trim() || null })
+      setReqReason('')
+      const fresh = await api.commsGetLimits()
+      setLimits(fresh)
+      setMsg({ kind: 'ok', text: 'Request sent to BetterCricket. We\'ll review your sending and lift the limit if all looks healthy.' })
+    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
+    finally { setReqBusy(false) }
+  }
 
   const sendTest = async () => {
     if (!testEmail.trim()) { setMsg({ kind: 'error', text: 'Enter an email to send the test to.' }); return }
@@ -94,6 +110,63 @@ export default function CommsSettings() {
             </div>
           )}
         </div>
+
+        {/* Sending limits — the club's tier, daily usage and deliverability */}
+        {limits && (() => {
+          const TIER_LABEL = { sandbox: 'Sandbox', production: 'Production', suspended: 'Suspended' }
+          const TIER_STYLE = {
+            sandbox: 'text-amber-500 border-amber-500/40',
+            production: 'text-green-500 border-green-500/40',
+            suspended: 'text-pb-red border-pb-red/40',
+          }
+          const m = limits.metrics || {}
+          const pct = (v) => `${((v || 0) * 100).toFixed(v >= 0.01 ? 1 : 2)}%`
+          return (
+            <div className="pb-card p-4 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm text-pb-text font-medium">Sending limits</div>
+                <span className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${TIER_STYLE[limits.tier] || ''}`}>
+                  {TIER_LABEL[limits.tier] || limits.tier}
+                </span>
+              </div>
+
+              {limits.blocked && (
+                <div className="text-pb-red text-xs mb-3 leading-relaxed">{limits.blocked}</div>
+              )}
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mb-3">
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Sent today</span><span className="text-pb-text">{limits.sent_today}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Daily limit</span><span className="text-pb-text">{limits.daily_cap == null ? 'Unlimited' : limits.daily_cap}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Bounce rate</span><span className="text-pb-text">{m.sufficient_sample ? pct(m.bounce_rate) : '—'}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-pb-faint">Spam rate</span><span className="text-pb-text">{m.sufficient_sample ? pct(m.complaint_rate) : '—'}</span></div>
+              </div>
+              <div className="text-pb-faintest text-xs leading-relaxed mb-3">
+                {limits.tier === 'sandbox'
+                  ? `New clubs start with a ${limits.daily_cap}-a-day limit while your sending settles in. Once you've sent cleanly, ask BetterCricket to lift it.`
+                  : limits.tier === 'suspended'
+                    ? 'Sending is paused because too many emails bounced or were marked as spam. Contact BetterCricket to review and restore it.'
+                    : 'Anything over the daily limit sends automatically the next day, so nothing is lost.'}
+              </div>
+
+              {limits.open_request ? (
+                <div className="text-xs text-pb-faint border-t pb-hairline-t pt-3">
+                  Request pending review — sent {limits.open_request.requested_at ? new Date(limits.open_request.requested_at).toLocaleDateString() : ''}.
+                </div>
+              ) : limits.can_request ? (
+                <div className="border-t pb-hairline-t pt-3">
+                  <label className="block text-xs text-pb-faint mb-1">Ask BetterCricket to lift your limit (optional note)</label>
+                  <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
+                    placeholder="e.g. 300-member club, weekly newsletter to our own members"
+                    className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
+                  <button onClick={requestLimit} disabled={reqBusy}
+                    className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
+                    {reqBusy ? 'Sending…' : 'Request higher limit'}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )
+        })()}
 
         {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
         {ses && (
