@@ -31,6 +31,18 @@ export default function CommsCampaigns() {
     ]).finally(() => setLoading(false))
   }, [])
 
+  // A send runs as a background task on the server, so a freshly-sent email sits
+  // at "sending" here until it flips to "sent". Poll while anything is in flight
+  // so the badge updates on its own without a manual refresh.
+  const anySending = campaigns.some(c => c.status === 'sending')
+  useEffect(() => {
+    if (!anySending) return
+    const id = setInterval(() => {
+      api.commsListCampaigns().then(setCampaigns).catch(() => {})
+    }, 3000)
+    return () => clearInterval(id)
+  }, [anySending])
+
   const newEmail = async () => {
     setCreating(true)
     setError('')
