@@ -100,6 +100,9 @@ export default function CommsSettings() {
   if (!s) return <BetterCommsLayout title="Settings"><div className="text-pb-faint text-sm">Loading…</div></BetterCommsLayout>
 
   const p = s.provider || {}
+  // Platform (super-admin, BetterCricket marketing context) sees the underlying
+  // mail-service internals; an ordinary club only sees that email is connected.
+  const isPlatform = !!ses && !!limits?.is_outreach
 
   return (
     <BetterCommsLayout title="Settings">
@@ -113,7 +116,7 @@ export default function CommsSettings() {
               <div className="text-sm text-pb-text font-medium">Email delivery</div>
               <div className="text-pb-faint text-sm mt-0.5">
                 {p.live
-                  ? <>Connected via <span className="text-pb-text capitalize">{p.provider}</span> · sending from <span className="text-pb-text">{p.from_address}</span></>
+                  ? <>Connected{isPlatform && <> via <span className="text-pb-text capitalize">{p.provider}</span></>} · sending from <span className="text-pb-text">{p.from_address}</span></>
                   : <>Preview mode — emails are rendered and logged but <strong>not delivered</strong>.</>}
               </div>
             </div>
@@ -188,7 +191,7 @@ export default function CommsSettings() {
         })()}
 
         {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
-        {ses && (
+        {isPlatform && (
           <div className="pb-card p-4 mb-4">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm text-pb-text font-medium">Amazon SES (platform)</div>
