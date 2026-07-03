@@ -324,25 +324,30 @@ def _inject_footer(full_html: str, footer: str, unsub_url: str, club_name: str, 
     return full_html + block
 
 
-def _absolute_url(url: str | None) -> str | None:
-    """Make a stored image URL absolute so email clients can fetch it.
+def _email_logo_src(org: Organisation) -> str | None:
+    """Absolute, email-safe logo URL for the banner, or ``None`` when there's no logo.
 
-    Logos are stored as a site-relative path (``/api/images/organisations/…``);
-    a mail client has no page origin to resolve that against, so the image shows
-    broken. Prefix relative paths with the public base URL; leave already-absolute
-    URLs (``http(s)://``) untouched."""
-    u = (url or "").strip()
+    Two things stop a stored logo from rendering in a recipient's inbox, and this
+    fixes both:
+    - It's stored as a site-relative path (``/api/images/organisations/…``); a mail
+      client has no page origin to resolve that against, so we make it absolute
+      against the public base URL.
+    - The stored bytes may be WebP, which many mail clients (Outlook, some Gmail
+      proxies) won't render; ``?format=png`` asks the image endpoint to transcode.
+    Already-absolute ``http(s)://`` logo URLs are left as-is."""
+    u = (org.logo_url or "").strip()
     if not u:
         return None
     if u.startswith("http://") or u.startswith("https://"):
         return u
-    return f"{settings.public_base_url.rstrip('/')}/{u.lstrip('/')}"
+    abs_url = f"{settings.public_base_url.rstrip('/')}/{u.lstrip('/')}"
+    return f"{abs_url}{'&' if '?' in abs_url else '?'}format=png"
 
 
 def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str, club_name: str) -> str:
     accent = org.accent_color or "#243352"
     name = html_lib.escape(org.name or "Our Club")
-    logo_src = _absolute_url(org.logo_url)
+    logo_src = _email_logo_src(org)
     logo = (
         f'<img src="{html_lib.escape(logo_src)}" alt="" height="40" '
         f'style="height:40px;max-height:40px;display:block">'

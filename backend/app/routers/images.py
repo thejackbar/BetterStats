@@ -28,16 +28,40 @@ def _parse_uuid(value: str) -> uuid.UUID:
         raise HTTPException(404, "Not found")
 
 
+# Mail clients render PNG/JPEG/GIF reliably but WebP support is patchy (Outlook's
+# Word engine renders nothing, some Gmail proxies show a broken image). A logo
+# fetched for an email asks for ?format=png so we transcode WebP to PNG on the way
+# out; already-safe formats pass through untouched.
+_EMAIL_SAFE_MIME = {"image/png", "image/jpeg", "image/gif"}
+
+
+def _to_png(data: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(data)) as im:
+        im = im.convert("RGBA")
+        out = BytesIO()
+        im.save(out, format="PNG")
+        return out.getvalue()
+
+
 @router.get("/organisations/{org_id}/logo")
-async def get_org_logo(org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_org_logo(org_id: str, format: str | None = None, db: AsyncSession = Depends(get_db)):
     org = await db.get(Organisation, _parse_uuid(org_id))
     if not org or not org.logo_data:
         raise HTTPException(404, "No logo")
-    return Response(
-        content=org.logo_data,
-        media_type=org.logo_mime or "image/png",
-        headers=_CACHE_HEADERS,
-    )
+    data = org.logo_data
+    mime = org.logo_mime or "image/png"
+    # Transcode to an email-safe format when requested and the stored image isn't one.
+    if (format or "").lower() == "png" and mime not in _EMAIL_SAFE_MIME:
+        try:
+            data = _to_png(data)
+            mime = "image/png"
+        except Exception:
+            pass  # fall back to the stored bytes rather than 500 the image
+    return Response(content=data, media_type=mime, headers=_CACHE_HEADERS)
 
 
 @router.get("/organisations/{org_id}/hero")
