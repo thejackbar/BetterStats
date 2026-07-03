@@ -858,6 +858,10 @@ export const api = {
   metaAdsSummary: () => request('/club-admin/meta-ads/summary'),
   metaAdsHistory: (days = 14) => request(`/club-admin/meta-ads/history?days=${days}`),
   metaAdsRefresh: () => request('/club-admin/meta-ads/refresh', { method: 'POST' }),
+  // Manual +/- correction to the Meta-reported lead count (indicative only).
+  metaAdsAdjustLeads: (delta, note = '') =>
+    request('/club-admin/meta-ads/leads/adjust', { method: 'POST', body: JSON.stringify({ delta, note }) }),
+  metaAdsLeadAdjustments: () => request('/club-admin/meta-ads/leads/adjustments'),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>

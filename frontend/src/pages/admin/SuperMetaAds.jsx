@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis,
+  ResponsiveContainer, AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip,
 } from 'recharts'
 import { api } from '../../lib/api'
@@ -94,15 +94,40 @@ export default function SuperMetaAds() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
 
+  const [adjustments, setAdjustments] = useState([])
+  const [adjNote, setAdjNote] = useState('')
+  const [adjusting, setAdjusting] = useState(false)
+  const [showAdjLog, setShowAdjLog] = useState(false)
+
+  const [attribution, setAttribution] = useState(null)
+
   const load = useCallback(() => {
     setLoading(true)
     Promise.all([api.metaAdsSummary(), api.metaAdsHistory(14)])
       .then(([s, h]) => { setSummary(s); setHistory(h.days || []); setError('') })
       .catch((e) => setError(e.message || 'Could not load the Meta Ads dashboard.'))
       .finally(() => setLoading(false))
+    api.metaAdsLeadAdjustments().then((d) => setAdjustments(d.adjustments || [])).catch(() => {})
+    api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const adjustLeads = async (delta) => {
+    setAdjusting(true)
+    setError('')
+    try {
+      const data = await api.metaAdsAdjustLeads(delta, adjNote)
+      setSummary(data)
+      setAdjNote('')
+      const d = await api.metaAdsLeadAdjustments()
+      setAdjustments(d.adjustments || [])
+    } catch (e) {
+      setError(e.message || 'Could not adjust the lead count.')
+    } finally {
+      setAdjusting(false)
+    }
+  }
 
   const refresh = async () => {
     setRefreshing(true)
@@ -200,7 +225,7 @@ export default function SuperMetaAds() {
             </div>
 
             {/* KPI cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-1">
               <Stat
                 label="Spend"
                 value={fmtMoney(campaign.spend)}
@@ -210,11 +235,74 @@ export default function SuperMetaAds() {
               <Stat label="Link CTR" value={fmtPct(campaign.link_ctr)} />
               <Stat label="Cost per LPV" value={campaign.cost_per_lpv != null ? fmtMoney(campaign.cost_per_lpv) : '–'} />
               <Stat
-                label="Meta-attributed leads"
-                value={fmtNum(campaign.leads)}
-                hint="indicative — see onboarding list"
+                label="Cost per lead"
+                value={campaign.cost_per_lead != null ? fmtMoney(campaign.cost_per_lead) : '–'}
+                hint="spend / effective leads"
               />
+
+              <div className="pb-card px-3 py-2.5">
+                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Meta-attributed leads</div>
+                <div className="font-display text-xl text-pb-text mt-0.5">{fmtNum(campaign.leads_effective)}</div>
+                <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
+                  {fmtNum(campaign.leads)} from Meta
+                  {campaign.leads_adjustment ? `, ${campaign.leads_adjustment > 0 ? '+' : ''}${campaign.leads_adjustment} manual` : ''}
+                </div>
+                <div className="flex items-center gap-1 mt-1.5">
+                  <button
+                    onClick={() => adjustLeads(-1)}
+                    disabled={adjusting}
+                    title="Remove one lead (e.g. spam or duplicate)"
+                    className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
+                  >
+                    &minus;
+                  </button>
+                  <button
+                    onClick={() => adjustLeads(1)}
+                    disabled={adjusting}
+                    title="Add one lead Meta didn't capture (e.g. a direct enquiry)"
+                    className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
+                  >
+                    +
+                  </button>
+                  <button
+                    onClick={() => setShowAdjLog((s) => !s)}
+                    className="font-mono text-[9px] text-pb-faint hover:underline ml-1"
+                  >
+                    {showAdjLog ? 'hide log' : `log (${adjustments.length})`}
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {showAdjLog && (
+              <div className="pb-card p-3 mb-2">
+                <input
+                  type="text"
+                  value={adjNote}
+                  onChange={(e) => setAdjNote(e.target.value)}
+                  placeholder="Optional note for the next +/- (e.g. duplicate, spam, converted to a paying club)"
+                  className="w-full bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 font-mono text-[11px] text-pb-text mb-2"
+                />
+                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1">Adjustment history</div>
+                {adjustments.length === 0 ? (
+                  <p className="text-xs text-pb-faint">No manual adjustments yet.</p>
+                ) : (
+                  <ul className="space-y-1 max-h-40 overflow-y-auto">
+                    {adjustments.map((a, i) => (
+                      <li key={i} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                        <span className={a.delta > 0 ? 'text-emerald-400 font-mono' : 'text-red-400 font-mono'}>
+                          {a.delta > 0 ? `+${a.delta}` : a.delta}
+                        </span>
+                        <span className="font-mono text-[10px] text-pb-faintest">{fmtTime(a.created_at)}</span>
+                        {a.created_by_email && <span className="text-pb-faint">{a.created_by_email}</span>}
+                        {a.note && <span className="text-pb-dim">{a.note}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="w-full bg-pb-surface2 rounded-full h-1.5 mb-4 overflow-hidden">
               <div
                 className="h-full bg-pb-accent"
@@ -223,7 +311,7 @@ export default function SuperMetaAds() {
             </div>
 
             {/* Trend charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
               <div className="pb-card p-4">
                 <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">Spend over time</div>
                 <div style={{ width: '100%', height: 200 }}>
@@ -268,6 +356,24 @@ export default function SuperMetaAds() {
                   )}
                 </div>
               </div>
+              <div className="pb-card p-4">
+                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">Leads per day (Meta-reported)</div>
+                <div style={{ width: '100%', height: 200 }}>
+                  {history.length === 0 ? (
+                    <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">No data yet.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={history} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+                        <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <Tooltip content={<ChartTooltip />} labelFormatter={fmtDay} />
+                        <Bar dataKey="leads" name="Leads" fill="#a78bfa" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Per-ad table */}
@@ -281,6 +387,8 @@ export default function SuperMetaAds() {
                     <th className="px-3 py-2.5">Link CTR</th>
                     <th className="px-3 py-2.5">LPVs</th>
                     <th className="px-3 py-2.5">Cost/LPV</th>
+                    <th className="px-3 py-2.5">Leads</th>
+                    <th className="px-3 py-2.5">Cost/Lead</th>
                     <th className="px-3 py-2.5">Status</th>
                   </tr>
                 </thead>
@@ -293,6 +401,8 @@ export default function SuperMetaAds() {
                       <td className="px-3 py-2.5 text-pb-dim">{fmtPct(ad.link_ctr)}</td>
                       <td className="px-3 py-2.5 text-pb-dim">{fmtNum(ad.landing_page_views)}</td>
                       <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{ad.cost_per_lpv != null ? fmtMoney(ad.cost_per_lpv) : '–'}</td>
+                      <td className="px-3 py-2.5 text-pb-dim">{fmtNum(ad.leads)}</td>
+                      <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{ad.cost_per_lead != null ? fmtMoney(ad.cost_per_lead) : '–'}</td>
                       <td className="px-3 py-2.5">
                         <span className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-mono uppercase ${AD_STATUS_STYLE[ad.status]?.cls || ''}`}>
                           {AD_STATUS_STYLE[ad.status]?.label || ad.status}
@@ -303,6 +413,69 @@ export default function SuperMetaAds() {
                 </tbody>
               </table>
             </div>
+
+            {/* On-site attribution & conversion, from our own visit tracking rather than Meta's numbers */}
+            {attribution && (
+              <div className="pb-card p-4 mb-4">
+                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
+                  On-site attribution, last {attribution.days} days
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
+                  <Stat label="Meta visitors" value={fmtNum(attribution.meta.visitors)} hint="site-tracked, not Meta's own count" />
+                  <Stat label="Facebook" value={fmtNum(attribution.meta.facebook)} />
+                  <Stat label="Instagram" value={fmtNum(attribution.meta.instagram)} />
+                  <Stat label="Paid clicks" value={fmtNum(attribution.meta.paid)} />
+                  <Stat
+                    label="Reached pricing/contact"
+                    value={fmtNum(attribution.conversion.reached_intent)}
+                    hint={`${attribution.conversion.pct}% of Meta visitors`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div>
+                    <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1.5">Top ad creatives (by visitor)</div>
+                    {attribution.creatives.length === 0 ? (
+                      <p className="text-xs text-pb-faint">No tagged creatives seen yet.</p>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {attribution.creatives.slice(0, 6).map((c, i) => (
+                            <tr key={i} className="border-b pb-hairline last:border-0">
+                              <td className="py-1.5 pr-2 text-pb-text">{c.content || '(untagged)'}</td>
+                              <td className="py-1.5 pr-2 text-pb-faint">{c.campaign || '–'}</td>
+                              <td className="py-1.5 text-right text-pb-dim whitespace-nowrap">{fmtNum(c.visitors)} visitors</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1.5">Where Meta clicks land</div>
+                    {attribution.landing.length === 0 ? (
+                      <p className="text-xs text-pb-faint">No landing pages recorded yet.</p>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {attribution.landing.slice(0, 6).map((l, i) => (
+                            <tr key={i} className="border-b pb-hairline last:border-0">
+                              <td className="py-1.5 pr-2 text-pb-text">{l.label || l.page}</td>
+                              <td className="py-1.5 text-right text-pb-dim whitespace-nowrap">{fmtNum(l.visitors)} visitors</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+                <p className="font-mono text-[9px] text-pb-faintest mt-3">
+                  From our own visit tracking (not Meta's), so it independently confirms whether an ad click actually
+                  went anywhere on the site. Full breakdown on the{' '}
+                  <a href="/admin/usage" className="text-accent hover:underline">Usage</a> page.
+                </p>
+              </div>
+            )}
 
             {/* Footer note */}
             <p className="text-xs text-pb-faint">

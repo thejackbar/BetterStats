@@ -2203,6 +2203,21 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_meta_ad_snapshots_date "
             "ON meta_ad_snapshots(snapshot_date DESC)"
         ))
+        # Meta Ads manual leads reconciliation (migration 127): a signed delta
+        # log so a manual correction survives the next daily snapshot re-run.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS meta_lead_adjustments (
+                id BIGSERIAL PRIMARY KEY,
+                delta INTEGER NOT NULL,
+                note TEXT,
+                created_by_email TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_meta_lead_adjustments_created_at "
+            "ON meta_lead_adjustments(created_at DESC)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

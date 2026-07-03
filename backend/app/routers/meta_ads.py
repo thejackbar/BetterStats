@@ -7,7 +7,8 @@ load); ``/refresh`` does a live pull and updates it on demand.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import User, get_db
@@ -17,6 +18,11 @@ from app.services import meta_ads
 from app.services.meta_ads import MetaAdsError
 
 router = APIRouter(prefix="/club-admin/meta-ads", tags=["meta-ads"])
+
+
+class LeadAdjustmentIn(BaseModel):
+    delta: int = Field(..., ge=-100000, le=100000)
+    note: str | None = None
 
 
 @router.get("/summary")
@@ -50,3 +56,26 @@ async def refresh(db: AsyncSession = Depends(get_db), _: User = Depends(require_
     data = await meta_ads.get_latest_summary(db)
     data["token_configured"] = True
     return data
+
+
+@router.post("/leads/adjust")
+async def adjust_leads(
+    body: LeadAdjustmentIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_super_admin),
+):
+    """Manually correct the Meta-reported lead count (+/-). Meta's own number
+    is indicative only, so this is stored as a standalone delta and layered on
+    top of the latest snapshot rather than overwriting it — see meta_ads.py."""
+    if body.delta == 0:
+        raise HTTPException(400, "delta must be non-zero")
+    await meta_ads.add_lead_adjustment(db, body.delta, body.note, user.email)
+    data = await meta_ads.get_latest_summary(db)
+    data["token_configured"] = settings.meta_ads_configured
+    return data
+
+
+@router.get("/leads/adjustments")
+async def leads_adjustments(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
+    """Audit trail of manual lead-count corrections, newest first."""
+    return {"adjustments": await meta_ads.get_lead_adjustments(db)}
