@@ -12,8 +12,9 @@ Three jobs, all reading data we already hold (``comms_recipients`` for sends,
 
   * **Tiers.** A club is ``sandbox`` (low cap, new/unproven), ``production``
     (raised after a super admin approves a request), or ``suspended`` (cap 0,
-    set by the breaker). ``organisations.comms_daily_limit`` overrides the tier
-    default. The marketing-outreach org is uncapped (BetterCricket's own domain).
+    set by the breaker). Per-club ``comms_sandbox_cap`` / ``comms_production_cap``
+    override the global default for each tier. The marketing-outreach org is
+    uncapped (BetterCricket's own domain).
 
   * **Circuit breaker.** Over a trailing window, if a club's hard-bounce rate or
     complaint rate crosses the AWS danger line (and it has sent enough to judge),
@@ -56,24 +57,32 @@ def _utc_day_start() -> _dt.datetime:
 
 # ─── tier → per-day cap ──────────────────────────────────────────────────────
 
+def _org_cap(org: Organisation, attr: str) -> Optional[int]:
+    """A per-club cap override (comms_sandbox_cap / comms_production_cap), or None
+    when the club has no override and the global settings default should apply."""
+    val = getattr(org, attr, None)
+    if val is None or str(val).strip() == "":
+        return None
+    try:
+        return max(0, int(val))
+    except (TypeError, ValueError):
+        return None
+
+
 def tier_daily_cap(org: Organisation) -> Optional[int]:
-    """The club's per-day send cap. ``None`` means uncapped (the marketing
-    outreach org). An explicit ``comms_daily_limit`` override wins over the tier
-    default; ``suspended`` is a hard 0 regardless of any override."""
+    """The club's per-day send cap for its current tier. ``None`` means uncapped
+    (the marketing outreach org). The per-club override for the tier wins over
+    the global settings default; ``suspended`` is a hard 0."""
     if org_is_outreach(org):
         return None
     tier = normalise_tier(getattr(org, "comms_tier", None))
     if tier == TIER_SUSPENDED:
         return 0
-    override = getattr(org, "comms_daily_limit", None)
-    if override is not None and str(override).strip() != "":
-        try:
-            return max(0, int(override))
-        except (TypeError, ValueError):
-            pass
     if tier == TIER_PRODUCTION:
-        return int(settings.comms_production_daily_cap)
-    return int(settings.comms_sandbox_daily_cap)
+        override = _org_cap(org, "comms_production_cap")
+        return override if override is not None else int(settings.comms_production_daily_cap)
+    override = _org_cap(org, "comms_sandbox_cap")
+    return override if override is not None else int(settings.comms_sandbox_daily_cap)
 
 
 # ─── daily send counts (from comms_recipients) ───────────────────────────────

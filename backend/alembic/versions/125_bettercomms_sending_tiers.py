@@ -20,8 +20,12 @@ def upgrade() -> None:
     # ── per-club sending tier on organisations ──────────────────────────────
     op.execute("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
                "comms_tier TEXT NOT NULL DEFAULT 'sandbox'")
+    # Per-club overrides of the global sandbox / production daily caps (NULL =
+    # use the settings default), set when onboarding a club on BetterAdmin.
     op.execute("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
-               "comms_daily_limit INTEGER")
+               "comms_sandbox_cap INTEGER")
+    op.execute("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+               "comms_production_cap INTEGER")
     # Existing clubs have already been sending as trusted tenants — start them in
     # 'production' so the new sandbox cap doesn't throttle live clubs on deploy.
     # New clubs created after this migration default to 'sandbox'.
@@ -77,5 +81,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS club_request_events")
     op.execute("DROP TABLE IF EXISTS comms_limit_requests")
-    op.execute("ALTER TABLE organisations DROP COLUMN IF EXISTS comms_daily_limit")
+    op.execute("ALTER TABLE organisations DROP COLUMN IF EXISTS comms_production_cap")
+    op.execute("ALTER TABLE organisations DROP COLUMN IF EXISTS comms_sandbox_cap")
     op.execute("ALTER TABLE organisations DROP COLUMN IF EXISTS comms_tier")

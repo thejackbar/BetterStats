@@ -45,8 +45,11 @@ Each club has a `comms_tier`:
 | `production` | `comms_production_daily_cap` (2,000) | A club with a clean record, lifted by a super admin. |
 | `suspended` | 0 | Blocked by the circuit breaker until a super admin reinstates it. |
 
-An explicit `comms_daily_limit` on the club overrides the tier default. The
-BetterCricket marketing-outreach org is uncapped.
+These are the global defaults. A club can carry its own per-tier override in
+`comms_sandbox_cap` / `comms_production_cap`, set by a super admin when
+onboarding the club on BetterAdmin (or later from All Clubs). A blank override
+falls back to the global default above. The BetterCricket marketing-outreach org
+is uncapped.
 
 A brand-new club starts in `sandbox`. Existing clubs were promoted to
 `production` on rollout so live sending was never throttled.

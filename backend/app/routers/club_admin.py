@@ -1508,7 +1508,8 @@ def _club_payload(org) -> dict:
         "billing_cycle": org.billing_cycle,
         "default_trial_days": org_default_trial_days(org),
         "comms_tier": getattr(org, "comms_tier", None) or "sandbox",
-        "comms_daily_limit": getattr(org, "comms_daily_limit", None),
+        "comms_sandbox_cap": getattr(org, "comms_sandbox_cap", None),
+        "comms_production_cap": getattr(org, "comms_production_cap", None),
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }
 
@@ -1619,9 +1620,10 @@ class ClubUpdate(BaseModel):
     billing_cycle: Optional[str] = None
     # Club General Settings — the configurable default trial length (days).
     default_trial_days: Optional[int] = None
-    # BetterComms sending tier + optional per-club daily-cap override.
+    # BetterComms sending tier + optional per-club daily-cap overrides per tier.
     comms_tier: Optional[str] = None
-    comms_daily_limit: Optional[int] = None
+    comms_sandbox_cap: Optional[int] = None
+    comms_production_cap: Optional[int] = None
 
 
 @router.patch("/super/clubs/{club_id}")
@@ -1668,8 +1670,9 @@ async def patch_club(
         if fields["comms_tier"] not in comms_limits.TIERS:
             raise HTTPException(status_code=422,
                                 detail=f"Comms tier must be one of: {', '.join(comms_limits.TIERS)}")
-    if fields.get("comms_daily_limit") is not None and int(fields["comms_daily_limit"]) < 0:
-        raise HTTPException(status_code=422, detail="comms_daily_limit must be >= 0")
+    for cap_field in ("comms_sandbox_cap", "comms_production_cap"):
+        if fields.get(cap_field) is not None and int(fields[cap_field]) < 0:
+            raise HTTPException(status_code=422, detail=f"{cap_field} must be >= 0")
 
     # Club General Settings (default_trial_days) lives in the general_settings blob,
     # not a column — merge it in rather than setattr.
@@ -1764,16 +1767,17 @@ async def approve_comms_request(
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
     org.comms_tier = comms_limits.TIER_PRODUCTION
+    # An explicit approved cap becomes this club's production-tier override.
     cap = data.daily_limit if data.daily_limit is not None else req.requested_cap
     if cap is not None:
-        org.comms_daily_limit = max(0, int(cap))
+        org.comms_production_cap = max(0, int(cap))
     req.status = "approved"
     req.decided_by = user.id
     req.decided_at = _datetime.now(_timezone.utc)
     req.decision_note = (data.note or "").strip() or None
     await db.commit()
     return {"status": "approved", "comms_tier": org.comms_tier,
-            "comms_daily_limit": org.comms_daily_limit}
+            "comms_production_cap": org.comms_production_cap}
 
 
 @router.post("/super/comms/requests/{request_id}/deny")

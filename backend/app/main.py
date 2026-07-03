@@ -1250,7 +1250,10 @@ async def lifespan(app: FastAPI):
             "comms_tier TEXT NOT NULL DEFAULT 'sandbox'"
         ))
         await conn.execute(text(
-            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_daily_limit INTEGER"
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_sandbox_cap INTEGER"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_production_cap INTEGER"
         ))
         await conn.execute(text(
             "UPDATE organisations SET comms_tier = 'production' WHERE comms_tier = 'sandbox'"

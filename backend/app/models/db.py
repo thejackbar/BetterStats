@@ -150,10 +150,13 @@ class Organisation(Base):
     # A new club starts in 'sandbox' with a low daily send cap; a super admin
     # lifts it to 'production' after a clean request. The bounce/complaint
     # circuit breaker auto-moves a club to 'suspended' (cap 0) until reinstated.
-    # comms_daily_limit is an explicit per-club override of the tier's default
-    # cap (NULL = use the tier default). See services/comms_limits.py.
+    # comms_sandbox_cap / comms_production_cap are per-club overrides of the
+    # global default caps for each tier (NULL = use the settings default). A
+    # super admin sets these when onboarding the club on BetterAdmin. See
+    # services/comms_limits.py.
     comms_tier = Column(Text, nullable=False, server_default="sandbox", default="sandbox")
-    comms_daily_limit = Column(Integer, nullable=True)
+    comms_sandbox_cap = Column(Integer, nullable=True)
+    comms_production_cap = Column(Integer, nullable=True)
     # ─── BetterComms: BetterCricket marketing-outreach designation (migration
     # 108) ─── which org runs BetterCricket's own Clubs Directory campaigns. A
     # super admin flags it from the BetterComms UI (no env change); the
@@ -449,7 +452,7 @@ class CommsLimitRequest(Base):
 
     Mirrors ModuleActionRequest: a request never changes the tier on its own, it
     queues a decision. The super admin approves (which sets the club's
-    ``comms_tier`` / ``comms_daily_limit``) or denies. Creating one also emits a
+    ``comms_tier`` / per-club cap) or denies. Creating one also emits a
     ClubRequestEvent (telemetry + a Twenty task) via services/club_requests.py.
     """
     __tablename__ = "comms_limit_requests"

@@ -138,8 +138,10 @@ class Settings(BaseSettings):
     # A new club starts in 'sandbox' with a low daily cap; once it has sent
     # cleanly it requests a lift to 'production' (a super admin approves). A club
     # whose bounce/complaint rate crosses the AWS danger line is auto-moved to
-    # 'suspended' (cap 0) until a super admin reinstates it. Caps are per-club per
-    # day; an explicit per-org override (organisations.comms_daily_limit) wins.
+    # 'suspended' (cap 0) until a super admin reinstates it. These are the global
+    # defaults; a club can carry its own per-tier override in
+    # organisations.comms_sandbox_cap / comms_production_cap (set by a super admin
+    # when onboarding the club on BetterAdmin), which wins over these.
     comms_sandbox_daily_cap: int = 50
     comms_production_daily_cap: int = 2000
     # Bounce/complaint circuit breaker. AWS reviews accounts over ~5% bounce or

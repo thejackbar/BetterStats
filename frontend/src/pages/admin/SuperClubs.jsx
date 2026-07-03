@@ -27,7 +27,7 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
-    comms_tier: 'sandbox', comms_daily_limit: '',
+    comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [clubAdmins, setClubAdmins] = useState([])
@@ -173,7 +173,8 @@ export default function SuperClubs() {
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
       comms_tier: club.comms_tier || 'sandbox',
-      comms_daily_limit: club.comms_daily_limit ?? '',
+      comms_sandbox_cap: club.comms_sandbox_cap ?? '',
+      comms_production_cap: club.comms_production_cap ?? '',
     })
     setClubAdmins([])
     api.superListClubAdmins(club.id).then(d => setClubAdmins(Array.isArray(d) ? d : [])).catch(() => {})
@@ -270,7 +271,8 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
-        comms_daily_limit: editForm.comms_daily_limit === '' ? null : Number(editForm.comms_daily_limit),
+        comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
+        comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
       }
       await api.superPatchClub(editId, payload)
       setMsg('Club updated')
@@ -666,10 +668,16 @@ export default function SuperClubs() {
                       </select>
                     </div>
                     <div>
-                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Daily send cap (blank = tier default)</label>
-                      <input type="number" min="0" value={editForm.comms_daily_limit}
-                        onChange={e => setEditForm(f => ({ ...f, comms_daily_limit: e.target.value }))}
-                        placeholder="tier default" className={INPUT_CLS} />
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Sandbox daily cap (blank = default)</label>
+                      <input type="number" min="0" value={editForm.comms_sandbox_cap}
+                        onChange={e => setEditForm(f => ({ ...f, comms_sandbox_cap: e.target.value }))}
+                        placeholder="global default" className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Production daily cap (blank = default)</label>
+                      <input type="number" min="0" value={editForm.comms_production_cap}
+                        onChange={e => setEditForm(f => ({ ...f, comms_production_cap: e.target.value }))}
+                        placeholder="global default" className={INPUT_CLS} />
                     </div>
                     {clubAdmins.length > 0 && (
                       <div className="col-span-2">
