@@ -1076,7 +1076,8 @@ async def send_test(
         if not extra:
             extra = await _sample_dir_vars(db, club)
     msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer, extra_vars=extra)
-    msg.subject = f"[TEST] {msg.subject}"
+    # A test is delivered identically to the real email (no [TEST] prefix); it just
+    # goes only to the address entered here.
     res = await get_email_provider().send(msg)
     if not res.ok:
         raise HTTPException(status_code=502, detail=f"Test send failed: {res.error}")
@@ -1506,7 +1507,7 @@ async def send_test_email(
         club, subject="BetterComms test email", body_html=body, utm={},
         email=email, name=None, unsub_url=unsub, footer=footer)
     msg = EmailMessage(
-        to_email=email, subject=f"[TEST] {subject}", html=html, text=text,
+        to_email=email, subject=subject, html=html, text=text,
         from_email=from_email, from_name=from_name, reply_to=reply_to,
         headers={"List-Unsubscribe": f"<{unsub}>",
                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"},
