@@ -1099,7 +1099,11 @@ async def send_campaign(
         raise HTTPException(status_code=409, detail=f"Campaign already {c.status}")
     if not (c.subject or "").strip():
         raise HTTPException(status_code=422, detail="Add a subject before sending")
-    contacts = await _resolve_audience(db, club, c.audience or {"type": "all"})
+    # An audience must be deliberately chosen — never fall back to "all" on send.
+    atype = (c.audience or {}).get("type")
+    if atype not in ("all", "segment", "saved_list", "list", "squad"):
+        raise HTTPException(status_code=422, detail="Choose an audience before sending")
+    contacts = await _resolve_audience(db, club, c.audience)
     if not contacts:
         raise HTTPException(status_code=422, detail="No subscribed contacts match this audience")
 

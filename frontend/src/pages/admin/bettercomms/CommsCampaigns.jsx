@@ -35,7 +35,7 @@ export default function CommsCampaigns() {
     setCreating(true)
     setError('')
     try {
-      const c = await api.commsCreateCampaign({ subject: '', body_html: '', audience: { type: 'all' } })
+      const c = await api.commsCreateCampaign({ subject: '', body_html: '', audience: { type: '' } })
       navigate(`/admin/comms/${c.id}`)
     } catch (e) {
       setError(e.message)

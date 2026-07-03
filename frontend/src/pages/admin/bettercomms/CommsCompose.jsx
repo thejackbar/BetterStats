@@ -26,7 +26,8 @@ export default function CommsCompose() {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [audienceCount, setAudienceCount] = useState(null)
-  const [audience, setAudience] = useState({ type: 'all' })
+  // Start unselected — sending to "all subscribed" must be a deliberate choice.
+  const [audience, setAudience] = useState({ type: '' })
   const [segments, setSegments] = useState([])
   const [lists, setLists] = useState([])
   const [templates, setTemplates] = useState([])
@@ -50,7 +51,7 @@ export default function CommsCompose() {
     setCampaign(c)
     setSubject(c.subject || '')
     setBody(c.body_html || '')
-    setAudience(c.audience && c.audience.type ? c.audience : { type: 'all' })
+    setAudience(c.audience && ['all', 'segment', 'saved_list', 'list', 'squad'].includes(c.audience.type) ? c.audience : { type: '' })
     setUtm(c.utm || {})
     setTemplateId(c.template_id || '')
     return c
@@ -81,11 +82,30 @@ export default function CommsCompose() {
     return () => clearInterval(pollRef.current)
   }, [load])
 
-  // Re-count whenever the chosen audience changes.
+  // An audience is "selected" only once the user picks a concrete option (all,
+  // or a specific segment/list). Empty type = not chosen yet.
+  const audienceSelected = (
+    audience.type === 'all'
+    || (audience.type === 'segment' && audience.segment_id)
+    || (audience.type === 'saved_list' && audience.list_id)
+    || (audience.type === 'squad' && audience.team_id)
+    || (audience.type === 'list' && (audience.contact_ids || []).length)
+  )
+
+  // Re-count whenever the chosen audience changes — but only once one is chosen.
   useEffect(() => {
     setAudienceCount(null)
+    if (!audienceSelected) return
     api.commsAudiencePreview(audience).then(r => setAudienceCount(r.count)).catch(() => setAudienceCount(null))
-  }, [audience])
+  }, [audience, audienceSelected])
+
+  // Send is only allowed once a subject, some content (a message or a template)
+  // and a deliberate audience are all present — no accidental blasts to everyone.
+  const sendMissing = []
+  if (!subject.trim()) sendMissing.push('a subject')
+  if (!(templateId || body.trim())) sendMissing.push('a message or template')
+  if (!audienceSelected) sendMissing.push('an audience')
+  const canSend = sendMissing.length === 0 && !!audienceCount
 
   const startPolling = () => {
     clearInterval(pollRef.current)
@@ -177,8 +197,11 @@ export default function CommsCompose() {
 
   const onSend = async () => {
     if (!subject.trim()) { setMsg({ kind: 'error', text: 'Add a subject before sending.' }); return }
+    if (!audienceSelected) { setMsg({ kind: 'error', text: 'Choose an audience before sending.' }); return }
+    if (!(templateId || body.trim())) { setMsg({ kind: 'error', text: 'Add a message (or pick a template) before sending.' }); return }
     const n = audienceCount ?? 0
-    if (!window.confirm(`Send this email to ${n} subscribed contact${n === 1 ? '' : 's'}?`)) return
+    const who = audience.type === 'all' ? 'ALL subscribed contacts' : 'the selected audience'
+    if (!window.confirm(`Send this email to ${n} contact${n === 1 ? '' : 's'} (${who})?`)) return
     setBusy('send'); setMsg(null)
     try {
       await save()
@@ -280,14 +303,17 @@ export default function CommsCompose() {
               <div className="text-sm text-pb-text mb-2">Audience</div>
               <select
                 value={audience.type === 'segment' ? `segment:${audience.segment_id}`
-                  : audience.type === 'saved_list' ? `list:${audience.list_id}` : 'all'}
+                  : audience.type === 'saved_list' ? `list:${audience.list_id}`
+                  : audience.type === 'all' ? 'all' : ''}
                 onChange={e => {
                   const v = e.target.value
                   if (v.startsWith('segment:')) setAudience({ type: 'segment', segment_id: v.slice(8) })
                   else if (v.startsWith('list:')) setAudience({ type: 'saved_list', list_id: v.slice(5) })
-                  else setAudience({ type: 'all' })
+                  else if (v === 'all') setAudience({ type: 'all' })
+                  else setAudience({ type: '' })
                 }}
-                className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
+                className={`w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border text-sm ${audienceSelected ? 'pb-hairline' : 'border-amber-500/60'}`}>
+                <option value="" disabled>Choose an audience…</option>
                 <option value="all">All subscribed contacts</option>
                 {segments.length > 0 && (
                   <optgroup label="Segments">
@@ -301,9 +327,11 @@ export default function CommsCompose() {
                 )}
               </select>
               <div className="text-pb-faintest text-xs mt-2">
-                {audienceCount != null
-                  ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
-                  : 'Counting…'}{' '}
+                {!audienceSelected
+                  ? <span className="text-amber-500">Choose who this goes to before sending.</span>
+                  : audienceCount != null
+                    ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
+                    : 'Counting…'}{' '}
                 <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent)' }}>Segments</a>
                 {' · '}
                 <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent)' }}>Lists</a>
@@ -332,17 +360,21 @@ export default function CommsCompose() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-2 mb-6">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <button onClick={onSave} disabled={busy === 'save'}
                 className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
                 {busy === 'save' ? 'Saving…' : 'Save draft'}
               </button>
-              <button onClick={onSend} disabled={!!busy || !audienceCount}
+              <button onClick={onSend} disabled={!!busy || !canSend}
+                title={sendMissing.length ? `Add ${sendMissing.join(', ')} to send` : ''}
                 className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50"
                 style={{ background: 'var(--pb-accent)' }}>
-                {busy === 'send' ? 'Sending…' : `Send${audienceCount != null ? ` to ${audienceCount}` : ''}`}
+                {busy === 'send' ? 'Sending…' : `Send${audienceSelected && audienceCount != null ? ` to ${audienceCount}` : ''}`}
               </button>
               <button onClick={onDelete} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-red ml-auto">Delete</button>
+            </div>
+            <div className="text-pb-faintest text-xs mb-6">
+              {sendMissing.length > 0 ? <>Add {sendMissing.join(', ')} to enable Send.</> : <>&nbsp;</>}
             </div>
 
             <div className="pb-card p-4">
