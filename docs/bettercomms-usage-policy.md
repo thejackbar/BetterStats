@@ -22,11 +22,16 @@ layers do the work:
 
 ## Account-wide guards
 
-- **Rate pacing.** Every send passes through one process-global token bucket set
-  at `ses_max_send_rate` (default 13/sec, under AWS's 14). Because the app runs a
-  single worker, this one bucket bounds the entire account, so all clubs sending
-  at once still cannot exceed the ceiling. (If the app is ever run with N
-  workers, divide the setting by N or move the bucket to Redis.)
+- **Rate pacing.** Every send passes through one process-global token bucket. The
+  rate is a super-admin setting managed from the BetterComms limits page: the
+  **AWS ceiling** (14/sec today, bumped when AWS raises the account's rate) and
+  **our send rate**, which must always stay strictly below the ceiling (default
+  13/sec). Because the app runs a single worker, this one bucket bounds the
+  entire account, so all clubs sending at once still cannot exceed the ceiling.
+  (If the app is ever run with N workers, divide the send rate by N or move the
+  bucket to Redis.) The env values `ses_aws_max_send_rate` / `ses_max_send_rate`
+  are the seed defaults used until a super admin sets the live values, which are
+  stored in `platform_settings` and read through a warm in-memory cache.
 - **Daily quota.** The account holds itself to `ses_daily_quota` minus
   `ses_daily_quota_headroom` (default 50,000 minus 5,000 = 45,000 usable),
   reserving room for retries and future transactional mail. A campaign only sends
@@ -102,7 +107,8 @@ All in `backend/app/config/settings.py`, overridable via the server `.env`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `ses_max_send_rate` | 13 | Per-second pacing ceiling (under AWS's 14). |
+| `ses_aws_max_send_rate` | 14 | Seed default for AWS's per-second ceiling (live value is super-admin managed). |
+| `ses_max_send_rate` | 13 | Seed default for our pacing rate (live value is super-admin managed; must stay below the ceiling). |
 | `ses_daily_quota` | 50000 | AWS daily grant. |
 | `ses_daily_quota_headroom` | 5000 | Reserved under the grant. |
 | `comms_sandbox_daily_cap` | 50 | Sandbox per-club daily cap. |
@@ -112,8 +118,9 @@ All in `backend/app/config/settings.py`, overridable via the server `.env`:
 | `comms_metrics_window_days` | 30 | Deliverability window. |
 | `comms_metrics_min_sample` | 50 | Min sends before rates are judged. |
 
-Raise `ses_daily_quota` (and, after an AWS increase, `ses_max_send_rate`) in
-lockstep with any future AWS grant.
+After an AWS increase, raise the AWS ceiling and send rate from the BetterComms
+limits page (no redeploy). Raise `ses_daily_quota` in the server config in
+lockstep with any future daily-quota grant.
 
 ## Acceptable use (the club's obligations)
 

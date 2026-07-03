@@ -27,6 +27,11 @@ export default function SuperCommsLimits() {
   const [filter, setFilter] = useState('pending')
   const [busy, setBusy] = useState('')
   const [edits, setEdits] = useState({})   // per-request { daily_limit, note }
+  // Account send rate (AWS ceiling + our pacing rate).
+  const [rates, setRates] = useState(null)
+  const [rateForm, setRateForm] = useState({ aws_max_send_rate: '', send_rate: '' })
+  const [rateMsg, setRateMsg] = useState(null)
+  const [rateBusy, setRateBusy] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -35,7 +40,25 @@ export default function SuperCommsLimits() {
       .catch((e) => setError(e.message || 'Could not load requests.'))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [])
+  const loadRates = () => {
+    api.superGetCommsRates()
+      .then((d) => { setRates(d); setRateForm({ aws_max_send_rate: d.aws_max_send_rate, send_rate: d.send_rate }) })
+      .catch(() => setRates(null))
+  }
+  useEffect(() => { load(); loadRates() }, [])
+
+  const saveRates = async () => {
+    setRateBusy(true); setRateMsg(null)
+    try {
+      const d = await api.superUpdateCommsRates({
+        aws_max_send_rate: Number(rateForm.aws_max_send_rate),
+        send_rate: Number(rateForm.send_rate),
+      })
+      setRates(d)
+      setRateMsg({ kind: 'ok', text: 'Send rate updated.' })
+    } catch (e) { setRateMsg({ kind: 'error', text: e.message }) }
+    finally { setRateBusy(false) }
+  }
 
   const counts = useMemo(() => {
     const c = { all: rows.length }
@@ -78,6 +101,48 @@ export default function SuperCommsLimits() {
             reinstate it from All Clubs once resolved.
           </p>
         </div>
+
+        {/* Account send rate — AWS ceiling + our pacing rate */}
+        {rates && (() => {
+          const aws = Number(rateForm.aws_max_send_rate)
+          const send = Number(rateForm.send_rate)
+          const invalid = !(send > 0) || !(aws > 0) || send >= aws
+          return (
+            <div className="pb-card p-4 mb-5">
+              <div className="text-sm text-pb-text font-medium mb-1">Account send rate</div>
+              <p className="text-xs text-pb-dim mb-3 leading-relaxed">
+                AWS grants this account a maximum send rate per second, shared across every club. We pace all
+                sending just below it. Update the AWS limit here when AWS changes your account's rate. Our
+                send rate must always stay below the AWS limit.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-[10px] text-pb-faint">
+                  <span className="block mb-1">AWS limit (msgs/sec)</span>
+                  <input type="number" min="1" value={rateForm.aws_max_send_rate}
+                    onChange={e => setRateForm(f => ({ ...f, aws_max_send_rate: e.target.value }))}
+                    className="w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                </label>
+                <label className="text-[10px] text-pb-faint">
+                  <span className="block mb-1">Our send rate (msgs/sec)</span>
+                  <input type="number" min="1" value={rateForm.send_rate}
+                    onChange={e => setRateForm(f => ({ ...f, send_rate: e.target.value }))}
+                    className="w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                </label>
+                <button onClick={saveRates} disabled={rateBusy || invalid}
+                  className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  {rateBusy ? '…' : 'SAVE RATE'}
+                </button>
+              </div>
+              {invalid && (
+                <p className="text-[11px] text-amber-400 mt-2">Our send rate must be a positive number below the AWS limit.</p>
+              )}
+              {rateMsg && (
+                <p className={`text-[11px] mt-2 ${rateMsg.kind === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>{rateMsg.text}</p>
+              )}
+            </div>
+          )
+        })()}
 
         <div className="flex flex-wrap gap-2 mb-4">
           {['all', ...STATUSES].map((s) => (

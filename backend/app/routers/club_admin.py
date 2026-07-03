@@ -1817,6 +1817,37 @@ async def reinstate_comms(
     return {"status": "ok", "comms_tier": org.comms_tier}
 
 
+@router.get("/super/comms/rates")
+async def get_comms_rates(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """The live AWS per-second ceiling + our pacing rate (super-admin managed)."""
+    from app.services import platform_settings as ps
+    return await ps.get_ses_rates(db)
+
+
+class CommsRatesIn(BaseModel):
+    aws_max_send_rate: Optional[int] = None   # AWS's granted ceiling
+    send_rate: Optional[int] = None           # our pacing rate (must stay < ceiling)
+
+
+@router.patch("/super/comms/rates")
+async def update_comms_rates(
+    data: CommsRatesIn,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the AWS ceiling and/or our send rate. The send rate must always be
+    strictly below the AWS ceiling — the update is rejected otherwise."""
+    from app.services import platform_settings as ps
+    try:
+        return await ps.update_ses_rates(
+            db, aws_max_send_rate=data.aws_max_send_rate, send_rate=data.send_rate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 # ─── Per-module subscription management (super admin) ─────────────────────────
 
 async def _load_club_with_subs(db: AsyncSession, club_id: str) -> Organisation:

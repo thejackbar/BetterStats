@@ -44,10 +44,17 @@ class SendRateLimiter:
         self._next_at = 0.0
 
     def _min_interval(self) -> float:
+        # The live rate is the super-admin-managed platform setting (warm cache,
+        # sync, no DB on the hot path); it falls back to the env seed default
+        # until warmed. Lazy import avoids any startup import cycle.
         try:
-            rate = int(getattr(settings, "ses_max_send_rate", 0)) or 13
-        except (TypeError, ValueError):
-            rate = 13
+            from app.services import platform_settings
+            rate = int(platform_settings.cached_send_rate())
+        except Exception:
+            try:
+                rate = int(getattr(settings, "ses_max_send_rate", 0)) or 13
+            except (TypeError, ValueError):
+                rate = 13
         rate = max(1, rate)
         return 1.0 / rate
 

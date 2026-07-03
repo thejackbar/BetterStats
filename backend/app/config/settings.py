@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     # send) share one account-wide rate. Single uvicorn worker ⇒ the in-process
     # bucket bounds the whole account; if the box ever runs multiple workers,
     # divide ses_max_send_rate by the worker count (or move the bucket to Redis).
+    # AWS's granted maximum send rate (per second). Stored here as the seed
+    # default; a super admin manages the live value from the BetterComms limits
+    # page (platform_settings), so an AWS increase is a settings change, not a
+    # redeploy. Raise this only when AWS raises your account's rate.
+    ses_aws_max_send_rate: int = 14
+    # Our pacing rate — always kept strictly BELOW the AWS ceiling. Seed default;
+    # the live value is the super-admin-managed platform setting.
     ses_max_send_rate: int = 13                    # per second, under AWS's 14/s
     # Account-wide daily send ceiling we hold ourselves to. Kept under the 50,000
     # AWS grant with headroom reserved for transactional / retries.

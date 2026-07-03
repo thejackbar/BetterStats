@@ -2166,6 +2166,12 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as stub_session:
         await generate_all_stubs(stub_session)
 
+    # Warm the SES send-rate cache from platform_settings so a DB-configured rate
+    # takes effect immediately on boot (not only once a super admin opens the page).
+    from app.services import platform_settings as _ps
+    async with AsyncSessionLocal() as _rate_session:
+        await _ps.warm_send_rate_cache(_rate_session)
+
     start_scheduler()
     logger.info("BetterStats API started")
     yield
