@@ -12,15 +12,15 @@ a re-fired 9am job) overwrites rather than duplicates.
 Mirrored idempotently in main.py lifespan so the API boots even if alembic
 hasn't run yet.
 
-Revision ID: 125
-Revises: 124
+Revision ID: 126
+Revises: 125
 Create Date: 2026-07-03
 """
 from alembic import op
 
 
-revision = '125'
-down_revision = '124'
+revision = '126'
+down_revision = '125'
 branch_labels = None
 depends_on = None
 
