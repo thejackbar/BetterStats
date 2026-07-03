@@ -1828,8 +1828,10 @@ async def get_comms_rates(
 
 
 class CommsRatesIn(BaseModel):
-    aws_max_send_rate: Optional[int] = None   # AWS's granted ceiling
+    aws_max_send_rate: Optional[int] = None   # AWS's granted per-second ceiling
     send_rate: Optional[int] = None           # our pacing rate (must stay < ceiling)
+    aws_daily_quota: Optional[int] = None      # AWS's granted daily ceiling
+    daily_send_limit: Optional[int] = None     # our practical daily max (≤ AWS daily)
 
 
 @router.patch("/super/comms/rates")
@@ -1838,12 +1840,14 @@ async def update_comms_rates(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set the AWS ceiling and/or our send rate. The send rate must always be
-    strictly below the AWS ceiling — the update is rejected otherwise."""
+    """Set the AWS ceilings and/or our practical limits. Our send rate must stay
+    strictly below the AWS per-second ceiling, and our daily limit at or below the
+    AWS daily ceiling — the update is rejected otherwise."""
     from app.services import platform_settings as ps
     try:
         return await ps.update_ses_rates(
-            db, aws_max_send_rate=data.aws_max_send_rate, send_rate=data.send_rate)
+            db, aws_max_send_rate=data.aws_max_send_rate, send_rate=data.send_rate,
+            aws_daily_quota=data.aws_daily_quota, daily_send_limit=data.daily_send_limit)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

@@ -29,7 +29,7 @@ export default function SuperCommsLimits() {
   const [edits, setEdits] = useState({})   // per-request { daily_limit, note }
   // Account send rate (AWS ceiling + our pacing rate).
   const [rates, setRates] = useState(null)
-  const [rateForm, setRateForm] = useState({ aws_max_send_rate: '', send_rate: '' })
+  const [rateForm, setRateForm] = useState({ aws_max_send_rate: '', send_rate: '', aws_daily_quota: '', daily_send_limit: '' })
   const [rateMsg, setRateMsg] = useState(null)
   const [rateBusy, setRateBusy] = useState(false)
 
@@ -42,7 +42,9 @@ export default function SuperCommsLimits() {
   }
   const loadRates = () => {
     api.superGetCommsRates()
-      .then((d) => { setRates(d); setRateForm({ aws_max_send_rate: d.aws_max_send_rate, send_rate: d.send_rate }) })
+      .then((d) => { setRates(d); setRateForm({
+        aws_max_send_rate: d.aws_max_send_rate, send_rate: d.send_rate,
+        aws_daily_quota: d.aws_daily_quota, daily_send_limit: d.daily_send_limit }) })
       .catch(() => setRates(null))
   }
   useEffect(() => { load(); loadRates() }, [])
@@ -53,9 +55,11 @@ export default function SuperCommsLimits() {
       const d = await api.superUpdateCommsRates({
         aws_max_send_rate: Number(rateForm.aws_max_send_rate),
         send_rate: Number(rateForm.send_rate),
+        aws_daily_quota: Number(rateForm.aws_daily_quota),
+        daily_send_limit: Number(rateForm.daily_send_limit),
       })
       setRates(d)
-      setRateMsg({ kind: 'ok', text: 'Send rate updated.' })
+      setRateMsg({ kind: 'ok', text: 'Send limits updated.' })
     } catch (e) { setRateMsg({ kind: 'error', text: e.message }) }
     finally { setRateBusy(false) }
   }
@@ -102,40 +106,57 @@ export default function SuperCommsLimits() {
           </p>
         </div>
 
-        {/* Account send rate — AWS ceiling + our pacing rate */}
+        {/* Account send limits — AWS ceilings + our practical limits */}
         {rates && (() => {
           const aws = Number(rateForm.aws_max_send_rate)
           const send = Number(rateForm.send_rate)
-          const invalid = !(send > 0) || !(aws > 0) || send >= aws
+          const awsDaily = Number(rateForm.aws_daily_quota)
+          const daily = Number(rateForm.daily_send_limit)
+          const rateBad = !(send > 0) || !(aws > 0) || send >= aws
+          const dailyBad = !(daily > 0) || !(awsDaily > 0) || daily > awsDaily
+          const invalid = rateBad || dailyBad
+          const INP = "w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
           return (
             <div className="pb-card p-4 mb-5">
-              <div className="text-sm text-pb-text font-medium mb-1">Account send rate</div>
+              <div className="text-sm text-pb-text font-medium mb-1">Account send limits</div>
               <p className="text-xs text-pb-dim mb-3 leading-relaxed">
-                AWS grants this account a maximum send rate per second, shared across every club. We pace all
-                sending just below it. Update the AWS limit here when AWS changes your account's rate. Our
-                send rate must always stay below the AWS limit.
+                AWS grants this account a maximum send rate per second and a maximum per day, shared across every
+                club. Update the AWS values here when AWS changes your account's grant. Our send rate must stay
+                below the AWS rate, and our daily limit at or below the AWS daily limit — anything over the daily
+                limit sends the next day.
               </p>
-              <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
                 <label className="text-[10px] text-pb-faint">
-                  <span className="block mb-1">AWS limit (msgs/sec)</span>
+                  <span className="block mb-1">AWS rate (msgs/sec)</span>
                   <input type="number" min="1" value={rateForm.aws_max_send_rate}
-                    onChange={e => setRateForm(f => ({ ...f, aws_max_send_rate: e.target.value }))}
-                    className="w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                    onChange={e => setRateForm(f => ({ ...f, aws_max_send_rate: e.target.value }))} className={INP} />
                 </label>
                 <label className="text-[10px] text-pb-faint">
-                  <span className="block mb-1">Our send rate (msgs/sec)</span>
+                  <span className="block mb-1">Our rate (msgs/sec)</span>
                   <input type="number" min="1" value={rateForm.send_rate}
-                    onChange={e => setRateForm(f => ({ ...f, send_rate: e.target.value }))}
-                    className="w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                    onChange={e => setRateForm(f => ({ ...f, send_rate: e.target.value }))} className={INP} />
+                </label>
+                <label className="text-[10px] text-pb-faint">
+                  <span className="block mb-1">AWS daily max</span>
+                  <input type="number" min="1" value={rateForm.aws_daily_quota}
+                    onChange={e => setRateForm(f => ({ ...f, aws_daily_quota: e.target.value }))} className={INP} />
+                </label>
+                <label className="text-[10px] text-pb-faint">
+                  <span className="block mb-1">Our daily max</span>
+                  <input type="number" min="1" value={rateForm.daily_send_limit}
+                    onChange={e => setRateForm(f => ({ ...f, daily_send_limit: e.target.value }))} className={INP} />
                 </label>
                 <button onClick={saveRates} disabled={rateBusy || invalid}
                   className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
                   style={{ background: 'var(--pb-accent)' }}>
-                  {rateBusy ? '…' : 'SAVE RATE'}
+                  {rateBusy ? '…' : 'SAVE LIMITS'}
                 </button>
               </div>
-              {invalid && (
-                <p className="text-[11px] text-amber-400 mt-2">Our send rate must be a positive number below the AWS limit.</p>
+              {rateBad && (
+                <p className="text-[11px] text-amber-400 mt-2">Our send rate must be a positive number below the AWS rate.</p>
+              )}
+              {dailyBad && (
+                <p className="text-[11px] text-amber-400 mt-2">Our daily max must be a positive number at or below the AWS daily max.</p>
               )}
               {rateMsg && (
                 <p className={`text-[11px] mt-2 ${rateMsg.kind === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>{rateMsg.text}</p>

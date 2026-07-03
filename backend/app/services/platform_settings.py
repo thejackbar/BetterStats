@@ -48,6 +48,20 @@ def default_send_rate() -> int:
         return 13
 
 
+def default_aws_daily_quota() -> int:
+    try:
+        return int(getattr(app_settings, "ses_daily_quota", 50000)) or 50000
+    except (TypeError, ValueError):
+        return 50000
+
+
+def default_daily_send_limit() -> int:
+    try:
+        return int(getattr(app_settings, "ses_daily_send_limit", 45000)) or 45000
+    except (TypeError, ValueError):
+        return 45000
+
+
 async def get_settings(db: AsyncSession) -> dict:
     """The platform settings blob (ensures the singleton row exists)."""
     row = (await db.execute(
@@ -109,38 +123,51 @@ def _as_int(value, fallback: int) -> int:
 
 
 async def get_ses_rates(db: AsyncSession) -> dict:
-    """The live AWS ceiling + our send rate, falling back to the env seed
-    defaults when unset. Refreshes the in-memory send-rate cache as a side
-    effect (so a GET after startup warms it)."""
+    """The live SES send limits (per-second rate + daily quota), falling back to
+    the env seed defaults when unset. Refreshes the in-memory send-rate cache as a
+    side effect (so a GET after startup warms it)."""
     s = await get_settings(db)
     aws = _as_int(s.get("ses_aws_max_send_rate"), default_aws_rate())
     send = _as_int(s.get("ses_send_rate"), default_send_rate())
+    aws_daily = _as_int(s.get("ses_aws_daily_quota"), default_aws_daily_quota())
+    daily = _as_int(s.get("ses_daily_send_limit"), default_daily_send_limit())
     global _send_rate_cache
     _send_rate_cache = send
     return {
         "aws_max_send_rate": aws,
         "send_rate": send,
+        "aws_daily_quota": aws_daily,
+        "daily_send_limit": daily,
         # Surfaced so the UI can show what the defaults are if never set.
         "default_aws_max_send_rate": default_aws_rate(),
         "default_send_rate": default_send_rate(),
+        "default_aws_daily_quota": default_aws_daily_quota(),
+        "default_daily_send_limit": default_daily_send_limit(),
     }
 
 
-async def update_ses_rates(db: AsyncSession, *, aws_max_send_rate=None, send_rate=None) -> dict:
-    """Set either or both SES rates. Enforces the invariant that our send rate is
-    ALWAYS strictly below the AWS ceiling (the resulting combined state is what's
-    validated, so a lone change to either can't break the rule). Commits and
-    refreshes the cache. Raises ValueError on a bad request."""
+async def update_ses_rates(db: AsyncSession, *, aws_max_send_rate=None, send_rate=None,
+                           aws_daily_quota=None, daily_send_limit=None) -> dict:
+    """Set any of the SES send limits. Enforces two invariants on the resulting
+    combined state (so a lone change to one field can't break a rule): our send
+    rate stays STRICTLY BELOW the AWS per-second ceiling, and our daily send limit
+    stays AT OR BELOW the AWS daily ceiling. Commits and refreshes the cache.
+    Raises ValueError on a bad request."""
     current = await get_ses_rates(db)
     new_aws = current["aws_max_send_rate"] if aws_max_send_rate is None else _pos_int(aws_max_send_rate, "aws_max_send_rate")
     new_send = current["send_rate"] if send_rate is None else _pos_int(send_rate, "send_rate")
+    new_aws_daily = current["aws_daily_quota"] if aws_daily_quota is None else _pos_int(aws_daily_quota, "aws_daily_quota")
+    new_daily = current["daily_send_limit"] if daily_send_limit is None else _pos_int(daily_send_limit, "daily_send_limit")
     if new_send >= new_aws:
         raise ValueError(
             f"The send rate ({new_send}/s) must be lower than the AWS limit ({new_aws}/s).")
-    patch = {"ses_aws_max_send_rate": new_aws, "ses_send_rate": new_send}
+    if new_daily > new_aws_daily:
+        raise ValueError(
+            f"The daily send limit ({new_daily:,}) can't exceed the AWS daily limit ({new_aws_daily:,}).")
     s = await get_settings(db)
     out = dict(s)
-    out.update(patch)
+    out.update({"ses_aws_max_send_rate": new_aws, "ses_send_rate": new_send,
+                "ses_aws_daily_quota": new_aws_daily, "ses_daily_send_limit": new_daily})
     await db.execute(
         text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
         {"s": json.dumps(out)},
@@ -148,7 +175,14 @@ async def update_ses_rates(db: AsyncSession, *, aws_max_send_rate=None, send_rat
     await db.commit()
     global _send_rate_cache
     _send_rate_cache = new_send
-    return {"aws_max_send_rate": new_aws, "send_rate": new_send}
+    return {"aws_max_send_rate": new_aws, "send_rate": new_send,
+            "aws_daily_quota": new_aws_daily, "daily_send_limit": new_daily}
+
+
+async def get_daily_send_limit(db: AsyncSession) -> int:
+    """Our practical daily send ceiling (super-admin managed, env seed default)."""
+    s = await get_settings(db)
+    return _as_int(s.get("ses_daily_send_limit"), default_daily_send_limit())
 
 
 def _pos_int(value, name: str) -> int:

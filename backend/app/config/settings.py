@@ -136,10 +136,15 @@ class Settings(BaseSettings):
     # Our pacing rate — always kept strictly BELOW the AWS ceiling. Seed default;
     # the live value is the super-admin-managed platform setting.
     ses_max_send_rate: int = 13                    # per second, under AWS's 14/s
-    # Account-wide daily send ceiling we hold ourselves to. Kept under the 50,000
-    # AWS grant with headroom reserved for transactional / retries.
+    # Daily send quota. Both values are super-admin managed from the BetterComms
+    # limits page (platform_settings); these are the seed defaults.
+    #   ses_daily_quota      — AWS's granted daily ceiling (50,000 today).
+    #   ses_daily_send_limit — the practical daily max we hold ourselves to
+    #                          (e.g. 40,000), always ≤ the AWS ceiling. Overflow
+    #                          past this defers to the next day.
     ses_daily_quota: int = 50000
-    ses_daily_quota_headroom: int = 5000           # reserve → 45,000 usable for campaigns
+    ses_daily_send_limit: int = 45000
+    ses_daily_quota_headroom: int = 5000           # deprecated (superseded by ses_daily_send_limit)
 
     # ─── BetterComms — per-club sending tiers (AWS-sandbox-style onboarding) ────
     # A new club starts in 'sandbox' with a low daily cap; once it has sent

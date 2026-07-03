@@ -32,10 +32,12 @@ layers do the work:
   bucket to Redis.) The env values `ses_aws_max_send_rate` / `ses_max_send_rate`
   are the seed defaults used until a super admin sets the live values, which are
   stored in `platform_settings` and read through a warm in-memory cache.
-- **Daily quota.** The account holds itself to `ses_daily_quota` minus
-  `ses_daily_quota_headroom` (default 50,000 minus 5,000 = 45,000 usable),
-  reserving room for retries and future transactional mail. A campaign only sends
-  today's remaining allowance; the rest is deferred.
+- **Daily quota.** The account holds itself to a practical daily send limit that
+  a super admin manages from the BetterComms limits page: the **AWS daily
+  ceiling** (50,000 today, bumped when AWS raises the grant) and **our daily
+  limit** (e.g. 40,000), which must stay at or below the AWS ceiling. A campaign
+  only sends today's remaining allowance; the rest defers to the next day. The
+  env values `ses_daily_quota` / `ses_daily_send_limit` are the seed defaults.
 - **Throttle retries.** A `Throttling` (429) or transient 5xx from SES is retried
   with backoff instead of dropping the recipient, so a brief rate blip never
   loses mail.
@@ -109,8 +111,8 @@ All in `backend/app/config/settings.py`, overridable via the server `.env`:
 |---------|---------|---------|
 | `ses_aws_max_send_rate` | 14 | Seed default for AWS's per-second ceiling (live value is super-admin managed). |
 | `ses_max_send_rate` | 13 | Seed default for our pacing rate (live value is super-admin managed; must stay below the ceiling). |
-| `ses_daily_quota` | 50000 | AWS daily grant. |
-| `ses_daily_quota_headroom` | 5000 | Reserved under the grant. |
+| `ses_daily_quota` | 50000 | Seed default for the AWS daily ceiling (live value is super-admin managed). |
+| `ses_daily_send_limit` | 45000 | Seed default for our practical daily max (live value is super-admin managed; must stay at or below the AWS daily ceiling). |
 | `comms_sandbox_daily_cap` | 50 | Sandbox per-club daily cap. |
 | `comms_production_daily_cap` | 2000 | Production per-club daily cap. |
 | `comms_bounce_rate_threshold` | 0.05 | Breaker bounce trip. |
@@ -118,9 +120,8 @@ All in `backend/app/config/settings.py`, overridable via the server `.env`:
 | `comms_metrics_window_days` | 30 | Deliverability window. |
 | `comms_metrics_min_sample` | 50 | Min sends before rates are judged. |
 
-After an AWS increase, raise the AWS ceiling and send rate from the BetterComms
-limits page (no redeploy). Raise `ses_daily_quota` in the server config in
-lockstep with any future daily-quota grant.
+After an AWS increase, raise the AWS rate ceiling, our send rate, the AWS daily
+ceiling and our daily limit from the BetterComms limits page (no redeploy).
 
 ## Acceptable use (the club's obligations)
 

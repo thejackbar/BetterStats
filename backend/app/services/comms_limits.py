@@ -4,11 +4,12 @@ bounce/complaint circuit breaker.
 Three jobs, all reading data we already hold (``comms_recipients`` for sends,
 ``email_events`` for deliverability), so there is no new counter to keep in sync:
 
-  * **Daily caps.** AWS grants 50,000/day account-wide; we hold campaigns to
-    ``ses_daily_quota - ses_daily_quota_headroom`` (reserving room for
-    transactional). Each club also has a per-day cap from its tier. A send is
-    allowed up to ``min(account_remaining, club_remaining)``; the overflow is
-    deferred to the next day (see routers/comms.py::_run_send).
+  * **Daily caps.** AWS grants a daily maximum (50,000 today); we hold campaigns
+    to the super-admin-managed practical daily limit (``ses_daily_send_limit``,
+    always ≤ the AWS ceiling — see services/platform_settings). Each club also has
+    a per-day cap from its tier. A send is allowed up to
+    ``min(account_remaining, club_remaining)``; the overflow is deferred to the
+    next day (see routers/comms.py::_run_send).
 
   * **Tiers.** A club is ``sandbox`` (low cap, new/unproven), ``production``
     (raised after a super admin approves a request), or ``suspended`` (cap 0,
@@ -102,8 +103,13 @@ async def sends_today(session: AsyncSession, org_id=None) -> int:
 
 async def account_daily_remaining(session: AsyncSession) -> int:
     """How many more sends the whole account may make today before hitting our
-    self-imposed ceiling (the AWS grant minus reserved headroom)."""
-    usable = int(settings.ses_daily_quota) - int(settings.ses_daily_quota_headroom)
+    practical daily send limit (super-admin managed, always ≤ the AWS daily
+    grant). Read from platform_settings, falling back to the env seed default."""
+    from app.services import platform_settings
+    try:
+        usable = int(await platform_settings.get_daily_send_limit(session))
+    except Exception:
+        usable = int(settings.ses_daily_send_limit)
     used = await sends_today(session, org_id=None)
     return max(0, usable - used)
 
