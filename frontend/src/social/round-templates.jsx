@@ -849,6 +849,99 @@ export function ResultsList({ palette: pal, meta = {}, results = [], club = {}, 
   )
 }
 
+// Weekend Wrap, plus each grade's top 2 run scorers & top 2 wicket takers for
+// our club (r.topBat / r.topBowl — up to 2 {name, line} entries each, sourced
+// from the match scorecard's "our team" innings). A grade with no performer
+// data yet (manually-added row) just renders its header line.
+export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+  const rows = results
+  const rec = record(rows)
+  const n = rows.length || 1
+  const gradeF = n >= 8 ? 16 : n >= 6 ? 19 : n >= 4 ? 22 : 26
+  const scoreF = n >= 8 ? 18 : n >= 6 ? 21 : n >= 4 ? 24 : 28
+  const oppF = n >= 8 ? 12 : n >= 6 ? 14 : n >= 4 ? 16 : 18
+  const badgeF = n >= 8 ? 11 : n >= 6 ? 13 : 15
+  const nameF = n >= 8 ? 12 : n >= 6 ? 13 : 15
+  const lineF = n >= 8 ? 11 : n >= 6 ? 12 : 14
+  const bar = n >= 8 ? 30 : n >= 6 ? 40 : 54
+  return (
+    <Post palette={pal}>
+      <Halftone color={pal.ink} opacity={0.06} size={11} />
+      <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '40px 56px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
+        <div>
+          <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '8px 16px' }}>RESULTS</Slab>
+          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 34, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
+            <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: pal.ink, opacity: 0.6, marginTop: 3 }}>ROUND RECORD</div>
+          </div>
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={64} />
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: 158, bottom: 138, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, marginBottom: 8 }}>
+          <div />
+          <Kicker color={pal.ink} size={10} style={{ opacity: 0.5 }}>TOP RUN SCORERS</Kicker>
+          <Kicker color={pal.ink} size={10} style={{ opacity: 0.5 }}>TOP WICKET TAKERS</Kicker>
+        </div>
+        {rows.map((r, i) => {
+          const w = r.outcome === 'W'
+          const c = w ? WIN : LOSS
+          const bats = (r.topBat || []).filter((p) => p && (p.name || p.line))
+          const bowls = (r.topBowl || []).filter((p) => p && (p.name || p.line))
+          return (
+            <div key={i} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '6px 150px minmax(0,1fr) 190px', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 6, height: bar, background: c }} />
+                <div style={{ fontFamily: DISPLAY, fontSize: gradeF, letterSpacing: 0.5, lineHeight: 0.95, overflow: 'hidden' }}>{r.grade}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pal.ink, opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.2, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85 }}>{r.opp} {r.them}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+                  <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: pal.ink, opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: pal.primary, background: c, padding: '4px 10px', minWidth: 56, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
+                </div>
+              </div>
+              {(bats.length > 0 || bowls.length > 0) && (
+                <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, paddingLeft: 0 }}>
+                  <div />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {bats.map((p, k) => (
+                      <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                        <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pal.accent, flexShrink: 0 }}>▸</span>
+                        <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                        <span style={{ fontFamily: MONO, fontSize: lineF, color: pal.ink, opacity: 0.7, flexShrink: 0 }}>{p.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {bowls.map((p, k) => (
+                      <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                        <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pal.accent, flexShrink: 0 }}>▸</span>
+                        <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                        <span style={{ fontFamily: MONO, fontSize: lineF, color: pal.ink, opacity: 0.7, flexShrink: 0 }}>{p.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} />
+      </div>
+      <Grain opacity={0.3} id="rll-g" />
+    </Post>
+  )
+}
+
 export function ResultsScoreboard({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
@@ -1119,10 +1212,22 @@ export const DEFAULT_FIXTURES = [
   { grade: "WOMEN'S 1ST", opp: 'FREMANTLE', oppMono: 'FRE', ha: 'H', time: '11:00 AM', venue: 'STEVENS RES' },
 ]
 export const DEFAULT_RESULTS = [
-  { grade: '1ST XI', opp: 'SUBIACO-FLOREAT', oppMono: 'SUB', us: '6/188', them: '184', outcome: 'W', margin: 'BY 4 WICKETS' },
-  { grade: '2ND XI', opp: 'WILLETTON', oppMono: 'WIL', us: '176', them: '9/201', outcome: 'L', margin: 'BY 25 RUNS' },
-  { grade: '3RD XI', opp: 'GOSNELLS', oppMono: 'GOS', us: '3/142', them: '139', outcome: 'W', margin: 'BY 7 WICKETS' },
-  { grade: '4TH XI', opp: 'MELVILLE', oppMono: 'MEL', us: '154', them: '4/192', outcome: 'L', margin: 'BY 38 RUNS' },
-  { grade: 'T20', opp: 'BAYSWATER', oppMono: 'BAY', us: '5/176', them: '8/164', outcome: 'W', margin: 'BY 12 RUNS' },
-  { grade: "WOMEN'S 1ST", opp: 'FREMANTLE', oppMono: 'FRE', us: '4/138', them: '135', outcome: 'W', margin: 'BY 6 WICKETS' },
+  { grade: '1ST XI', opp: 'SUBIACO-FLOREAT', oppMono: 'SUB', us: '6/188', them: '184', outcome: 'W', margin: 'BY 4 WICKETS',
+    topBat: [{ name: 'J. BARENDSE', line: '64 (71)' }, { name: 'T. MCNAMEE', line: '39 (58)' }],
+    topBowl: [{ name: 'A. ALLISON', line: '4/29 (9.4)' }, { name: 'S. ROBERTS', line: '2/26 (8)' }] },
+  { grade: '2ND XI', opp: 'WILLETTON', oppMono: 'WIL', us: '176', them: '9/201', outcome: 'L', margin: 'BY 25 RUNS',
+    topBat: [{ name: 'C. MURRAY', line: '52 (64)' }, { name: 'B. PAYNE', line: '31 (40)' }],
+    topBowl: [{ name: 'D. GOODMAN', line: '3/38 (10)' }, { name: 'R. HALL', line: '2/45 (9)' }] },
+  { grade: '3RD XI', opp: 'GOSNELLS', oppMono: 'GOS', us: '3/142', them: '139', outcome: 'W', margin: 'BY 7 WICKETS',
+    topBat: [{ name: 'J. ROBSON', line: '48 (63)' }, { name: 'K. SHEJWAL', line: '43 (58)' }],
+    topBowl: [{ name: 'M. FERNANDO', line: '3/25 (9)' }, { name: 'L. DIXON', line: '3/31 (8)' }] },
+  { grade: '4TH XI', opp: 'MELVILLE', oppMono: 'MEL', us: '154', them: '4/192', outcome: 'L', margin: 'BY 38 RUNS',
+    topBat: [{ name: 'H. WAHID', line: '29 (33)' }, { name: 'N. DEGRUSSA', line: '22 (30)' }],
+    topBowl: [{ name: 'C. THIRD', line: '2/40 (9)' }, { name: 'J. ALLEN', line: '1/28 (7)' }] },
+  { grade: 'T20', opp: 'BAYSWATER', oppMono: 'BAY', us: '5/176', them: '8/164', outcome: 'W', margin: 'BY 12 RUNS',
+    topBat: [{ name: 'J. BARENDSE', line: '58 (39)' }, { name: 'T. MCNAMEE', line: '27 (21)' }],
+    topBowl: [{ name: 'A. ALLISON', line: '3/22 (4)' }, { name: 'S. ROBERTS', line: '2/31 (4)' }] },
+  { grade: "WOMEN'S 1ST", opp: 'FREMANTLE', oppMono: 'FRE', us: '4/138', them: '135', outcome: 'W', margin: 'BY 6 WICKETS',
+    topBat: [{ name: 'C. MURRAY', line: '46 (55)' }, { name: 'B. PAYNE', line: '33 (42)' }],
+    topBowl: [{ name: 'D. GOODMAN', line: '2/19 (7)' }, { name: 'R. HALL', line: '2/24 (6)' }] },
 ]

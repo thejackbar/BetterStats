@@ -32,6 +32,10 @@ _RESULT_WINDOW_DAYS = 90
 _RESULT_MAX_DATES = 3
 _RESULT_MAX_MATCHES = 24
 
+# Same dismissal-type semantics as admin.py's single-scorecard import.
+_DNB_TYPES = {"did not bat", "dnb", "absent", "absent hurt"}
+_NOT_OUT_ID = 1  # dismissalTypeId == 1 means "not out" in GR API
+
 
 def _label(day: str) -> str:
     """'2026-06-14' -> 'SAT 14 JUN' (no leading zero, uppercase)."""
@@ -108,6 +112,79 @@ def _margin_from_text(text: str | None) -> str:
     return f"BY {frag}".strip()
 
 
+def _overs_str(overs_raw) -> str:
+    """Convert oversBowled string/float to 'X.Y' cricket-notation display string."""
+    if overs_raw is None:
+        return "0"
+    if isinstance(overs_raw, str) and "." in overs_raw:
+        return overs_raw
+    try:
+        balls = int(float(str(overs_raw)) * 6) if "." not in str(overs_raw) else None
+        return f"{balls // 6}.{balls % 6}" if balls is not None else str(overs_raw)
+    except (TypeError, ValueError):
+        return str(overs_raw)
+
+
+def _perf_name(raw: str | None) -> str:
+    """'Surname, First' or 'First Surname' -> 'F. SURNAME' performer label."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if "," in raw:
+        last, first = (x.strip() for x in raw.split(",", 1))
+    else:
+        parts = raw.split()
+        if len(parts) == 1:
+            return parts[0].upper().rstrip(".,;:")
+        first, last = parts[0], " ".join(parts[1:])
+    fi = first[:1].upper()
+    last = last.strip().upper().rstrip(".,;:")
+    return f"{fi}. {last}" if fi and last else (last or first.upper())
+
+
+def _top_batters(bat_rows: list) -> list[dict]:
+    """Our club's top 2 run scorers from one innings (most runs, fewer balls breaks ties)."""
+    cands = [
+        b for b in (bat_rows or [])
+        if (b.get("dismissalType") or "").lower() not in _DNB_TYPES
+        and (int(b.get("runsScored") or 0) > 0 or int(b.get("ballsFaced") or 0) > 0)
+    ]
+    cands.sort(key=lambda b: (-int(b.get("runsScored") or 0), int(b.get("ballsFaced") or 0)))
+    out = []
+    for b in cands[:2]:
+        name = _perf_name(b.get("playerShortName"))
+        if not name:
+            continue
+        runs = int(b.get("runsScored") or 0)
+        balls = int(b.get("ballsFaced") or 0)
+        dt_id = b.get("dismissalTypeId") or 0
+        dt = (b.get("dismissalType") or "").lower()
+        not_out = dt_id == _NOT_OUT_ID or dt == "not out"
+        out.append({"name": name, "line": f"{runs}{'*' if not_out else ''} ({balls})"})
+    return out
+
+
+def _top_bowlers(bowl_rows: list) -> list[dict]:
+    """Our club's top 2 wicket takers from one innings (most wickets, fewest runs breaks ties)."""
+    def overs_val(o):
+        try:
+            return float(str(o or 0).replace(",", "."))
+        except (TypeError, ValueError):
+            return 0.0
+
+    cands = [b for b in (bowl_rows or []) if overs_val(b.get("oversBowled")) > 0 or int(b.get("wicketsTaken") or 0) > 0]
+    cands.sort(key=lambda b: (-int(b.get("wicketsTaken") or 0), int(b.get("runsConceded") or 0)))
+    out = []
+    for b in cands[:2]:
+        name = _perf_name(b.get("playerShortName"))
+        if not name:
+            continue
+        w = int(b.get("wicketsTaken") or 0)
+        r = int(b.get("runsConceded") or 0)
+        out.append({"name": name, "line": f"{w}/{r} ({_overs_str(b.get('oversBowled'))})"})
+    return out
+
+
 def _club_dict(org) -> dict:
     name = (org.name or "CLUB")
     logo = org.logo_url or (f"/api/images/organisations/{org.id}/logo" if getattr(org, "logo_data", None) else None)
@@ -146,6 +223,10 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str) -> dict | None:
     if us is None or them is None:
         return None
 
+    our_inn = inn_by_team.get(our_id) or {}
+    top_bat = _top_batters(our_inn.get("batting") or [])
+    top_bowl = _top_bowlers(our_inn.get("bowling") or [])
+
     outcome = "T"
     for st in summary_teams:
         if (st.get("id") or "").lower() != our_id:
@@ -169,6 +250,8 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str) -> dict | None:
         "them": them,
         "outcome": outcome,
         "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
+        "topBat": top_bat,
+        "topBowl": top_bowl,
     }
 
 
