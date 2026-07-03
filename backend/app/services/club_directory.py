@@ -676,46 +676,115 @@ def _contact_exists(*conds):
             .correlate(MarketingClub))
 
 
+# ─── Tri-state directory filters (off / include / exclude) ───────────────────
+#
+# Each of these filters can be OFF, or applied as INCLUDE (keep only matching
+# clubs) or EXCLUDE (drop matching clubs). Every filter is defined by an
+# (exclude_cond, include_cond) pair — exclude_cond is exactly what the old
+# boolean exclude filter applied, so existing behaviour is preserved; the include
+# side is its logical counterpart. Applied from the ``modes`` map that the router
+# threads through club_filters. See routers/marketing.py + SuperMarketing.jsx.
+FILTER_MODE_KEYS = (
+    "junior", "carnival", "school", "rep", "cricket_au",
+    "emailed", "exported", "suppressed",
+)
+FILTER_MODES = ("off", "include", "exclude")
+
+# Cricket Australia / state-association mailbox domains. A club whose generic
+# email (or any officer email) sits on one of these is a governing-body org, not
+# a grassroots club we'd cold-email. Matched as the email host (…@domain) or a
+# subdomain (…@x.domain), case-insensitively, so "notcricket.com.au" never trips.
+CA_EMAIL_DOMAINS = (
+    "cricket.com.au", "wacricket.com.au", "saca.com.au", "cricketvictoria.com.au",
+    "crickettas.com.au", "cricketnsw.com.au", "ccnsw.com", "cricketact.com.au",
+    "qldcricket.com.au", "ntcricket.com.au",
+)
+
+
+def _ca_email_match(col):
+    """True if ``col`` is an email on a Cricket Australia / state-body domain."""
+    parts = []
+    for d in CA_EMAIL_DOMAINS:
+        parts.append(func.lower(col).like(f"%@{d}"))
+        parts.append(func.lower(col).like(f"%@%.{d}"))
+    return or_(*parts)
+
+
+def _filter_conditions(key: str):
+    """(exclude_cond, include_cond) for a tri-state filter, or None for unknown."""
+    C = MarketingClubContact
+    name = func.lower(MarketingClub.name)
+    if key == "junior":
+        p = name.like("%junior%"); return (~p, p)
+    if key == "carnival":
+        p = name.like("%carnival%"); return (~p, p)
+    if key == "school":
+        p = name.like("%school%"); return (~p, p)
+    if key == "rep":
+        # Representative teams: a word starting "rep" (Rep / Reps / Representative),
+        # so "Prep"/"…prep…" is not caught. Postgres case-insensitive regex.
+        p = MarketingClub.name.op("~*")(r"\m(rep|represent)")
+        return (~p, p)
+    if key == "cricket_au":
+        p = or_(_ca_email_match(MarketingClub.contact_email),
+                _contact_exists(_ca_email_match(C.email)))
+        return (~p, p)
+    if key == "emailed":
+        return (MarketingClub.emailed_at.is_(None), MarketingClub.emailed_at.isnot(None))
+    if key == "exported":
+        # exclude = keep clubs that still have an emailable contact not yet in
+        # BetterComms (the old behaviour); include = only clubs with nothing left.
+        keep = _contact_exists(C.email.isnot(None), C.exported_at.is_(None))
+        return (keep, ~keep)
+    if key == "suppressed":
+        # exclude = keep clubs that still have a subscribed emailable contact;
+        # include = only clubs with none left.
+        keep = _contact_exists(C.email.isnot(None), C.subscribed.is_(True))
+        return (keep, ~keep)
+    return None
+
+
+def filter_mode_conditions(modes: Optional[dict]) -> list:
+    """Translate a ``{key: 'include'|'exclude'}`` map into WHERE conditions."""
+    out = []
+    for key in FILTER_MODE_KEYS:
+        mode = str((modes or {}).get(key) or "").strip().lower()
+        if mode not in ("include", "exclude"):
+            continue
+        pair = _filter_conditions(key)
+        if pair is None:
+            continue
+        exclude_cond, include_cond = pair
+        out.append(include_cond if mode == "include" else exclude_cond)
+    return out
+
+
 def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  association: Optional[str] = None, status: Optional[str] = None,
                  postcode_from: Optional[str] = None, postcode_to: Optional[str] = None,
                  contact_filter: Optional[str] = None, person: Optional[str] = None,
-                 exclude_junior: bool = False, exclude_emailed: bool = False,
-                 exclude_carnival: bool = False, exclude_school: bool = False,
-                 exclude_exported: bool = False, exclude_suppressed: bool = False,
-                 visited: bool = False, emailed: bool = False,
+                 modes: Optional[dict] = None,
+                 visited: bool = False,
                  associations: Optional[list] = None,
                  association_extra: Optional[list] = None,
                  countries: Optional[list] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
-    filters. Contact-presence filters use correlated EXISTS over the contacts."""
+    filters. Contact-presence filters use correlated EXISTS over the contacts.
+
+    ``modes`` carries the tri-state directory filters (junior / carnival / school
+    / rep / cricket_au / emailed / exported / suppressed), each 'include' or
+    'exclude'; see filter_mode_conditions."""
     C = MarketingClubContact
     conds = []
     if state:
         conds.append(MarketingClub.state == state)
-    if exclude_junior:
-        conds.append(~func.lower(MarketingClub.name).like("%junior%"))
-    if exclude_carnival:
-        conds.append(~func.lower(MarketingClub.name).like("%carnival%"))
-    if exclude_school:
-        conds.append(~func.lower(MarketingClub.name).like("%school%"))
+    # Tri-state directory filters (off / include / exclude).
+    conds.extend(filter_mode_conditions(modes))
     if associations:
         conds.append(or_(*[_assoc_match(n) for n in associations if n]))
     if countries:
         conds.append(MarketingClub.country.in_([c for c in countries if c]))
-    if exclude_emailed:
-        conds.append(MarketingClub.emailed_at.is_(None))
-    if emailed:
-        # Only clubs that have been emailed (the outreach send timestamp is set) —
-        # the positive counterpart to exclude_emailed.
-        conds.append(MarketingClub.emailed_at.isnot(None))
-    if exclude_exported:
-        # Only clubs that still have an emailable contact not yet in BetterComms.
-        conds.append(_contact_exists(C.email.isnot(None), C.exported_at.is_(None)))
-    if exclude_suppressed:
-        # Only clubs that still have an emailable, subscribed (non-opted-out) contact.
-        conds.append(_contact_exists(C.email.isnot(None), C.subscribed.is_(True)))
     if visited:
         # Only clubs where someone has visited the public site from a link tagged
         # with this club's UTM code — resolved through utm_code matches AND manual
