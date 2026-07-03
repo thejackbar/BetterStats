@@ -324,13 +324,29 @@ def _inject_footer(full_html: str, footer: str, unsub_url: str, club_name: str, 
     return full_html + block
 
 
+def _absolute_url(url: str | None) -> str | None:
+    """Make a stored image URL absolute so email clients can fetch it.
+
+    Logos are stored as a site-relative path (``/api/images/organisations/…``);
+    a mail client has no page origin to resolve that against, so the image shows
+    broken. Prefix relative paths with the public base URL; leave already-absolute
+    URLs (``http(s)://``) untouched."""
+    u = (url or "").strip()
+    if not u:
+        return None
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    return f"{settings.public_base_url.rstrip('/')}/{u.lstrip('/')}"
+
+
 def _wrap_html(org: Organisation, inner: str, footer: str, unsub_url: str, club_name: str) -> str:
     accent = org.accent_color or "#243352"
     name = html_lib.escape(org.name or "Our Club")
+    logo_src = _absolute_url(org.logo_url)
     logo = (
-        f'<img src="{html_lib.escape(org.logo_url)}" alt="" height="40" '
+        f'<img src="{html_lib.escape(logo_src)}" alt="" height="40" '
         f'style="height:40px;max-height:40px;display:block">'
-        if org.logo_url else f'<strong style="color:#fff;font-size:18px">{name}</strong>'
+        if logo_src else f'<strong style="color:#fff;font-size:18px">{name}</strong>'
     )
     safe_footer = html_lib.escape(footer).replace("\n", "<br>") if footer else name
     return f"""\
