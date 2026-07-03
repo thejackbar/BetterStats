@@ -268,15 +268,24 @@ const VARIANTS = {
   ),
 }
 
-export function SocialBackground({ variant = 'ink-splatter', colors, size = 1080, radius = 0, className, style, children }) {
+export function SocialBackground({ variant = 'ink-splatter', colors, size = 1080, height, radius = 0, className, style, children }) {
   const p = { ...DEFAULT_COLORS, ...(colors || {}) }
   const render = VARIANTS[variant] || VARIANTS['ink-splatter']
   const px = Number(size) || 1080
-  const scale = px / 1080
+  // height defaults to size (the original square case). For a non-square
+  // canvas (e.g. a 1920×1080 scorecard) the fixed 1080×1080 design space is
+  // scaled up to *cover* the box (like CSS background-size:cover) and
+  // centred, cropping the excess on whichever axis overflows, rather than
+  // stretching it non-uniformly (which would turn every circle into an
+  // ellipse and skew every diagonal).
+  const py = Number(height) || px
+  const scale = Math.max(px, py) / 1080
+  const offsetX = (px - 1080 * scale) / 2
+  const offsetY = (py - 1080 * scale) / 2
   return (
-    <div className={className} style={{ position: 'relative', width: px, height: px, overflow: 'hidden', borderRadius: radius, background: '#000', ...style }}>
-      {/* fixed 1080 design space, scaled to the requested size */}
-      <div style={{ position: 'absolute', top: 0, left: 0, width: 1080, height: 1080, transformOrigin: 'top left', transform: `scale(${scale})` }}>
+    <div className={className} style={{ position: 'relative', width: px, height: py, overflow: 'hidden', borderRadius: radius, background: '#000', ...style }}>
+      {/* fixed 1080 design space, scaled to cover the requested box */}
+      <div style={{ position: 'absolute', top: offsetY, left: offsetX, width: 1080, height: 1080, transformOrigin: 'top left', transform: `scale(${scale})` }}>
         {render(p)}
       </div>
       {/* content overlay in the caller's own coordinate space */}

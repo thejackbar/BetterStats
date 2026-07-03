@@ -1170,12 +1170,12 @@ export default function AdminSocialPost() {
 
   // bgColors[bgStyle] is a *partial* override merged over the palette's own
   // derived defaults, so switching palette still updates an uncustomised
-  // background instead of freezing it at whatever it looked like when picked.
-  // Kept separate from isScorecard so the colour pickers still work while a
-  // Scorecard template is selected (the 1920×1080 layout just doesn't render
-  // it — SocialBackgrounds variants are square-only).
+  // background instead of freezing it at whatever it looked like when picked
+  // — and, just as importantly, so switching TEMPLATE doesn't perturb it:
+  // only ever store the keys the user actually touched (see the colour
+  // picker onChange below), never a full baked-in snapshot.
   const bgColorsMerged = bgStyle !== 'none' ? { ...paletteToBgColors(renderPalette), ...(bgColors[bgStyle] || {}) } : null
-  const bgActive = bgStyle !== 'none' && !isScorecard
+  const bgActive = bgStyle !== 'none'
   const bgResolvedColors = bgActive ? bgColorsMerged : null
   // The template's own opaque canvas fill is given an alpha channel so the
   // SocialBackground sitting behind it (same coordinate space, lower in the
@@ -1466,13 +1466,8 @@ export default function AdminSocialPost() {
                 </div>
               )}
               <div className="mt-2 pt-2 border-t pb-hairline">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Background</span>
-                  {isScorecard && bgStyle !== 'none' && (
-                    <span className="font-mono text-[9px] text-pb-faintest">Scorecards stay plain — 1920×1080 isn't square</span>
-                  )}
-                </div>
-                <div className="flex gap-2 flex-wrap items-center mb-1">
+                <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Background</span>
+                <div className="flex gap-2 flex-wrap items-center mt-1.5 mb-1">
                   <BgStyleSwatch entry={{ key: 'none', label: 'Clean' }} colors={paletteToBgColors(renderPalette)} selected={bgStyle === 'none'} onClick={() => setBgStyle('none')} />
                   {BG_GROUPS.map(group => (
                     <div key={group} className="flex gap-2 flex-wrap items-center">
@@ -1490,7 +1485,7 @@ export default function AdminSocialPost() {
                       <input
                         type="color"
                         value={bgColorsMerged[key] || '#000000'}
-                        onChange={e => setBgColors(c => ({ ...c, [bgStyle]: { ...paletteToBgColors(renderPalette), ...(c[bgStyle] || {}), [key]: e.target.value } }))}
+                        onChange={e => setBgColors(c => ({ ...c, [bgStyle]: { ...(c[bgStyle] || {}), [key]: e.target.value } }))}
                         className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0"
                       />
                       {label}
@@ -2430,7 +2425,7 @@ export default function AdminSocialPost() {
                 return (
                   <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                     <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
-                      {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} style={{ position: 'absolute', inset: 0 }} />}
+                      {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
                       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
                     </div>
                   </div>
@@ -2468,7 +2463,7 @@ export default function AdminSocialPost() {
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                       <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
-                        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} style={{ position: 'absolute', inset: 0 }} />}
+                        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
                         <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
                       </div>
                     </div>
@@ -2487,7 +2482,7 @@ export default function AdminSocialPost() {
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
         <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-          {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} style={{ position: 'absolute', inset: 0 }} />}
+          {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
         </div>
       </div>
