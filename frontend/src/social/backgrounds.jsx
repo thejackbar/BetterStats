@@ -237,6 +237,131 @@ function VintageVignette({ palette, width: w, height: h }) {
   )
 }
 
+// ── 9. Splatter — sharp-edged ink-splat blobs + droplet trail ──
+// (Distinct from Grunge Spray's soft airbrush blur: a splat is a crisp,
+// jagged-silhouette shape, closer to spilled ink than a spray can.)
+function splatPoints(cx, cy, baseR, spikes, seed) {
+  const pts = []
+  for (let i = 0; i < spikes; i++) {
+    const angle = (i / spikes) * Math.PI * 2
+    const r = baseR * (0.55 + prand(seed + i * 3.7) * 0.85)
+    pts.push(`${cx + Math.cos(angle) * r},${cy + Math.sin(angle) * r}`)
+  }
+  return pts.join(' ')
+}
+function Splatter({ palette, width: w, height: h }) {
+  const ink = palette.ink
+  const splats = [
+    { x: 0.1, y: 0.12, r: 46, spikes: 11, seed: 4 },
+    { x: 0.9, y: 0.88, r: 58, spikes: 13, seed: 22 },
+  ]
+  const droplets = Array.from({ length: 30 }, (_, i) => {
+    const corner = i % 2 === 0 ? { x: 0.1, y: 0.12 } : { x: 0.9, y: 0.88 }
+    const spread = 0.22
+    return {
+      x: corner.x + (prand(i * 4.2 + 3) - 0.5) * spread,
+      y: corner.y + (prand(i * 6.1 + 9) - 0.5) * spread,
+      r: 2 + prand(i * 3.4 + 5) * 6,
+      o: 0.25 + prand(i * 8.8 + 1) * 0.35,
+    }
+  })
+  return (
+    <Svg width={w} height={h}>
+      <g fill={ink}>
+        {splats.map((s, i) => (
+          <polygon key={`s${i}`} points={splatPoints(s.x * w, s.y * h, s.r, s.spikes, s.seed)} opacity={0.4} />
+        ))}
+        {droplets.map((d, i) => (
+          <circle key={`d${i}`} cx={d.x * w} cy={d.y * h} r={d.r} opacity={Math.max(0, Math.min(1, d.o))} />
+        ))}
+      </g>
+    </Svg>
+  )
+}
+
+// ── 10. Chaos Waves — energetic overlapping wave bands, match-day motion ──
+function waveLine(w, baseY, amp, freq, phase) {
+  const steps = 24
+  const pts = []
+  for (let i = 0; i <= steps; i++) {
+    const x = (i / steps) * w
+    const y = baseY + Math.sin((i / steps) * Math.PI * freq + phase) * amp
+    pts.push(`${x},${y}`)
+  }
+  return pts
+}
+// A wave band filled between the wavy line and whichever canvas edge it's
+// anchored to — 'bottom' closes down to y=h, 'top' closes up to y=0.
+function waveBand(w, h, baseY, amp, freq, phase, anchor) {
+  const pts = waveLine(w, baseY, amp, freq, phase)
+  const edgeY = anchor === 'top' ? 0 : h
+  return [`0,${edgeY}`, ...pts, `${w},${edgeY}`].join(' ')
+}
+function ChaosWaves({ palette, width: w, height: h }) {
+  const accent = palette.accent
+  const ink = palette.ink
+  const bands = [
+    { y: h * 0.82, amp: 30, freq: 3.4, phase: 0.4, fill: accent, o: 0.16, anchor: 'bottom' },
+    { y: h * 0.9, amp: 22, freq: 4.1, phase: 1.6, fill: ink, o: 0.1, anchor: 'bottom' },
+    { y: h * 0.15, amp: 18, freq: 3.8, phase: 2.4, fill: accent, o: 0.1, anchor: 'top' },
+  ]
+  return (
+    <Svg width={w} height={h}>
+      {bands.map((b, i) => (
+        <polygon key={i} points={waveBand(w, h, b.y, b.amp, b.freq, b.phase, b.anchor)} fill={b.fill} opacity={b.o} />
+      ))}
+    </Svg>
+  )
+}
+
+// ── 11. Scribble — dense hand-drawn scribble clusters, playful energy ──
+function scribblePath(cx, cy, size, seed) {
+  const points = 18
+  let d = `M ${cx} ${cy}`
+  for (let i = 1; i <= points; i++) {
+    const angle = prand(seed + i * 5.3) * Math.PI * 2
+    const r = size * (0.2 + prand(seed + i * 2.1) * 0.8)
+    d += ` L ${cx + Math.cos(angle) * r} ${cy + Math.sin(angle) * r}`
+  }
+  return d
+}
+function Scribble({ palette, width: w, height: h }) {
+  const ink = palette.ink
+  const clusters = [
+    { x: 0.12, y: 0.14, size: 60, seed: 6 },
+    { x: 0.88, y: 0.86, size: 70, seed: 31 },
+  ]
+  return (
+    <Svg width={w} height={h}>
+      <g stroke={ink} strokeWidth={1.6} fill="none" opacity={0.28} strokeLinecap="round" strokeLinejoin="round">
+        {clusters.map((c, i) => (
+          <path key={i} d={scribblePath(c.x * w, c.y * h, c.size, c.seed)} />
+        ))}
+      </g>
+    </Svg>
+  )
+}
+
+// ── 12. Blurry Blobs — soft, modern gradient-mesh-style abstract blobs ──
+function BlurryBlobs({ palette, width: w, height: h }) {
+  const accent = palette.accent
+  const ink = palette.ink
+  const blobs = [
+    { x: 0.18, y: 0.22, r: 210, fill: accent, o: 0.18, b: 60 },
+    { x: 0.85, y: 0.2, r: 170, fill: ink, o: 0.08, b: 60 },
+    { x: 0.75, y: 0.85, r: 230, fill: accent, o: 0.14, b: 70 },
+  ]
+  return (
+    <Svg width={w} height={h}>
+      <g>
+        {blobs.map((b, i) => (
+          <circle key={i} cx={b.x * w} cy={b.y * h} r={b.r} fill={b.fill} opacity={b.o} style={{ filter: `blur(${b.b}px)` }} />
+        ))}
+      </g>
+    </Svg>
+  )
+}
+
 export const BACKGROUND_STYLES = [
   { key: 'none', label: 'Clean', hint: 'No extra texture — just the template default' },
   { key: 'grunge', label: 'Grunge Spray', hint: 'Spray-can blots in the corners', Component: GrungeSpray },
@@ -247,6 +372,10 @@ export const BACKGROUND_STYLES = [
   { key: 'chalk', label: 'Chalkboard Dust', hint: 'Soft chalky haze + doodles', Component: ChalkboardDust },
   { key: 'halftonepop', label: 'Halftone Pop', hint: 'Comic-style dot burst', Component: HalftonePop },
   { key: 'vintage', label: 'Vintage Vignette', hint: 'Worn-photo edges + grain', Component: VintageVignette },
+  { key: 'splatter', label: 'Splatter', hint: 'Sharp-edged ink-splat blobs', Component: Splatter },
+  { key: 'chaoswaves', label: 'Chaos Waves', hint: 'Energetic overlapping wave bands', Component: ChaosWaves },
+  { key: 'scribble', label: 'Scribble', hint: 'Dense hand-drawn scribble clusters', Component: Scribble },
+  { key: 'blurryblobs', label: 'Blurry Blobs', hint: 'Soft modern gradient-mesh blobs', Component: BlurryBlobs },
 ]
 
 // Renders the chosen texture (or nothing, for 'none') on top of a template's

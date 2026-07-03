@@ -220,6 +220,30 @@ function BgStyleSwatch({ entry, palette, selected, onClick }) {
   )
 }
 
+// Saved-Design swatch — the combined "look" (colour + background texture) in
+// one preview, so picking a saved design is a single click rather than
+// separately re-picking a palette, a texture and a font each time.
+const DESIGN_SWATCH_SIZE = 44
+function DesignSwatch({ design, selected, onClick }) {
+  const scale = DESIGN_SWATCH_SIZE / 1080
+  const pal = { primary: design.primary, secondary: design.secondary, accent: design.accent, ink: design.ink }
+  return (
+    <button
+      onClick={onClick}
+      title={`${design.name} — ${BACKGROUND_STYLES.find(s => s.key === design.bgStyle)?.label || 'Clean'}`}
+      style={{
+        width: DESIGN_SWATCH_SIZE, height: DESIGN_SWATCH_SIZE, borderRadius: 6, cursor: 'pointer', overflow: 'hidden', position: 'relative',
+        background: design.primary, border: `2px solid ${selected ? design.accent : 'transparent'}`, flexShrink: 0,
+      }}
+    >
+      <div style={{ width: 1080, height: 1080, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute' }}>
+        <BackgroundLayer styleKey={design.bgStyle} palette={pal} width={1080} height={1080} />
+      </div>
+      <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 8, background: design.accent }} />
+    </button>
+  )
+}
+
 function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, isFirst, isLast }) {
   const { player } = sp
   return (
@@ -548,6 +572,17 @@ export default function AdminSocialPost() {
     try { return JSON.parse(localStorage.getItem('bs_social_palettes') || '[]') } catch { return [] }
   })
   const [savePaletteName, setSavePaletteName] = useState('')
+
+  // Saved Designs — a full "look" (colour palette + background texture + font
+  // + dark/light), not just colour. A design's colours piggyback on the same
+  // savedPalettes list/lookup as a Custom palette (so paletteKey resolution
+  // needs no changes); the extra fields (bgStyle/fontKey/dark) live here,
+  // keyed by the same key.
+  const [savedDesigns, setSavedDesigns] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_designs') || '[]') } catch { return [] }
+  })
+  const [saveDesignName, setSaveDesignName] = useState('')
+  const [showSaveDesign, setShowSaveDesign] = useState(false)
 
   const [heroImage, setHeroImage] = useState({ blobUrl: null })
   const [heroMode, setHeroMode] = useState('player')
@@ -1338,6 +1373,69 @@ export default function AdminSocialPost() {
                   <BgStyleSwatch key={s.key} entry={s} palette={renderPalette} selected={bgStyle === s.key} onClick={() => setBgStyle(s.key)} />
                 ))}
               </div>
+              <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
+                <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Saved Designs</span>
+                {savedDesigns.map(d => (
+                  <div key={d.key} className="flex items-center gap-1">
+                    <DesignSwatch
+                      design={d}
+                      selected={paletteKey === d.key}
+                      onClick={() => {
+                        setPaletteKey(d.key)
+                        setBgStyle(d.bgStyle)
+                        setFontKey(d.fontKey)
+                        setDarkMode(d.dark)
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const nextDesigns = savedDesigns.filter(x => x.key !== d.key)
+                        setSavedDesigns(nextDesigns)
+                        localStorage.setItem('bs_social_designs', JSON.stringify(nextDesigns))
+                        const nextPalettes = savedPalettes.filter(x => x.key !== d.key)
+                        setSavedPalettes(nextPalettes)
+                        localStorage.setItem('bs_social_palettes', JSON.stringify(nextPalettes))
+                        if (paletteKey === d.key) setPaletteKey('club')
+                      }}
+                      className="text-pb-faintest hover:text-red-400 text-[10px] leading-none"
+                    >✕</button>
+                  </div>
+                ))}
+                {!showSaveDesign && (
+                  <button
+                    onClick={() => setShowSaveDesign(true)}
+                    className="px-2.5 py-1 rounded border text-[11px] font-mono text-pb-faint hover:text-pb-text border-transparent transition-colors"
+                  >+ Save current look</button>
+                )}
+              </div>
+              {showSaveDesign && (
+                <div className="mt-2 flex gap-2 items-center">
+                  <input value={saveDesignName} onChange={e => setSaveDesignName(e.target.value)} placeholder="Design name — e.g. Match Day Grunge"
+                    className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono" />
+                  <button
+                    onClick={() => {
+                      const name = saveDesignName.trim() || `Design ${savedDesigns.length + 1}`
+                      const key = `design_${Date.now()}`
+                      const pal = { key, name, primary: activePalette.primary, secondary: activePalette.secondary, accent: activePalette.accent, ink: activePalette.ink }
+                      const nextPalettes = [...savedPalettes, pal]
+                      setSavedPalettes(nextPalettes)
+                      localStorage.setItem('bs_social_palettes', JSON.stringify(nextPalettes))
+                      const design = { key, name, primary: activePalette.primary, secondary: activePalette.secondary, accent: activePalette.accent, ink: activePalette.ink, bgStyle, fontKey, dark: darkMode }
+                      const nextDesigns = [...savedDesigns, design]
+                      setSavedDesigns(nextDesigns)
+                      localStorage.setItem('bs_social_designs', JSON.stringify(nextDesigns))
+                      setSaveDesignName('')
+                      setShowSaveDesign(false)
+                      setPaletteKey(key)
+                    }}
+                    className="px-3 py-1 rounded text-xs font-mono text-pb-text border pb-hairline hover:bg-pb-surface2 transition-colors whitespace-nowrap"
+                  >Save design</button>
+                  <button
+                    onClick={() => { setShowSaveDesign(false); setSaveDesignName('') }}
+                    className="text-pb-faintest hover:text-pb-text text-xs font-mono"
+                  >Cancel</button>
+                </div>
+              )}
             </section>
 
             {/* Tab bar */}
