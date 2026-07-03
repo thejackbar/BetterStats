@@ -8,15 +8,15 @@ daily snapshot / Refresh now, since ``run_snapshot`` upserts ``leads`` fresh
 from the API every time), the correction is stored as a signed delta log:
 effective leads = latest snapshot's raw ``leads`` + SUM(delta) here.
 
-Revision ID: 127
-Revises: 126
+Revision ID: 130
+Revises: 129
 Create Date: 2026-07-03
 """
 from alembic import op
 
 
-revision = '127'
-down_revision = '126'
+revision = '130'
+down_revision = '129'
 branch_labels = None
 depends_on = None
 

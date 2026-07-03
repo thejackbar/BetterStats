@@ -2203,7 +2203,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_meta_ad_snapshots_date "
             "ON meta_ad_snapshots(snapshot_date DESC)"
         ))
-        # Meta Ads manual leads reconciliation (migration 127): a signed delta
+        # Meta Ads manual leads reconciliation (migration 130): a signed delta
         # log so a manual correction survives the next daily snapshot re-run.
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS meta_lead_adjustments (
