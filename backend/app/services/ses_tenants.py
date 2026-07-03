@@ -176,10 +176,14 @@ async def _post(path: str, payload: dict) -> tuple[int, dict]:
 
 
 def _is_already_exists(status: int, data: dict) -> bool:
-    """SES returns a 4xx with an AlreadyExists-type message when the tenant or
-    association is already there — which for an idempotent ensure is success."""
+    """SES returns a 4xx with an already-exists-type message when the tenant or
+    association is already there — which for an idempotent ensure is success.
+    AWS phrases it "... already exists" (with a space), so match that too."""
+    if status < 400:
+        return True
     blob = json.dumps(data).lower()
-    return status < 400 or "alreadyexist" in blob or "already associated" in blob or "conflict" in blob
+    return ("already exist" in blob or "alreadyexist" in blob
+            or "already associated" in blob or "conflict" in blob)
 
 
 # ─── provisioning ────────────────────────────────────────────────────────────
