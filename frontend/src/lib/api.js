@@ -854,6 +854,10 @@ export const api = {
   },
   superUpdateOnboarding: (id, status) =>
     request(`/club-admin/super/onboarding-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  // Meta Ads HQ dashboard (super admin) — BetterCricket's own campaign spend.
+  metaAdsSummary: () => request('/club-admin/meta-ads/summary'),
+  metaAdsHistory: (days = 14) => request(`/club-admin/meta-ads/history?days=${days}`),
+  metaAdsRefresh: () => request('/club-admin/meta-ads/refresh', { method: 'POST' }),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>
