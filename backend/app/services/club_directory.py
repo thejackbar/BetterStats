@@ -835,22 +835,22 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
     suppression, audit all reused). Honours the same directory ``filters`` the
     page shows (state / association / postcode / contact-presence), and only the
     contacts a super admin ticked (``outreach_selected``) unless ``selected_only``
-    is False. Skips clubs that are already customers and any suppressed address;
-    existing comms suppressions are left untouched."""
+    is False. The only hard guard is the excluded flag; a suppressed address is
+    left untouched. Customers and already-emailed clubs ARE exportable (use the
+    directory filters to hold them back when you want to)."""
     org = await _resolve_outreach_org(session, organisation_id)
 
     q = (
         select(MarketingClubContact, MarketingClub)
         .join(MarketingClub, MarketingClubContact.marketing_club_id == MarketingClub.id)
-        .where(MarketingClubContact.subscribed.is_(True),
-               MarketingClub.existing_org_id.is_(None))
+        .where(MarketingClubContact.subscribed.is_(True))
     )
     for cond in club_filters(**(filters or {})):
         q = q.where(cond)
-    # Hard guards, regardless of the UI filters: never export an excluded club, and
-    # never re-export one already marked emailed (manual send or a prior campaign).
-    q = q.where(MarketingClub.excluded.is_(False),
-                MarketingClub.emailed_at.is_(None))
+    # The one hard guard, regardless of the UI filters: never export an excluded
+    # club. Customer / already-emailed clubs are eligible (steer them with the
+    # tri-state directory filters instead).
+    q = q.where(MarketingClub.excluded.is_(False))
     if selected_only:
         q = q.where(MarketingClubContact.outreach_selected.is_(True))
     if only_with_email:
@@ -886,9 +886,9 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         added += 1
     await session.commit()
 
-    # Diagnostics: how many clubs matched the directory filter, and how many of
-    # those the hard guards held back — so the UI can explain a "0 added" result
-    # (e.g. the only filtered club is already a customer or already emailed).
+    # Diagnostics: how many clubs matched the directory filter, and how many the
+    # one hard guard (excluded) held back — so the UI can explain a "0 added"
+    # result. Customer / emailed counts are informational only (no longer skipped).
     base = select(MarketingClub.id).where(MarketingClub.detail_fetched_at.isnot(None))
     for cond in club_filters(**(filters or {})):
         base = base.where(cond)
@@ -900,15 +900,13 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         return await session.scalar(select(func.count()).select_from(s.subquery())) or 0
 
     matched = await _count()
-    eligible = await _count(MarketingClub.excluded.is_(False),
-                            MarketingClub.emailed_at.is_(None),
-                            MarketingClub.existing_org_id.is_(None))
+    eligible = await _count(MarketingClub.excluded.is_(False))
 
     result = {"org": org.name, "candidates": len(rows), "added": added,
               "already_present": skipped, "already_suppressed": suppressed,
               "clubs_matched": matched, "clubs_eligible": eligible,
-              "skipped_customers": await _count(MarketingClub.existing_org_id.isnot(None)),
-              "skipped_emailed": await _count(MarketingClub.emailed_at.isnot(None)),
+              "customers": await _count(MarketingClub.existing_org_id.isnot(None)),
+              "emailed": await _count(MarketingClub.emailed_at.isnot(None)),
               "skipped_excluded": await _count(MarketingClub.excluded.is_(True))}
     logger.info("export_to_comms: %s", result)
     return result
