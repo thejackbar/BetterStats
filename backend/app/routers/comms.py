@@ -979,23 +979,26 @@ async def first_name_find_replace(
     value = (data.replace or "").strip()
     if not value:
         raise HTTPException(status_code=422, detail="Enter a replacement first name.")
-    find_blank = find == ""
-    # jsonb_set writes merge_vars->>'first_name' in place (creating merge_vars when
-    # NULL). A blank find targets the no-name rows; otherwise an exact (trimmed,
-    # case-insensitive) name match.
-    res = await db.execute(text("""
-        UPDATE comms_contacts
-        SET merge_vars = jsonb_set(COALESCE(merge_vars, '{}'::jsonb),
-                                   '{first_name}', to_jsonb(:val::text), true),
-            updated_at = NOW()
-        WHERE organisation_id = :org
-          AND (
-            (:find_blank AND (name IS NULL OR btrim(name) = ''))
-            OR (NOT :find_blank AND lower(btrim(coalesce(name, ''))) = :findlow)
-          )
-    """), {"val": value, "org": club.id, "find_blank": find_blank, "findlow": find.lower()})
+    find_lower = find.lower()
+    # Done in Python over the org's contacts (a bounded set) rather than a raw
+    # jsonb_set UPDATE — assigning a fresh merge_vars dict is what SQLAlchemy's
+    # change tracking needs to actually persist a JSONB edit (an in-place mutation
+    # of the existing dict is NOT detected, so it would silently not save).
+    contacts = (await db.execute(
+        select(CommsContact).where(CommsContact.organisation_id == club.id)
+    )).scalars().all()
+    updated = 0
+    for c in contacts:
+        name = (c.name or "").strip()
+        matched = (name == "") if find == "" else (name.lower() == find_lower)
+        if not matched:
+            continue
+        mv = dict(c.merge_vars or {})
+        mv["first_name"] = value
+        c.merge_vars = mv          # new dict reference ⇒ flagged dirty ⇒ persisted
+        updated += 1
     await db.commit()
-    return {"updated": int(res.rowcount or 0), "find": find, "replace": value}
+    return {"updated": updated, "find": find, "replace": value}
 
 
 # ─── Audience preview ────────────────────────────────────────────────────────
