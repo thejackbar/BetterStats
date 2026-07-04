@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -48,6 +49,18 @@ export default function SuperOnboarding() {
       await api.superUpdateOnboarding(id, status)
     } catch {
       load()  // reload to undo the optimistic change if the save failed
+    }
+  }
+
+  const remove = async (row) => {
+    if (!window.confirm(`Delete the enquiry from ${row.club || row.email}? This can't be undone.`)) return
+    const prev = rows
+    setRows(rs => rs.filter(r => r.id !== row.id))  // optimistic
+    try {
+      await api.superDeleteOnboarding(row.id)
+    } catch (e) {
+      setRows(prev)  // restore if the delete failed
+      setError(e.message || 'Could not delete the request.')
     }
   }
 
@@ -108,6 +121,7 @@ export default function SuperOnboarding() {
                   <th className="px-3 py-2.5">Current setup</th>
                   <th className="px-3 py-2.5">Message</th>
                   <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5"></th>
                 </tr>
               </thead>
               <tbody>
@@ -159,6 +173,23 @@ export default function SuperOnboarding() {
                       >
                         {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap space-y-1.5">
+                      {r.visitor_id && (
+                        <Link
+                          to={`/admin/usage?q=${r.visitor_id}&days=90`}
+                          className="block font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-2 py-1 hover:bg-pb-surface2 transition text-center"
+                        >
+                          View activity
+                        </Link>
+                      )}
+                      <button
+                        onClick={() => remove(r)}
+                        aria-label={`Delete request from ${r.club}`}
+                        className="block w-full font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-red-400 border pb-hairline rounded px-2 py-1 hover:border-red-500/40 transition"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

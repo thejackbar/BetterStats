@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   BarChart, Bar, PieChart, Pie, Cell, Legend,
@@ -584,7 +585,14 @@ function MetaCampaigns({ data, loading }) {
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function AdminUsage() {
-  const [days, setDays] = useState(7)
+  // A deep link (e.g. "View activity" on an onboarding request) can seed the
+  // search and window — ?q=<visitor_id>&days=90 jumps straight to that
+  // visitor's full page-view journey.
+  const [searchParams] = useSearchParams()
+  const initialQ = searchParams.get('q') || ''
+  const initialDays = Number(searchParams.get('days')) || 7
+
+  const [days, setDays] = useState(initialDays)
   const [eventType, setEventType] = useState('')
   const [roles, setRoles] = useState([])
 
@@ -599,8 +607,8 @@ export default function AdminUsage() {
   const [topUsers, setTopUsers] = useState([])
   const [recent, setRecent] = useState([])
   const [campaigns, setCampaigns] = useState(null)
-  const [search, setSearch] = useState('')
-  const [q, setQ] = useState('')
+  const [search, setSearch] = useState(initialQ)
+  const [q, setQ] = useState(initialQ)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -688,7 +696,7 @@ export default function AdminUsage() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search path or UTM — /pricing, utm_campaign=spring, applecross, fbclid…"
+                placeholder="Search path, UTM or a visitor id — /pricing, utm_campaign=spring, applecross, fbclid…"
                 className="w-full bg-pb-surface border pb-hairline rounded pl-8 pr-16 py-2 font-mono text-[12px] text-pb-text placeholder:text-pb-faintest focus:outline-none focus:border-pb-accent"
               />
               {search && (
@@ -784,12 +792,13 @@ export default function AdminUsage() {
 
         {/* Visitors — new vs returning, derived from the (hashed) IP. */}
         {visitors && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {[
               { label: 'Visitors', value: visitors.visitors, hint: 'unique IPs' },
               { label: 'Returning', value: visitors.returning, hint: `${visitors.returning_pct}% · seen before` },
               { label: 'New', value: visitors.new, hint: 'first time' },
               { label: 'Multi-day', value: visitors.multi_day, hint: '≥2 days active' },
+              { label: 'Converted', value: visitors.converted, hint: 'submitted an enquiry' },
               { label: 'Hits / visitor', value: visitors.avg_hits, hint: 'avg', raw: true },
             ].map(s => (
               <div key={s.label} className="pb-card px-3 py-2" style={{ background: 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' }}>

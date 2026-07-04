@@ -116,10 +116,19 @@ def _search_clause(q: Optional[str], params: dict) -> str:
     The page-view beacon stores the FULL landing URL (incl. the query string)
     in ``path``, so a search like ``utm_campaign=spring`` or ``applecross``
     matches historical rows too — not just the rows written after the dedicated
-    utm_* columns existed. Empty/whitespace ``q`` → no clause."""
+    utm_* columns existed. Empty/whitespace ``q`` → no clause.
+
+    A bare UUID (e.g. pasted from an onboarding request's visitor id, or a
+    deep link from SuperOnboarding's "View activity" button) matches
+    ``visitor_id`` exactly instead — that's how a lead's own enquiry links
+    back to the page-view journey that led to it."""
     if not q or not q.strip():
         return ""
-    params["q"] = f"%{q.strip()}%"
+    trimmed = q.strip()
+    if _UUID_RE.fullmatch(trimmed):
+        params["q"] = trimmed
+        return "AND ue.visitor_id::text = :q"
+    params["q"] = f"%{trimmed}%"
     return (
         "AND (ue.path ILIKE :q OR ue.route ILIKE :q "
         "OR ue.utm_source ILIKE :q OR ue.utm_campaign ILIKE :q "
@@ -657,7 +666,12 @@ async def visitors(
       - returning:   visitors whose first-ever hit predates the window
       - new:         visitors − returning
       - multi_day:   visitors active on ≥2 distinct days in the window
-      - high_intent: visitors who viewed the contact or pricing page
+      - high_intent: visitors who viewed the contact or pricing page (a proxy —
+                      they LOOKED, not necessarily submitted anything)
+      - converted:   visitors who actually submitted an onboarding enquiry
+                      (short CTA modal or full /contact form), matched on the
+                      shared first-party visitor id — a real conversion, not a
+                      proxy
       - identified:  visitors carrying a real first-party id (not IP-only)
       - avg_hits:    hits per visitor
     """
@@ -677,7 +691,11 @@ async def visitors(
                        COUNT(*) AS hits,
                        COUNT(DISTINCT date_trunc('day', ue.created_at)) AS active_days,
                        bool_or(ue.visitor_id IS NOT NULL) AS identified,
-                       bool_or({_INTENT_CONTACT} OR {_INTENT_PRICING}) AS high_intent
+                       bool_or({_INTENT_CONTACT} OR {_INTENT_PRICING}) AS high_intent,
+                       bool_or(EXISTS (
+                           SELECT 1 FROM club_onboarding_requests cor
+                           WHERE cor.visitor_id = ue.visitor_id::text
+                       )) AS converted
                 FROM usage_events ue
                 WHERE {_VKEY} IS NOT NULL
                   AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
@@ -696,6 +714,7 @@ async def visitors(
                 (SELECT COUNT(*) FROM win)                                  AS visitors,
                 (SELECT COUNT(*) FROM win WHERE active_days >= 2)           AS multi_day,
                 (SELECT COUNT(*) FROM win WHERE high_intent)               AS high_intent,
+                (SELECT COUNT(*) FROM win WHERE converted)                 AS converted,
                 (SELECT COUNT(*) FROM win WHERE identified)                AS identified,
                 (SELECT COALESCE(SUM(hits), 0) FROM win)                    AS total_hits,
                 (SELECT COUNT(*) FROM first_seen
@@ -714,6 +733,7 @@ async def visitors(
         "new": max(visitors_n - returning_n, 0),
         "multi_day": int(row["multi_day"] or 0),
         "high_intent": int(row["high_intent"] or 0),
+        "converted": int(row["converted"] or 0),
         "identified": int(row["identified"] or 0),
         "total_hits": total_hits,
         "avg_hits": round(total_hits / visitors_n, 1) if visitors_n else 0.0,

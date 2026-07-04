@@ -20,6 +20,7 @@ from app.models.db import ClubOnboardingRequest, get_db
 from app.services import meta_capi
 from app.services.login_audit import client_ip
 from app.services.twenty_sync import mark_contact_source
+from app.services.usage_tracker import record_event_bg
 
 logger = logging.getLogger(__name__)
 
@@ -139,5 +140,21 @@ async def submit_contact(
         user_agent=request.headers.get("user-agent"),
         fbp=meta.fbp if meta else None,
         fbc=meta.fbc if meta else None,
+    )
+    # Drop a breadcrumb for the conversion itself, so it shows up inline with
+    # this visitor's page-view journey on the super-admin Usage page instead of
+    # only existing as a row in the onboarding table. Fire-and-forget, never
+    # raises (see usage_tracker.record_event).
+    record_event_bg(
+        event_type="conversion",
+        method="POST",
+        path="/public/contact",
+        route="/public/contact",
+        status=200,
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        referer=request.headers.get("referer"),
+        visitor_id=payload.visitorId,
+        metadata={"club": club, "source": row.source},
     )
     return {"ok": True}

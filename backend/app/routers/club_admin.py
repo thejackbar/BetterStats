@@ -2445,6 +2445,11 @@ async def list_onboarding_requests(
             "contact_method": r.contact_method,
             "status": r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "source": r.source,
+            # First-party visitor id (same one the Usage Breadcrumbs page keys
+            # on) so staff can jump from an enquiry to the page-view journey
+            # that led to it.
+            "visitor_id": r.visitor_id,
         }
         for r in result.scalars().all()
     ]
@@ -2474,6 +2479,21 @@ async def update_onboarding_request(
     row.status = status_value
     await db.commit()
     return {"ok": True, "status": status_value}
+
+
+@router.delete("/super/onboarding-requests/{request_id}")
+async def delete_onboarding_request(
+    request_id: uuid.UUID,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a junk/duplicate/spam enquiry from the onboarding list."""
+    row = await db.get(ClubOnboardingRequest, request_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    await db.delete(row)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/super/users", status_code=201)

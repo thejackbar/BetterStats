@@ -854,6 +854,8 @@ export const api = {
   },
   superUpdateOnboarding: (id, status) =>
     request(`/club-admin/super/onboarding-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  superDeleteOnboarding: (id) =>
+    request(`/club-admin/super/onboarding-requests/${id}`, { method: 'DELETE' }),
   // Meta Ads HQ dashboard (super admin) — BetterCricket's own campaign spend.
   metaAdsSummary: () => request('/club-admin/meta-ads/summary'),
   metaAdsHistory: (days = 14) => request(`/club-admin/meta-ads/history?days=${days}`),
