@@ -226,6 +226,25 @@ class Settings(BaseSettings):
     def meta_ads_configured(self) -> bool:
         return bool(self.meta_access_token and self.meta_ad_account_id)
 
+    # ─── Meta Conversions API (CAPI) — server-side event redundancy ────────────
+    # Sends key events (Lead first) to Meta server-side alongside the browser
+    # pixel, sharing an event_id so Meta dedupes the pair into one event. Catches
+    # leads the browser pixel misses (ad blockers, iOS ITP, page-load failures).
+    # Blank token = CAPI calls are skipped (logged, never blocks the form — the
+    # browser pixel keeps working either way). This token is DIFFERENT from
+    # meta_access_token above (that one is ads_read for the HQ dashboard; this one
+    # needs write access to the dataset's events). Generate via Events Manager >
+    # BetterCricket Web dataset > Settings > Conversions API > Generate access
+    # token (or the existing Conversions API System User). NEVER commit it.
+    meta_dataset_id: str = "1317878090534903"
+    meta_capi_access_token: str = ""
+    meta_graph_version: str = "v21.0"
+    meta_test_event_code: str = ""  # Events Manager > Test Events; leave blank in prod
+
+    @property
+    def meta_capi_configured(self) -> bool:
+        return bool(self.meta_dataset_id and self.meta_capi_access_token)
+
     @property
     def twenty_configured(self) -> bool:
         return bool(self.twenty_api_url and self.twenty_api_key)

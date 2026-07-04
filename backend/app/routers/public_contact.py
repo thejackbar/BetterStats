@@ -17,11 +17,23 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import ClubOnboardingRequest, get_db
+from app.services import meta_capi
+from app.services.login_audit import client_ip
 from app.services.twenty_sync import mark_contact_source
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/public/contact", tags=["public-contact"])
+
+
+class ContactMeta(BaseModel):
+    """Meta Pixel / Conversions API dedup context — see docs/meta-conversions-api.md.
+    `eventId` must be the exact id the browser pixel's Lead fired with, so Meta
+    dedupes the browser + server copy into one event instead of double-counting."""
+    eventId: Optional[str] = None
+    eventSourceUrl: Optional[str] = None
+    fbp: Optional[str] = None
+    fbc: Optional[str] = None
 
 
 class ContactIn(BaseModel):
@@ -49,6 +61,10 @@ class ContactIn(BaseModel):
     # Distinguishes the short CTA-modal capture (club + email only) from the full
     # 17-field /contact form, so staff know what to expect before they follow up.
     source: Optional[str] = None
+    # Meta Pixel dedup context, forwarded so the server-side Lead event (below)
+    # matches the browser pixel's Lead. Absent = CAPI event is skipped (see
+    # meta_capi.send_lead_event), the browser pixel still fires either way.
+    meta: Optional[ContactMeta] = None
 
 
 def _clip(value: Optional[str], limit: int) -> Optional[str]:
@@ -108,4 +124,20 @@ async def submit_contact(
     # contact via the website. Runs after the response so a CRM hiccup can't slow
     # or fail the form (Formspree is the primary delivery either way).
     background.add_task(mark_contact_source, email, "WEBSITE")
+    # Server-side Lead event (Meta Conversions API), sharing the browser pixel's
+    # event_id so Meta dedupes the pair. Best-effort + backgrounded — a CAPI
+    # hiccup never affects this response (see meta_capi.send_lead_event).
+    meta = payload.meta
+    background.add_task(
+        meta_capi.send_lead_event,
+        event_id=meta.eventId if meta else None,
+        event_source_url=meta.eventSourceUrl if meta else None,
+        email=email,
+        phone=payload.phone,
+        name=name or None,
+        client_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        fbp=meta.fbp if meta else None,
+        fbc=meta.fbc if meta else None,
+    )
     return {"ok": True}
