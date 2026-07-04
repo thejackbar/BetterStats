@@ -696,6 +696,13 @@ async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict
 
 # ─── Contacts ────────────────────────────────────────────────────────────────
 
+# The contact list is loaded in one shot and filtered client-side (search, facets,
+# directory chips), so it's capped for a sane page weight. Set high enough to cover
+# the whole BetterCricket outreach directory, so Lists/Contacts can select every
+# contact — not just the first slice. (A future scale step is server-side paging.)
+CONTACTS_LIST_CAP = 50000
+
+
 @router.get("/contacts")
 async def list_contacts(
     query: str = "",
@@ -722,7 +729,7 @@ async def list_contacts(
         ))
     if subscribed is not None:
         stmt = stmt.where(CommsContact.subscribed.is_(subscribed))
-    rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(5000))).scalars().all()
+    rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(CONTACTS_LIST_CAP))).scalars().all()
     mc_map = await _mc_map(db, rows)
     # Which of these addresses are on the global suppression list (one lookup).
     emails = [c.email.lower() for c in rows if c.email]
@@ -749,6 +756,7 @@ async def list_contacts(
                                   suppressed=(c.email or "").lower() in supp_emails) for c in rows],
         "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2],
                     "bounced": counts[3], "excluded": counts[4]},
+        "cap": CONTACTS_LIST_CAP,
     }
 
 
@@ -902,10 +910,12 @@ async def bulk_delete_contacts(
             continue
     if not ids:
         return {"deleted": 0}
-    contacts = (await db.execute(select(CommsContact).where(
-        CommsContact.organisation_id == club.id,
-        CommsContact.id.in_(ids),
-    ))).scalars().all()
+    contacts = []
+    for i in range(0, len(ids), 5000):  # chunk so a huge selection stays under the bind-param cap
+        contacts.extend((await db.execute(select(CommsContact).where(
+            CommsContact.organisation_id == club.id,
+            CommsContact.id.in_(ids[i:i + 5000]),
+        ))).scalars().all())
     for c in contacts:
         if c.marketing_club_id and c.email:
             await db.execute(
@@ -2331,24 +2341,36 @@ async def add_list_members(
     db: AsyncSession = Depends(get_db),
 ):
     lst = await _list_or_404(db, club, list_id)
-    added = 0
+    ids = []
     for raw in (data.contact_ids or []):
         try:
-            cid = uuid.UUID(str(raw))
+            ids.append(uuid.UUID(str(raw)))
         except (ValueError, TypeError):
             continue
-        # Only the club's own contacts can join the list.
-        contact = await db.get(CommsContact, cid)
-        if not contact or contact.organisation_id != club.id:
-            continue
-        exists_row = await db.scalar(select(CommsListMember.id).where(
-            CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
-        if exists_row:
-            continue
-        db.add(CommsListMember(list_id=lst.id, contact_id=cid))
-        added += 1
+    if not ids:
+        return {"added": 0, "count": await _list_count(db, lst.id)}
+    # Set-based + chunked so adding a whole filtered directory (thousands of ids)
+    # is a handful of queries, not two per contact (which would time out and can
+    # blow past the driver's bind-parameter limit).
+    def _chunks(seq, n=5000):
+        for i in range(0, len(seq), n):
+            yield seq[i:i + n]
+    valid = set()
+    for batch in _chunks(ids):
+        valid |= set((await db.execute(select(CommsContact.id).where(
+            CommsContact.organisation_id == club.id,
+            CommsContact.id.in_(batch)))).scalars().all())
+    if not valid:
+        return {"added": 0, "count": await _list_count(db, lst.id)}
+    existing = set()
+    for batch in _chunks(list(valid)):
+        existing |= set((await db.execute(select(CommsListMember.contact_id).where(
+            CommsListMember.list_id == lst.id,
+            CommsListMember.contact_id.in_(batch)))).scalars().all())
+    to_add = [cid for cid in valid if cid not in existing]
+    db.add_all([CommsListMember(list_id=lst.id, contact_id=cid) for cid in to_add])
     await db.commit()
-    return {"added": added, "count": await _list_count(db, lst.id)}
+    return {"added": len(to_add), "count": await _list_count(db, lst.id)}
 
 
 @router.delete("/lists/{list_id}/members/{contact_id}")

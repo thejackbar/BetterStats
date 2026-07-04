@@ -190,6 +190,11 @@ export default function CommsContacts() {
         )}
         <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>
       </div>
+      {data.cap && (data.contacts || []).length >= data.cap && (s.total || 0) > data.contacts.length && (
+        <div className="text-amber-500/90 text-[11px] mb-3">
+          Showing the first {data.contacts.length.toLocaleString()} of {(s.total || 0).toLocaleString()} contacts. Narrow the search to reach the rest.
+        </div>
+      )}
       {showDirChips && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
           <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Directory</span>
