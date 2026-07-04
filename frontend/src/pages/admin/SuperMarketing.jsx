@@ -367,6 +367,49 @@ function VisitsPanel({ clubId, summary }) {
   )
 }
 
+// Visitors who browsed this club's pages then hit /login without an account
+// to log into yet — lazy-loaded when the row is expanded, same pattern as
+// VisitsPanel. Strongest read on this signal is a not-yet-customer club.
+function LoginIntentPanel({ clubId, summary, isCustomer }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.mktClubLoginIntent(clubId)
+      .then((d) => { if (alive) setData(d) })
+      .catch(() => { if (alive) setData(null) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [clubId])
+
+  const visitors = data?.visitors ?? summary?.visitors ?? 0
+  if (!loading && !visitors) return null
+  return (
+    <div className="pt-2 mt-1 border-t pb-hairline">
+      <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1">
+        Browsed then hit /login
+      </div>
+      {loading && !data ? (
+        <div className="text-pb-faint">Loading…</div>
+      ) : (
+        <div className="space-y-1">
+          <div className="text-pb-dim">
+            <span className="text-amber-300 font-medium">{visitors}</span> visitor(s)
+            {data?.hits > visitors && <span className="text-pb-faint"> ({data.hits} hits)</span>}
+            {data?.last_seen && <span className="text-pb-faint"> · last {fmtWhen(data.last_seen)}</span>}
+          </div>
+          {!isCustomer && (
+            <div className="text-amber-300/90 text-[11px]">
+              Not a customer yet — they have no account to log into. Likely wants to join.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ContactEditRow({ init, onSave, onCancel, busy }) {
   const [f, setF] = useState({
     role: init.role || '', full_name: init.full_name || '',
@@ -559,6 +602,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
         <div className="space-y-2">
           {onSaveSales && <SalesEditor key={club.id} club={club} onSave={onSaveSales} />}
           <VisitsPanel clubId={club.id} summary={club.visits} />
+          <LoginIntentPanel clubId={club.id} summary={club.login_intent} isCustomer={club.is_customer} />
         </div>
       </div>
     </div>
@@ -1038,6 +1082,7 @@ export default function SuperMarketing() {
             <Stat label="With email" value={stats.clubs_with_email} />
             <Stat label="Emailed" value={stats.emailed} />
             <Stat label="Visited site" value={stats.visited} />
+            <Stat label="Wants in (tried login)" value={stats.login_intent_not_customer} />
             <Stat label="Assoc. linked" value={stats.associations_fetched} />
             <Stat label="Assoc. pending" value={stats.associations_pending} />
             <Stat label="Associations" value={stats.distinct_associations} />
@@ -1329,6 +1374,17 @@ export default function SuperMarketing() {
                                   title={`${c.visits.views} view(s) from ${c.visits.visitors} visitor(s)`
                                     + (c.visits.last_seen ? ` · last ${fmtWhen(c.visits.last_seen)}` : '')}>
                               visited{c.visits.views > 1 ? ` ×${c.visits.views}` : ''}
+                            </span>
+                          )}
+                          {c.login_intent && (
+                            <span className={'text-[10px] rounded px-1 border '
+                              + (c.is_customer
+                                ? 'text-pb-faint border-pb-hairline'
+                                : 'text-amber-300 border-amber-500/40 bg-amber-500/10')}
+                                  title={`${c.login_intent.visitors} visitor(s) browsed this club's pages then hit /login`
+                                    + (c.login_intent.last_seen ? ` · last ${fmtWhen(c.login_intent.last_seen)}` : '')
+                                    + (c.is_customer ? '' : ' — not a customer, likely wants to join')}>
+                              {c.is_customer ? 'tried login' : '🔑 wants in'}
                             </span>
                           )}
                           {exportedCount > 0 && (
