@@ -46,6 +46,9 @@ class ContactIn(BaseModel):
     # First-party visitor id (localStorage UUID) so the enquiry links back to the
     # anonymous browsing journey behind it on the super-admin Usage page.
     visitorId: Optional[str] = None
+    # Distinguishes the short CTA-modal capture (club + email only) from the full
+    # 17-field /contact form, so staff know what to expect before they follow up.
+    source: Optional[str] = None
 
 
 def _clip(value: Optional[str], limit: int) -> Optional[str]:
@@ -64,16 +67,18 @@ async def submit_contact(
 ):
     """Store one club onboarding enquiry.
 
-    The required fields are validated client-side too; we re-check the three that
-    make a row meaningful (name, club, email) and clip every field so a bad or
-    oversized post can't bloat the table. Formspree is the primary delivery, so
-    the frontend treats a non-200 here as non-fatal.
+    Required fields are validated client-side too; we re-check club and email
+    (the two the short CTA-modal form collects) and clip every field so a bad or
+    oversized post can't bloat the table. Name is optional here since the quick
+    form doesn't ask for it — the full /contact form still requires it client-side.
+    Formspree is the primary delivery, so the frontend treats a non-200 here as
+    non-fatal.
     """
     name = (payload.name or "").strip()
     club = (payload.club or "").strip()
     email = (payload.email or "").strip().lower()
-    if not name or not club or not email:
-        raise HTTPException(status_code=422, detail="Name, club and email are required.")
+    if not club or not email:
+        raise HTTPException(status_code=422, detail="Club and email are required.")
 
     row = ClubOnboardingRequest(
         name=name[:200],
@@ -93,7 +98,7 @@ async def submit_contact(
         interests=_clip(payload.interests, 400),
         heard_about=_clip(payload.heard, 200),
         contact_method=_clip(payload.contactMethod, 20),
-        source="contact_form",
+        source=_clip(payload.source, 50) or "contact_form",
         user_agent=_clip(request.headers.get("user-agent"), 500),
         visitor_id=_clip(payload.visitorId, 64),
     )

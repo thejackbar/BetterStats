@@ -1,0 +1,116 @@
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { isMarketingPath } from '../App'
+import QuickEnquiryModal from './QuickEnquiryModal'
+
+// Sticky bottom "Get your club on BetterCricket" bar, opens a short enquiry
+// modal (see QuickEnquiryModal) rather than navigating away.
+//
+// Visibility:
+// - BetterCricket's own marketing pages (MARKETING_PATHS, minus /contact — those
+//   visitors are already converting): shown to every visitor, every time. These
+//   are our sales pages, so a persistent ask is exactly what we want.
+// - A club's public site (/:clubSlug and its subpages): shown ONLY to visitors
+//   who arrived via a paid Meta ad (utm_source=meta or utm_medium=paid_social),
+//   remembered for the session — so a club's own members/visitors never see a
+//   "switch to us" pitch on the club's own page. Applecross is our demo, so ad
+//   traffic there still sees it, which is what we want.
+// - Never on /contact (already converting) or /admin*, /login.
+
+const AD_VISITOR_KEY = 'bc:adVisitor'
+const DISMISS_KEY = 'bc:ctaDismissed'
+const QUERY_KEY = 'bc:utmQuery'
+
+function isPaidVisitor() {
+  const params = (() => {
+    try { return new URLSearchParams(window.location.search) } catch { return new URLSearchParams() }
+  })()
+  const source = (params.get('utm_source') || '').toLowerCase()
+  const medium = (params.get('utm_medium') || '').toLowerCase()
+  const isAdHit = source === 'meta' || medium === 'paid_social'
+  try {
+    if (isAdHit) {
+      sessionStorage.setItem(AD_VISITOR_KEY, '1')
+      if (!sessionStorage.getItem(QUERY_KEY)) {
+        sessionStorage.setItem(QUERY_KEY, window.location.search || '')
+      }
+    }
+    return sessionStorage.getItem(AD_VISITOR_KEY) === '1'
+  } catch {
+    return isAdHit
+  }
+}
+
+export default function ClubCTABar() {
+  const { pathname } = useLocation()
+  const [show, setShow] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+
+  useEffect(() => {
+    const onContact = pathname === '/contact'
+    const onAdmin = pathname.startsWith('/admin') || pathname === '/login'
+    if (onContact || onAdmin) { setShow(false); return }
+
+    let dismissed = false
+    try { dismissed = sessionStorage.getItem(DISMISS_KEY) === '1' } catch { /* ignore */ }
+    if (dismissed) { setShow(false); return }
+
+    setShow(isMarketingPath(pathname) || isPaidVisitor())
+  }, [pathname])
+
+  if (!show) return null
+
+  function dismiss() {
+    try { sessionStorage.setItem(DISMISS_KEY, '1') } catch { /* ignore */ }
+    setShow(false)
+  }
+
+  return (
+    <>
+      <div
+        role="region"
+        aria-label="Get your club on BetterCricket"
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 9999,
+          background: 'rgba(11,18,32,0.96)', backdropFilter: 'blur(8px)',
+          borderTop: '1px solid rgba(52,211,153,0.35)',
+          boxShadow: '0 -8px 30px rgba(0,0,0,0.45)',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 980, margin: '0 auto', padding: '12px 16px',
+            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+            color: '#e6eaf2', fontFamily: 'Inter, system-ui, sans-serif',
+          }}
+        >
+          <span style={{ flex: '1 1 220px', fontSize: 15, lineHeight: 1.4 }}>
+            <strong style={{ color: '#fff' }}>Want this for your club?</strong>{' '}
+            Turn your club's full cricket history into a site like this.
+          </span>
+          <button
+            onClick={() => setModalOpen(true)}
+            style={{
+              background: '#34d399', color: '#0b1220', fontWeight: 700,
+              padding: '10px 18px', borderRadius: 10, border: 'none',
+              fontSize: 15, whiteSpace: 'nowrap', cursor: 'pointer',
+            }}
+          >
+            Get your club on BetterCricket →
+          </button>
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss"
+            style={{
+              background: 'transparent', border: 'none', color: '#9aa6b8',
+              fontSize: 22, lineHeight: 1, cursor: 'pointer', padding: '4px 6px',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+      {modalOpen && <QuickEnquiryModal onClose={() => setModalOpen(false)} />}
+    </>
+  )
+}

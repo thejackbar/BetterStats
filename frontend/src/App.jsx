@@ -10,15 +10,19 @@ import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
 import ScrollToTop from './components/ScrollToTop'
 import FaviconManager from './components/FaviconManager'
-import PaidVisitorCTA from './components/PaidVisitorCTA'
+import ClubCTABar from './components/ClubCTABar'
 import { usePageView } from './hooks/usePageView'
 
-// Marketing pages have their own MarketingNav — suppress the global Navbar on those routes
-const MARKETING_PATHS = ['/', '/overview', '/features', '/pricing', '/compare', '/modules', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
+// Marketing pages have their own MarketingNav — suppress the global Navbar on those routes.
+// Also the reference list for ClubCTABar (which BetterCricket pages vs. club public
+// pages get the "get your club on BetterCricket" bar shown to every visitor).
+export const MARKETING_PATHS = ['/', '/overview', '/features', '/pricing', '/compare', '/modules', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
+export function isMarketingPath(pathname) {
+  return MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
+}
 function ConditionalNavbar() {
   const { pathname } = useLocation()
-  const isMarketing =
-    MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
+  const isMarketing = isMarketingPath(pathname)
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav.
   const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/')
@@ -196,7 +200,7 @@ export default function App() {
       <div className="min-h-screen bg-pb-bg">
         <ScrollToTop />
         <PageViewBeacon />
-        <PaidVisitorCTA />
+        <ClubCTABar />
         <FaviconManager />
         <ConditionalNavbar />
         <Suspense fallback={<PageLoader />}>
