@@ -53,6 +53,7 @@ from app.services import comms_segments
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
+from app.services.club_directory import CA_EMAIL_DOMAINS
 from app.services import name_format
 from app.services.send_rate_limiter import send_limiter
 from app.services.email_service import EmailMessage, get_email_provider, provider_status, email_is_live
@@ -113,9 +114,41 @@ async def _mc_map(db: AsyncSession, contacts) -> dict:
     return {m.id: m for m in rows}
 
 
+def _email_on_ca_domain(email: Optional[str]) -> bool:
+    """True if the address is on a Cricket Australia / state-body domain — the same
+    rule the Clubs Directory 'cricket_au' filter uses (host or a subdomain)."""
+    e = (email or "").strip().lower()
+    at = e.rfind("@")
+    if at < 0:
+        return False
+    host = e[at + 1:]
+    return any(host == d or host.endswith("." + d) for d in CA_EMAIL_DOMAINS)
+
+
+_REP_RE = re.compile(r"\b(rep|represent)", re.I)
+
+
+def _dir_flags(club_name: str, email: Optional[str], mc: "Optional[MarketingClub]") -> dict:
+    """The Clubs Directory categorical filters resolved for one contact, mirroring
+    services/club_directory._filter_conditions so the BetterComms Lists/Contacts
+    include/exclude chips match the directory exactly."""
+    name = (club_name or "").lower()
+    ca = _email_on_ca_domain(email) or (mc is not None and _email_on_ca_domain(getattr(mc, "contact_email", None)))
+    return {
+        "is_junior": "junior" in name,
+        "is_carnival": "carnival" in name,
+        "is_school": "school" in name,
+        "is_rep": bool(_REP_RE.search(club_name or "")),
+        "is_cricket_au": bool(ca),
+        # The directory 'already-emailed' state: the linked club has an outreach send.
+        "emailed": bool(mc is not None and getattr(mc, "emailed_at", None)),
+    }
+
+
 def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
                  suppressed: bool = False) -> dict:
     complained = bool(getattr(c, "complained", False))
+    dir_fields = _dir_fields(c, mc)
     return {
         "id": str(c.id),
         "email": c.email,
@@ -129,7 +162,8 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
         # exclusion, or on the global suppression list (passed in by the caller).
         "suppressed": bool(c.bounced or complained or c.excluded or suppressed),
         "player_id": str(c.player_id) if c.player_id else None,
-        **_dir_fields(c, mc),
+        **dir_fields,
+        **_dir_flags(dir_fields.get("club", ""), c.email, mc),
     }
 
 
@@ -906,6 +940,40 @@ async def sync_from_club(
         updated += res == "updated"
     await db.commit()
     return {"added": added, "updated": updated}
+
+
+class SetBlankFirstNameIn(BaseModel):
+    first_name: str
+
+
+@router.post("/contacts/set-blank-first-name")
+async def set_blank_first_name(
+    data: SetBlankFirstNameIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-set the {{first_name}} merge variable for every contact of this org
+    whose {{name}} is blank. Used for BetterCricket outreach lists where a row is a
+    generic mailbox (e.g. a committee address) with no person's name — so
+    {{first_name}} can greet them as e.g. "Committee Members" instead of falling
+    back to the email local-part. Only touches blank-name contacts; a contact that
+    has a name is left alone."""
+    value = (data.first_name or "").strip()
+    if not value:
+        raise HTTPException(status_code=422, detail="Enter a first name to set.")
+    # jsonb_set writes merge_vars->>'first_name' in place (creating merge_vars when
+    # NULL), scoped to this org and only rows with a blank/absent name.
+    res = await db.execute(text("""
+        UPDATE comms_contacts
+        SET merge_vars = jsonb_set(COALESCE(merge_vars, '{}'::jsonb),
+                                   '{first_name}', to_jsonb(:val::text), true),
+            updated_at = NOW()
+        WHERE organisation_id = :org
+          AND (name IS NULL OR btrim(name) = '')
+    """), {"val": value, "org": club.id})
+    await db.commit()
+    return {"updated": int(res.rowcount or 0), "first_name": value}
 
 
 # ─── Audience preview ────────────────────────────────────────────────────────

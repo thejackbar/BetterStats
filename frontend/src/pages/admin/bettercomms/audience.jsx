@@ -29,6 +29,63 @@ export function emptyFilters() {
   return { club: [], association: [], country: [], utm_code: [], state: [] }
 }
 
+// ─── Clubs Directory include/exclude filters (super-admin outreach) ───────────
+// The same tri-state categorical filters the Club Directory offers, matched
+// against derived booleans the backend puts on each contact (is_junior,
+// is_carnival, is_school, is_rep, is_cricket_au, emailed). Each chip is Off,
+// Include (keep only matching) or Exclude (drop matching).
+export const MODE_FILTERS = [
+  { key: 'junior', flag: 'is_junior', label: 'Juniors', title: 'Club name contains "junior"' },
+  { key: 'carnival', flag: 'is_carnival', label: 'Carnivals', title: 'Club name contains "carnival"' },
+  { key: 'school', flag: 'is_school', label: 'Schools', title: 'Club name contains "school"' },
+  { key: 'rep', flag: 'is_rep', label: 'Rep orgs', title: 'Club is a representative team (Rep / Representative)' },
+  { key: 'cricket_au', flag: 'is_cricket_au', label: 'Cricket Australia orgs', title: 'Contact or club email is on a Cricket Australia / state-body domain' },
+  { key: 'emailed', flag: 'emailed', label: 'Already-emailed', title: 'The contact\'s club has an outreach send recorded' },
+]
+const MODE_CYCLE = { '': 'exclude', exclude: 'include', include: '' }
+const MODE_STYLE = {
+  '': 'border-pb-hairline text-pb-faint hover:text-pb-text',
+  exclude: 'border-red-500/50 text-red-300 bg-red-500/10',
+  include: 'border-emerald-500/50 text-emerald-300 bg-emerald-500/10',
+}
+const MODE_PREFIX = { '': '', exclude: '✕ ', include: '✓ ' }
+
+export function emptyModes() {
+  return Object.fromEntries(MODE_FILTERS.map(f => [f.key, '']))
+}
+export function matchesModes(c, modes) {
+  return MODE_FILTERS.every(f => {
+    const m = modes[f.key]
+    if (!m) return true
+    const has = !!c[f.flag]
+    return m === 'include' ? has : !has
+  })
+}
+export function anyMode(modes) {
+  return MODE_FILTERS.some(f => modes[f.key])
+}
+// A filter chip whose click cycles Off → Exclude → Include → Off.
+export function FilterChip({ label, title, mode, onChange }) {
+  const m = mode || ''
+  return (
+    <button type="button" title={title} onClick={() => onChange(MODE_CYCLE[m])}
+      className={`px-2 py-1 rounded border text-xs transition ${MODE_STYLE[m]}`}>
+      {MODE_PREFIX[m]}{label}
+    </button>
+  )
+}
+// The full chip row — renders only when contacts carry directory data.
+export function DirectoryFilterChips({ modes, onChange }) {
+  return (
+    <>
+      {MODE_FILTERS.map(f => (
+        <FilterChip key={f.key} label={f.label} title={f.title} mode={modes[f.key]}
+          onChange={(v) => onChange({ ...modes, [f.key]: v })} />
+      ))}
+    </>
+  )
+}
+
 // Suppressed is a derived boolean the backend sets on a contact when its address
 // is globally suppressed (bounce / complaint / unsubscribe) or excluded by
 // BetterCricket. Mode is 'all' | 'active' | 'suppressed'.

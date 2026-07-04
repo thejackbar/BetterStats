@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
-import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle } from './audience'
+import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle,
+  emptyModes, matchesModes, anyMode, DirectoryFilterChips } from './audience'
 
 function Stat({ label, value, tone }) {
   return (
@@ -16,7 +17,9 @@ export default function CommsContacts() {
   const [data, setData] = useState({ contacts: [], summary: {} })
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
+  const [modes, setModes] = useState(emptyModes)
   const [supp, setSupp] = useState('all')
+  const [firstNameVal, setFirstNameVal] = useState('')
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState('')
@@ -37,11 +40,13 @@ export default function CommsContacts() {
   useEffect(() => { reload().catch(e => setMsg({ kind: 'error', text: e.message })).finally(() => setLoading(false)) }, [reload])
 
   const facetOptions = useMemo(() => facetOptionsFrom(data.contacts), [data.contacts])
+  const showDirChips = useMemo(() => (data.contacts || []).some(c => c.club), [data.contacts])
+  const blankNameCount = useMemo(() => (data.contacts || []).filter(c => !(c.name || '').trim()).length, [data.contacts])
   const q = query.trim().toLowerCase()
   const visible = useMemo(() =>
-    (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesSuppressed(c, supp)),
-    [data.contacts, q, filters, supp])
-  const activeFilters = !!q || FACETS.some(f => filters[f.key].length) || supp !== 'all'
+    (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp)),
+    [data.contacts, q, filters, modes, supp])
+  const activeFilters = !!q || FACETS.some(f => filters[f.key].length) || anyMode(modes) || supp !== 'all'
 
   const run = async (key, fn, okText) => {
     setBusy(key); setMsg(null)
@@ -63,6 +68,14 @@ export default function CommsContacts() {
     if (!newEmail.trim()) return
     run('add', async () => { const r = await api.commsCreateContact(newEmail.trim(), newName.trim() || null); setNewEmail(''); setNewName(''); return r },
       () => 'Contact added.')
+  }
+
+  const setBlankFirstName = () => {
+    const v = firstNameVal.trim()
+    if (!v) return
+    if (!window.confirm(`Set {{first_name}} to "${v}" for the ${blankNameCount} contact${blankNameCount === 1 ? '' : 's'} with no name?`)) return
+    run('setfn', async () => { const r = await api.commsSetBlankFirstName(v); setFirstNameVal(''); return r },
+      r => `Set {{first_name}} to "${r.first_name}" for ${r.updated} contact${r.updated === 1 ? '' : 's'} with no name.`)
   }
 
   const toggleSub = (c) => run(`t${c.id}`, () => api.commsUpdateContact(c.id, { subscribed: !c.subscribed }))
@@ -137,11 +150,37 @@ export default function CommsContacts() {
         ))}
         <SuppressedToggle value={supp} onChange={setSupp} />
         {activeFilters && (
-          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setSupp('all') }}
+          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setModes(emptyModes()); setSupp('all') }}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
         )}
         <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>
       </div>
+      {showDirChips && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Directory</span>
+          <DirectoryFilterChips modes={modes} onChange={setModes} />
+          <span className="text-pb-faintest text-[10px] ml-1">tap once to exclude, twice to include</span>
+        </div>
+      )}
+
+      {/* Bulk: greet the no-name contacts (e.g. generic committee mailboxes). */}
+      {showDirChips && blankNameCount > 0 && (
+        <div className="pb-card p-3 mb-4 flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs text-pb-faint mb-1">
+              Set <code className="text-pb-accent">{'{{first_name}}'}</code> for the {blankNameCount} contact{blankNameCount === 1 ? '' : 's'} with no name
+            </label>
+            <input value={firstNameVal} onChange={e => setFirstNameVal(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && setBlankFirstName()}
+              placeholder="e.g. Committee Members"
+              className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+          </div>
+          <button onClick={setBlankFirstName} disabled={busy === 'setfn' || !firstNameVal.trim()}
+            className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
+            {busy === 'setfn' ? 'Setting…' : 'Set First Name'}
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-pb-faint text-sm">Loading…</div>
