@@ -1,10 +1,10 @@
 export default {
   version: 'v8.56.0',
-  date: '2026-07-04',
+  date: '2026-07-03',
   sortKey: '2026-07-04T08:00:00Z',
-  title: 'BetterComms contact filters + bulk first name',
+  title: 'Meta Ads HQ: manual lead correction and deeper insight',
   items: [
-    'BetterComms Lists and Contacts now carry the Club Directory include/exclude filters (Juniors, Carnivals, Schools, Rep orgs, Cricket Australia orgs, Already-emailed). Tap a chip once to exclude, twice to include, so you can build a list from exactly the contacts you want.',
-    'Contacts has a Set First Name box: type a value like "Committee Members" and it fills {{first_name}} for every contact that has no name, so those emails still open with a proper greeting.',
+    'The Meta-attributed leads figure can now be corrected by hand with +/- buttons, since Meta\'s own count is only indicative. Each correction is logged with an optional note and survives the next automatic refresh.',
+    'Added cost per lead (overall and per ad), a leads-per-day chart, and an on-site attribution panel showing how many Meta-ad visitors actually reached a pricing or contact page.',
   ],
 }
