@@ -157,6 +157,7 @@ async def list_clubs(
     emailed: str = "off",
     exported: str = "off",
     suppressed: str = "off",
+    excluded: str = "off",
     visited: bool = False,
     kind: Optional[str] = "club",
     group_by_association: bool = False,
@@ -279,6 +280,7 @@ class DirFilterFields(BaseModel):
     emailed: str = "off"
     exported: str = "off"
     suppressed: str = "off"
+    excluded: str = "off"
     visited: bool = False
     associations: Optional[List[str]] = None
     countries: Optional[List[str]] = None
@@ -674,6 +676,7 @@ async def export_csv(
     emailed: str = "off",
     exported: str = "off",
     suppressed: str = "off",
+    excluded: str = "off",
     visited: bool = False,
     associations: Optional[List[str]] = Query(None),
     countries: Optional[List[str]] = Query(None),
@@ -684,7 +687,7 @@ async def export_csv(
     """CSV of the currently-filtered directory (one row per club+contact)."""
     modes = {"junior": junior, "carnival": carnival, "school": school, "rep": rep,
              "cricket_au": cricket_au, "emailed": emailed, "exported": exported,
-             "suppressed": suppressed}
+             "suppressed": suppressed, "excluded": excluded}
     filters = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact, person,
         modes=modes, associations=associations, visited=visited, countries=countries))

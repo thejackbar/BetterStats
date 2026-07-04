@@ -686,7 +686,7 @@ def _contact_exists(*conds):
 # threads through club_filters. See routers/marketing.py + SuperMarketing.jsx.
 FILTER_MODE_KEYS = (
     "junior", "carnival", "school", "rep", "cricket_au",
-    "emailed", "exported", "suppressed",
+    "emailed", "exported", "suppressed", "excluded",
 )
 FILTER_MODES = ("off", "include", "exclude")
 
@@ -741,6 +741,11 @@ def _filter_conditions(key: str):
         # include = only clubs with none left.
         keep = _contact_exists(C.email.isnot(None), C.subscribed.is_(True))
         return (keep, ~keep)
+    if key == "excluded":
+        # A club a super admin has flagged as excluded from outreach (never
+        # exported/sent). exclude = drop excluded clubs; include = only them.
+        p = MarketingClub.excluded.is_(True)
+        return (~p, p)
     return None
 
 

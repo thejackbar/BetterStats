@@ -26,6 +26,7 @@ const MODE_FILTERS = [
   { key: 'emailed', label: 'Already-emailed', title: 'Club has an outreach send recorded' },
   { key: 'exported', label: 'Exported', title: 'Include = nothing left to export; Exclude = still has an emailable contact not yet in BetterComms' },
   { key: 'suppressed', label: 'Suppressed', title: 'Include = no subscribed emailable contact left; Exclude = still has a subscribed contact' },
+  { key: 'excluded', label: 'Excluded', title: 'Club flagged as excluded from outreach. Include = only excluded clubs; Exclude = hide them' },
 ]
 const MODE_CYCLE = { '': 'exclude', exclude: 'include', include: '' }
 const MODE_STYLE = {
@@ -752,7 +753,7 @@ export default function SuperMarketing() {
     contact: '', person: '',
     // Tri-state directory filters: '' (off) | 'include' | 'exclude'.
     junior: '', carnival: '', school: '', rep: '', cricket_au: '',
-    emailed: '', exported: '', suppressed: '',
+    emailed: '', exported: '', suppressed: '', excluded: '',
     visited: false,
   })
   const [expanded, setExpanded] = useState(null)
@@ -1082,7 +1083,7 @@ export default function SuperMarketing() {
                                                   postcode_from: '', postcode_to: '', contact: '',
                                                   person: '', junior: '', carnival: '', school: '',
                                                   rep: '', cricket_au: '', emailed: '', exported: '',
-                                                  suppressed: '', visited: false })}>
+                                                  suppressed: '', excluded: '', visited: false })}>
                 Clear all
               </button>
             )}
