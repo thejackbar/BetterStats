@@ -56,8 +56,8 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
     <div className={`flex items-center gap-3 py-1.5 ${last ? '' : 'pb-hairline-t'}`}>
       <input type="checkbox" className="accent-pb-accent shrink-0" checked={checked} onChange={onCheck} onClick={e => e.stopPropagation()} />
       <button onClick={() => onDetails(c.id)} className="min-w-0 text-left hover:opacity-80 flex-1" title="View details">
-        <span className="text-sm text-pb-text truncate">{c.name || c.email}</span>
-        {c.name && <span className="text-pb-faintest text-xs ml-2 truncate">{c.email}</span>}
+        <span className="text-sm text-pb-text truncate">{c.name || c.first_name || c.email}</span>
+        {(c.name || c.first_name) && <span className="text-pb-faintest text-xs ml-2 truncate">{c.email}</span>}
         {(c.club || c.state) && (
           <span className="text-pb-faintest text-[11px] ml-2 truncate">{[c.club, c.state].filter(Boolean).join(' · ')}</span>
         )}

@@ -168,6 +168,9 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
         # exclusion, or on the global suppression list (passed in by the caller).
         "suppressed": bool(c.bounced or complained or c.excluded or suppressed),
         "player_id": str(c.player_id) if c.player_id else None,
+        # The stored {{first_name}} override (what Set First Name writes). Surfaced
+        # so a nameless contact can still read as its set first name in the list.
+        "first_name": str((c.merge_vars or {}).get("first_name") or "").strip(),
         **dir_fields,
         **_dir_flags(dir_fields.get("club", ""), c.email, mc),
     }

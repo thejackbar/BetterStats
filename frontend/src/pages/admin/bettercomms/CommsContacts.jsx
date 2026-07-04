@@ -216,10 +216,11 @@ export default function CommsContacts() {
       ) : (
         <div className="pb-card overflow-hidden">
           {visible.map((c, i) => {
-            // A nameless directory contact still needs to read as its club + email,
-            // not a bare address: label falls back name → club → email, and the sub
-            // line always carries whatever of club/email isn't already the label.
-            const primary = c.name || c.club || c.email
+            // A nameless directory contact still needs to read as something, not a
+            // bare address. Label falls back name → first_name → club → email (so a
+            // contact whose {{first_name}} was set via Set First Name shows that),
+            // and the sub line carries whatever of club/email isn't the label.
+            const primary = c.name || c.first_name || c.club || c.email
             const sub = [c.club, c.email].filter(v => v && v !== primary).join(' · ')
             return (
             <div key={c.id} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
