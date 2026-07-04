@@ -173,7 +173,7 @@ async def list_clubs(
         stmt = stmt.where(MarketingClub.kind == kind)
     modes = {"junior": junior, "carnival": carnival, "school": school, "rep": rep,
              "cricket_au": cricket_au, "emailed": emailed, "exported": exported,
-             "suppressed": suppressed}
+             "suppressed": suppressed, "excluded": excluded}
     kw = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact,
         person, modes=modes, associations=associations, visited=visited,
