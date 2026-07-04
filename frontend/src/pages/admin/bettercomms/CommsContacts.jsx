@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle,
-  emptyModes, matchesModes, anyMode, DirectoryFilterChips } from './audience'
+  emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint } from './audience'
 
 function Stat({ label, value, tone }) {
   return (
@@ -153,7 +153,7 @@ export default function CommsContacts() {
       </div>
 
       <input value={query} onChange={e => setQuery(e.target.value)}
-        placeholder="Search name, email, club, association, country, UTM code, state or website…"
+        placeholder={searchHint(showDirChips)}
         className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (

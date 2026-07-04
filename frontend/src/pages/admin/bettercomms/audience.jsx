@@ -19,6 +19,15 @@ export function matchesQuery(c, q) {
   if (!q) return true
   return SEARCH_FIELDS.some(f => (c[f] || '').toLowerCase().includes(q))
 }
+
+// The search box hint. The club/association/UTM/etc. fields only carry data for
+// BetterCricket outreach (directory) contacts, so a normal club is told it's
+// searching name or email. `hasDirectory` = the contacts carry directory data.
+export const SEARCH_HINT_FULL = 'Search name, email, club, association, country, UTM code, state or website…'
+export const SEARCH_HINT_BASIC = 'Search on name or email address'
+export function searchHint(hasDirectory) {
+  return hasDirectory ? SEARCH_HINT_FULL : SEARCH_HINT_BASIC
+}
 export function matchesFilters(c, filters) {
   return FACETS.every(f => {
     const sel = filters[f.key]
@@ -204,6 +213,7 @@ export function AudiencePanel({ contacts, total, loading, csvName = 'audience', 
   const [filters, setFilters] = useState(emptyFilters)
 
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
+  const hasDirectory = useMemo(() => (contacts || []).some(c => c.club), [contacts])
   const q = query.trim().toLowerCase()
   const shown = useMemo(() =>
     (contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters)),
@@ -213,7 +223,7 @@ export function AudiencePanel({ contacts, total, loading, csvName = 'audience', 
   return (
     <div>
       <input value={query} onChange={e => setQuery(e.target.value)}
-        placeholder="Search name, email, club, association, country, UTM code, state or website…"
+        placeholder={searchHint(hasDirectory)}
         className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (

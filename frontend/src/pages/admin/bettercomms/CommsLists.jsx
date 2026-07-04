@@ -3,7 +3,7 @@ import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
-  emptyModes, matchesModes, anyMode, DirectoryFilterChips } from './audience'
+  emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint } from './audience'
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -181,7 +181,7 @@ function ListDetail({ list, lists, onChanged }) {
 
       {/* Search + filters */}
       <input value={query} onChange={e => setQuery(e.target.value)}
-        placeholder="Search name, email, club, association, country, UTM code, state or website…"
+        placeholder={searchHint(showDirChips)}
         className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (
