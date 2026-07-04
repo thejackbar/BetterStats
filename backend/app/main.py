@@ -1281,9 +1281,8 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "ses_tenant_paused BOOLEAN NOT NULL DEFAULT false"
         ))
-        await conn.execute(text(
-            "UPDATE organisations SET comms_tier = 'production' WHERE comms_tier = 'sandbox'"
-        ))
+        # (No boot-time tier promotion — see the note above. A club is sandbox
+        # until a super admin approves production; migration 129 did the reset.)
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS comms_limit_requests (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
