@@ -192,13 +192,17 @@ export default function CommsSettings() {
                 </div>
               ) : limits.can_request ? (
                 <div className="border-t pb-hairline-t pt-3">
-                  <label className="block text-xs text-pb-faint mb-1">Ask BetterCricket to lift your limit (optional note)</label>
+                  <div className="text-xs text-pb-text font-medium mb-1">Request an upgrade to Production</div>
+                  <div className="text-pb-faintest text-xs mb-2 leading-relaxed">
+                    You're on the Sandbox limit ({limits.daily_cap}/day). Ask BetterCricket to move you to
+                    the Production limit once your sending has settled in. A note about your club helps us review it.
+                  </div>
                   <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
                     placeholder="e.g. 300-member club, weekly newsletter to our own members"
                     className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
                   <button onClick={requestLimit} disabled={reqBusy}
                     className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
-                    {reqBusy ? 'Sending…' : 'Request higher limit'}
+                    {reqBusy ? 'Sending…' : 'Request Production limit'}
                   </button>
                 </div>
               ) : null}
