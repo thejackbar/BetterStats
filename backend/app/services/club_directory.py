@@ -876,9 +876,15 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
             else:
                 skipped += 1
             continue
+        # {{name}} is the officer's name only. When the crawl found only an email
+        # (no officer name), leave it blank rather than falling back to the club
+        # name — a blank name is what the "Set First Name" find/replace targets, and
+        # a club name in {{name}} would greet a person by their club. The club name
+        # still travels on the contact via its linked directory club (the {{club}}
+        # variable) and its tags.
         session.add(CommsContact(
             organisation_id=org.id, email=email,
-            name=contact.full_name or club.name, source="import",
+            name=(contact.full_name or "").strip() or None, source="import",
             marketing_club_id=club.id,   # link back so a campaign send flags the club
             tags=[club.name] + _assoc_names(club),
         ))
