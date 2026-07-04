@@ -79,13 +79,19 @@ def _norm_email(raw: Optional[str]) -> Optional[str]:
     return e if _EMAIL_RE.match(e) else None
 
 
-def _first_name(name: Optional[str], email: str) -> str:
+def _first_name(name: Optional[str], email: Optional[str]) -> str:
     # A club stores players surname-first ("Barendse, Elton"), so derive the given
     # name format-aware (the part after the comma) rather than the first token.
     fn = name_format.first_name(name)
     if fn:
         return fn
-    return (email.split("@", 1)[0] or "there").replace(".", " ").split()[0].title()
+    # Fall back to the email local-part ONLY when an email is supplied. Passing
+    # email="" (or None) disables the fallback, so the greeting resolves blank —
+    # what BetterCricket outreach wants for a directory contact that has only an
+    # email and no officer name (better a blank than greeting them "Syasirsibtain").
+    if email:
+        return (email.split("@", 1)[0] or "there").replace(".", " ").split()[0].title()
+    return ""
 
 
 def _dir_fields(c: CommsContact, mc: "Optional[MarketingClub]") -> dict:
@@ -498,9 +504,14 @@ def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisati
         return v if (v is not None and str(v).strip() != "") else default
 
     name = (c.name or "").strip()
+    # BetterCricket outreach contacts often have only an email (no officer name).
+    # There we DON'T guess a name from the email local-part — {{name}} and
+    # {{first_name}} resolve blank until a super admin sets them (Set First Name).
+    # A club's own members keep the friendly email-local-part fallback.
+    fn_email = None if org_is_outreach(org) else c.email
     return {
-        "first_name": pick("first_name", _first_name(c.name, c.email)),
-        "name": name or _first_name(c.name, c.email),
+        "first_name": pick("first_name", _first_name(c.name, fn_email)),
+        "name": name or _first_name(c.name, fn_email),
         "email": c.email,
         "club": pick("club", mv.get("club") or (org.name or "")),
         "association": pick("association", mv.get("association", "")),
@@ -516,9 +527,13 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     """(subject, html, text) for one recipient. A full-HTML template renders as-is
     with the mandatory unsubscribe footer injected; a fragment gets the club shell.
     UTM tagging of links is applied ONLY for the BetterCricket marketing org."""
+    # Outreach: no email-local-part fallback (a directory contact with no officer
+    # name greets blank, not "Syasirsibtain"). A per-recipient first_name override
+    # from merge_vars still wins via extra_vars below. A club keeps the fallback.
+    fn_email = None if org_is_outreach(org) else email
     ctx = {
-        "first_name": _first_name(name, email),
-        "name": (name or "").strip() or _first_name(name, email),
+        "first_name": _first_name(name, fn_email),
+        "name": (name or "").strip() or _first_name(name, fn_email),
         "email": email,
         # {{club}} is the single club variable: the recipient's club. Defaults to
         # the sending org's name (a club emailing its own members), and is
