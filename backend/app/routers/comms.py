@@ -27,7 +27,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -877,6 +877,45 @@ async def delete_contact(
     await db.delete(c)
     await db.commit()
     return {"status": "ok"}
+
+
+class BulkDeleteContactsIn(BaseModel):
+    contact_ids: List[str]
+
+
+@router.post("/contacts/bulk-delete")
+async def bulk_delete_contacts(
+    data: BulkDeleteContactsIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete many contacts at once (the ids a super admin ticked in the list —
+    filtered or not). Org-scoped; ids that aren't this org's are ignored. Mirrors
+    the single delete: a directory-sourced contact flips its source marketing
+    contact back to not-exported so the directory can re-offer it."""
+    ids = []
+    for raw in (data.contact_ids or []):
+        try:
+            ids.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    if not ids:
+        return {"deleted": 0}
+    contacts = (await db.execute(select(CommsContact).where(
+        CommsContact.organisation_id == club.id,
+        CommsContact.id.in_(ids),
+    ))).scalars().all()
+    for c in contacts:
+        if c.marketing_club_id and c.email:
+            await db.execute(
+                update(MarketingClubContact)
+                .where(MarketingClubContact.marketing_club_id == c.marketing_club_id,
+                       func.lower(MarketingClubContact.email) == c.email.lower())
+                .values(exported_at=None, updated_at=func.now()))
+        await db.delete(c)
+    await db.commit()
+    return {"deleted": len(contacts)}
 
 
 class ContactImport(BaseModel):
