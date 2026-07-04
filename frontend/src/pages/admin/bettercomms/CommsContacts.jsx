@@ -215,11 +215,17 @@ export default function CommsContacts() {
         <div className="pb-card p-8 text-center text-pb-faint text-sm">No contacts match your search.</div>
       ) : (
         <div className="pb-card overflow-hidden">
-          {visible.map((c, i) => (
+          {visible.map((c, i) => {
+            // A nameless directory contact still needs to read as its club + email,
+            // not a bare address: label falls back name → club → email, and the sub
+            // line always carries whatever of club/email isn't already the label.
+            const primary = c.name || c.club || c.email
+            const sub = [c.club, c.email].filter(v => v && v !== primary).join(' · ')
+            return (
             <div key={c.id} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
               <button onClick={() => setDetailId(c.id)} className="min-w-0 text-left hover:opacity-80" title="View details & merge variables">
-                <div className="text-pb-text text-sm truncate">{c.name || c.email}</div>
-                {c.name && <div className="text-pb-faintest text-xs truncate">{c.email}</div>}
+                <div className="text-pb-text text-sm truncate">{primary}</div>
+                {sub && <div className="text-pb-faintest text-xs truncate">{sub}</div>}
               </button>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">{c.source}</span>
@@ -235,7 +241,8 @@ export default function CommsContacts() {
                 <button onClick={() => del(c)} className="text-pb-faintest hover:text-pb-red text-sm px-1" title="Remove">✕</button>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
