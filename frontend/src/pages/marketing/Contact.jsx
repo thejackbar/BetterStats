@@ -6,6 +6,7 @@ import Reveal from '../../components/marketing/Reveal'
 import { FORMSPREE_ID, SUPPORT_EMAIL } from '../../data/marketing'
 import { api } from '../../lib/api'
 import { getVisitorId } from '../../lib/visitor'
+import { getMetaEventContext } from '../../lib/metaPixel'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
@@ -135,6 +136,9 @@ function ContactForm() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setErrors({})
     setStatus('submitting')
+    // One event_id shared between the browser pixel (below) and the backend's
+    // server-side Conversions API call, so Meta dedupes the pair into one Lead.
+    const meta = getMetaEventContext()
     // Also store the enquiry in the BetterStats DB so it shows up in the
     // super-admin onboarding list. Best-effort: Formspree (below) is the primary
     // delivery and drives success/error, so a failure here never blocks the form.
@@ -148,6 +152,7 @@ function ContactForm() {
       clubUrl: fields.clubUrl, heard: fields.heard, message: fields.message,
       // Links this enquiry to the anonymous browsing journey behind it.
       visitorId: getVisitorId(),
+      meta,
     }).catch(() => {})
     try {
       const res = await fetch(FORMSPREE_URL, {
@@ -178,13 +183,15 @@ function ContactForm() {
       if (res.ok && data.ok !== false) {
         setStatus('success')
         // Meta Pixel: a completed request-access form is our key conversion.
+        // eventID matches the server-side Conversions API call above so Meta
+        // dedupes the two into one Lead instead of double-counting it.
         if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
           window.fbq('track', 'Lead', {
             content_name: 'Request access',
             content_category: 'club_enquiry',
             value: 399,
             currency: 'AUD',
-          })
+          }, { eventID: meta.eventId })
         }
       } else {
         setStatus('error')

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FORMSPREE_ID } from '../data/marketing'
 import { api } from '../lib/api'
 import { getVisitorId } from '../lib/visitor'
+import { getMetaEventContext } from '../lib/metaPixel'
 
 const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
 
@@ -56,6 +57,10 @@ export default function QuickEnquiryModal({ onClose }) {
     setErrors({})
     setStatus('submitting')
 
+    // One event_id shared between the browser pixel (below) and the backend's
+    // server-side Conversions API call, so Meta dedupes the pair into one Lead.
+    const meta = getMetaEventContext()
+
     api.submitOnboarding({
       name: fields.name,
       club: fields.club,
@@ -63,6 +68,7 @@ export default function QuickEnquiryModal({ onClose }) {
       message: fields.message,
       source: 'cta_quick_form',
       visitorId: getVisitorId(),
+      meta,
     }).catch(() => {})
 
     try {
@@ -86,7 +92,7 @@ export default function QuickEnquiryModal({ onClose }) {
             content_category: 'club_enquiry',
             value: 399,
             currency: 'AUD',
-          })
+          }, { eventID: meta.eventId })
         }
       } else {
         setStatus('error')
