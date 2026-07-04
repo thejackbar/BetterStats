@@ -802,6 +802,9 @@ export default function SuperMarketing() {
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
+  // Export to BetterComms: default to the ticked ("who to email") contacts only.
+  // Untick to push every subscribed, emailable contact in the filtered list.
+  const [onlyTicked, setOnlyTicked] = useState(true)
 
   const loadStats = useCallback(() => {
     api.mktStats().then(setStats).catch(() => {})
@@ -865,7 +868,7 @@ export default function SuperMarketing() {
   const exportComms = async () => {
     setBusy('export'); setMsg('')
     try {
-      const r = await api.mktExportComms({ ...filters })
+      const r = await api.mktExportComms({ ...filters, selected_only: onlyTicked })
       let m = `Exported to ${r.org}: ${r.added} added, ${r.already_present} already there, ${r.already_suppressed} suppressed.`
       // Explain a 0-added result. Only excluded clubs are held back; otherwise
       // the eligible clubs just had no ticked, emailable contact.
@@ -1247,6 +1250,12 @@ export default function SuperMarketing() {
             <button className={BTN} disabled={busy === 'export'} onClick={exportComms}>
               {busy === 'export' ? 'Exporting...' : 'Export to BetterComms'}
             </button>
+            <label className="flex items-center gap-1.5 text-[11px] text-pb-faint cursor-pointer select-none"
+                   title="On: only the contacts ticked 'who to email' per club (office bearers by default). Off: every subscribed, emailable contact in the filtered list.">
+              <input type="checkbox" className="accent-pb-accent" checked={onlyTicked}
+                     onChange={e => setOnlyTicked(e.target.checked)} />
+              Only ticked contacts
+            </label>
             <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
                     title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
               {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
