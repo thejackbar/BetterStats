@@ -473,6 +473,8 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ utm }) }),
   mktClubVisits: (clubId) =>
     request(`/club-admin/marketing/clubs/${clubId}/visits`),
+  mktClubLoginIntent: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/login-intent`),
   mktUtmValues: () => request('/club-admin/marketing/utm-values'),
   mktSetUtmAlias: (body) =>
     request('/club-admin/marketing/utm-aliases', { method: 'PUT', body: JSON.stringify(body) }),

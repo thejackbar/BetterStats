@@ -1492,6 +1492,90 @@ def _visited_in_sql(mc: str = "marketing_clubs") -> str:
     return f"{mc}.id::text IN (SELECT v.cid FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL)"
 
 
+# ─── Login-intent (visited a club's pages, then went to /login) ─────────────
+# /login itself never resolves to a club through _RESOLVED_VISITS — it's a
+# single global route, not a club slug or UTM code — so a visitor hitting it
+# is otherwise invisible to the directory. But the SAME visitor's OTHER
+# page-views in the same browsing session usually do resolve (they landed on
+# or browsed the club's public page first). Chaining the two is the strongest
+# "wants an account" signal we hold, especially for a club with no
+# existing_org_id: there's nothing of theirs to log into yet, so repeat
+# /login visits from that visitor read as onboarding interest, not a member
+# who forgot their password.
+_LOGIN_HITS_CTE = (
+    f"WITH resolved AS ({_RESOLVED_VISITS}), "
+    "logins AS ("
+    "  SELECT vk, created_at, country, city FROM resolved "
+    "  WHERE split_part(path, '?', 1) = '/login'"
+    "), "
+    "visitor_club AS ("
+    "  SELECT DISTINCT ON (vk) vk, cid FROM resolved "
+    "  WHERE cid IS NOT NULL AND split_part(path, '?', 1) <> '/login' "
+    "  ORDER BY vk, created_at DESC"
+    "), "
+    "login_hits AS ("
+    "  SELECT l.created_at, l.country, l.city, l.vk, vc.cid "
+    "  FROM logins l JOIN visitor_club vc ON vc.vk = l.vk"
+    ") "
+)
+
+
+async def club_login_intent_stats(session: AsyncSession, club_ids: list) -> dict:
+    """Visitors who hit /login after browsing a club's own pages, keyed by club
+    id — same ``{club_id: {visitors, last_seen}}`` shape as club_visit_stats,
+    so the directory can merge it in alongside the 'visited' badge."""
+    ids = sorted({str(c) for c in (club_ids or []) if c})
+    if not ids:
+        return {}
+    rows = (await session.execute(text(
+        _LOGIN_HITS_CTE
+        + "SELECT cid, COUNT(DISTINCT vk) AS visitors, MAX(created_at) AS last_seen "
+          "FROM login_hits WHERE cid = ANY(:ids) GROUP BY cid"
+    ), {"ids": ids})).all()
+    return {
+        r.cid: {
+            "visitors": int(r.visitors or 0),
+            "last_seen": r.last_seen.isoformat() if r.last_seen else None,
+        }
+        for r in rows
+    }
+
+
+async def club_login_intent_detail(session: AsyncSession, club_id, limit: int = 50) -> dict:
+    """Trail of /login hits attributed to one club's visitors. Powers the
+    directory's expanded-row panel, mirroring club_visit_detail."""
+    cid = str(club_id or "").strip()
+    empty = {"club_id": cid, "hits": 0, "visitors": 0,
+              "first_seen": None, "last_seen": None, "recent": []}
+    if not cid:
+        return empty
+    summary = (await session.execute(text(
+        _LOGIN_HITS_CTE
+        + "SELECT COUNT(*) AS hits, COUNT(DISTINCT vk) AS visitors, "
+          "MIN(created_at) AS first_seen, MAX(created_at) AS last_seen "
+          "FROM login_hits WHERE cid = :cid"
+    ), {"cid": cid})).one()
+    if not summary.hits:
+        return empty
+    recent = (await session.execute(text(
+        _LOGIN_HITS_CTE
+        + "SELECT created_at, country, city FROM login_hits "
+          "WHERE cid = :cid ORDER BY created_at DESC LIMIT :lim"
+    ), {"cid": cid, "lim": max(1, min(int(limit or 50), 200))})).all()
+    return {
+        "club_id": cid,
+        "hits": int(summary.hits or 0),
+        "visitors": int(summary.visitors or 0),
+        "first_seen": summary.first_seen.isoformat() if summary.first_seen else None,
+        "last_seen": summary.last_seen.isoformat() if summary.last_seen else None,
+        "recent": [
+            {"at": r.created_at.isoformat() if r.created_at else None,
+             "country": r.country, "city": r.city}
+            for r in recent
+        ],
+    }
+
+
 async def club_visit_stats(session: AsyncSession, club_ids: list) -> dict:
     """Summarise site visits for a page of clubs in ONE query, keyed by club id.
     Returns ``{club_id: {views, visitors, last_seen}}`` for clubs with any visit,
@@ -1671,6 +1755,14 @@ async def directory_stats(session: AsyncSession) -> dict:
         select(func.count(MarketingClub.id)).where(MarketingClub.emailed_at.isnot(None))) or 0
     visited = await session.scalar(text(
         f"SELECT COUNT(DISTINCT v.cid) FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL")) or 0
+    login_intent = await session.scalar(text(
+        _LOGIN_HITS_CTE + "SELECT COUNT(DISTINCT cid) FROM login_hits")) or 0
+    login_intent_not_customer = await session.scalar(text(
+        _LOGIN_HITS_CTE
+        + "SELECT COUNT(DISTINCT lh.cid) FROM login_hits lh "
+          "JOIN marketing_clubs mc ON mc.id::text = lh.cid "
+          "WHERE mc.existing_org_id IS NULL"
+    )) or 0
     distinct_assoc = await session.scalar(
         select(func.count(func.distinct(MarketingClub.association_guid)))
         .where(MarketingClub.association_guid.isnot(None))) or 0
@@ -1690,6 +1782,8 @@ async def directory_stats(session: AsyncSession) -> dict:
         "already_customers": customers,
         "emailed": emailed,
         "visited": visited,
+        "login_intent": login_intent,
+        "login_intent_not_customer": login_intent_not_customer,
         # Back-compat keys the dashboard/CLI may still read.
         "total": clubs,
         "frontier_remaining": assoc_pending,

@@ -209,6 +209,9 @@ async def list_clubs(
     # Site visits attributable to each club (usage breadcrumbs, resolved through
     # utm_code + manual aliases), fetched for the whole page in one query.
     visit_stats = await cd.club_visit_stats(db, [c.id for c in clubs])
+    # Visitors who browsed a club's pages then hit /login — a lead signal,
+    # strongest for a club with no existing_org_id (nothing to log into yet).
+    login_intent_stats = await cd.club_login_intent_stats(db, [c.id for c in clubs])
 
     out = []
     for c in clubs:
@@ -225,6 +228,7 @@ async def list_clubs(
             "excluded": c.excluded,
             "utm_code": c.utm_code or cd._default_utm(c.name),
             "visits": visit_stats.get(str(c.id)),
+            "login_intent": login_intent_stats.get(str(c.id)),
             "trial_modules": c.trial_modules or [],
             "requested_trial_modules": c.requested_trial_modules or [],
             "demo_status": c.demo_status,
@@ -493,6 +497,17 @@ async def club_visits(club_id: str, db: AsyncSession = Depends(get_db),
     if club is None:
         raise HTTPException(status_code=404, detail="Club not found")
     return await cd.club_visit_detail(db, club.id)
+
+
+@router.get("/clubs/{club_id}/login-intent")
+async def club_login_intent(club_id: str, db: AsyncSession = Depends(get_db),
+                             _=Depends(require_super_admin)):
+    """Visitors who browsed this club's pages then hit /login — totals and a
+    recent trail, for the directory's expanded-row panel."""
+    club = await db.get(MarketingClub, club_id)
+    if club is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return await cd.club_login_intent_detail(db, club.id)
 
 
 @router.get("/utm-values")
