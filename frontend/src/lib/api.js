@@ -1639,8 +1639,8 @@ export const api = {
     request('/club-admin/comms/contacts/import', { method: 'POST', body: JSON.stringify({ text }) }),
   commsSyncFromClub: () =>
     request('/club-admin/comms/contacts/sync-from-club', { method: 'POST' }),
-  commsSetBlankFirstName: (firstName) =>
-    request('/club-admin/comms/contacts/set-blank-first-name', { method: 'POST', body: JSON.stringify({ first_name: firstName }) }),
+  commsFirstNameFindReplace: (find, replace) =>
+    request('/club-admin/comms/contacts/first-name-find-replace', { method: 'POST', body: JSON.stringify({ find, replace }) }),
   commsAudiencePreview: (audience) =>
     request('/club-admin/comms/audience/preview', { method: 'POST', body: JSON.stringify(audience) }),
 

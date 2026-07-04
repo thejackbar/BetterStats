@@ -19,7 +19,8 @@ export default function CommsContacts() {
   const [filters, setFilters] = useState(emptyFilters)
   const [modes, setModes] = useState(emptyModes)
   const [supp, setSupp] = useState('all')
-  const [firstNameVal, setFirstNameVal] = useState('')
+  const [fnFind, setFnFind] = useState('')
+  const [fnReplace, setFnReplace] = useState('')
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState('')
@@ -41,7 +42,16 @@ export default function CommsContacts() {
 
   const facetOptions = useMemo(() => facetOptionsFrom(data.contacts), [data.contacts])
   const showDirChips = useMemo(() => (data.contacts || []).some(c => c.club), [data.contacts])
-  const blankNameCount = useMemo(() => (data.contacts || []).filter(c => !(c.name || '').trim()).length, [data.contacts])
+  // Live count of contacts whose {{name}} matches the Find value (blank Find = the
+  // no-name rows; otherwise an exact, case-insensitive match), so the button says
+  // how many it will touch.
+  const fnMatchCount = useMemo(() => {
+    const f = fnFind.trim().toLowerCase()
+    return (data.contacts || []).filter(c => {
+      const n = (c.name || '').trim().toLowerCase()
+      return f === '' ? n === '' : n === f
+    }).length
+  }, [data.contacts, fnFind])
   const q = query.trim().toLowerCase()
   const visible = useMemo(() =>
     (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp)),
@@ -70,12 +80,14 @@ export default function CommsContacts() {
       () => 'Contact added.')
   }
 
-  const setBlankFirstName = () => {
-    const v = firstNameVal.trim()
-    if (!v) return
-    if (!window.confirm(`Set {{first_name}} to "${v}" for the ${blankNameCount} contact${blankNameCount === 1 ? '' : 's'} with no name?`)) return
-    run('setfn', async () => { const r = await api.commsSetBlankFirstName(v); setFirstNameVal(''); return r },
-      r => `Set {{first_name}} to "${r.first_name}" for ${r.updated} contact${r.updated === 1 ? '' : 's'} with no name.`)
+  const applyFirstName = () => {
+    const rep = fnReplace.trim()
+    if (!rep) return
+    const find = fnFind.trim()
+    const target = find ? `name "${find}"` : 'no name'
+    if (!window.confirm(`Set {{first_name}} to "${rep}" for the ${fnMatchCount} contact${fnMatchCount === 1 ? '' : 's'} with ${target}?`)) return
+    run('setfn', async () => { const r = await api.commsFirstNameFindReplace(find, rep); setFnFind(''); setFnReplace(''); return r },
+      r => `Set {{first_name}} to "${r.replace}" for ${r.updated} contact${r.updated === 1 ? '' : 's'}.`)
   }
 
   const toggleSub = (c) => run(`t${c.id}`, () => api.commsUpdateContact(c.id, { subscribed: !c.subscribed }))
@@ -163,22 +175,33 @@ export default function CommsContacts() {
         </div>
       )}
 
-      {/* Bulk: greet the no-name contacts (e.g. generic committee mailboxes). */}
-      {showDirChips && blankNameCount > 0 && (
-        <div className="pb-card p-3 mb-4 flex flex-wrap items-end gap-2">
-          <div className="flex-1 min-w-[180px]">
-            <label className="block text-xs text-pb-faint mb-1">
-              Set <code className="text-pb-accent">{'{{first_name}}'}</code> for the {blankNameCount} contact{blankNameCount === 1 ? '' : 's'} with no name
-            </label>
-            <input value={firstNameVal} onChange={e => setFirstNameVal(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && setBlankFirstName()}
-              placeholder="e.g. Committee Members"
-              className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+      {/* Bulk first-name find/replace: match {{name}} → set {{first_name}}. */}
+      {showDirChips && (
+        <div className="pb-card p-3 mb-4">
+          <div className="text-xs text-pb-faint mb-2">
+            Set <code className="text-pb-accent">{'{{first_name}}'}</code> by matching <code className="text-pb-accent">{'{{name}}'}</code>.
+            Leave <strong className="text-pb-text">Find</strong> blank to match contacts with no name, or type a name to match it exactly.
           </div>
-          <button onClick={setBlankFirstName} disabled={busy === 'setfn' || !firstNameVal.trim()}
-            className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
-            {busy === 'setfn' ? 'Setting…' : 'Set First Name'}
-          </button>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[160px]">
+              <label className="block text-xs text-pb-faint mb-1">Find (in {'{{name}}'}, blank = no name)</label>
+              <input value={fnFind} onChange={e => setFnFind(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && applyFirstName()}
+                placeholder="(blank)"
+                className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <label className="block text-xs text-pb-faint mb-1">Replace (set {'{{first_name}}'} to)</label>
+              <input value={fnReplace} onChange={e => setFnReplace(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && applyFirstName()}
+                placeholder="e.g. Committee Members"
+                className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+            </div>
+            <button onClick={applyFirstName} disabled={busy === 'setfn' || !fnReplace.trim() || fnMatchCount === 0}
+              className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
+              {busy === 'setfn' ? 'Setting…' : `Set First Name (${fnMatchCount})`}
+            </button>
+          </div>
         </div>
       )}
 

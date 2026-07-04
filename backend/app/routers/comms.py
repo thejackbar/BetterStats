@@ -942,38 +942,45 @@ async def sync_from_club(
     return {"added": added, "updated": updated}
 
 
-class SetBlankFirstNameIn(BaseModel):
-    first_name: str
+class FirstNameFindReplaceIn(BaseModel):
+    find: Optional[str] = None   # match against {{name}}; blank = the no-name rows
+    replace: str                 # the value to set {{first_name}} to
 
 
-@router.post("/contacts/set-blank-first-name")
-async def set_blank_first_name(
-    data: SetBlankFirstNameIn,
+@router.post("/contacts/first-name-find-replace")
+async def first_name_find_replace(
+    data: FirstNameFindReplaceIn,
     _: User = _require,
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Bulk-set the {{first_name}} merge variable for every contact of this org
-    whose {{name}} is blank. Used for BetterCricket outreach lists where a row is a
-    generic mailbox (e.g. a committee address) with no person's name — so
-    {{first_name}} can greet them as e.g. "Committee Members" instead of falling
-    back to the email local-part. Only touches blank-name contacts; a contact that
-    has a name is left alone."""
-    value = (data.first_name or "").strip()
+    """Find/replace the {{first_name}} merge variable by matching {{name}}. For every
+    contact of this org whose {{name}} equals ``find`` (case-insensitive, trimmed;
+    a blank ``find`` matches the rows that have no name), set {{first_name}} to
+    ``replace``. Used for BetterCricket outreach lists where a row is a generic
+    mailbox (e.g. a committee address) — so {{first_name}} can greet them as e.g.
+    "Committee Members" instead of falling back to the email local-part."""
+    find = (data.find or "").strip()
+    value = (data.replace or "").strip()
     if not value:
-        raise HTTPException(status_code=422, detail="Enter a first name to set.")
+        raise HTTPException(status_code=422, detail="Enter a replacement first name.")
+    find_blank = find == ""
     # jsonb_set writes merge_vars->>'first_name' in place (creating merge_vars when
-    # NULL), scoped to this org and only rows with a blank/absent name.
+    # NULL). A blank find targets the no-name rows; otherwise an exact (trimmed,
+    # case-insensitive) name match.
     res = await db.execute(text("""
         UPDATE comms_contacts
         SET merge_vars = jsonb_set(COALESCE(merge_vars, '{}'::jsonb),
                                    '{first_name}', to_jsonb(:val::text), true),
             updated_at = NOW()
         WHERE organisation_id = :org
-          AND (name IS NULL OR btrim(name) = '')
-    """), {"val": value, "org": club.id})
+          AND (
+            (:find_blank AND (name IS NULL OR btrim(name) = ''))
+            OR (NOT :find_blank AND lower(btrim(coalesce(name, ''))) = :findlow)
+          )
+    """), {"val": value, "org": club.id, "find_blank": find_blank, "findlow": find.lower()})
     await db.commit()
-    return {"updated": int(res.rowcount or 0), "first_name": value}
+    return {"updated": int(res.rowcount or 0), "find": find, "replace": value}
 
 
 # ─── Audience preview ────────────────────────────────────────────────────────
