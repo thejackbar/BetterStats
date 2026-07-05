@@ -217,10 +217,29 @@ def currency(amount_dollars, code: str = "AUD") -> Optional[dict]:
             "currencyCode": code}
 
 
+_URL_RE = re.compile(r"^https?://\S+\.\S+$", re.I)
+_URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.\-]*://", re.I)
+
+
 def link(url: Optional[str], label: Optional[str] = None) -> Optional[dict]:
+    """A Twenty LINKS value from a messy directory field — Twenty 400s the WHOLE
+    record ("The URL of the link is not valid") on a bare domain with no scheme
+    (the common case for a directory-scraped website field), a mashed-together
+    multi-value field, or stray whitespace/punctuation. Splits on common
+    separators, prepends https:// to a schemeless token, and returns the first
+    token that parses as a plausible URL, else None (so the record is created
+    without a link rather than failing outright)."""
     if not url:
         return None
-    return {"primaryLinkUrl": url, "primaryLinkLabel": label or ""}
+    for tok in re.split(r"[\s,;|]+", str(url).strip()):
+        tok = tok.strip().strip(".,;<>()\"'")
+        if not tok:
+            continue
+        if not _URL_SCHEME_RE.match(tok):
+            tok = f"https://{tok}"
+        if _URL_RE.match(tok):
+            return {"primaryLinkUrl": tok, "primaryLinkLabel": label or ""}
+    return None
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
