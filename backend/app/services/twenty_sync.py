@@ -658,6 +658,39 @@ async def _prewarm_person_emails(session, http, force: bool = False) -> int:
     return active_n + deleted_n
 
 
+def _link_keys_in(values: dict) -> list:
+    """Which keys in ``values`` carry a Twenty LINKS-shaped value (detected by the
+    ``primaryLinkUrl`` sub-key link() always sets), so a rejected link field can be
+    identified and dropped generically regardless of which field it was."""
+    return [k for k, v in values.items() if isinstance(v, dict) and "primaryLinkUrl" in v]
+
+
+def _is_invalid_url_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "invalid_url" in msg or "url of the link is not valid" in msg
+
+
+async def _update_resilient(http, plural, record_id, values):
+    """PATCH, retrying once without any LINKS-shaped value if Twenty rejects one as
+    invalid. A record already in Twenty shouldn't start failing every refresh just
+    because a directory-scraped website field turned out messier than link()'s own
+    cleanup in twenty_client.py could catch."""
+    try:
+        return await client.update(http, plural, record_id, values)
+    except TwentyApiError as e:
+        if not _is_invalid_url_error(e):
+            raise
+        link_keys = _link_keys_in(values)
+        if not link_keys:
+            raise
+        logger.warning(
+            "twenty: %s %s update rejected link field(s) %s (value=%r) — "
+            "dropping and retrying without them",
+            plural, record_id, link_keys, {k: values[k] for k in link_keys})
+        return await client.update(
+            http, plural, record_id, {k: v for k, v in values.items() if k not in link_keys})
+
+
 async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
                   create_extra=None, dedup=None, known_id=None):
     """Create-or-update a Twenty record, keyed on the local link table first, then
@@ -679,7 +712,7 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
         # can be deleted in Twenty out-of-band, and only the update round-trip tells
         # us (404 -> recreate below). Skipping on a matching hash would leave a
         # deleted record gone forever.
-        updated = await client.update(http, plural, tid, values)
+        updated = await _update_resilient(http, plural, tid, values)
         if updated is not None:
             await _link_put(session, entity_type, bc_id, tid, h)
             return tid, "updated"
@@ -692,7 +725,7 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
         existing = await client.find_by(http, plural, dedup[0], dedup[1])
     adopt_id = (existing or {}).get("id") or known_id
     if adopt_id:
-        if await client.update(http, plural, adopt_id, values) is not None:
+        if await _update_resilient(http, plural, adopt_id, values) is not None:
             await _link_put(session, entity_type, bc_id, adopt_id, h)
             return adopt_id, "adopted"
     try:
@@ -706,7 +739,23 @@ async def _upsert(session, http, entity_type, bc_id, plural, ext_field, values,
             if await client.update(http, plural, known_id, values) is not None:
                 await _link_put(session, entity_type, bc_id, known_id, h)
                 return known_id, "adopted"
-        raise
+            raise
+        # A LINKS-type value (e.g. Company.publicProfileUrl) can still fail Twenty's
+        # own stricter validation even after link()'s cleanup in twenty_client.py —
+        # don't lose the whole record over one optional field. Drop whichever
+        # LINKS-shaped value(s) are present and retry once; the log line records the
+        # actual rejected value so a recurring shape can be added to link()'s cleanup.
+        if not _is_invalid_url_error(e):
+            raise
+        link_keys = _link_keys_in(values)
+        if not link_keys:
+            raise
+        logger.warning(
+            "twenty: %s %s create rejected link field(s) %s (value=%r) — "
+            "dropping and retrying without them",
+            entity_type, bc_id, link_keys, {k: values[k] for k in link_keys})
+        stripped = {k: v for k, v in values.items() if k not in link_keys}
+        rec = await client.create(http, plural, {**stripped, **(create_extra or {})})
     tid = rec["id"]
     await _link_put(session, entity_type, bc_id, tid, h)
     return tid, "created"
