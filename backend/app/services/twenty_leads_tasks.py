@@ -39,8 +39,8 @@ from sqlalchemy import select, text
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_client import client
 from app.services.twenty_sync import (
-    _all_contacts_unsubscribed, _billing_modules, _engagement, _link_get, _link_put,
-    _module_split, _raise_task, _twenty_modules, _upsert,
+    _all_contacts_unsubscribed, _billing_modules, _engagement, _lifecycle, _link_get,
+    _link_put, _module_split, _raise_task, _twenty_modules, _upsert,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,17 +101,17 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
     # Working if a trial is already live, else New — set once at create only.
     status = "WORKING" if trialing else "NEW"
     return {"source": source, "modules": modules, "tier": tier,
-            "score": eng.get("engagementScore") or 0, "cycle": in_cycle,
+            "score": eng.get("engagementScore") or 0,
             "summary": summary[:400], "status": status}
 
 
-def _lead_values(sig: dict) -> dict:
+def _lead_values(sig: dict, lifecycle_stage: str) -> dict:
     """The refreshable signal fields written on every run."""
     return {
         "leadSource": sig["source"],
         "signalSummary": sig["summary"],
         "engagementScore": sig["score"],         # mirrors company.engagementScore
-        "engagementCycle": sig["cycle"],         # mirrors company.inSalesCycle
+        "lifecycleStage": lifecycle_stage,       # mirrors company.lifecycleStage
         "engagementTier": sig["tier"],           # same option values as company.engagementTier
         "modulesOfInterest": sig["modules"],
     }
@@ -140,7 +140,8 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
                if club.existing_org_id else None)
         paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
         is_paying = bool(paid) or (club.demo_status or "") == "customer"
-        if await _all_contacts_unsubscribed(session, club.id) and not is_paying:
+        all_unsub = await _all_contacts_unsubscribed(session, club.id)
+        if all_unsub and not is_paying:
             # Every officer has opted out — discard any existing Lead instead of
             # (re)qualifying one for a fully-suppressed club.
             lead_row = await _link_get(session, "lead", guid)
@@ -159,7 +160,7 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         sig = _lead_signal(club, org, eng, synced=synced)
         if sig is None:
             continue
-        values = _lead_values(sig)
+        values = _lead_values(sig, _lifecycle(club, is_paying, all_unsub))
         values["name"] = club.name          # the Lead's display name = the club name
         snaps.append((guid, tid_by_guid[guid], values, sig["status"]))
     # Diagnostics so the caller/UI can see WHY the result is what it is — a cold list

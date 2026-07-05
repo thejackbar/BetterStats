@@ -815,3 +815,40 @@ migration 133).
   underscore key before a create/update body goes out) — a reusable convention
   for any future signal that needs to ride along the same dict without touching
   Twenty's schema.
+
+## 15. July 2026 — Lead mirrors Company's engagementScore + lifecycleStage
+
+A Lead used to carry only `engagementTier` (its own SELECT, refreshed daily). Two
+more fields now mirror straight off the Company, kept in lockstep from every angle:
+
+- **`Lead.engagementScore`** (NUMBER) and **`Lead.lifecycleStage`** (SELECT, same
+  options as `Company.lifecycleStage`) added to `bootstrap_twenty.py`'s Lead
+  fields.
+- **`twenty_sync._LEAD_MIRROR_FIELDS`** (`{"engagementScore": "engagementScore",
+  "lifecycleStage": "lifecycleStage"}`) drives `_sync_lead_from_company`, called
+  right after every Company push that can change either — `export_to_twenty`,
+  `refresh_engagement`, `push_club_and_contacts` — so a club's Lead updates in the
+  same request as its Company, not on the next daily Lead scan. Adding a third
+  mirrored field later is a one-line addition to the map.
+- **`refresh_engagement` now recomputes the FULL lifecycle stage every run**, not
+  only the all-officers-unsubscribed override it used to set. Previously a club
+  that started paying, or was emailed for the first time, wouldn't move stage
+  again until the next `export_to_twenty`/`push_club_and_contacts` run touched it;
+  now the nightly refresh catches it too.
+- `twenty_leads_tasks._seed_and_refresh_leads` computes the same `_lifecycle(club,
+  is_paying, all_unsub)` for the daily Lead seed/refresh pass, so a brand-new Lead
+  is created with the right stage immediately, not just patched onto it later.
+- An **"Engagement cycle" (mirroring `Company.inSalesCycle`) was added then
+  removed same day** — `lifecycleStage` was judged the more useful mirror. If
+  it's already been bootstrapped into a live workspace, delete the field manually
+  in Twenty (Settings → Data model → Lead) — `bootstrap_twenty.py` only ever
+  creates fields, it has no delete path.
+- **`_upsert` no longer loses a whole record over one bad Company field.** The
+  same 16 clubs kept failing `POST /rest/companies` with `INVALID_URL` even after
+  `link()` gained its own validation — the exact bad shape was never confirmed
+  (no direct DB access to the live data). Rather than keep guessing, `_upsert`
+  now catches that error generically on both create and update (detects any
+  dict value carrying `primaryLinkUrl`, not just `publicProfileUrl` by name),
+  drops the offending field(s), retries once, and logs the exact rejected value
+  — so the record is created either way, and the log tells us what to fix in
+  `link()` next.

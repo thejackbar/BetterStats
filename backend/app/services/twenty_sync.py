@@ -867,17 +867,17 @@ async def _sync_memberships(session, http, club_guid, club_name, assocs, company
 # Company field -> Lead field, for whatever a Lead mirrors from its Company.
 _LEAD_MIRROR_FIELDS = {
     "engagementScore": "engagementScore",
-    "inSalesCycle": "engagementCycle",
+    "lifecycleStage": "lifecycleStage",
 }
 
 
 async def _sync_lead_from_company(session, http, club_guid: str, company_fields: dict) -> None:
     """Mirror onto a club's Lead (if any) whatever of the Company's fields the Lead
-    also carries — engagementScore, and inSalesCycle as Lead.engagementCycle — the
-    moment the Company is pushed, from ANY path that can change either: BetterCricket's
-    own recompute (export_to_twenty, refresh_engagement, push_club_and_contacts) is
-    what actually drives the value, so mirroring right after each of those pushes
-    covers every source of change without waiting for the daily Lead seed/refresh
+    also carries — engagementScore and lifecycleStage — the moment the Company is
+    pushed, from ANY path that can change either: BetterCricket's own recompute
+    (export_to_twenty, refresh_engagement, push_club_and_contacts) is what actually
+    drives the value, so mirroring right after each of those pushes covers every
+    source of change without waiting for the daily Lead seed/refresh
     (twenty_leads_tasks._lead_values sets both there too, for a brand-new Lead).
     No-op if the club has no Lead yet, or ``company_fields`` touches neither mirrored
     field; best-effort, never raises into the Company push."""
@@ -1352,13 +1352,14 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                        if club.existing_org_id else None)
                 fields = await _engagement(session, club, org)
                 all_unsub = await _all_contacts_unsubscribed(session, club.id)
-                # A club whose every officer has opted out is Suppressed unless it's
-                # a genuinely paying customer (never override an active customer's
-                # lifecycle from a nightly engagement refresh).
+                # Recompute the full lifecycle stage every refresh (not just the
+                # suppression override) so it — and the Lead mirror below — actually
+                # catch any change, not only an all-officers-unsubscribe: a synced
+                # club that starts paying, or one that's just been emailed for the
+                # first time, moves stage here too.
                 paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
                 is_paying = bool(paid) or (club.demo_status or "") == "customer"
-                if all_unsub and not is_paying:
-                    fields["lifecycleStage"] = "SUPPRESSED"
+                fields["lifecycleStage"] = _lifecycle(club, is_paying, all_unsub)
                 updates.append((guid, tid_by_guid[guid], fields, all_unsub and not is_paying))
 
             async with httpx.AsyncClient() as http:
