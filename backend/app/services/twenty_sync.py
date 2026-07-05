@@ -178,9 +178,16 @@ def _arr(module_keys) -> float:
     return total - {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}.get(priced, 146)
 
 
-def _recency_pts(last, full=40):
+def _recency_pts(last, full=20):
     """Recency points from a last-touch timestamp: decays with age, a small floor
-    for any touch ever, 0 if never."""
+    for any touch ever, 0 if never.
+
+    ``full`` was 40 — sitting almost exactly on the Hot cutoff (45) on its own, so
+    a single page view this week already read Hot regardless of depth. Halved to
+    20 so recency alone can't cross into Hot; real frequency (repeat visits, more
+    than a couple of page views) or an explicit intent signal (trial request,
+    contact form) has to contribute too. A few pages read this week now lands
+    Warm, not Hot — sustained/repeat browsing still gets there via freq_pts."""
     if not last:
         return 0
     days = (datetime.datetime.now(datetime.timezone.utc) - last).days
@@ -327,10 +334,13 @@ async def _engagement(session, club: MarketingClub,
         tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
 
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
-    # engagement (so it's a deal to work, not just a name on a list).
+    # RECENT engagement (so it's a deal to work, not just a name on a list). Uses
+    # ``sessions``/``eng_30d`` (both 30-day-windowed), not the all-time ``last_touch``
+    # — a single click years ago shouldn't keep a club permanently flagged in-cycle
+    # long after its score has decayed back to Cold.
     in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
-        or onboarding_count or last_touch or sessions or eng_30d)
+        or onboarding_count or sessions or eng_30d)
 
     fields = {
         "engagementScore": score,
