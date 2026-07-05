@@ -211,6 +211,10 @@ async def _push_ses_to_twenty(session: AsyncSession, etype, subtype, ses_message
         return
     for email in recipients:
         await twenty_sync.update_person_by_email(email, fields)
+        if "subscribed" in fields:
+            # A permanent bounce or complaint just opted this person out — check
+            # whether every officer of their club(s) has now done so too.
+            await twenty_sync.handle_contact_opt_out(session, email)
 
 
 async def _record(session: AsyncSession, etype: str, subtype, reason,

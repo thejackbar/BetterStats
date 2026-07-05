@@ -36,11 +36,11 @@ from typing import Optional
 import httpx
 from sqlalchemy import select, text
 
-from app.config.settings import settings
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_client import client
 from app.services.twenty_sync import (
-    _billing_modules, _engagement, _link_get, _link_put, _twenty_modules, _upsert,
+    _all_contacts_unsubscribed, _billing_modules, _engagement, _link_get, _link_put,
+    _module_split, _raise_task, _twenty_modules, _upsert,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,18 +58,22 @@ def _now() -> datetime.datetime:
 
 # ── Lead lane ────────────────────────────────────────────────────────────────
 
-def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict):
+def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
+                 synced: bool = False):
     """Does this club qualify as a Lead right now, and if so with what source and
     modules of interest? Returns None when there's no qualifying signal (a merely
     contacted / emailed club is NOT a Lead — that would flood the inbox). Mirrors the
-    trigger table: requested a trial, in a trial, or in the engagement sales cycle."""
+    trigger table: requested a trial, in a trial, in the engagement sales cycle,
+    synced (an organisations row exists but the club isn't paying yet), or the
+    engagement score has crossed into Hot territory (score >= 45)."""
     if getattr(club, "not_interested", False):
         return None
     interested = _billing_modules(club.requested_trial_modules or [])
     trial_mods = _billing_modules(club.trial_modules or [])
     trialing = (club.demo_status or "") == "in_trial" or bool(trial_mods)
     in_cycle = bool(eng.get("inSalesCycle"))
-    if not (interested or trialing or in_cycle):
+    hot_score = (eng.get("engagementScore") or 0) >= 45
+    if not (interested or trialing or in_cycle or synced or hot_score):
         return None
     # Modules of interest = wanted-or-trialing, plus anything the rollup flagged as an
     # upsell (already in Twenty MULTI_SELECT form).
@@ -85,7 +89,8 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict):
     tier = eng.get("engagementTier") or "COLD"
     summary = (f"Tier {tier.title()}; sessions30d={eng.get('sessions30d', 0)}, "
                f"emailEng30d={eng.get('emailEngaged30d', 0)}"
-               + (f"; interested={wanted}" if wanted else ""))
+               + (f"; interested={wanted}" if wanted else "")
+               + ("; club synced, no paid module yet" if synced else ""))
     # Working if a trial is already live, else New — set once at create only.
     status = "WORKING" if trialing else "NEW"
     return {"source": source, "modules": modules, "tier": tier,
@@ -123,8 +128,25 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         scanned += 1
         org = (await session.get(Organisation, club.existing_org_id)
                if club.existing_org_id else None)
+        paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
+        is_paying = bool(paid) or (club.demo_status or "") == "customer"
+        if await _all_contacts_unsubscribed(session, club.id) and not is_paying:
+            # Every officer has opted out — discard any existing Lead instead of
+            # (re)qualifying one for a fully-suppressed club.
+            lead_row = await _link_get(session, "lead", guid)
+            if lead_row:
+                try:
+                    await client.update(http, "leads", lead_row[0], {"leadStatus": "DISCARDED"})
+                    stats["leads_discarded"] += 1
+                except Exception:  # noqa: BLE001
+                    logger.exception("twenty lead discard failed for suppressed club %s", guid)
+            continue
         eng = await _engagement(session, club, org)
-        sig = _lead_signal(club, org, eng)
+        # "We sync the club" (an organisations row exists) is itself a qualifying
+        # Lead signal while it isn't yet paying — a customer already in the
+        # engagement sales cycle qualifies through in_cycle/upsell instead.
+        synced = bool(club.existing_org_id) and not is_paying
+        sig = _lead_signal(club, org, eng, synced=synced)
         if sig is None:
             continue
         values = _lead_values(sig)
@@ -152,32 +174,16 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
 
 async def _create_task(session, http, ext_ref: str, title: str,
                        company_tid: Optional[str], due_at, stats, kind: str) -> None:
-    """Create one Twenty Task, deduped on ``ext_ref`` via twenty_links. Links it to
-    the club through a taskTargets join record (best-effort). No-op if a Task for this
-    ref already exists, so the daily scan never doubles up."""
-    if await _link_get(session, "task", ext_ref):
-        return
-    values: dict = {"title": title[:255], "status": "TODO"}
-    if due_at is not None:
-        values["dueAt"] = due_at.isoformat()
-    if settings.twenty_task_assignee_id:
-        values["assigneeId"] = settings.twenty_task_assignee_id
-    try:
-        task = await client.create(http, "tasks", values)
-    except Exception:  # noqa: BLE001
+    """Create one Twenty Task, deduped on ``ext_ref`` via twenty_links (delegates to
+    the shared ``twenty_sync._raise_task``). No-op if a Task for this ref already
+    exists, so the daily scan never doubles up."""
+    already = await _link_get(session, "task", ext_ref)
+    tid = await _raise_task(session, http, ext_ref, title, company_tid, due_at)
+    if tid is None and not already:
         stats["tasks_errored"] += 1
-        logger.exception("twenty task create failed (%s)", ext_ref)
         return
-    tid = task.get("id")
-    if not tid:
-        return
-    await _link_put(session, "task", ext_ref, tid, "")
-    if company_tid:
-        try:
-            await client.create(http, "taskTargets", {"taskId": tid, "companyId": company_tid})
-        except Exception:  # noqa: BLE001 — the task still exists unlinked
-            logger.exception("twenty taskTarget link failed for task %s", tid)
-    stats["tasks_" + kind] += 1
+    if tid is not None:
+        stats["tasks_" + kind] += 1
 
 
 async def _company_tid(session, guid: Optional[str]) -> Optional[str]:

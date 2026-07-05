@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config.settings import settings
 from app.models.db import CommsContact, EmailEvent, MarketingClubContact, Organisation, get_db
+from app.services import twenty_sync
 from app.services.marketing_org import org_is_outreach
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,16 @@ async def _unsubscribe(token: str, db: AsyncSession) -> tuple[str, str, str]:
             except (ValueError, TypeError):
                 pass  # bad campaign id in token — still unsubscribe, just don't log
         await db.commit()
+        # Mirror the opt-out into the CRM: flip the Person's subscribed flag, and
+        # (marketing-outreach sends only, since only those contacts are Twenty
+        # People) check whether every officer of their club(s) has now opted out.
+        if contact.email:
+            try:
+                await twenty_sync.update_person_by_email(contact.email, {"subscribed": False})
+                if org and org_is_outreach(org):
+                    await twenty_sync.handle_contact_opt_out(db, contact.email)
+            except Exception:  # noqa: BLE001 - a CRM hiccup must never break unsubscribe
+                logger.exception("twenty push failed for unsubscribe of %s", contact.email)
         return ("You're unsubscribed",
                 f"You won't receive any more emails from {club_name}. Changed your mind? Just let them know.",
                 accent)

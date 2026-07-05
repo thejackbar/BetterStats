@@ -711,3 +711,57 @@ up `/srv/docker/twenty/db` before the first migration run. None of this touches 
   Company now so the subset partitions cleanly when non-AU sources (e.g. UK
   Play-Cricket) come online. No model change needed then, just new directory
   sources feeding the same export.
+
+## 13. July 2026 — lifecycle/engagement rule correction + presync Task queue
+
+Feedback pass that corrected several rules baked into the Phase 2–6 code and
+closed two real gaps (`services/twenty_sync.py`, `twenty_leads_tasks.py`,
+`twenty_inbound.py`, `club_directory.py`, `public_comms.py`, `ses_events.py`,
+`routers/comms.py`; one-off backfill in `scripts/reconcile_twenty.py`).
+
+- **"Synced" is not "Customer".** `_lifecycle`/`_engagement` previously treated
+  any club with an `organisations` row (`existing_org_id`) as CUSTOMER and
+  scored it on account-health, even with zero paid modules — a club synced
+  ahead of a sale (or mid-trial) read as a paying customer from day one. Fixed:
+  CUSTOMER now requires `_module_split(org)` to actually return a non-empty
+  `paid` list (or `demo_status == 'customer'`). A synced-but-not-paying club is
+  PROSPECT, scored on prospect lead-heat, and raises a Lead (§5's "synced"
+  trigger in `_lead_signal`).
+- **Engagement tiers**: Cold < 30, Warm 30–45, Hot > 45 (was Cold < 34 / Hot ≥
+  67) on both the prospect and customer scoring branches.
+- **All-officers-unsubscribed → Suppressed.** New
+  `_all_contacts_unsubscribed` + `enforce_club_suppression` /
+  `handle_contact_opt_out`: when every named-email officer of a club has opted
+  out, the Company flips to SUPPRESSED (never overriding an actual paying
+  customer), its Lead is discarded, and any still-open Opportunity is marked
+  Lost / Dormant. Runs inline on every `refresh_engagement` pass (self-healing)
+  and in real time from the one-click unsubscribe link (`public_comms.py`,
+  previously didn't push to Twenty at all) and SES bounce/complaint
+  (`ses_events.py`).
+- **Every BetterComms send now upserts Twenty**, closing the gap where a club
+  had to be manually exported before it could appear in the CRM.
+  `twenty_sync.push_club_and_contacts(club_id, contact_ids)` upserts one
+  Company + the given officers on demand; `routers/comms.py::_run_send` calls
+  it for every marketing-outreach recipient right after a campaign send,
+  auto-enrolling a first-ever-emailed club at its computed lifecycle stage
+  (Target, by default).
+- **Trial Modules is now a real trigger, both directions.** `twenty_inbound.py`
+  reacted only to `interestedModules`; it now also reacts to `trialModules`,
+  and a super admin adding a module to a `marketing_clubs.trial_modules` row in
+  the Club Directory (`club_directory.set_sales_state`) queues the same
+  request. Shared `twenty_inbound.request_trial_modules`: a synced club gets a
+  real `ModuleActionRequest` (as before); an un-synced club (no `organisations`
+  row) gets a Twenty **Task** asking for it to be synced first
+  (`_queue_presync_task`, deduped forever on `presync:{club_guid}:{module}` via
+  `twenty_links`) — there's no separate BetterCricket-side queue table for
+  this, the Task itself is the queued request.
+- **Task creation deduped through one helper**: `twenty_sync._raise_task`
+  (twenty_links-keyed create-or-skip) is now shared by the daily
+  Lead/Task scan (`twenty_leads_tasks._create_task`) and any event-driven Task
+  raise, instead of two separate implementations.
+- **One-time reconciliation**: `python -m app.scripts.reconcile_twenty`
+  enrols every club the corrected rules say already belongs in Twenty (ever
+  emailed, synced, trialing, or a demo status set) but isn't linked yet, then
+  runs `refresh_engagement` + `refresh_leads_and_tasks` so every already-linked
+  club's lifecycle/tier/suppression/Lead state is brought current under the
+  corrected rules. Idempotent — safe to re-run.

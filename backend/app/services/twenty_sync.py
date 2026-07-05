@@ -24,6 +24,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
 from app.services.club_directory import club_filters
@@ -108,16 +109,31 @@ def _club_kind(name: Optional[str]) -> str:
     return "CLUB"
 
 
-def _lifecycle(club: MarketingClub) -> str:
+def _lifecycle(club: MarketingClub, is_paying: bool = False, all_unsub: bool = False) -> str:
     # Must be one of the Company lifecycleStage options (Target / Prospect /
     # Engaged / Trial / Customer / Churned / Suppressed). "Contacted" is an
     # Opportunity pipeline stage, NOT a company lifecycle value, so a contacted
     # club maps to Prospect here.
+    #
+    # ``is_paying`` = the linked org actually holds at least one PAID module
+    # (``_module_split``'s ``paid`` list is non-empty) — NOT just "an
+    # organisations row exists". Onboarding/syncing a club only pulls its CA
+    # data in; it doesn't make them a customer, so a synced-but-not-yet-paying
+    # club is a Prospect (with a Lead raised — see twenty_leads_tasks), never
+    # Customer.
     s = (club.status or "").lower()
-    if club.existing_org_id or s == "onboarded" or (club.demo_status or "") == "customer":
+    if is_paying or (club.demo_status or "") == "customer":
         return "CUSTOMER"
+    # Every named-email officer has opted out — a marketing-suppression state
+    # that overrides everything except an actual paying customer.
+    if all_unsub:
+        return "SUPPRESSED"
     if (club.demo_status or "") == "in_trial":
         return "TRIAL"
+    # Requested a trial, or we've synced the club (an organisations row exists,
+    # even without a paid module yet) — Prospect, not Customer.
+    if club.existing_org_id or club.requested_trial_modules:
+        return "PROSPECT"
     if s == "suppressed" or club.excluded:
         return "SUPPRESSED"
     if s == "contacted" or club.emailed_at:
@@ -196,7 +212,11 @@ async def _engagement(session, club: MarketingClub,
                 "upsellModules": [], "inSalesCycle": False}
     utm = club.utm_code
     org_id = str(club.existing_org_id) if club.existing_org_id else None
-    is_customer = org is not None
+    paid, _trial_mods, _renewals = _module_split(org) if org is not None else ([], [], [])
+    # A synced-but-not-yet-paying org (e.g. a demo synced ahead of a sale) is scored
+    # as a Prospect's lead heat, not a Customer's account health — "we sync the club"
+    # doesn't itself make them a customer (see _lifecycle).
+    is_customer = bool(paid) or (club.demo_status or "") == "customer"
 
     # Web activity (usage_events) by UTM code (prospect) or org id (customer/trial).
     web = (await session.execute(text("""
@@ -229,13 +249,14 @@ async def _engagement(session, club: MarketingClub,
 
     # Modules the club wants but isn't paying for = the open opportunity (a prospect's
     # interest, or a customer's expansion / trialing-extra). Drives the upsell signal.
-    paid = _billing_modules((org.module_overrides if org else None) or [])
+    paid_keys = _billing_modules(paid)
     wanted = _billing_modules(club.requested_trial_modules or []) | _billing_modules(club.trial_modules or [])
-    upsell = sorted(wanted - paid)
+    upsell = sorted(wanted - paid_keys)
 
     freq_pts = min(sessions * 6 + eng_30d * 4, 40)
     recency = _recency_pts(last_touch)
 
+    # Tier bands: Cold < 30, Warm 30-45, Hot > 45 (open-ended at the top).
     if is_customer:
         # Account health + expansion. A paying account starts engaged, gains for
         # recent product use, and for an active expansion opportunity; floored at Warm.
@@ -243,7 +264,7 @@ async def _engagement(session, club: MarketingClub,
         if upsell:
             score += 15
         score = min(score, 100)
-        tier = "HOT" if (score >= 67 or upsell) else "WARM"
+        tier = "HOT" if (score > 45 or upsell) else "WARM"
     else:
         # Prospect lead heat: recency + frequency of any touch + buying intent.
         score = recency + freq_pts
@@ -252,7 +273,7 @@ async def _engagement(session, club: MarketingClub,
         if (club.demo_status or "") == "in_trial":
             score += 8
         score = min(score, 100)
-        tier = "COLD" if score < 34 else "WARM" if score < 67 else "HOT"
+        tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
 
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # engagement (so it's a deal to work, not just a name on a list).
@@ -281,17 +302,24 @@ async def _engagement(session, club: MarketingClub,
     return fields
 
 
-def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -> dict:
+def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None,
+                    all_unsub: bool = False) -> dict:
     # Association membership is a separate many-to-many via the clubAssociation
     # junction (see _sync_memberships), each membership carrying an isPrimary flag —
     # so the primary association is recoverable from the relations and the company
     # holds no denormalised association field. Customer-side fields (paid modules,
     # subscription, renewal, billing, ARR) come from the linked Organisation when
     # the club is already onboarded.
+    #
+    # Per-module split (migration 118) resolved up front so lifecycleStage agrees
+    # with paidModules/ARR below: a club only counts as CUSTOMER once it genuinely
+    # holds a paid module, not merely because it's been synced.
+    paid, trial, renewals = _module_split(org) if org is not None else ([], [], [])
+    is_paying = bool(paid) or (club.demo_status or "") == "customer"
     vals = {
         "name": club.name,
         "bcClubId": club.grassroots_guid,
-        "lifecycleStage": _lifecycle(club),
+        "lifecycleStage": _lifecycle(club, is_paying, all_unsub),
         "subscriptionStatus": _sub_status(club),
         "trialModules": _twenty_modules(club.trial_modules),
         "interestedModules": _twenty_modules(club.requested_trial_modules),
@@ -311,11 +339,9 @@ def _company_values(club: MarketingClub, org: "Optional[Organisation]" = None) -
     if org is not None:
         status = (org.subscription_status or "").lower()
         vals["subscriptionStatus"] = status.upper() or None
-        # Per-module split (migration 118): a club can pay for some modules while
-        # trialing others, so paid vs trial is resolved per module, not from one
-        # org-wide flag. The org-level status stays a master switch — paused/cancelled
-        # there means nothing is live, so paidModules is empty and ARR is $0.
-        paid, trial, renewals = _module_split(org)
+        # The org-level status stays a master switch — paused/cancelled there means
+        # nothing is live, so paidModules is empty and ARR is $0 (already reflected
+        # in ``paid`` above, since _module_split zeroes out when the switch is off).
         vals["paidModules"] = _twenty_modules(paid)
         vals["arr"] = currency(_arr(paid))
         if trial:
@@ -466,6 +492,37 @@ async def _link_put(session: AsyncSession, entity_type: str, bc_id: str,
         "twenty_id = EXCLUDED.twenty_id, content_hash = EXCLUDED.content_hash, "
         "last_synced_at = NOW()"),
         {"e": entity_type, "b": bc_id, "t": twenty_id, "h": content_hash})
+
+
+async def _raise_task(session, http, ext_ref: str, title: str,
+                      company_tid: "Optional[str]" = None, due_at=None) -> "Optional[str]":
+    """Create one Twenty Task, deduped on ``ext_ref`` via ``twenty_links``
+    (entity_type ``task``) — shared by the daily Lead/Task scan
+    (twenty_leads_tasks) and any event-driven Task raise (a queued module trial
+    request, a "sync this club first" prompt, …). Best-effort: logs and returns
+    None on failure or when a Task for this ref already exists, never raises."""
+    if await _link_get(session, "task", ext_ref):
+        return None
+    values: dict = {"title": title[:255], "status": "TODO"}
+    if due_at is not None:
+        values["dueAt"] = due_at.isoformat()
+    if settings.twenty_task_assignee_id:
+        values["assigneeId"] = settings.twenty_task_assignee_id
+    try:
+        task = await client.create(http, "tasks", values)
+    except Exception:  # noqa: BLE001
+        logger.exception("twenty task create failed (%s)", ext_ref)
+        return None
+    tid = task.get("id")
+    if not tid:
+        return None
+    await _link_put(session, "task", ext_ref, tid, "")
+    if company_tid:
+        try:
+            await client.create(http, "taskTargets", {"taskId": tid, "companyId": company_tid})
+        except Exception:  # noqa: BLE001 - the task still exists unlinked
+            logger.exception("twenty taskTarget link failed for task %s", tid)
+    return tid
 
 
 async def _index_people_pass(session, http, filter: "str | None") -> tuple:
@@ -735,6 +792,178 @@ async def mark_contact_source(email: str, source: str) -> None:
     await update_person_by_email(email, {"contactSource": source})
 
 
+# ── club-level suppression (all officers opted out) ────────────────────────────
+
+async def _all_contacts_unsubscribed(session, club_id) -> bool:
+    """True when the club has at least one named-email officer and every one of
+    them has unsubscribed/bounced/complained. A club with zero email contacts is
+    NOT "all unsubscribed" — there's nothing to suppress on."""
+    row = (await session.execute(text("""
+        SELECT COUNT(*) FILTER (WHERE subscribed) AS subscribed_n, COUNT(*) AS total_n
+        FROM marketing_club_contacts
+        WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> ''
+    """), {"cid": str(club_id)})).first()
+    if not row or not row[1]:
+        return False
+    return row[0] == 0
+
+
+async def _downgrade_lead_and_opportunities(session, http, club_guid: str,
+                                            company_tid: "Optional[str]") -> None:
+    """A club whose every officer has opted out shouldn't sit in active sales
+    triage: discard its Lead (if any) and mark any of its still-open Opportunities
+    Lost / Dormant. Best-effort — the Opportunity relation-filter path
+    (``company.id[eq]:``) is unverified against the live workspace, same caveat as
+    the Task field paths in twenty_leads_tasks."""
+    lead_row = await _link_get(session, "lead", club_guid)
+    if lead_row:
+        try:
+            await client.update(http, "leads", lead_row[0], {"leadStatus": "DISCARDED"})
+        except Exception:  # noqa: BLE001
+            logger.exception("twenty: failed to discard lead for suppressed club %s", club_guid)
+    if not company_tid:
+        return
+    try:
+        payload = await client.list_page(http, "opportunities", limit=60,
+                                         filter=f"company.id[eq]:{company_tid}")
+        data = payload.get("data") if isinstance(payload, dict) else None
+        opps = data.get("opportunities") if isinstance(data, dict) else None
+        for opp in (opps or []):
+            if (opp.get("stage") or "") in ("Won", "Lost / Dormant") or not opp.get("id"):
+                continue
+            await client.update(http, "opportunities", opp["id"], {"stage": "Lost / Dormant"})
+    except Exception:  # noqa: BLE001 - opportunities aren't tracked in twenty_links; best-effort only
+        logger.exception("twenty: failed to downgrade opportunities for suppressed club %s", club_guid)
+
+
+async def enforce_club_suppression(session, club_id) -> dict:
+    """Recompute whether every named-email officer of this club has opted out, and
+    if so, mark its Company Suppressed (unless it's a genuinely paying customer)
+    and downgrade any open Lead/Opportunity. Called right after a contact's
+    subscribed flag flips false (unsubscribe link / SES bounce / complaint); the
+    same check also runs inline for every linked club on each ``refresh_engagement``
+    pass (nightly job + the one-time reconcile script), so it self-heals even
+    without a real-time trigger. No-op and never raises — this must not affect the
+    triggering request."""
+    if not client.configured:
+        return {"skipped": "not configured"}
+    try:
+        club = await session.get(MarketingClub, club_id)
+        if club is None:
+            return {"skipped": "no club"}
+        if not await _all_contacts_unsubscribed(session, club.id):
+            return {"skipped": "not all unsubscribed"}
+        link_row = await _link_get(session, "club", club.grassroots_guid)
+        if not link_row:
+            return {"skipped": "club not in CRM"}
+        company_tid = link_row[0]
+        org = (await session.get(Organisation, club.existing_org_id)
+               if club.existing_org_id else None)
+        paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
+        if paid or (club.demo_status or "") == "customer":
+            return {"skipped": "paying customer"}
+        async with httpx.AsyncClient() as http:
+            await client.update(http, "companies", company_tid, {"lifecycleStage": "SUPPRESSED"})
+            await _downgrade_lead_and_opportunities(session, http, club.grassroots_guid, company_tid)
+        return {"ok": True, "club": club.name}
+    except Exception as e:  # noqa: BLE001 - never let a CRM error affect the caller
+        logger.exception("twenty enforce_club_suppression failed for %s", club_id)
+        return {"error": str(e)}
+
+
+async def handle_contact_opt_out(session, email: str) -> None:
+    """After a contact's subscribed flag flips false (unsubscribe / bounce /
+    complaint), check every marketing club they're an officer of and suppress the
+    ones where every officer has now opted out. Best-effort, never raises."""
+    if not client.configured or not email:
+        return
+    try:
+        rows = (await session.execute(text(
+            "SELECT DISTINCT marketing_club_id FROM marketing_club_contacts "
+            "WHERE lower(email) = :e AND marketing_club_id IS NOT NULL"),
+            {"e": email.strip().lower()})).all()
+        for (cid,) in rows:
+            await enforce_club_suppression(session, cid)
+    except Exception:  # noqa: BLE001
+        logger.exception("twenty handle_contact_opt_out failed for %s", email)
+
+
+async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" = None) -> dict:
+    """Best-effort: upsert ONE prospect club's Company + the given
+    MarketingClubContact ids (People) into Twenty. This is the "every email sent
+    should upsert a record" hook: sending a BetterComms campaign to a club's
+    officer is itself the moment they enter the targeted CRM subset — no manual
+    "export to Twenty" click required first. A club not yet in the CRM is created
+    fresh, landing at its computed lifecycle stage (Target, for a first-ever send).
+
+    ``contact_ids`` defaults to the club's outreach-selected officers when omitted.
+    Opens its own session + http client; never raises — a CRM hiccup must never
+    break a send."""
+    if not client.configured or not marketing_club_id:
+        return {"skipped": "not configured"}
+    try:
+        async with async_session_maker() as session:
+            session.sync_session.expire_on_commit = False
+            club = await session.get(MarketingClub, marketing_club_id)
+            if club is None:
+                return {"skipped": "no club"}
+            org = (await session.get(
+                        Organisation, club.existing_org_id,
+                        options=[selectinload(Organisation.module_subscriptions)])
+                   if club.existing_org_id else None)
+            cq = select(MarketingClubContact).where(
+                MarketingClubContact.marketing_club_id == club.id)
+            if contact_ids:
+                cq = cq.where(MarketingClubContact.id.in_(contact_ids))
+            else:
+                cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
+            contacts = (await session.execute(cq)).scalars().all()
+            all_unsub = await _all_contacts_unsubscribed(session, club.id)
+            company = {**_company_values(club, org, all_unsub=all_unsub),
+                       **(await _engagement(session, club, org))}
+            club_stage = company["lifecycleStage"]
+
+            async with httpx.AsyncClient() as http:
+                ctid, _cact = await _upsert(session, http, "club", club.grassroots_guid,
+                                            "companies", "bcClubId", company)
+                for ct in contacts:
+                    try:
+                        person_vals = {**_person_values(ct, club.country),
+                                       "clubLifecycleStage": club_stage}
+                        email = (person_vals.get("emails") or {}).get("primaryEmail")
+                        dedup = ("emails.primaryEmail", email) if email else None
+                        nm = person_vals.get("name") or {}
+                        nkey = _name_key(nm.get("firstName"), nm.get("lastName"))
+                        known_id, match_by = None, None
+                        if email:
+                            row = await _link_get(session, "person_email", email)
+                            if row:
+                                known_id, match_by = row[0], "email"
+                        if not known_id and nkey:
+                            row = await _link_get(session, "person_name", nkey)
+                            if row:
+                                known_id, match_by = row[0], "name"
+                        if match_by == "name" and "emails" in person_vals:
+                            person_vals = {k: v for k, v in person_vals.items() if k != "emails"}
+                        pid, _pact = await _upsert(
+                            session, http, "person", str(ct.id), "people", "bcContactId",
+                            person_vals, dedup=dedup, known_id=known_id,
+                            create_extra={**_person_create_extra(ct), "companyId": ctid})
+                        if email:
+                            await _link_put(session, "person_email", email, pid, "")
+                        if nkey:
+                            await _link_put(session, "person_name", nkey, pid, "")
+                    except Exception:  # noqa: BLE001 - one bad officer must not drop the rest
+                        logger.exception("twenty push_club_and_contacts: officer %s failed", ct.id)
+                if all_unsub:
+                    await _downgrade_lead_and_opportunities(session, http, club.grassroots_guid, ctid)
+            await session.commit()
+        return {"ok": True, "club": club.name, "company": ctid}
+    except Exception as e:  # noqa: BLE001 - never let a CRM error affect the caller
+        logger.exception("twenty push_club_and_contacts failed for club %s", marketing_club_id)
+        return {"error": str(e)}
+
+
 async def push_org_company(org_id) -> dict:
     """Push ONE onboarded club's Company fields (paid/trial modules, ARR, subscription
     status, renewal) to Twenty after a subscription change. Best-effort and
@@ -813,9 +1042,10 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                 if selected_only:
                     cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
                 contacts = (await session.execute(cq)).scalars().all()
-                company = {**_company_values(club, org),
+                all_unsub = await _all_contacts_unsubscribed(session, club.id)
+                company = {**_company_values(club, org, all_unsub=all_unsub),
                            **(await _engagement(session, club, org))}
-                club_stage = _lifecycle(club)
+                club_stage = company["lifecycleStage"]
                 people = [{
                     "bc_id": str(ct.id),
                     # clubLifecycleStage denormalises the club's stage onto the Contact
@@ -831,6 +1061,7 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                     "company": company,
                     "assocs": _club_assocs(club),
                     "people": people,
+                    "all_unsub": all_unsub,
                 })
 
             logger.info("twenty export: %d club snapshot(s); officer counts: %s",
@@ -931,6 +1162,9 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                                     "twenty export: officer %s failed (email=%r name=%r known_id=%r)",
                                     bc_id, locals().get("email"), locals().get("nkey"),
                                     locals().get("known_id"))
+                        if snap["all_unsub"]:
+                            await _downgrade_lead_and_opportunities(
+                                session, http, snap["guid"], ctid)
                         await session.commit()
                         logger.info("twenty export: committed club %r", snap["name"])
                     except Exception:  # noqa: BLE001 - one bad club must not abort the run
@@ -981,13 +1215,24 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                     continue
                 org = (await session.get(Organisation, club.existing_org_id)
                        if club.existing_org_id else None)
-                updates.append((tid_by_guid[guid], await _engagement(session, club, org)))
+                fields = await _engagement(session, club, org)
+                all_unsub = await _all_contacts_unsubscribed(session, club.id)
+                # A club whose every officer has opted out is Suppressed unless it's
+                # a genuinely paying customer (never override an active customer's
+                # lifecycle from a nightly engagement refresh).
+                paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
+                is_paying = bool(paid) or (club.demo_status or "") == "customer"
+                if all_unsub and not is_paying:
+                    fields["lifecycleStage"] = "SUPPRESSED"
+                updates.append((guid, tid_by_guid[guid], fields, all_unsub and not is_paying))
 
             async with httpx.AsyncClient() as http:
-                for tid, fields in updates:
+                for guid, tid, fields, suppress in updates:
                     try:
                         await client.update(http, "companies", tid, fields)
                         stats["refreshed"] += 1
+                        if suppress:
+                            await _downgrade_lead_and_opportunities(session, http, guid, tid)
                     except Exception:  # noqa: BLE001 - one bad company can't stop the rest
                         stats["errored"] += 1
                         logger.exception("twenty refresh_engagement failed for %s", tid)

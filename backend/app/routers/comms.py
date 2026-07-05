@@ -53,6 +53,7 @@ from app.services import comms_segments
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
+from app.services import twenty_sync
 from app.services.club_directory import CA_EMAIL_DOMAINS
 from app.services import name_format
 from app.services.send_rate_limiter import send_limiter
@@ -1560,7 +1561,29 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     WHERE r.campaign_id = :cid AND r.status = 'sent'
                       AND cc.marketing_club_id IS NOT NULL)
             """), {"now": now, "cid": uuid.UUID(campaign_id)})
+            # Every email sent should upsert a record in Twenty: for a
+            # marketing-outreach send, the club (Company) and the officer(s) just
+            # emailed (People) enter the CRM subset now if they weren't already —
+            # no manual "export to Twenty" click required first.
+            sent_officers = (await s.execute(text("""
+                SELECT DISTINCT cc.marketing_club_id, mcc.id
+                FROM comms_recipients r
+                JOIN comms_contacts cc ON cc.id = r.contact_id
+                JOIN marketing_club_contacts mcc
+                  ON mcc.marketing_club_id = cc.marketing_club_id
+                 AND lower(mcc.email) = lower(cc.email)
+                WHERE r.campaign_id = :cid AND r.status = 'sent'
+                  AND cc.marketing_club_id IS NOT NULL
+            """), {"cid": uuid.UUID(campaign_id)})).all()
             await s.commit()
+        by_club: dict = {}
+        for club_id, contact_id in sent_officers:
+            by_club.setdefault(club_id, []).append(contact_id)
+        for club_id, contact_ids in by_club.items():
+            try:
+                await twenty_sync.push_club_and_contacts(club_id, contact_ids)
+            except Exception:  # noqa: BLE001 - a CRM hiccup must never affect the send
+                logger.exception("twenty push_club_and_contacts failed for club %s", club_id)
         logger.info("BetterComms: campaign %s sent=%d failed=%d", campaign_id, sent, failed)
     except Exception as e:  # never let the task die silently
         logger.error("BetterComms send failed for %s: %s", campaign_id, e, exc_info=True)

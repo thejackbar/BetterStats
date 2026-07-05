@@ -1104,10 +1104,17 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
                           demo_status=..., not_interested=None) -> Optional[dict]:
     """Set a prospect club's sales-pipeline state (super-admin maintained, no
     automated source). Only the fields passed are changed. Returns the new state,
-    or None if the club isn't found."""
+    or None if the club isn't found.
+
+    Adding a module to Trial Modules here queues the same super-admin action-queue
+    request the Twenty CRM webhook raises when a salesperson does the equivalent
+    edit on the Company (see twenty_inbound.request_trial_modules): a real
+    ModuleActionRequest if the club is already synced, else a Twenty Task asking
+    for it to be synced first. Best-effort — never blocks saving the sales state."""
     club = await session.get(MarketingClub, club_id)
     if club is None:
         return None
+    old_trial = set(club.trial_modules or [])
     if trial_modules is not None:
         club.trial_modules = _clean_modules(trial_modules)
     if requested_trial_modules is not None:
@@ -1118,8 +1125,18 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     if not_interested is not None:
         club.not_interested = bool(not_interested)
     club.updated_at = func.now()
+    added_trial = set(club.trial_modules or []) - old_trial
     await session.commit()
     await session.refresh(club)
+    if added_trial:
+        try:
+            from app.services.twenty_inbound import request_trial_modules
+            org = (await session.get(Organisation, club.existing_org_id)
+                   if club.existing_org_id else None)
+            await request_trial_modules(session, club, org, sorted(added_trial),
+                                        source="app", ext_key=f"app:{club.grassroots_guid}")
+        except Exception:  # noqa: BLE001 - queueing the follow-up must never block the save
+            logger.exception("club_directory: failed to queue trial request for %s", club.id)
     return {
         "id": str(club.id),
         "trial_modules": club.trial_modules or [],

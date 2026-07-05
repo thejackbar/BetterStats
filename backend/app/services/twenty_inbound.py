@@ -1,20 +1,26 @@
 """Twenty INBOUND — turn a CRM record-update webhook into a BetterCricket request.
 
 Twenty is otherwise an export-only sink (twenty_sync). This is the one path data
-flows the other way: when a salesperson marks a club interested in a module on the
-Twenty Company, the webhook lands here and we queue a module trial request
-(``module_action_requests``, source=twenty) for a super admin to action. It never
-changes entitlement directly.
+flows the other way: when a salesperson marks a club interested in a module, or
+adds one to Trial Modules, on the Twenty Company, the webhook lands here and we
+queue a module trial request (``module_action_requests``, source=twenty) for a
+super admin to action. It never changes entitlement directly.
+
+A club that isn't synced yet (no ``organisations`` row — ``ModuleActionRequest``
+requires one) can't be queued that way: instead we raise a Twenty Task asking for
+the club to be synced first, so the trial request can follow once it is.
 
 The dispatcher is deliberately generic — keyed on ``eventName`` — so future
 Twenty-origin request types plug into the same entrypoint. Verified against a real
 Twenty payload may need the field paths below tweaked; they follow the shape we
-export in twenty_sync (``bcClubId``, ``interestedModules`` as uppercase keys).
+export in twenty_sync (``bcClubId``, ``interestedModules``/``trialModules`` as
+uppercase keys).
 """
 from __future__ import annotations
 
 import logging
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,8 +42,8 @@ def _record_from(payload: dict) -> dict:
 
 
 def _modules_from(value) -> list[str]:
-    """Normalise an interested-modules value (Twenty multiselect, uppercase keys, or
-    a comma string) to our lowercase module keys."""
+    """Normalise a Twenty modules multiselect value (uppercase keys, or a comma
+    string) to our lowercase module keys."""
     if value is None:
         return []
     if isinstance(value, str):
@@ -50,52 +56,73 @@ def _modules_from(value) -> list[str]:
     return [p.lower() for p in parts if p and p.lower() in BILLABLE_MODULES]
 
 
-async def _resolve_org(db: AsyncSession, record: dict) -> Organisation | None:
-    """Map a Twenty Company back to a BetterCricket org via the bcClubId we export
-    (= marketing_clubs.grassroots_guid -> existing_org_id)."""
+async def _resolve_club_and_org(db: AsyncSession, record: dict):
+    """Map a Twenty Company back to its marketing-directory row and (if synced) its
+    BetterCricket org, via the bcClubId we export (= marketing_clubs.grassroots_guid
+    -> existing_org_id). Returns (mc, org) — org is None for a club not yet synced."""
     bc_club_id = record.get("bcClubId") or record.get("bcclubid")
     if not bc_club_id:
-        return None
+        return None, None
     mc = (await db.execute(
         select(MarketingClub).where(MarketingClub.grassroots_guid == str(bc_club_id))
     )).scalar_one_or_none()
-    if mc is None or mc.existing_org_id is None:
-        return None
-    return await db.get(Organisation, mc.existing_org_id)
+    if mc is None:
+        return None, None
+    org = await db.get(Organisation, mc.existing_org_id) if mc.existing_org_id else None
+    return mc, org
 
 
-async def dispatch_webhook(db: AsyncSession, payload: dict) -> dict:
-    """Route a verified Twenty webhook. Returns a small summary for the response/log.
-    Only company create/update events carrying interested modules do anything today."""
-    event = str((payload or {}).get("eventName") or (payload or {}).get("event") or "").lower()
-    record = _record_from(payload)
-    # Only act on company events (ignore people/associations/etc).
-    if "company" not in event and "bcClubId" not in record and "bcclubid" not in record:
-        return {"handled": False, "reason": "not a company event"}
+async def _queue_presync_task(db: AsyncSession, mc: MarketingClub, module_keys: list[str]) -> list[str]:
+    """The club hasn't been synced yet (no organisations row), so a trial can't be
+    queued as a ModuleActionRequest. Raise a Twenty Task per requested module instead
+    — deduped forever on a deterministic ext_ref, so re-saving the same modules in
+    Twenty never re-raises it."""
+    from app.services.twenty_sync import _link_get, _raise_task  # deferred: avoid a cycle
+    created = []
+    link_row = await _link_get(db, "club", mc.grassroots_guid)
+    company_tid = link_row[0] if link_row else None
+    async with httpx.AsyncClient() as http:
+        for module_key in module_keys:
+            ext_ref = f"presync:{mc.grassroots_guid}:{module_key}"
+            title = (f"Sync {mc.name}: needed before the {module_key.upper()} trial "
+                     f"requested in the CRM can be created")
+            tid = await _raise_task(db, http, ext_ref, title, company_tid)
+            if tid:
+                created.append(module_key)
+                await db.commit()  # persist the twenty_links dedupe row immediately
+    return created
 
-    interested = _modules_from(record.get("interestedModules") or record.get("interestedmodules"))
-    if not interested:
-        return {"handled": False, "reason": "no interested modules"}
 
-    org = await _resolve_org(db, record)
+async def request_trial_modules(db: AsyncSession, mc: MarketingClub, org: "Organisation | None",
+                                module_keys: list[str], *, source: str,
+                                ext_key: "str | None" = None) -> dict:
+    """Queue a trial for each of ``module_keys`` on ``mc``: a real, actionable
+    ``ModuleActionRequest`` when the club is already synced (an org exists), else a
+    Twenty Task asking for the club to be synced first (see ``_queue_presync_task``).
+    Shared by the Twenty webhook (a salesperson edits Trial/Interested Modules on the
+    Company) and the Club Directory (a super admin edits Trial Modules directly) —
+    both funnel through the same super-admin action queue either way.
+
+    Deduped: an org-side request skips a module already held or already outstanding;
+    a pre-sync Task is deduped forever on ``(club, module)`` via twenty_links."""
+    module_keys = sorted(set(module_keys))
+    if not module_keys:
+        return {"created": []}
     if org is None:
-        return {"handled": False, "reason": "no linked club"}
+        created = await _queue_presync_task(db, mc, module_keys)
+        return {"club": mc.name, "sync_required": True, "created": created}
 
-    # Skip modules the club already holds (compared at the billable level, so a club
-    # already on BetterAdmin isn't asked again for fees/comms/merch).
     held = {
         billing_key_for(k) for k in (await db.execute(
             select(OrgModuleSubscription.module_key)
             .where(OrgModuleSubscription.organisation_id == org.id)
         )).scalars().all()
     }
-    record_id = str(record.get("id") or "")
     created = []
-    for module_key in interested:
+    for module_key in module_keys:
         if module_key in held:
             continue
-        ext_ref = f"twenty:{record_id}:{module_key}" if record_id else None
-        # Dedupe: an existing outstanding request, or the same external_ref.
+        ext_ref = f"{ext_key}:{module_key}" if ext_key else None
         existing_q = select(ModuleActionRequest.id).where(
             ModuleActionRequest.organisation_id == org.id,
             ModuleActionRequest.module_key == module_key,
@@ -113,11 +140,37 @@ async def dispatch_webhook(db: AsyncSession, payload: dict) -> dict:
             module_key=module_key,
             kind="trial",
             status="outstanding",
-            source="twenty",
-            note="Interest flagged in the CRM",
+            source=source,
+            note="Trial requested in the CRM" if source == "twenty" else "Trial modules updated in the Club Directory",
             external_ref=ext_ref,
         ))
         created.append(module_key)
     if created:
         await db.commit()
-    return {"handled": True, "club": org.name, "created": created}
+    return {"club": org.name, "created": created}
+
+
+async def dispatch_webhook(db: AsyncSession, payload: dict) -> dict:
+    """Route a verified Twenty webhook. Returns a small summary for the response/log.
+    Only company create/update events carrying interested or trial modules do
+    anything today."""
+    event = str((payload or {}).get("eventName") or (payload or {}).get("event") or "").lower()
+    record = _record_from(payload)
+    # Only act on company events (ignore people/associations/etc).
+    if "company" not in event and "bcClubId" not in record and "bcclubid" not in record:
+        return {"handled": False, "reason": "not a company event"}
+
+    interested = _modules_from(record.get("interestedModules") or record.get("interestedmodules"))
+    trialing = _modules_from(record.get("trialModules") or record.get("trialmodules"))
+    wanted = sorted(set(interested) | set(trialing))
+    if not wanted:
+        return {"handled": False, "reason": "no interested/trial modules"}
+
+    mc, org = await _resolve_club_and_org(db, record)
+    if mc is None:
+        return {"handled": False, "reason": "no linked club"}
+
+    record_id = str(record.get("id") or "")
+    result = await request_trial_modules(db, mc, org, wanted, source="twenty",
+                                         ext_key=f"twenty:{record_id}" if record_id else None)
+    return {"handled": True, **result}
