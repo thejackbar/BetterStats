@@ -765,3 +765,53 @@ closed two real gaps (`services/twenty_sync.py`, `twenty_leads_tasks.py`,
   runs `refresh_engagement` + `refresh_leads_and_tasks` so every already-linked
   club's lifecycle/tier/suppression/Lead state is brought current under the
   corrected rules. Idempotent — safe to re-run.
+
+## 14. July 2026 — website enquiries, sync/trial hooks, and page-view volume
+
+A second feedback pass, wiring three more signal sources into the same
+`_engagement` rollup (`services/twenty_sync.py`, `twenty_leads_tasks.py`,
+`routers/organisations.py`, `routers/club_admin.py`, `services/twenty_client.py`;
+migration 133).
+
+- **Website "onboard my club" enquiries now feed the score.** Both the
+  `ClubCTABar` → `QuickEnquiryModal` ("Get your club on BetterCricket") and the
+  full `/contact` page ("Request access" → "Send message") post to the SAME
+  `POST /public/contact` → `club_onboarding_requests` row — that table carries no
+  FK back to `marketing_clubs`, so `twenty_sync._onboarding_signal` attributes a
+  submission to a club at read time: match the submitter's email against a known
+  officer (`marketing_club_contacts`), else the anonymous visitor's UTM-tagged
+  `usage_events` history, else an exact club-name match. A hit is the single
+  strongest prospect score bump (+20, beats the admin-set requested-trial flag),
+  qualifies as a Lead sourced `CONTACT_US` (an option that already existed in the
+  bootstrap but nothing populated it before), and gates Step 1 of the reconcile
+  script (email-match only there, for enrolment precision).
+- **A real per-module trial now always registers.** `_engagement` computed
+  `_module_split(org)`'s real `trial` list (actual `org_module_subscriptions`
+  rows a super admin started) and then discarded it, scoring only the marketing
+  directory's separate, manually-set `trial_modules` aspirational field. Fixed:
+  the real trial list is folded into `wanted`/`upsellModules` too, so starting a
+  trial via `club_admin.py::start_module_trial` registers even if nobody
+  separately ticks it in the Club Directory.
+- **Syncing a club now pushes to Twenty immediately.** `existing_org_id` used to
+  only get linked back to the Marketing Directory the next time the directory
+  *crawler* revisited that club (`club_directory._link_existing_org`) — which
+  could be days after the actual onboard. `organisations.py::onboard_organisation`
+  now does the same match (PlayHQ id, then name) right when the org is created,
+  and fires `push_org_company` immediately if it finds one.
+- **Starting a trial now pushes to Twenty immediately.** `start_module_trial`
+  (the direct super-admin route) never pushed to Twenty at all — only its
+  sibling `approve_module_request` (approving a *queued* trial request) did. Both
+  now call the same `_push_club_to_twenty` fire-and-forget helper.
+- **Page-view/API volume, not just distinct visitors.** The `usage_events` web
+  query only ever counted `COUNT(DISTINCT visitor_id)` — one visitor browsing 50
+  pages scored identically to one bouncing after a single view. Added a capped
+  `COUNT(*)` volume term (`min(events_30d, 20)`) alongside it. Added migration
+  **133**: `usage_events(org_id, created_at) WHERE org_id IS NOT NULL` — the
+  customer/trial branch of this query (`org_id::text = …`) had no index at all.
+- **Internal-only signal fields never reach Twenty's API.** `_engagement` needed
+  to hand a boolean (`_onboardingRequested`) to `twenty_leads_tasks._lead_signal`
+  without it being a real Twenty Company field. Rather than bootstrap a throwaway
+  field, `twenty_client.py` gained a `_public()` filter (drop any leading-
+  underscore key before a create/update body goes out) — a reusable convention
+  for any future signal that needs to ride along the same dict without touching
+  Twenty's schema.

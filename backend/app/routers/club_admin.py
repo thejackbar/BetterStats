@@ -1918,6 +1918,10 @@ async def start_module_trial(
     mod_subs.start_trial_billing(org, module_key, start=body.start, end=body.end, days=days)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
+    # A new trial is a strong engagement signal (see twenty_sync._engagement's
+    # per-module upsell calc) — push it to Twenty now rather than waiting for the
+    # nightly refresh, same as the approve_module_request path below.
+    _push_club_to_twenty(org.id)
     return _club_payload(org)
 
 

@@ -1,11 +1,14 @@
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 import re as _re
 from pydantic import BaseModel
 import uuid
 
-from app.models.db import Organisation, Season, Grade, User, ClubMembership, get_db
+from app.models.db import Organisation, Season, Grade, User, ClubMembership, MarketingClub, get_db
 from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
@@ -17,6 +20,24 @@ from app.auth.capabilities import require_cap, RUN_SYNC
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
 _org_sync_running: set = set()
+_background_tasks: set = set()
+logger = logging.getLogger(__name__)
+
+
+def _push_club_to_twenty(org_id) -> None:
+    """Fire-and-forget: push one club's Company fields to Twenty. No-op when
+    Twenty isn't configured; never raises into the request (mirrors
+    club_admin.py's identical helper — kept local since routers don't share
+    request-scoped helpers)."""
+    async def _run():
+        try:
+            from app.services import twenty_sync
+            await twenty_sync.push_org_company(org_id)
+        except Exception:
+            logger.exception("twenty push failed")
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 class OnboardRequest(BaseModel):
@@ -87,6 +108,26 @@ async def onboard_organisation(
     org = await upsert_organisation(db, org_data)
     run_id = await start_sync_run(org.id, "org_full")
     background_tasks.add_task(_sync_safe, data.org_id, run_id, "org_full")
+
+    # Link this now-synced org back to its Marketing Directory row immediately —
+    # otherwise the link only happens the next time the directory crawler
+    # revisits this club (club_directory._link_existing_org), which could be
+    # days away. Same matching priority (PlayHQ id, then name), reversed to look
+    # up FROM the org. Best-effort: a club that isn't in the directory at all is
+    # a normal no-op. Pushing to Twenty now (rather than waiting for the nightly
+    # refresh) is what makes "we synced the club" show up in the CRM lifecycle/
+    # engagement score right away.
+    mc = await db.scalar(
+        select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
+                                    MarketingClub.playhq_id == data.org_id))
+    if mc is None:
+        mc = await db.scalar(
+            select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
+                                        func.lower(MarketingClub.name) == name.lower()))
+    if mc is not None:
+        mc.existing_org_id = org.id
+        await db.commit()
+        _push_club_to_twenty(org.id)
 
     # The onboarded club becomes the club admin's linked club.
     if not is_super:

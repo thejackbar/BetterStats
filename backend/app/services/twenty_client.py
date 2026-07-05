@@ -68,6 +68,15 @@ class TwentyApiError(Exception):
     Twenty rejected (raise_for_status alone only gives the status code)."""
 
 
+def _public(values: dict) -> dict:
+    """Drop any leading-underscore key before a value dict goes out over the wire.
+    Callers use a ``_foo`` key as internal bookkeeping carried alongside the real
+    Twenty fields (e.g. a signal one caller derives and a sibling caller reads back
+    off the same dict) — Twenty has no such field and would reject/ignore it, so
+    every create/update passes through here first."""
+    return {k: v for k, v in values.items() if not k.startswith("_")}
+
+
 def _raise(r: httpx.Response, method: str, plural: str):
     try:
         detail = r.json()
@@ -141,7 +150,7 @@ class TwentyClient:
         return last  # exhausted retries — return the last 429 so the caller raises
 
     async def create(self, http: httpx.AsyncClient, plural: str, values: dict) -> dict:
-        r = await self._send(http, "POST", f"{self.base}/rest/{plural}", json=values)
+        r = await self._send(http, "POST", f"{self.base}/rest/{plural}", json=_public(values))
         if r.status_code >= 400:
             _raise(r, "POST", plural)
         return _record(r.json())
@@ -156,7 +165,7 @@ class TwentyClient:
         # lists. Sending deletedAt=null restores it (no-op on an active record), so
         # the export — the source of truth for the subset — un-trashes records and
         # they reappear, instead of silently "updating" a hidden record.
-        body = dict(values)
+        body = _public(values)
         body["deletedAt"] = None
         r = await self._send(http, "PATCH", f"{self.base}/rest/{plural}/{record_id}", json=body)
         if r.status_code == 404:

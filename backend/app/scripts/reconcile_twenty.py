@@ -8,19 +8,30 @@ Twenty actually is, right now, and that every already-linked club's lifecycle
 stage / engagement tier / Lead / suppression state reflects the corrected rules:
 
   - a club that's ever been emailed, synced (an organisations row exists), had a
-    trial requested/started, or has a demo status set should already be a Company
-    in Twenty (Target by default; Prospect once synced or a trial's been asked
-    for) — Step 1 enrols any club matching that but missing from twenty_links.
+    trial requested/started, has a demo status set, or is the target of an
+    attributable "Get your club on BetterCricket" / "Request access" website
+    enquiry should already be a Company in Twenty (Target by default; Prospect
+    once synced or a trial's been asked for) — Step 1 enrols any club matching
+    that but missing from twenty_links.
   - engagement score/tier (Warm 30-45, Hot >45) and lifecycle stage (synced alone
     is never Customer; only a genuinely paid module is) — Step 2 recomputes both
-    for every already-linked club.
+    for every already-linked club. The score itself now also accounts for: real
+    per-module trial subscriptions a super admin started (not just the directory's
+    aspirational trial_modules flag), raw page-view/API volume on a club's UTM
+    code or org (not just distinct-visitor count), and a direct onboarding
+    enquiry (the single strongest prospect signal — scores above requested-trial).
   - a club whose every named-email officer has unsubscribed/bounced/complained is
     Suppressed, with its Lead discarded and any open Opportunity marked Lost /
     Dormant — folded into Step 2's refresh_engagement pass.
   - a Lead exists for every club that requested a trial, is trialing, is synced
-    but not yet paying, is in the engagement sales cycle, or has crossed a score
-    of 45 — Step 3 seeds/refreshes Leads, mirrors outstanding module trial
-    requests to Tasks, and scans trials/renewals coming due.
+    but not yet paying, is in the engagement sales cycle, submitted a direct
+    onboarding enquiry (sourced "Contact us"), or has crossed a score of 45 —
+    Step 3 seeds/refreshes Leads, mirrors outstanding module trial requests to
+    Tasks, and scans trials/renewals coming due.
+  - syncing a club (organisations.py::onboard_organisation) and starting a real
+    module trial (club_admin.py::start_module_trial) now both push to Twenty
+    immediately in addition to this backfill — this script is for everything
+    that happened before those hooks existed, or while Twenty was unreachable.
 
 Usage from the backend container:
   docker exec -e PYTHONPATH=/app betterstats-backend \\
@@ -48,9 +59,16 @@ _PACE_SECONDS = 0.05
 
 async def _clubs_missing_from_crm() -> list:
     """Every club the rules already say belongs in Twenty (ever emailed, synced,
-    trialing/requested a trial, or carrying a demo status) but with no
-    ``twenty_links`` row yet — i.e. a club BetterComms/BetterCricket has already
-    interacted with in a way that should have enrolled it, but hasn't."""
+    trialing/requested a trial, carrying a demo status, or the target of an
+    attributable "onboard my club" website enquiry) but with no ``twenty_links``
+    row yet — i.e. a club BetterComms/BetterCricket has already interacted with in
+    a way that should have enrolled it, but hasn't.
+
+    The onboarding-enquiry match is deliberately narrower here than the one
+    ``twenty_sync._onboarding_signal`` uses for scoring (email-against-known-officer
+    only, no UTM/name fallback) — this gate decides whether to enrol a WHOLE club
+    into the CRM, so it stays on the highest-precision signal; the scoring signal
+    just needs to be directionally right, not this strict."""
     async with async_session_maker() as session:
         rows = (await session.execute(text("""
             SELECT mc.id
@@ -62,6 +80,13 @@ async def _clubs_missing_from_crm() -> list:
                 OR mc.demo_status IS NOT NULL
                 OR jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) > 0
                 OR jsonb_array_length(COALESCE(mc.requested_trial_modules, '[]'::jsonb)) > 0
+                OR EXISTS (
+                  SELECT 1 FROM club_onboarding_requests cor
+                  WHERE cor.email IS NOT NULL AND cor.email <> ''
+                    AND lower(cor.email) IN (
+                      SELECT lower(email) FROM marketing_club_contacts
+                      WHERE marketing_club_id = mc.id AND email IS NOT NULL AND email <> '')
+                )
               )
               AND NOT EXISTS (
                 SELECT 1 FROM twenty_links tl

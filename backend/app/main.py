@@ -755,6 +755,13 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_source "
             "ON usage_events(traffic_source) WHERE traffic_source IS NOT NULL"
         ))
+        # Migration 133: index the org_id branch of twenty_sync._engagement's
+        # usage_events scan (a customer/trial club's authenticated in-app
+        # activity) — previously unindexed.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_org_created "
+            "ON usage_events(org_id, created_at DESC) WHERE org_id IS NOT NULL"
+        ))
         # Login attempts — append-only audit of every sign-in attempt (success
         # or failure), so we can see which username/email is being tried, from
         # where, and whether it succeeded. IP is stored as a truncated SHA-256

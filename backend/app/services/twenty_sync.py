@@ -193,12 +193,40 @@ def _recency_pts(last, full=40):
     return int(full * 0.1)
 
 
+async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]"):
+    """Has anyone asked, on the public site, for this club to be onboarded? Covers
+    both the "Get your club on BetterCricket" quick modal and the full /contact
+    "Request access" form — both post to the SAME ``club_onboarding_requests`` row
+    (``routers/public_contact.py``), which carries no FK back to ``marketing_clubs``,
+    so it's attributed here the same way email engagement is: by matching the
+    submitter's email against a known officer of this club, OR (for a submitter who
+    isn't yet a listed officer — the common case for a brand-new enquiry) by the
+    anonymous visitor having arrived via this club's outreach UTM code, OR an exact
+    club-name match as a last resort. Returns (count, last_at)."""
+    row = (await session.execute(text("""
+        SELECT COUNT(*), MAX(cor.created_at)
+        FROM club_onboarding_requests cor
+        WHERE (cor.email IS NOT NULL AND cor.email <> '' AND lower(cor.email) IN (
+                 SELECT lower(email) FROM marketing_club_contacts
+                 WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> ''))
+           OR (CAST(:utm AS text) IS NOT NULL AND cor.visitor_id IS NOT NULL
+               AND cor.visitor_id IN (
+                 SELECT DISTINCT visitor_id::text FROM usage_events
+                 WHERE utm_id = CAST(:utm AS text) AND visitor_id IS NOT NULL))
+           OR (cor.club IS NOT NULL AND lower(cor.club) = lower(:name))
+    """), {"cid": str(club.id), "utm": utm, "name": club.name or ""})).first()
+    return (row[0] or 0, row[1]) if row else (0, None)
+
+
 async def _engagement(session, club: MarketingClub,
                       org: "Optional[Organisation]" = None) -> dict:
     """A per-club engagement rollup pushed onto the Company so the CRM can score and
-    sort without holding raw events. Two signal sources, both attributed to the club:
-    web breadcrumbs (``usage_events`` by outreach UTM code or org id) AND email
-    engagement (``email_events`` opens/clicks for the club's contact emails or org).
+    sort without holding raw events. Signal sources, all attributed to the club: web
+    breadcrumbs (``usage_events`` by outreach UTM code or org id, both distinct-visitor
+    reach AND raw page-view/API volume), email engagement (``email_events`` opens/
+    clicks), a direct "onboard my club" website enquiry, and — for a customer — real
+    per-module trial subscriptions (not just the marketing directory's aspirational
+    trial-interest field).
 
     Lifecycle-aware: a PROSPECT is scored on lead heat (recency + frequency of web +
     email + buying intent); a CUSTOMER (linked org) is scored on account health +
@@ -212,23 +240,29 @@ async def _engagement(session, club: MarketingClub,
                 "upsellModules": [], "inSalesCycle": False}
     utm = club.utm_code
     org_id = str(club.existing_org_id) if club.existing_org_id else None
-    paid, _trial_mods, _renewals = _module_split(org) if org is not None else ([], [], [])
+    paid, trial_mods, _renewals = _module_split(org) if org is not None else ([], [], [])
     # A synced-but-not-yet-paying org (e.g. a demo synced ahead of a sale) is scored
     # as a Prospect's lead heat, not a Customer's account health — "we sync the club"
     # doesn't itself make them a customer (see _lifecycle).
     is_customer = bool(paid) or (club.demo_status or "") == "customer"
 
     # Web activity (usage_events) by UTM code (prospect) or org id (customer/trial).
+    # Counts BOTH distinct-visitor reach (sessions) and raw event volume (page views
+    # + API calls) — a club whose one visitor browses 50 pages is more engaged than
+    # one who bounces after a single view, which distinct-visitor count alone can't
+    # tell apart.
     web = (await session.execute(text("""
         SELECT MAX(created_at) AS last_seen,
                COUNT(DISTINCT visitor_id)
-                 FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d
+                 FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
+               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS events_30d
         FROM usage_events
         WHERE (CAST(:utm AS text) IS NOT NULL AND utm_id = CAST(:utm AS text))
            OR (CAST(:org AS text) IS NOT NULL AND org_id::text = CAST(:org AS text))
     """), {"utm": utm, "org": org_id})).first()
     last_web = web[0] if web else None
     sessions = (web[1] or 0) if web else 0
+    events_30d = (web[2] or 0) if web else 0
 
     # Email engagement (email_events opens/clicks) for this club's contact emails, or
     # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
@@ -245,15 +279,26 @@ async def _engagement(session, club: MarketingClub,
     last_email = em[0] if em else None
     eng_30d = (em[1] or 0) if em else 0
 
-    last_touch = max([d for d in (last_web, last_email) if d], default=None)
+    onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm)
+
+    last_touch = max([d for d in (last_web, last_email, onboarding_last) if d], default=None)
 
     # Modules the club wants but isn't paying for = the open opportunity (a prospect's
-    # interest, or a customer's expansion / trialing-extra). Drives the upsell signal.
+    # interest, or a customer's expansion / trialing-extra). ``trial_mods`` is the
+    # REAL per-module trial subscriptions a super admin actually started
+    # (org_module_subscriptions status='trial') — not just the marketing directory's
+    # aspirational trial_modules field, so initiating a real trial always registers
+    # even if nobody separately flags it in the Club Directory.
     paid_keys = _billing_modules(paid)
-    wanted = _billing_modules(club.requested_trial_modules or []) | _billing_modules(club.trial_modules or [])
+    wanted = (_billing_modules(club.requested_trial_modules or [])
+              | _billing_modules(club.trial_modules or [])
+              | _billing_modules(trial_mods))
     upsell = sorted(wanted - paid_keys)
 
-    freq_pts = min(sessions * 6 + eng_30d * 4, 40)
+    # A modest per-event weight on top of the session count, capped so raw volume
+    # can't dominate the score on its own (a crawler/bot hammering one UTM link
+    # shouldn't read as a hot lead).
+    freq_pts = min(sessions * 6 + eng_30d * 4 + min(events_30d, 20), 40)
     recency = _recency_pts(last_touch)
 
     # Tier bands: Cold < 30, Warm 30-45, Hot > 45 (open-ended at the top).
@@ -263,6 +308,8 @@ async def _engagement(session, club: MarketingClub,
         score = 45 + int(recency * 0.5) + min(int(freq_pts * 0.5), 20)
         if upsell:
             score += 15
+        if onboarding_count:
+            score += 10   # e.g. asking to onboard a second team/ground
         score = min(score, 100)
         tier = "HOT" if (score > 45 or upsell) else "WARM"
     else:
@@ -272,14 +319,18 @@ async def _engagement(session, club: MarketingClub,
             score += 12
         if (club.demo_status or "") == "in_trial":
             score += 8
+        if onboarding_count:
+            # A direct "onboard my club" enquiry is the strongest signal a prospect
+            # can give — heavier than the admin-set requested_trial_modules flag.
+            score += 20
         score = min(score, 100)
         tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
 
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # engagement (so it's a deal to work, not just a name on a list).
-    in_cycle = bool(upsell) if is_customer else bool(
+    in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
-        or last_touch or sessions or eng_30d)
+        or onboarding_count or last_touch or sessions or eng_30d)
 
     fields = {
         "engagementScore": score,
@@ -292,6 +343,9 @@ async def _engagement(session, club: MarketingClub,
         # CRM View can filter "has visited the site". `last_web` is MAX(created_at) of
         # web activity attributed by utm_id or org id — the primary attribution path.
         "hasVisitedSite": bool(last_web),
+        # Exposed for the Lead lane (twenty_leads_tasks) to source-label a Lead
+        # raised off a direct enquiry as "Contact us" rather than a generic bucket.
+        "_onboardingRequested": bool(onboarding_count),
     }
     if last_touch:
         fields["lastSeenAt"] = last_touch.isoformat()

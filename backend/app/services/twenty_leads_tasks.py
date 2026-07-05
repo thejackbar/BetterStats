@@ -64,8 +64,9 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
     modules of interest? Returns None when there's no qualifying signal (a merely
     contacted / emailed club is NOT a Lead — that would flood the inbox). Mirrors the
     trigger table: requested a trial, in a trial, in the engagement sales cycle,
-    synced (an organisations row exists but the club isn't paying yet), or the
-    engagement score has crossed into Hot territory (score >= 45)."""
+    synced (an organisations row exists but the club isn't paying yet), a direct
+    "onboard my club" website enquiry, or the engagement score has crossed into Hot
+    territory (score >= 45)."""
     if getattr(club, "not_interested", False):
         return None
     interested = _billing_modules(club.requested_trial_modules or [])
@@ -73,14 +74,19 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
     trialing = (club.demo_status or "") == "in_trial" or bool(trial_mods)
     in_cycle = bool(eng.get("inSalesCycle"))
     hot_score = (eng.get("engagementScore") or 0) >= 45
-    if not (interested or trialing or in_cycle or synced or hot_score):
+    onboarding_requested = bool(eng.get("_onboardingRequested"))
+    if not (interested or trialing or in_cycle or synced or hot_score or onboarding_requested):
         return None
     # Modules of interest = wanted-or-trialing, plus anything the rollup flagged as an
     # upsell (already in Twenty MULTI_SELECT form).
     wanted = sorted(interested | trial_mods)
     modules = sorted(set(_twenty_modules(wanted)) | set(eng.get("upsellModules") or []))
-    # Source: pick the strongest concrete channel, else the outbound default.
-    if interested or trialing:
+    # Source: pick the strongest concrete channel, else the outbound default. A direct
+    # enquiry (the "Get your club" modal or the /contact "Request access" form) is the
+    # single strongest signal, so it wins even over an admin-set trial flag.
+    if onboarding_requested:
+        source = "CONTACT_US"
+    elif interested or trialing:
         source = "WEBSITE"
     elif eng.get("emailEngaged30d"):
         source = "EMAIL_ENGAGEMENT"
@@ -90,7 +96,8 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
     summary = (f"Tier {tier.title()}; sessions30d={eng.get('sessions30d', 0)}, "
                f"emailEng30d={eng.get('emailEngaged30d', 0)}"
                + (f"; interested={wanted}" if wanted else "")
-               + ("; club synced, no paid module yet" if synced else ""))
+               + ("; club synced, no paid module yet" if synced else "")
+               + ("; asked to be onboarded via the website" if onboarding_requested else ""))
     # Working if a trial is already live, else New — set once at create only.
     status = "WORKING" if trialing else "NEW"
     return {"source": source, "modules": modules, "tier": tier,
