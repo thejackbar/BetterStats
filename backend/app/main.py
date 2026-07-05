@@ -1386,6 +1386,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_comms_campaigns_org ON comms_campaigns(organisation_id, created_at DESC)"
         ))
+        # Campaign name + description (migration 132).
+        await conn.execute(text("ALTER TABLE comms_campaigns ADD COLUMN IF NOT EXISTS name TEXT"))
+        await conn.execute(text("ALTER TABLE comms_campaigns ADD COLUMN IF NOT EXISTS description TEXT"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS comms_recipients (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

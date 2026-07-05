@@ -1651,6 +1651,7 @@ export const api = {
     request('/club-admin/comms/audience/preview', { method: 'POST', body: JSON.stringify(audience) }),
 
   commsListCampaigns: () => request('/club-admin/comms/campaigns'),
+  commsCampaignEngagement: () => request('/club-admin/comms/campaigns/engagement'),
   commsCreateCampaign: (data) =>
     request('/club-admin/comms/campaigns', { method: 'POST', body: JSON.stringify(data) }),
   commsGetCampaign: (id) => request(`/club-admin/comms/campaigns/${id}`),

@@ -108,7 +108,11 @@ export default function CommsCampaigns() {
               <div key={c.id}
                 className={`w-full flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
                 <button onClick={() => navigate(`/admin/comms/${c.id}`)} className="min-w-0 flex-1 text-left">
-                  <div className="text-pb-text text-sm truncate">{c.subject || <span className="text-pb-faintest italic">(no subject)</span>}</div>
+                  <div className="text-pb-text text-sm truncate">{c.name || c.subject || <span className="text-pb-faintest italic">(no subject)</span>}</div>
+                  {c.description && <div className="text-pb-faint text-xs mt-0.5 truncate" title={c.description}>{c.description}</div>}
+                  {c.name && c.subject && c.name !== c.subject && (
+                    <div className="text-pb-faintest text-[11px] mt-0.5 truncate">Subject: {c.subject}</div>
+                  )}
                   {c.utm?.utm_campaign && (
                     <div className="text-[11px] font-mono mt-0.5 truncate" title={`utm_campaign=${c.utm.utm_campaign}`}>
                       <span className="text-pb-faintest">utm_campaign=</span><span className="text-pb-faint">{c.utm.utm_campaign}</span>
@@ -116,8 +120,11 @@ export default function CommsCampaigns() {
                   )}
                   <div className="text-pb-faintest text-xs mt-0.5">
                     {c.status === 'sent' && c.sent_at ? `Sent ${fmtDate(c.sent_at)}` : `Created ${fmtDate(c.created_at)}`}
-                    {(c.status === 'sent' || c.status === 'error') && st.recipients != null && (
-                      <> · {st.sent || 0}/{st.recipients} delivered{st.failed ? ` · ${st.failed} failed` : ''}</>
+                    {(c.status === 'sent' || c.status === 'error' || c.status === 'sending') && c.engagement && (c.engagement.sent > 0 || c.engagement.bounced > 0 || c.engagement.unsub_supp > 0) && (
+                      <> · {c.engagement.sent} sent
+                        {c.engagement.bounced > 0 && <> · <span className="text-pb-red">{c.engagement.bounced} bounced</span></>}
+                        {c.engagement.unsub_supp > 0 && <> · <span className="text-amber-500">{c.engagement.unsub_supp} unsub/spam</span></>}
+                      </>
                     )}
                   </div>
                   {c.warnings?.length > 0 && (

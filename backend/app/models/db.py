@@ -2107,6 +2107,10 @@ class CommsCampaign(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     subject = Column(Text, nullable=False, server_default="")
+    # Human name for the Emails list (migration 132). Blank → auto-filled from the
+    # subject + a -MMDD-HH:MM timestamp at send. description is an optional note.
+    name = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
     preheader = Column(Text, nullable=True)
     body_html = Column(Text, nullable=True)
     body_text = Column(Text, nullable=True)

@@ -21,9 +21,10 @@ from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import func, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config.settings import settings
-from app.models.db import CommsContact, MarketingClubContact, Organisation, get_db
+from app.models.db import CommsContact, EmailEvent, MarketingClubContact, Organisation, get_db
 from app.services.marketing_org import org_is_outreach
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,22 @@ async def _unsubscribe(token: str, db: AsyncSession) -> tuple[str, str, str]:
                 .where(func.lower(MarketingClubContact.email) == contact.email.lower(),
                        MarketingClubContact.subscribed.is_(True))
                 .values(subscribed=False, unsubscribed_at=now, updated_at=func.now()))
+        # Record an 'unsubscribe' event attributed to the campaign whose link was
+        # clicked (the token carries 'cam'), so per-campaign unsubscribe counts read
+        # from email_events like bounces/complaints. Synthetic ses_message_id dedupes
+        # repeat clicks via the (ses_message_id, event_type, email) unique index.
+        cam = payload.get("cam")
+        if cam:
+            try:
+                await db.execute(
+                    pg_insert(EmailEvent)
+                    .values(organisation_id=(org.id if org else None),
+                            campaign_id=uuid.UUID(str(cam)), contact_id=contact.id,
+                            email=(contact.email or ""), event_type="unsubscribe",
+                            ses_message_id=f"unsub:{cam}:{contact.id}")
+                    .on_conflict_do_nothing(constraint="uq_email_event_dedupe"))
+            except (ValueError, TypeError):
+                pass  # bad campaign id in token — still unsubscribe, just don't log
         await db.commit()
         return ("You're unsubscribed",
                 f"You won't receive any more emails from {club_name}. Changed your mind? Just let them know.",

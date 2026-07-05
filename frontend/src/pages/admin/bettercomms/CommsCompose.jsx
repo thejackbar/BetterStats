@@ -24,6 +24,8 @@ export default function CommsCompose() {
   const navigate = useNavigate()
   const [campaign, setCampaign] = useState(null)
   const [subject, setSubject] = useState('')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [body, setBody] = useState('')
   const [audienceCount, setAudienceCount] = useState(null)
   // Start unselected — sending to "all subscribed" must be a deliberate choice.
@@ -50,6 +52,8 @@ export default function CommsCompose() {
     const c = await api.commsGetCampaign(id)
     setCampaign(c)
     setSubject(c.subject || '')
+    setName(c.name || '')
+    setDescription(c.description || '')
     setBody(c.body_html || '')
     setAudience(c.audience && ['all', 'segment', 'saved_list', 'list', 'squad'].includes(c.audience.type) ? c.audience : { type: '' })
     setUtm(c.utm || {})
@@ -119,7 +123,7 @@ export default function CommsCompose() {
   }
 
   const save = async () => {
-    const c = await api.commsUpdateCampaign(id, { subject, body_html: body, audience, utm, template_id: templateId || null })
+    const c = await api.commsUpdateCampaign(id, { subject, name, description, body_html: body, audience, utm, template_id: templateId || null })
     setCampaign(c)
     return c
   }
@@ -244,7 +248,11 @@ export default function CommsCompose() {
               <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Status</span>
               <span className="font-mono text-xs text-pb-text uppercase">{campaign.status}</span>
             </div>
-            <div className="text-pb-text font-medium">{campaign.subject || '(no subject)'}</div>
+            <div className="text-pb-text font-medium">{campaign.name || campaign.subject || '(no subject)'}</div>
+            {campaign.description && <div className="text-pb-faint text-xs mt-0.5">{campaign.description}</div>}
+            {campaign.name && campaign.subject && campaign.name !== campaign.subject && (
+              <div className="text-pb-faintest text-xs mt-0.5">Subject: {campaign.subject}</div>
+            )}
             <div className="grid grid-cols-3 gap-3 mt-4 text-center">
               <div className="pb-card p-3"><div className="text-xl font-display font-bold text-pb-text">{st.recipients ?? 0}</div><div className="text-pb-faintest text-xs">recipients</div></div>
               <div className="pb-card p-3"><div className="text-xl font-display font-bold text-green-500">{st.sent ?? 0}</div><div className="text-pb-faintest text-xs">delivered</div></div>
@@ -264,6 +272,21 @@ export default function CommsCompose() {
             <label className="block text-sm text-pb-faint mb-1">Subject</label>
             <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Round 5 — training this Thursday"
               className="w-full pb-input mb-4 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline" />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-sm text-pb-faint mb-1">Name <span className="text-pb-faintest">(optional)</span></label>
+                <input value={name} onChange={e => setName(e.target.value)}
+                  placeholder="Leave blank to auto-name from the subject + date/time"
+                  className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm text-pb-faint mb-1">Description <span className="text-pb-faintest">(optional)</span></label>
+                <input value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="A short note about this email"
+                  className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+              </div>
+            </div>
 
             {templates.length > 0 && (
               <div className="mb-3">

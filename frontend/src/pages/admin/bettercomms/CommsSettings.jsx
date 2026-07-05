@@ -8,6 +8,19 @@ const SUPPRESSION_LABEL = {
   manual: 'Suppressed manually',
 }
 
+// One label/value row in the Bounces & unsubscribes card. `bad`/`warn` colour a
+// non-zero value red/amber so a problem stands out.
+function EngRow({ label, value, bad, warn }) {
+  const v = Number(value || 0)
+  const tone = v > 0 && bad ? 'text-pb-red' : v > 0 && warn ? 'text-amber-500' : 'text-pb-text'
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-pb-faint">{label}</span>
+      <span className={tone}>{v.toLocaleString()}</span>
+    </div>
+  )
+}
+
 export default function CommsSettings() {
   const [s, setS] = useState(null)
   const [fromName, setFromName] = useState('')
@@ -21,6 +34,7 @@ export default function CommsSettings() {
   const [testEmail, setTestEmail] = useState('')
   const [testBusy, setTestBusy] = useState(false)
   const [limits, setLimits] = useState(null)      // sending tier + usage + deliverability
+  const [engagement, setEngagement] = useState(null)   // bounced / unsub per last + all campaigns
   const [reqReason, setReqReason] = useState('')
   const [reqBusy, setReqBusy] = useState(false)
   const [tenantBusy, setTenantBusy] = useState(false)
@@ -37,6 +51,7 @@ export default function CommsSettings() {
     // Super-admin only; a 403 for club admins just leaves the panel hidden.
     api.commsSesStatus().then(setSes).catch(() => setSes(null))
     api.commsGetLimits().then(setLimits).catch(() => setLimits(null))
+    api.commsCampaignEngagement().then(setEngagement).catch(() => setEngagement(null))
   }, [])
 
   const provisionTenants = async () => {
@@ -209,6 +224,39 @@ export default function CommsSettings() {
             </div>
           )
         })()}
+
+        {/* Bounces & unsubscribes — last email and all emails */}
+        {engagement && (
+          <div className="pb-card p-4 mb-4">
+            <div className="text-sm text-pb-text font-medium mb-3">Bounces & unsubscribes</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <div className="text-pb-faintest text-[11px] uppercase tracking-wide2 mb-1.5 truncate">
+                  Last email{engagement.last?.name ? ` — ${engagement.last.name}` : ''}
+                </div>
+                {engagement.last ? (
+                  <div className="text-sm space-y-1">
+                    <EngRow label="Sent" value={engagement.last.sent} />
+                    <EngRow label="Bounced" value={engagement.last.bounced} bad />
+                    <EngRow label="Unsubscribed / spam" value={engagement.last.unsub_supp} warn />
+                  </div>
+                ) : <div className="text-pb-faintest text-sm">No emails sent yet.</div>}
+              </div>
+              <div>
+                <div className="text-pb-faintest text-[11px] uppercase tracking-wide2 mb-1.5">All emails</div>
+                <div className="text-sm space-y-1">
+                  <EngRow label="Sent" value={engagement.all.sent} />
+                  <EngRow label="Bounced" value={engagement.all.bounced} bad />
+                  <EngRow label="Unsubscribed / spam" value={engagement.all.unsub_supp} warn />
+                </div>
+              </div>
+            </div>
+            <div className="text-pb-faintest text-[11px] leading-relaxed mt-3">
+              Bounced = the address couldn't be delivered to. Unsubscribed / spam = people who opted
+              out via the email or marked it as spam. Both are removed from future sends.
+            </div>
+          </div>
+        )}
 
         {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
         {isPlatform && (

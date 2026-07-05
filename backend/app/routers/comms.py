@@ -199,10 +199,12 @@ def campaign_warnings(subject: str, body_html: str, utm: dict) -> list[str]:
     return warnings
 
 
-def _campaign_out(c: CommsCampaign) -> dict:
+def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict:
     return {
         "id": str(c.id),
         "subject": c.subject,
+        "name": getattr(c, "name", None),
+        "description": getattr(c, "description", None),
         "preheader": c.preheader,
         "body_html": c.body_html,
         "audience": c.audience or {},
@@ -214,6 +216,9 @@ def _campaign_out(c: CommsCampaign) -> dict:
         "error": c.error,
         "sent_at": c.sent_at.isoformat() if c.sent_at else None,
         "created_at": c.created_at.isoformat() if c.created_at else None,
+        # Per-campaign deliverability (sent / bounced / unsub+complaint), when the
+        # caller has computed it (the list endpoint batches it).
+        "engagement": engagement,
     }
 
 
@@ -241,11 +246,11 @@ def _sender(org: Organisation) -> tuple[str, str, Optional[str], str]:
     return from_name, from_email, reply_to, footer
 
 
-def _unsub_token(org_id, cid) -> str:
-    return jwt.encode(
-        {"org": str(org_id), "cid": str(cid), "typ": UNSUB_TYP},
-        settings.secret_key, algorithm=settings.algorithm,
-    )
+def _unsub_token(org_id, cid, campaign_id=None) -> str:
+    payload = {"org": str(org_id), "cid": str(cid), "typ": UNSUB_TYP}
+    if campaign_id is not None:
+        payload["cam"] = str(campaign_id)   # so an unsubscribe attributes to its campaign
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
 def _unsub_url(token: str) -> str:
@@ -1106,6 +1111,36 @@ async def preview_campaign(
 
 # ─── Campaigns ───────────────────────────────────────────────────────────────
 
+# Distinct-people counts, keyed on the address, for a set of campaigns.
+_EV_BOUNCE = func.count(func.distinct(func.lower(EmailEvent.email))).filter(
+    EmailEvent.event_type == "bounce")
+# Unsubscribes and spam complaints both remove a person from future sends.
+_EV_UNSUB = func.count(func.distinct(func.lower(EmailEvent.email))).filter(
+    EmailEvent.event_type.in_(("unsubscribe", "complaint")))
+
+
+async def _campaign_engagement(db: AsyncSession, campaign_ids: list) -> dict:
+    """Per-campaign {sent, bounced, unsub_supp}, keyed by str(campaign_id). One
+    grouped query over comms_recipients + one over email_events."""
+    out: dict = {}
+    if not campaign_ids:
+        return out
+    for cid, sent in (await db.execute(
+        select(CommsRecipient.campaign_id, func.count().label("sent"))
+        .where(CommsRecipient.campaign_id.in_(campaign_ids),
+               CommsRecipient.status == "sent")
+        .group_by(CommsRecipient.campaign_id))).all():
+        out.setdefault(str(cid), {})["sent"] = int(sent or 0)
+    for cid, bounced, unsub in (await db.execute(
+        select(EmailEvent.campaign_id, _EV_BOUNCE.label("b"), _EV_UNSUB.label("u"))
+        .where(EmailEvent.campaign_id.in_(campaign_ids))
+        .group_by(EmailEvent.campaign_id))).all():
+        d = out.setdefault(str(cid), {})
+        d["bounced"] = int(bounced or 0)
+        d["unsub_supp"] = int(unsub or 0)
+    return out
+
+
 @router.get("/campaigns")
 async def list_campaigns(
     _: User = _require,
@@ -1115,16 +1150,67 @@ async def list_campaigns(
     rows = (await db.execute(select(CommsCampaign).where(
         CommsCampaign.organisation_id == club.id
     ).order_by(CommsCampaign.created_at.desc()).limit(200))).scalars().all()
-    return [_campaign_out(c) for c in rows]
+    eng = await _campaign_engagement(db, [c.id for c in rows])
+
+    def _eng(c):
+        e = eng.get(str(c.id), {})
+        return {"sent": e.get("sent", int((c.stats or {}).get("sent", 0) or 0)),
+                "bounced": e.get("bounced", 0), "unsub_supp": e.get("unsub_supp", 0)}
+    return [_campaign_out(c, engagement=_eng(c)) for c in rows]
+
+
+@router.get("/campaigns/engagement")
+async def campaigns_engagement(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bounced + unsubscribed/suppressed totals for the Settings card: across ALL
+    campaigns, and for the most recent sent campaign."""
+    all_sent = int((await db.scalar(select(func.count(CommsRecipient.id)).where(
+        CommsRecipient.organisation_id == club.id, CommsRecipient.status == "sent"))) or 0)
+    all_ev = (await db.execute(
+        select(_EV_BOUNCE.label("b"), _EV_UNSUB.label("u"))
+        .where(EmailEvent.organisation_id == club.id))).one()
+    all_block = {"sent": all_sent, "bounced": int(all_ev[0] or 0),
+                 "unsub_supp": int(all_ev[1] or 0)}
+
+    last = (await db.execute(select(CommsCampaign).where(
+        CommsCampaign.organisation_id == club.id,
+        CommsCampaign.status.in_(("sent", "sending", "error")),
+    ).order_by(CommsCampaign.sent_at.desc().nullslast(),
+               CommsCampaign.created_at.desc()).limit(1))).scalars().first()
+    last_block = None
+    if last is not None:
+        eng = (await _campaign_engagement(db, [last.id])).get(str(last.id), {})
+        last_block = {
+            "id": str(last.id),
+            "name": last.name or last.subject or "(no subject)",
+            "subject": last.subject,
+            "sent_at": last.sent_at.isoformat() if last.sent_at else None,
+            "sent": eng.get("sent", int((last.stats or {}).get("sent", 0) or 0)),
+            "bounced": eng.get("bounced", 0),
+            "unsub_supp": eng.get("unsub_supp", 0),
+        }
+    return {"all": all_block, "last": last_block}
 
 
 class CampaignIn(BaseModel):
     subject: str = ""
+    name: Optional[str] = None
+    description: Optional[str] = None
     preheader: Optional[str] = None
     body_html: str = ""
     audience: Optional[dict] = None
     utm: Optional[dict] = None
     template_id: Optional[str] = None
+
+
+def _auto_campaign_name(subject: str, when: datetime) -> str:
+    """Auto name for an unnamed Email: subject + a -MMDD-HH:MM timestamp,
+    e.g. 'Announcement' → 'Announcement-0526-10:30'. Falls back to 'Email'."""
+    base = (subject or "").strip() or "Email"
+    return f"{base}-{when.strftime('%m%d-%H:%M')}"
 
 
 def _parse_template_id(raw: Optional[str]):
@@ -1146,6 +1232,8 @@ async def create_campaign(
     c = CommsCampaign(
         organisation_id=club.id,
         subject=(data.subject or "").strip(),
+        name=(data.name or "").strip() or None,
+        description=(data.description or "").strip() or None,
         preheader=(data.preheader or None),
         body_html=data.body_html or "",
         audience=data.audience or {"type": "all"},
@@ -1183,6 +1271,10 @@ async def update_campaign(
     if c.status != "draft":
         raise HTTPException(status_code=409, detail="Only draft campaigns can be edited")
     c.subject = (data.subject or "").strip()
+    if data.name is not None:
+        c.name = (data.name or "").strip() or None
+    if data.description is not None:
+        c.description = (data.description or "").strip() or None
     c.preheader = data.preheader or None
     c.body_html = data.body_html or ""
     if data.audience is not None:
@@ -1298,6 +1390,9 @@ async def send_campaign(
             email=ct.email, name=ct.name, status="queued",
         ))
     c.status = "sending"
+    # Auto-name an unnamed Email at send: subject + -MMDD-HH:MM.
+    if not (c.name or "").strip():
+        c.name = _auto_campaign_name(c.subject, datetime.now(timezone.utc))
     c.stats = {"recipients": len(contacts), "sent": 0, "failed": 0, "deferred": 0}
     c.error = None
     await db.commit()
@@ -1389,7 +1484,7 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                 "rid": r.id,
                 "email": r.email,
                 "name": r.name,
-                "unsub": _unsub_url(_unsub_token(org.id, r.contact_id or r.id)),
+                "unsub": _unsub_url(_unsub_token(org.id, r.contact_id or r.id, camp.id)),
                 "vars": mc_vars.get(r.contact_id, {}),
             } for r in recips]
             # Pre-render every message while we still hold the org (pure CPU).
