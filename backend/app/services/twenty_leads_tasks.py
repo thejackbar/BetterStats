@@ -101,6 +101,7 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
     # Working if a trial is already live, else New — set once at create only.
     status = "WORKING" if trialing else "NEW"
     return {"source": source, "modules": modules, "tier": tier,
+            "score": eng.get("engagementScore") or 0,
             "summary": summary[:400], "status": status}
 
 
@@ -109,6 +110,7 @@ def _lead_values(sig: dict) -> dict:
     return {
         "leadSource": sig["source"],
         "signalSummary": sig["summary"],
+        "engagementScore": sig["score"],         # mirrors company.engagementScore
         "engagementTier": sig["tier"],           # same option values as company.engagementTier
         "modulesOfInterest": sig["modules"],
     }

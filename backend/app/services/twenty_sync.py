@@ -815,6 +815,23 @@ async def _sync_memberships(session, http, club_guid, club_name, assocs, company
         stats["memberships_" + act] += 1
 
 
+async def _sync_lead_score(session, http, club_guid: str, score) -> None:
+    """Mirror a Company's engagementScore onto its Lead the moment the Company is
+    pushed, so the two numbers never drift apart between the daily Lead
+    seed/refresh passes (twenty_leads_tasks._lead_values already sets it there
+    too — this covers every OTHER path that patches Company.engagementScore:
+    export_to_twenty, refresh_engagement, push_club_and_contacts). No-op if the
+    club has no Lead yet; best-effort, never raises into the Company push."""
+    if score is None:
+        return
+    try:
+        lead_row = await _link_get(session, "lead", club_guid)
+        if lead_row:
+            await client.update(http, "leads", lead_row[0], {"engagementScore": score})
+    except Exception:  # noqa: BLE001 - a CRM hiccup must never fail the Company push
+        logger.exception("twenty: failed to mirror engagement score to lead for %s", club_guid)
+
+
 async def update_person_by_email(email: str, fields: dict) -> None:
     """Best-effort update of a Person matched by their unique email with arbitrary
     Twenty fields (contact source, subscribed/bounced flags, last campaign, …).
@@ -980,6 +997,8 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
             async with httpx.AsyncClient() as http:
                 ctid, _cact = await _upsert(session, http, "club", club.grassroots_guid,
                                             "companies", "bcClubId", company)
+                await _sync_lead_score(session, http, club.grassroots_guid,
+                                       company.get("engagementScore"))
                 for ct in contacts:
                     try:
                         person_vals = {**_person_values(ct, club.country),
@@ -1133,6 +1152,8 @@ async def export_to_twenty(*, filters: Optional[dict] = None,
                         ctid, cact = await _upsert(session, http, "club", snap["guid"],
                                                    "companies", "bcClubId", snap["company"])
                         stats["clubs_" + cact] += 1
+                        await _sync_lead_score(session, http, snap["guid"],
+                                               snap["company"].get("engagementScore"))
                         logger.info("twenty export: club %r -> company %s id=%s (%d officers)",
                                     snap["name"], cact, ctid, len(snap["people"]))
                         # Association membership is now a read-only array on the Company
@@ -1285,6 +1306,7 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                     try:
                         await client.update(http, "companies", tid, fields)
                         stats["refreshed"] += 1
+                        await _sync_lead_score(session, http, guid, fields.get("engagementScore"))
                         if suppress:
                             await _downgrade_lead_and_opportunities(session, http, guid, tid)
                     except Exception:  # noqa: BLE001 - one bad company can't stop the rest

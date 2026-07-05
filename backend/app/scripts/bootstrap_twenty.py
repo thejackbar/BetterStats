@@ -181,6 +181,10 @@ FIELDS = [
     ("lead", "leadSource", "Source", "SELECT",
      _options(["Outbound campaign", "Website", "Email engagement", "Contact us"])),
     ("lead", "signalSummary", "Signal", "TEXT", None),
+    # Mirrors Company.engagementScore — kept in lockstep by twenty_sync (every
+    # Company push that changes the score patches the Lead too, if one exists),
+    # not just refreshed on the daily Lead scan.
+    ("lead", "engagementScore", "Engagement score", "NUMBER", None),
     ("lead", "engagementTier", "Engagement tier", "SELECT",
      _options(["Cold", "Warm", "Hot", "Not interested"])),
     ("lead", "modulesOfInterest", "Modules of interest", "MULTI_SELECT", MODULE_OPTS),
