@@ -27,7 +27,7 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
-from app.services.club_directory import club_filters
+from app.services.club_directory import _PATH_CODE, club_filters
 from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
                                         full_name, link, phone)
 
@@ -200,7 +200,8 @@ def _recency_pts(last, full=20):
     return int(full * 0.1)
 
 
-async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]"):
+async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
+                              org_slug: "Optional[str]" = None):
     """Has anyone asked, on the public site, for this club to be onboarded? Covers
     both the "Get your club on BetterCricket" quick modal and the full /contact
     "Request access" form — both post to the SAME ``club_onboarding_requests`` row
@@ -208,21 +209,26 @@ async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]")
     so it's attributed here the same way email engagement is: by matching the
     submitter's email against a known officer of this club, OR (for a submitter who
     isn't yet a listed officer — the common case for a brand-new enquiry) by the
-    anonymous visitor having arrived via this club's outreach UTM code, OR an exact
+    anonymous visitor having arrived via this club's outreach UTM code OR this
+    club's marketing-page path (``_PATH_CODE`` — a visitor who lands on
+    /{club-slug}/... with no UTM param at all, then later submits Contact, needs
+    attributing the same way ``_engagement``'s own web query does), OR an exact
     club-name match as a last resort. Returns (count, last_at)."""
-    row = (await session.execute(text("""
+    row = (await session.execute(text(f"""
         SELECT COUNT(*), MAX(cor.created_at)
         FROM club_onboarding_requests cor
         WHERE (cor.email IS NOT NULL AND cor.email <> '' AND lower(cor.email) IN (
                  SELECT lower(email) FROM marketing_club_contacts
                  WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> ''))
-           OR (CAST(:utm AS text) IS NOT NULL AND cor.visitor_id IS NOT NULL
-               AND cor.visitor_id IN (
-                 SELECT DISTINCT visitor_id::text FROM usage_events
-                 WHERE (utm_id = CAST(:utm AS text) OR utm_source = CAST(:utm AS text))
-                   AND visitor_id IS NOT NULL))
+           OR (cor.visitor_id IS NOT NULL AND cor.visitor_id IN (
+                 SELECT DISTINCT ue.visitor_id::text FROM usage_events ue
+                 WHERE ue.visitor_id IS NOT NULL
+                   AND ((CAST(:utm AS text) IS NOT NULL
+                         AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
+                              OR {_PATH_CODE} = CAST(:utm AS text)))
+                     OR (CAST(:org_slug AS text) IS NOT NULL AND {_PATH_CODE} = CAST(:org_slug AS text)))))
            OR (cor.club IS NOT NULL AND lower(cor.club) = lower(:name))
-    """), {"cid": str(club.id), "utm": utm, "name": club.name or ""})).first()
+    """), {"cid": str(club.id), "utm": utm, "org_slug": org_slug, "name": club.name or ""})).first()
     return (row[0] or 0, row[1]) if row else (0, None)
 
 
@@ -267,16 +273,33 @@ async def _engagement(session, club: MarketingClub,
     # panel (_RESOLVED_VISITS) already matches both. Checking only utm_id silently
     # missed every click from a utm_source-tagged link (confirmed: a club with 54
     # visitors on its Directory "site visits" panel scored 0 sessions here).
-    web = (await session.execute(text("""
-        SELECT MAX(created_at) AS last_seen,
-               COUNT(DISTINCT visitor_id)
-                 FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
-               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS events_30d
-        FROM usage_events
+    #
+    # Also matches the club's marketing-page PATH itself (``_PATH_CODE``, the same
+    # first-path-segment extraction _RESOLVED_VISITS uses) against the utm_code, and
+    # — for a customer — against the org's own slug. A visitor who lands on
+    # /{club-slug}/... straight from Google or a shared link (no UTM query param at
+    # all) still needs attributing; without this a customer's own site traffic (path
+    # keyed on the org slug, which need not even equal the club's stored utm_code —
+    # confirmed for West Coburg St Andrews CC and Geelong Over 50s CC, both showing
+    # real Directory "site visits" via path-only hits) scored zero sessions here.
+    org_slug = getattr(org, "slug", None) if org is not None else None
+    web = (await session.execute(text(f"""
+        SELECT MAX(ue.created_at) AS last_seen,
+               COUNT(DISTINCT ue.visitor_id)
+                 FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
+               COUNT(*) FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS events_30d
+        FROM usage_events ue
         WHERE (CAST(:utm AS text) IS NOT NULL
-               AND (utm_id = CAST(:utm AS text) OR utm_source = CAST(:utm AS text)))
-           OR (CAST(:org AS text) IS NOT NULL AND org_id::text = CAST(:org AS text))
-    """), {"utm": utm, "org": org_id})).first()
+               AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
+                    OR {_PATH_CODE} = CAST(:utm AS text)))
+           OR (CAST(:org AS text) IS NOT NULL AND ue.org_id::text = CAST(:org AS text))
+           OR (CAST(:org_slug AS text) IS NOT NULL AND {_PATH_CODE} = CAST(:org_slug AS text))
+           OR EXISTS (
+                SELECT 1 FROM marketing_utm_aliases a
+                WHERE a.marketing_club_id = CAST(:cid AS uuid)
+                  AND a.utm_value IN (ue.utm_id, ue.utm_source, {_PATH_CODE})
+              )
+    """), {"utm": utm, "org": org_id, "org_slug": org_slug, "cid": str(club.id)})).first()
     last_web = web[0] if web else None
     sessions = (web[1] or 0) if web else 0
     events_30d = (web[2] or 0) if web else 0
@@ -296,7 +319,7 @@ async def _engagement(session, club: MarketingClub,
     last_email = em[0] if em else None
     eng_30d = (em[1] or 0) if em else 0
 
-    onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm)
+    onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm, org_slug)
 
     last_touch = max([d for d in (last_web, last_email, onboarding_last) if d], default=None)
 

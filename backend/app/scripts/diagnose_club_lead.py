@@ -17,6 +17,7 @@ from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_leads_tasks import _lead_signal
 from app.services.twenty_sync import (
     _all_contacts_unsubscribed, _engagement, _link_get, _module_split,
+    _onboarding_signal,
 )
 
 
@@ -62,6 +63,12 @@ async def diagnose(name_query: str) -> None:
                    if club.existing_org_id else None)
             paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
             is_paying = bool(paid) or (club.demo_status or "") == "customer"
+            org_slug = getattr(org, "slug", None) if org is not None else None
+            print(f"  org_slug (for path-attributed traffic): {org_slug!r}")
+
+            ob_count, ob_last = await _onboarding_signal(session, club, club.utm_code, org_slug)
+            print(f"  Onboarding/contact-form requests attributed to this club: "
+                  f"{ob_count} (most recent: {ob_last})")
 
             all_unsub = await _all_contacts_unsubscribed(session, club.id)
             if all_unsub and not is_paying:
