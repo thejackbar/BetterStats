@@ -219,7 +219,8 @@ async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]")
            OR (CAST(:utm AS text) IS NOT NULL AND cor.visitor_id IS NOT NULL
                AND cor.visitor_id IN (
                  SELECT DISTINCT visitor_id::text FROM usage_events
-                 WHERE utm_id = CAST(:utm AS text) AND visitor_id IS NOT NULL))
+                 WHERE (utm_id = CAST(:utm AS text) OR utm_source = CAST(:utm AS text))
+                   AND visitor_id IS NOT NULL))
            OR (cor.club IS NOT NULL AND lower(cor.club) = lower(:name))
     """), {"cid": str(club.id), "utm": utm, "name": club.name or ""})).first()
     return (row[0] or 0, row[1]) if row else (0, None)
@@ -258,13 +259,22 @@ async def _engagement(session, club: MarketingClub,
     # + API calls) — a club whose one visitor browses 50 pages is more engaged than
     # one who bounces after a single view, which distinct-visitor count alone can't
     # tell apart.
+    #
+    # Matches BOTH utm_id and utm_source against the club's code — a campaign
+    # template can carry the code in either param (utm_id is auto-appended by
+    # comms.py's _apply_utm; utm_source is also available as a merge var an
+    # operator can hand-place in a link), and club_directory.py's own visit-stats
+    # panel (_RESOLVED_VISITS) already matches both. Checking only utm_id silently
+    # missed every click from a utm_source-tagged link (confirmed: a club with 54
+    # visitors on its Directory "site visits" panel scored 0 sessions here).
     web = (await session.execute(text("""
         SELECT MAX(created_at) AS last_seen,
                COUNT(DISTINCT visitor_id)
                  FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS events_30d
         FROM usage_events
-        WHERE (CAST(:utm AS text) IS NOT NULL AND utm_id = CAST(:utm AS text))
+        WHERE (CAST(:utm AS text) IS NOT NULL
+               AND (utm_id = CAST(:utm AS text) OR utm_source = CAST(:utm AS text)))
            OR (CAST(:org AS text) IS NOT NULL AND org_id::text = CAST(:org AS text))
     """), {"utm": utm, "org": org_id})).first()
     last_web = web[0] if web else None

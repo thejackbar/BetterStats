@@ -852,3 +852,42 @@ more fields now mirror straight off the Company, kept in lockstep from every ang
   drops the offending field(s), retries once, and logs the exact rejected value
   — so the record is created either way, and the log tells us what to fix in
   `link()` next.
+
+## 16. July 2026 — `_engagement` was missing `utm_source`-tagged traffic entirely
+
+Found via a real case: Tasmania Police CC showed 54 visitors / 71 views on the
+Club Directory's own "site visits" panel (real product exploration — `/applecross`,
+`/modules/betterstats`, `/modules/betteradmin`, `/contact`…), yet
+`twenty_sync._engagement` computed `sessions30d=0` and scored 0/Cold.
+
+**Root cause**: `_engagement`'s web-activity query only ever matched
+`usage_events.utm_id = club.utm_code`. `club_directory.py`'s own
+`_RESOLVED_VISITS` (which powers that Directory panel, and got it right) already
+matches `utm_code` against **either** `utm_id` **or** `utm_source` — because
+`comms.py`'s `_apply_utm` had a bug: it appended `utm_id` to a campaign link
+UNLESS the link already contained `utm_source=` — but `utm_source` is also a
+documented merge var (`{{utm_source}}` = the club's code, meant for an
+operator-authored link like `?utm_source={{utm_code}}&utm_medium=…`). A campaign
+using that pattern got a real, correctly-bucketed `utm_source` (hence showing up
+fine in Sources/Directory panels, both of which already check `utm_source`), but
+never got `utm_id` — the one column `_engagement` checked.
+
+**Fixed both ends**:
+- `_engagement`'s web query and `_onboarding_signal`'s visitor-to-utm subquery
+  now match `utm_id = :utm OR utm_source = :utm`, same as `_RESOLVED_VISITS`,
+  so already-sent campaigns' traffic (which can't be retagged after the fact)
+  is picked up retroactively.
+- `comms.py::_apply_utm` no longer treats "already has `utm_source=`" as a
+  reason to skip `utm_id` — the two are independent (campaign attribution vs.
+  per-club attribution) and a link can carry both. It now decides per-param:
+  skip the campaign's own `utm_source`/`medium`/`campaign` only if `utm_source=`
+  is already present, and skip `utm_id` only if `utm_id=` is already present —
+  so a hand-templated `{{utm_source}}` link still gets `utm_id` appended, and
+  future campaigns can't silently lose per-club attribution this way again.
+
+Not fixed (deliberately out of scope for this pass): `_engagement` still doesn't
+use the fuller `_RESOLVED_VISITS` resolution (the `marketing_utm_aliases` table
+for renamed UTM codes, or the path-embedded-code / org-slug fallbacks) — only
+the `utm_id`/`utm_source` parity fix. Worth revisiting if a club's traffic is
+still invisible to `_engagement` after this fix and `docker exec ... python -m
+app.scripts.diagnose_club_lead "<name>"` confirms it's still zero.

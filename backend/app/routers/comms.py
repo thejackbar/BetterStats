@@ -295,29 +295,41 @@ def _is_full_doc(html: str) -> bool:
 
 def _apply_utm(html: str, utm: dict, utm_code: Optional[str] = None) -> str:
     """Append the campaign's UTM tags to every outbound http(s) link, leaving the
-    unsubscribe link, mailto/tel, anchors and already-tagged links alone. Only the
-    BetterCricket marketing-outreach org uses this (see _render_parts).
+    unsubscribe link, mailto/tel and anchors alone. Only the BetterCricket
+    marketing-outreach org uses this (see _render_parts).
 
     When ``utm_code`` is given (the recipient club's per-club code) it is added as
     ``utm_id`` so a later anonymous site visit from this link can be tied back to
-    the club — that's what powers the "visited the pricing page" segment."""
+    the club — that's what powers the "visited the pricing page" segment AND the
+    engagement score. utm_id is appended independently of the campaign's own
+    utm_source/medium/campaign params (which ARE skipped on a link an operator
+    already hand-tagged, to avoid duplicating those): the two serve different
+    purposes, so a template that hand-places {{utm_source}}={{utm_code}} in its own
+    link (a documented merge-var pattern) must not silently lose per-club
+    attribution just because utm_source was already present. Confirmed missing:
+    a club whose campaign link only carried utm_source scored zero engagement
+    despite 54 real visitors, because the old skip condition ("already has
+    utm_source=") suppressed utm_id too."""
     params = [(k, str(v).strip()) for k in _UTM_KEYS if (v := (utm or {}).get(k)) and str(v).strip()]
     code = str(utm_code or "").strip()
-    if code:
-        params.append(("utm_id", code))
-    if not params:
+    if not params and not code:
         return html
-    qs = "&".join(f"{k}={quote(v, safe='')}" for k, v in params)
+    campaign_qs = "&".join(f"{k}={quote(v, safe='')}" for k, v in params)
 
     def repl(m):
         url = m.group(2)
         low = url.lower()
-        if (not low.startswith(("http://", "https://"))
-                or "/public/comms/unsubscribe/" in low
-                or "utm_source=" in low):
+        if not low.startswith(("http://", "https://")) or "/public/comms/unsubscribe/" in low:
+            return m.group(0)
+        parts = []
+        if params and "utm_source=" not in low:
+            parts.append(campaign_qs)
+        if code and "utm_id=" not in low:
+            parts.append(f"utm_id={quote(code, safe='')}")
+        if not parts:
             return m.group(0)
         sep = "&" if "?" in url else "?"
-        return f"{m.group(1)}{url}{sep}{qs}{m.group(3)}"
+        return f"{m.group(1)}{url}{sep}{'&'.join(parts)}{m.group(3)}"
 
     return _HREF_RE.sub(repl, html)
 
