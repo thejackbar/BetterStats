@@ -35,6 +35,7 @@ from typing import Optional
 
 import httpx
 from sqlalchemy import select, text
+from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_client import client
@@ -136,7 +137,9 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         if club is None:
             continue
         scanned += 1
-        org = (await session.get(Organisation, club.existing_org_id)
+        org = (await session.get(
+                    Organisation, club.existing_org_id,
+                    options=[selectinload(Organisation.module_subscriptions)])
                if club.existing_org_id else None)
         paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
         is_paying = bool(paid) or (club.demo_status or "") == "customer"

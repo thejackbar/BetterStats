@@ -12,6 +12,7 @@ import asyncio
 import sys
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_leads_tasks import _lead_signal
@@ -59,7 +60,9 @@ async def diagnose(name_query: str) -> None:
                       "regardless of traffic.")
                 continue
 
-            org = (await session.get(Organisation, club.existing_org_id)
+            org = (await session.get(
+                        Organisation, club.existing_org_id,
+                        options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
             paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
             is_paying = bool(paid) or (club.demo_status or "") == "customer"
@@ -85,8 +88,8 @@ async def diagnose(name_query: str) -> None:
             print(f"    breakdown: recencyPts={eng.get('_recencyPts')} "
                   f"emailDecayPts={eng.get('_emailDecayPts')} "
                   f"webDecayPts={eng.get('_webDecayPts')} "
-                  f"freqPts={eng.get('_freqPts')} (freq capped at 60; "
-                  f"emailDecayPts=0 with real opens/clicks sent means SES open/click "
+                  f"freqPts={eng.get('_freqPts')} (reach capped 24 + depth capped 40 "
+                  f"= 64 max; emailDecayPts=0 with real opens/clicks sent means SES open/click "
                   f"tracking is likely OFF — see app.scripts.email_opens)")
 
             synced = bool(club.existing_org_id) and not is_paying

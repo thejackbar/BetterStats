@@ -23,6 +23,7 @@ import csv
 import sys
 
 from sqlalchemy import text
+from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_leads_tasks import _lead_signal
@@ -63,7 +64,9 @@ async def _row_for(club_id, lead_tid: str) -> "dict | None":
         company_row = await _link_get(session, "club", club.grassroots_guid)
         company_tid = company_row[0] if company_row else None
 
-        org = (await session.get(Organisation, club.existing_org_id)
+        org = (await session.get(
+                    Organisation, club.existing_org_id,
+                    options=[selectinload(Organisation.module_subscriptions)])
                if club.existing_org_id else None)
         paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
         is_paying = bool(paid) or (club.demo_status or "") == "customer"
@@ -107,7 +110,8 @@ def _print_row(r: dict) -> None:
           f"lifecycleStage={r['lifecycle_stage']}  leadStatus={r['lead_status']}  "
           f"leadSource={r['lead_source']}")
     print(f"  Breakdown: recencyPts={r['recency_pts']}  emailDecayPts={r['email_decay_pts']}  "
-          f"webDecayPts={r['web_decay_pts']}  freqPts={r['freq_pts']} (capped at 60)")
+          f"webDecayPts={r['web_decay_pts']}  freqPts={r['freq_pts']} "
+          f"(reach capped 24 + depth capped 40 = 64 max)")
     print(f"  Volume:    sessions30d={r['sessions_30d']}  emailEngaged30d={r['email_engaged_30d']}  "
           f"inSalesCycle={r['in_sales_cycle']}  lastSeenAt={r['last_seen_at']}")
     print(f"  Account:   isCustomer={r['is_customer']}  syncedNotPaying={r['synced_not_paying']}  "

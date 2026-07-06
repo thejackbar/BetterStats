@@ -954,11 +954,17 @@ and still does its job of gating "last touch" freshness independently).
 - **Web** (`web_decay_pts`): 3/2/1/0.5 pts per matched page-view/API event at
   ≤7/≤14/≤21/≤28 days, else 0 — a burst of visits this week now clearly
   outscores the same count trickled over the full month.
-- `freq_pts = min(sessions*6 + email_decay_pts + web_decay_pts, 60)` — cap
-  raised from 40 to 60 (raw volume still can't dominate outright — the
-  crawler/bot concern the old cap existed for), but high enough that real
-  clubs differentiate on genuine depth+recency before saturating it, rather
-  than bunching at the ceiling like before.
+- `reach_pts = min(sessions*6, 24)` and `depth_pts = min(email_decay_pts +
+  web_decay_pts, 40)` are capped **separately** (`freq_pts = reach_pts +
+  depth_pts`, max 64) rather than pooled into one shared ceiling — an actual
+  local test run (seeded clubs, real Postgres, see below) caught that a shared
+  cap let `sessions*6` alone crowd out the headroom before the decay sums got
+  a chance to matter: two clubs with the same event count, one bursting in
+  the last week and one trickling over the full 28 days, produced genuinely
+  different `web_decay_pts` (27 vs 13.5) that both still rounded up to the
+  identical final score, because 9 sessions × 6 = 54 was already past a
+  shared 60-point cap on its own. Splitting the caps let both survive to the
+  final number (71 vs 58 in that same test).
 - Final `score` is rounded once at the very end (`int(round(score))`) since
   the decay sums can be fractional (the 0.5-point web tier); tier-band
   comparisons run on the precise value first.
@@ -972,6 +978,32 @@ and still does its job of gating "last touch" freshness independently).
   score descending, with an optional `--csv <path>` for a spreadsheet-ready
   export — the fleet-wide view (a full audit of every Lead at once) rather
   than `diagnose_club_lead.py`'s one-club-at-a-time lookup.
+
+**Validated against a real local build, not just read**: stood up a throwaway
+Postgres 16 + the full app schema (`Base.metadata.create_all` for the
+ORM-mapped tables, plus the handful of raw-SQL-only tables main.py's lifespan
+otherwise creates) in the sandbox, seeded six clubs with deliberately
+different web/email activity shapes, and ran both `diagnose_club_lead.py` and
+`engagement_lead_breakdown.py` for real. That's what caught the shared-cap
+bug above, and a second, unrelated latent bug in the same pass:
+
+- **`refresh_engagement()` and `_seed_and_refresh_leads()` — the two bulk/
+  periodic scans — were loading a club's linked `Organisation` with a plain
+  `session.get(Organisation, id)`, never eager-loading `module_subscriptions`.**
+  `_module_split()` only reads the real per-module `org_module_subscriptions`
+  rows "when loaded" (its own docstring), and silently falls back to the
+  legacy whole-org `module_overrides`/`subscription_status` fields otherwise —
+  which lumps ALL held modules into either "all paid" or "all trial" with no
+  per-module distinction. The three real-time single-company push paths
+  (`push_club_and_contacts`, `push_org_company`, `export_to_twenty`) already
+  eager-load correctly (`options=[selectinload(Organisation.module_subscriptions)]`)
+  — only the two bulk scans that run against the WHOLE club book (the daily
+  06:00 engagement refresh and the daily 07:00 Lead/Task sweep — the paths
+  that matter most) were missing it. Fixed both to match; also fixed the same
+  gap in `diagnose_club_lead.py`/`engagement_lead_breakdown.py` themselves
+  (caught when a seeded customer club with a genuinely paid module scored as
+  if it were still a prospect, because the org's paid-module row wasn't
+  visible to `_module_split` without the eager load).
 
 **Depends on AWS SES "Open and click tracking" actually being enabled** on the
 `ses_configuration_set`/`ses_configuration_set_transactional` config sets in

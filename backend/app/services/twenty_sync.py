@@ -370,13 +370,20 @@ async def _engagement(session, club: MarketingClub,
               | _billing_modules(trial_mods))
     upsell = sorted(wanted - paid_keys)
 
-    # Distinct-visitor reach (sessions) plus the two per-event age-decayed sums
-    # above, capped so raw volume still can't dominate the score on its own (a
-    # crawler/bot hammering one UTM link shouldn't read as a hot lead) — but the cap
-    # is well above what the OLD flat-count formula could ever reach, since real
-    # clubs should differentiate on genuine depth+recency before hitting it, not
-    # bunch up at a low ceiling.
-    freq_pts = min(sessions * 6 + email_decay_pts + web_decay_pts, 60)
+    # Reach (distinct visitors) and depth (the two per-event age-decayed sums) are
+    # capped SEPARATELY, not pooled into one shared ceiling — a shared cap let a
+    # handful of distinct sessions alone (sessions*6) crowd out all the headroom
+    # before the decay sums got a chance to differentiate anything (caught by
+    # actually running this: two clubs with the same event count, one bursting
+    # this week and one trickling over the full month, produced visibly different
+    # web_decay_pts — 27 vs 13.5 — that both still rounded up to the SAME final
+    # score, because sessions*6 alone was already most of the old shared 60-point
+    # cap). Each sub-cap is generous enough that a crawler/bot still can't dominate
+    # the score on its own, but real depth/recency differences now survive to the
+    # final number instead of both saturating the same ceiling.
+    reach_pts = min(sessions * 6, 24)
+    depth_pts = min(email_decay_pts + web_decay_pts, 40)
+    freq_pts = reach_pts + depth_pts
     recency = _recency_pts(last_touch)
 
     # Tier bands: Cold < 30, Warm 30-45, Hot > 45 (open-ended at the top).
@@ -1442,7 +1449,9 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                 club = clubs.get(guid)
                 if club is None:
                     continue
-                org = (await session.get(Organisation, club.existing_org_id)
+                org = (await session.get(
+                            Organisation, club.existing_org_id,
+                            options=[selectinload(Organisation.module_subscriptions)])
                        if club.existing_org_id else None)
                 fields = await _engagement(session, club, org)
                 all_unsub = await _all_contacts_unsubscribed(session, club.id)
