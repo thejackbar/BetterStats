@@ -967,6 +967,11 @@ and still does its job of gating "last touch" freshness independently).
   stripped by `_public()` before anything reaches Twenty, same convention as
   `_onboardingRequested`) — surfaced in `diagnose_club_lead.py`'s new
   `breakdown:` line so a score can be explained, not just observed.
+- **`app/scripts/engagement_lead_breakdown.py`** (new, read-only) reports this
+  same breakdown for every club that currently has a Twenty Lead, sorted by
+  score descending, with an optional `--csv <path>` for a spreadsheet-ready
+  export — the fleet-wide view (a full audit of every Lead at once) rather
+  than `diagnose_club_lead.py`'s one-club-at-a-time lookup.
 
 **Depends on AWS SES "Open and click tracking" actually being enabled** on the
 `ses_configuration_set`/`ses_configuration_set_transactional` config sets in
