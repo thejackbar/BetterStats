@@ -283,11 +283,23 @@ async def _engagement(session, club: MarketingClub,
     # confirmed for West Coburg St Andrews CC and Geelong Over 50s CC, both showing
     # real Directory "site visits" via path-only hits) scored zero sessions here.
     org_slug = getattr(org, "slug", None) if org is not None else None
+    # ``web_decay_pts`` scores EACH matched page-view/API event by its own age (not
+    # just the newest one) and sums them — a burst of 8 pages this week outscores 8
+    # pages trickled over the full window, and the sum itself differentiates a quiet
+    # club from a busy one far more than a flat 30-day count capped at 20 ever could
+    # (many genuinely-different clubs were converging on the same capped value).
     web = (await session.execute(text(f"""
         SELECT MAX(ue.created_at) AS last_seen,
                COUNT(DISTINCT ue.visitor_id)
                  FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
-               COUNT(*) FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS events_30d
+               COUNT(*) FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS events_30d,
+               COALESCE(SUM(CASE
+                   WHEN ue.created_at > NOW() - INTERVAL '7 days' THEN 3.0
+                   WHEN ue.created_at > NOW() - INTERVAL '14 days' THEN 2.0
+                   WHEN ue.created_at > NOW() - INTERVAL '21 days' THEN 1.0
+                   WHEN ue.created_at > NOW() - INTERVAL '28 days' THEN 0.5
+                   ELSE 0.0
+               END), 0.0)::float AS web_decay_pts
         FROM usage_events ue
         WHERE (CAST(:utm AS text) IS NOT NULL
                AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
@@ -303,13 +315,35 @@ async def _engagement(session, club: MarketingClub,
     last_web = web[0] if web else None
     sessions = (web[1] or 0) if web else 0
     events_30d = (web[2] or 0) if web else 0
+    web_decay_pts = float(web[3] or 0.0) if web else 0.0
 
     # Email engagement (email_events opens/clicks) for this club's contact emails, or
     # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
+    #
+    # ``email_decay_pts`` mirrors a marketing-automation "score every time" rule
+    # (e.g. HubSpot): each open/click is scored on ITS OWN age against a tiered
+    # schedule and every qualifying event is summed, rather than folding every touch
+    # into one flat 30-day count. A click is weighted double an open (a real click
+    # is stronger buying intent than a pixel-fired open, which Apple Mail Privacy
+    # Protection can trigger without the recipient ever looking). Requires AWS SES
+    # "Open and click tracking" enabled on the configuration set — if that's off,
+    # email_events never gets open/click rows and this is always 0 (see
+    # app/scripts/email_opens.py to check).
     em = (await session.execute(text("""
         SELECT MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
-                                AND created_at > NOW() - INTERVAL '30 days') AS eng_30d
+                                AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
+               COALESCE(SUM(CASE
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN 16.0
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN 12.0
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN 8.0
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN 4.0
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN 8.0
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN 6.0
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN 4.0
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN 2.0
+                   ELSE 0.0
+               END), 0.0)::float AS email_decay_pts
         FROM email_events
         WHERE lower(email) IN (
                 SELECT lower(email) FROM marketing_club_contacts
@@ -318,6 +352,7 @@ async def _engagement(session, club: MarketingClub,
     """), {"cid": str(club.id), "org": org_id})).first()
     last_email = em[0] if em else None
     eng_30d = (em[1] or 0) if em else 0
+    email_decay_pts = float(em[2] or 0.0) if em else 0.0
 
     onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm, org_slug)
 
@@ -335,10 +370,13 @@ async def _engagement(session, club: MarketingClub,
               | _billing_modules(trial_mods))
     upsell = sorted(wanted - paid_keys)
 
-    # A modest per-event weight on top of the session count, capped so raw volume
-    # can't dominate the score on its own (a crawler/bot hammering one UTM link
-    # shouldn't read as a hot lead).
-    freq_pts = min(sessions * 6 + eng_30d * 4 + min(events_30d, 20), 40)
+    # Distinct-visitor reach (sessions) plus the two per-event age-decayed sums
+    # above, capped so raw volume still can't dominate the score on its own (a
+    # crawler/bot hammering one UTM link shouldn't read as a hot lead) — but the cap
+    # is well above what the OLD flat-count formula could ever reach, since real
+    # clubs should differentiate on genuine depth+recency before hitting it, not
+    # bunch up at a low ceiling.
+    freq_pts = min(sessions * 6 + email_decay_pts + web_decay_pts, 60)
     recency = _recency_pts(last_touch)
 
     # Tier bands: Cold < 30, Warm 30-45, Hot > 45 (open-ended at the top).
@@ -366,6 +404,12 @@ async def _engagement(session, club: MarketingClub,
         score = min(score, 100)
         tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
 
+    # freq_pts sums fractional per-event decay points (the 21-28 day web-view tier
+    # is worth 0.5), so score can come out fractional here — round once, at the
+    # very end, so the tier-band comparisons above run on the precise value but the
+    # field actually pushed to Twenty reads as a whole number.
+    score = int(round(score))
+
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # RECENT engagement (so it's a deal to work, not just a name on a list). Uses
     # ``sessions``/``eng_30d`` (both 30-day-windowed), not the all-time ``last_touch``
@@ -389,6 +433,13 @@ async def _engagement(session, club: MarketingClub,
         # Exposed for the Lead lane (twenty_leads_tasks) to source-label a Lead
         # raised off a direct enquiry as "Contact us" rather than a generic bucket.
         "_onboardingRequested": bool(onboarding_count),
+        # Internal-only score breakdown (underscore-prefixed, stripped by _public()
+        # before anything reaches Twenty) — for diagnose_club_lead.py, so a score
+        # can actually be explained rather than just observed.
+        "_recencyPts": recency,
+        "_emailDecayPts": round(email_decay_pts, 1),
+        "_webDecayPts": round(web_decay_pts, 1),
+        "_freqPts": round(freq_pts, 1),
     }
     if last_touch:
         fields["lastSeenAt"] = last_touch.isoformat()

@@ -82,6 +82,12 @@ async def diagnose(name_query: str) -> None:
                   f"tier={eng.get('engagementTier')} sessions30d={eng.get('sessions30d')} "
                   f"emailEngaged30d={eng.get('emailEngaged30d')} "
                   f"inSalesCycle={eng.get('inSalesCycle')}")
+            print(f"    breakdown: recencyPts={eng.get('_recencyPts')} "
+                  f"emailDecayPts={eng.get('_emailDecayPts')} "
+                  f"webDecayPts={eng.get('_webDecayPts')} "
+                  f"freqPts={eng.get('_freqPts')} (freq capped at 60; "
+                  f"emailDecayPts=0 with real opens/clicks sent means SES open/click "
+                  f"tracking is likely OFF — see app.scripts.email_opens)")
 
             synced = bool(club.existing_org_id) and not is_paying
             sig = _lead_signal(club, org, eng, synced=synced)

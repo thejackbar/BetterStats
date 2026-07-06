@@ -891,3 +891,91 @@ for renamed UTM codes, or the path-embedded-code / org-slug fallbacks) — only
 the `utm_id`/`utm_source` parity fix. Worth revisiting if a club's traffic is
 still invisible to `_engagement` after this fix and `docker exec ... python -m
 app.scripts.diagnose_club_lead "<name>"` confirms it's still zero.
+
+## 17. July 2026 — `_engagement` was missing path-only (no-UTM) traffic
+
+The gap flagged as out-of-scope in §16 turned out to matter in practice: West
+Coburg St Andrews CC and Geelong Over 50s CC both showed real Directory "site
+visits" (confirmed via the Directory panel) that `diagnose_club_lead.py` still
+scored as `sessions30d=0`. Both clubs' traffic landed on `/{club-slug}/...`
+with **no UTM query param at all** — organic hits, a shared link, or (for West
+Coburg, already a customer) a visitor going straight to the org's own site —
+so neither the `utm_id`/`utm_source` columns nor `org_id` had anything to
+match on.
+
+**Fixed**: `_engagement`'s web query and `_onboarding_signal`'s visitor lookup
+now also match via `_PATH_CODE` (the same first-path-segment extraction
+`_RESOLVED_VISITS` uses) against the club's `utm_code`, against the linked
+org's `slug` (for a customer whose own site path need not equal its stored
+UTM code — confirmed true for both clubs above), and via `marketing_utm_aliases`
+keyed to this specific club. This is the `_RESOLVED_VISITS` parity `§16` left
+undone — now closed.
+
+Also fixed the same session: **trial requests now raise a Twenty Task
+immediately**, not on the next daily 07:00 sweep. Two gaps: (a) ticking
+"Requested Trial" (as opposed to "Trial Modules") in the Club Directory queued
+nothing at all — `set_sales_state` only reacted to Trial Modules; both now
+trigger the same follow-up. (b) even a queued `ModuleActionRequest` for an
+already-synced club waited for `_mirror_requests_to_tasks`'s daily sweep to
+become a visible Task — `twenty_inbound.request_trial_modules` now raises the
+Task inline (same `req:{id}` ext_ref the daily sweep already uses, so it just
+no-ops on it next run rather than double-raising).
+
+## 18. July 2026 — engagement score differentiation: per-event decayed scoring
+
+**Problem raised**: too many clubs converged on the same `engagementScore`,
+making the CRM's sort-by-score nearly useless for prioritising outreach. Two
+compounding causes, found by walking the formula rather than the data (no
+production DB access from this environment — verify empirically after deploy
+via `diagnose_club_lead.py`'s new `breakdown:` line):
+
+1. `eng_30d` (email) and `events_30d` (web) were **flat counts capped low**
+   (`min(events_30d, 20)`, `freq_pts` capped at 40 overall) — many genuinely
+   different clubs (5 opens vs 15 opens; a burst last week vs a trickle all
+   month) converged on the same capped contribution.
+2. `_recency_pts` is a 4-bucket step function (`≤7d→20, ≤30d→14, ≤90d→7,
+   else→2`) applied once to a single collapsed `last_touch` (the max across
+   web/email/onboarding) — any two clubs whose last touch fell in the same
+   bucket were indistinguishable on this term regardless of how different
+   their actual history was.
+
+**Fix — per-event, age-decayed points, summed** (mirrors a standard
+marketing-automation "score every time" rule, e.g. HubSpot's event-scoring
+UI): each qualifying `email_events`/`usage_events` row is scored on **its own**
+age against a tiered schedule, and every qualifying row in the last 28 days is
+summed — replacing the flat counts, not the separate `_recency_pts` term
+(left alone; it was deliberately recalibrated earlier this session, see §14,
+and still does its job of gating "last touch" freshness independently).
+
+- **Email** (`email_decay_pts`): a click scores double an open at the same
+  age (a click is stronger buying intent than a pixel-fired open, which Apple
+  Mail Privacy Protection can trigger unread) — click 16/12/8/4 pts at
+  ≤7/≤14/≤21/≤28 days, open 8/6/4/2 pts on the same windows, else 0.
+- **Web** (`web_decay_pts`): 3/2/1/0.5 pts per matched page-view/API event at
+  ≤7/≤14/≤21/≤28 days, else 0 — a burst of visits this week now clearly
+  outscores the same count trickled over the full month.
+- `freq_pts = min(sessions*6 + email_decay_pts + web_decay_pts, 60)` — cap
+  raised from 40 to 60 (raw volume still can't dominate outright — the
+  crawler/bot concern the old cap existed for), but high enough that real
+  clubs differentiate on genuine depth+recency before saturating it, rather
+  than bunching at the ceiling like before.
+- Final `score` is rounded once at the very end (`int(round(score))`) since
+  the decay sums can be fractional (the 0.5-point web tier); tier-band
+  comparisons run on the precise value first.
+- New internal-only fields on the `_engagement` return dict —
+  `_recencyPts`/`_emailDecayPts`/`_webDecayPts`/`_freqPts` (underscore-prefixed,
+  stripped by `_public()` before anything reaches Twenty, same convention as
+  `_onboardingRequested`) — surfaced in `diagnose_club_lead.py`'s new
+  `breakdown:` line so a score can be explained, not just observed.
+
+**Depends on AWS SES "Open and click tracking" actually being enabled** on the
+`ses_configuration_set`/`ses_configuration_set_transactional` config sets in
+the SES console — that's an AWS-side toggle, not app config. If it's off,
+`email_events` never gets `open`/`click` rows and `email_decay_pts` is always
+0 (check with `docker exec -e PYTHONPATH=/app betterstats-backend python -m
+app.scripts.email_opens` — 0 opens across the board with real sends means
+tracking is off, not that nobody's reading the emails).
+
+Emitted `emailEngaged30d`/`sessions30d`/`events_30d` display fields are
+unchanged (still flat counts, for CRM-visible "how many" context) — only the
+internal scoring formula now reads the decayed sums instead of the flat ones.
