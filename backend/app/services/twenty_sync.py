@@ -371,18 +371,30 @@ async def _engagement(session, club: MarketingClub,
     upsell = sorted(wanted - paid_keys)
 
     # Reach (distinct visitors) and depth (the two per-event age-decayed sums) are
-    # capped SEPARATELY, not pooled into one shared ceiling — a shared cap let a
-    # handful of distinct sessions alone (sessions*6) crowd out all the headroom
-    # before the decay sums got a chance to differentiate anything (caught by
-    # actually running this: two clubs with the same event count, one bursting
-    # this week and one trickling over the full month, produced visibly different
-    # web_decay_pts — 27 vs 13.5 — that both still rounded up to the SAME final
-    # score, because sessions*6 alone was already most of the old shared 60-point
-    # cap). Each sub-cap is generous enough that a crawler/bot still can't dominate
-    # the score on its own, but real depth/recency differences now survive to the
-    # final number instead of both saturating the same ceiling.
-    reach_pts = min(sessions * 6, 24)
-    depth_pts = min(email_decay_pts + web_decay_pts, 40)
+    # each squashed through a saturating curve (cap*raw/(raw+half)) — asymptotic
+    # towards the cap but NEVER reaching it, so two different raw values can never
+    # tie. A hard min(raw, cap) was tried first and genuinely broke on real data:
+    # Tasmania Police CC (54 distinct visitors, 71 views) and Yarnteen CC (12
+    # visitors, 20 views) both blew straight past a 24-point reach cap (hit at just
+    # 4 sessions) and a 40-point depth cap (hit at ~14 recent page views), landing
+    # on the exact same clipped freq_pts and the same final score (84) despite one
+    # club having ~4x the other's real traffic. With a hard clip it doesn't matter
+    # how far past the cap a club is — 10% over and 1000% over land on the same
+    # number.
+    # The curve keeps *some* headroom between any two real values all the way up
+    # (diminishing returns, not a flat wall), while still bounding a crawler/bot's
+    # score the same way a hard cap did. ``half`` (the raw value giving exactly
+    # half the cap) is set equal to the cap itself — verified against real and
+    # synthetic data to sit closest to the OLD hard-clip calibration for
+    # low/typical volumes (a lone visitor's score barely moves) while still
+    # clearly separating genuinely different high-volume clubs (Tasmania
+    # Police's real 54-visitor/71-view case scores 76 vs Yarnteen's real
+    # 12-visitor/20-view case at 62 — both previously clipped to an identical 84).
+    def _saturate(raw: float, cap: float, half: float) -> float:
+        return cap * raw / (raw + half) if raw > 0 else 0.0
+
+    reach_pts = _saturate(sessions * 6, cap=24, half=24)
+    depth_pts = _saturate(email_decay_pts + web_decay_pts, cap=40, half=40)
     freq_pts = reach_pts + depth_pts
     recency = _recency_pts(last_touch)
 

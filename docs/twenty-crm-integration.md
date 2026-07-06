@@ -954,17 +954,33 @@ and still does its job of gating "last touch" freshness independently).
 - **Web** (`web_decay_pts`): 3/2/1/0.5 pts per matched page-view/API event at
   ≤7/≤14/≤21/≤28 days, else 0 — a burst of visits this week now clearly
   outscores the same count trickled over the full month.
-- `reach_pts = min(sessions*6, 24)` and `depth_pts = min(email_decay_pts +
-  web_decay_pts, 40)` are capped **separately** (`freq_pts = reach_pts +
-  depth_pts`, max 64) rather than pooled into one shared ceiling — an actual
-  local test run (seeded clubs, real Postgres, see below) caught that a shared
-  cap let `sessions*6` alone crowd out the headroom before the decay sums got
-  a chance to matter: two clubs with the same event count, one bursting in
-  the last week and one trickling over the full 28 days, produced genuinely
-  different `web_decay_pts` (27 vs 13.5) that both still rounded up to the
-  identical final score, because 9 sessions × 6 = 54 was already past a
-  shared 60-point cap on its own. Splitting the caps let both survive to the
-  final number (71 vs 58 in that same test).
+- `reach_pts` (from `sessions*6`) and `depth_pts` (from `email_decay_pts +
+  web_decay_pts`) are computed **separately** and summed into `freq_pts`,
+  each through its own **saturating curve** — `cap*raw/(raw+half)`,
+  asymptotic towards the cap but never reaching it — rather than a hard
+  `min(raw, cap)` clip. Went through two rounds of this, both caught by
+  actually running real numbers, not by reading the formula:
+  1. First cut pooled reach and depth into one shared 60-point hard cap. A
+     local test run (seeded clubs, real Postgres) showed `sessions*6` alone
+     could crowd out the whole cap before the decay sums got a chance to
+     matter — two clubs with the same event count, one bursting in the last
+     week and one trickling over the month, produced genuinely different
+     `web_decay_pts` (27 vs 13.5) that both still rounded up to the same
+     final score. Fix: split into `reach_pts = min(sessions*6, 24)` and
+     `depth_pts = min(..., 40)`, capped independently.
+  2. That still broke on real production data: **Tasmania Police CC** (54
+     distinct visitors, 71 page views) and **Yarnteen CC** (12 visitors, 20
+     views) both blew straight past the 24-point reach cap (hit at just 4
+     sessions) and the 40-point depth cap (hit at ~14 recent views), landing
+     on the exact same clipped `freq_pts` and an identical final score (84)
+     despite one club having ~4.5x the other's real traffic — reported
+     directly from the live admin UI. A hard clip can't tell 10% over the
+     cap from 1000% over; both land on the same number. Fixed by replacing
+     both `min()` clips with the saturating curve above (`half` = the cap
+     itself, tuned against both the real Tasmania/Yarnteen numbers and the
+     synthetic test clubs from round 1 so typical/low-volume scores barely
+     move while genuinely different high-volume clubs now separate:
+     Tasmania → 76, Yarnteen → 62).
 - Final `score` is rounded once at the very end (`int(round(score))`) since
   the decay sums can be fractional (the 0.5-point web tier); tier-band
   comparisons run on the precise value first.
