@@ -104,7 +104,11 @@ async def request_trial_modules(db: AsyncSession, mc: MarketingClub, org: "Organ
     both funnel through the same super-admin action queue either way.
 
     Deduped: an org-side request skips a module already held or already outstanding;
-    a pre-sync Task is deduped forever on ``(club, module)`` via twenty_links."""
+    a pre-sync Task is deduped forever on ``(club, module)`` via twenty_links. Also
+    raises the Twenty Task for each newly-queued request immediately (rather than
+    waiting for the daily ``_mirror_requests_to_tasks`` sweep in
+    twenty_leads_tasks.py) — same ``req:{id}`` ext_ref, so that sweep's own dedupe
+    check simply no-ops on it next run instead of ever double-raising."""
     module_keys = sorted(set(module_keys))
     if not module_keys:
         return {"created": []}
@@ -118,7 +122,8 @@ async def request_trial_modules(db: AsyncSession, mc: MarketingClub, org: "Organ
             .where(OrgModuleSubscription.organisation_id == org.id)
         )).scalars().all()
     }
-    created = []
+    established = (org.subscription_status or "").lower() in ("active", "trial", "past_due")
+    new_reqs = []
     for module_key in module_keys:
         if module_key in held:
             continue
@@ -135,7 +140,7 @@ async def request_trial_modules(db: AsyncSession, mc: MarketingClub, org: "Organ
             select(ModuleActionRequest.id).where(ModuleActionRequest.external_ref == ext_ref)
         )).first():
             continue
-        db.add(ModuleActionRequest(
+        req = ModuleActionRequest(
             organisation_id=org.id,
             module_key=module_key,
             kind="trial",
@@ -143,10 +148,30 @@ async def request_trial_modules(db: AsyncSession, mc: MarketingClub, org: "Organ
             source=source,
             note="Trial requested in the CRM" if source == "twenty" else "Trial modules updated in the Club Directory",
             external_ref=ext_ref,
-        ))
-        created.append(module_key)
-    if created:
-        await db.commit()
+        )
+        db.add(req)
+        new_reqs.append((req, module_key))
+    if not new_reqs:
+        return {"club": org.name, "created": []}
+    await db.flush()  # populate req.id for the Task ext_ref below
+    await db.commit()
+    created = [module_key for _req, module_key in new_reqs]
+    try:
+        from app.services.twenty_sync import _link_get, _raise_task
+        link_row = await _link_get(db, "club", mc.grassroots_guid)
+        company_tid = link_row[0] if link_row else None
+        async with httpx.AsyncClient() as http:
+            for req, module_key in new_reqs:
+                mod = (module_key or "").upper()
+                title = (f"Enable {mod} trial for {org.name}" if established
+                         else f"Set up {org.name}: initiate sync + start BetterStats trial "
+                              f"({mod} requested)")
+                await _raise_task(db, http, f"req:{req.id}", title, company_tid)
+                await db.commit()
+    except Exception:  # noqa: BLE001 - the ModuleActionRequest is already saved; the
+        # daily mirror sweep will still raise the Task if this best-effort push fails
+        logger.exception("twenty_inbound: failed to raise immediate Task for %s trial request(s)",
+                         org.name)
     return {"club": org.name, "created": created}
 
 

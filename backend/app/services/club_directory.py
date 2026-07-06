@@ -1106,15 +1106,21 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     automated source). Only the fields passed are changed. Returns the new state,
     or None if the club isn't found.
 
-    Adding a module to Trial Modules here queues the same super-admin action-queue
-    request the Twenty CRM webhook raises when a salesperson does the equivalent
-    edit on the Company (see twenty_inbound.request_trial_modules): a real
-    ModuleActionRequest if the club is already synced, else a Twenty Task asking
-    for it to be synced first. Best-effort — never blocks saving the sales state."""
+    Adding a module to Trial Modules OR Requested Trial here queues the same
+    super-admin action-queue request the Twenty CRM webhook raises when a
+    salesperson does the equivalent edit on the Company (see
+    twenty_inbound.request_trial_modules): a real ModuleActionRequest if the club
+    is already synced, else a Twenty Task asking for it to be synced first.
+    Requested Trial is the "a club asked us for a trial" signal (e.g. by phone/
+    email, logged here by a super admin) — it needs the same follow-up action as
+    Trial Modules, just earlier in the pipeline, so it raises the identical
+    request/Task rather than sitting silently on the club's row. Best-effort —
+    never blocks saving the sales state."""
     club = await session.get(MarketingClub, club_id)
     if club is None:
         return None
     old_trial = set(club.trial_modules or [])
+    old_requested = set(club.requested_trial_modules or [])
     if trial_modules is not None:
         club.trial_modules = _clean_modules(trial_modules)
     if requested_trial_modules is not None:
@@ -1126,14 +1132,16 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
         club.not_interested = bool(not_interested)
     club.updated_at = func.now()
     added_trial = set(club.trial_modules or []) - old_trial
+    added_requested = set(club.requested_trial_modules or []) - old_requested
     await session.commit()
     await session.refresh(club)
-    if added_trial:
+    added_modules = sorted(added_trial | added_requested)
+    if added_modules:
         try:
             from app.services.twenty_inbound import request_trial_modules
             org = (await session.get(Organisation, club.existing_org_id)
                    if club.existing_org_id else None)
-            await request_trial_modules(session, club, org, sorted(added_trial),
+            await request_trial_modules(session, club, org, added_modules,
                                         source="app", ext_key=f"app:{club.grassroots_guid}")
         except Exception:  # noqa: BLE001 - queueing the follow-up must never block the save
             logger.exception("club_directory: failed to queue trial request for %s", club.id)
