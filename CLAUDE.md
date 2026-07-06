@@ -819,6 +819,51 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
 - **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
   `betterstats-backend` shares a Docker network with `klubpro-postgres`.
 
+## BetterComms — HTML / Design / Preview editor (Jul 2026)
+
+Template (`CommsTemplates.jsx`) and Email compose (`CommsCompose.jsx`) both used
+to be a plain `<textarea>` + a read-only iframe. Both now share one editor,
+`frontend/src/components/admin/EmailEditorTabs.jsx`, with three modes: **HTML**
+(the textarea), **Design** (WYSIWYG), **Preview** (unchanged — server-rendered
+`srcDoc` iframe, footer injected, exactly what a send produces).
+
+- **Design mode edits the real DOM, not a schema.** Real templates are
+  table-based layouts (`role="presentation"`, `cellpadding`, inline styles) for
+  email-client compatibility — a schema-based rich-text library (TipTap/Quill/
+  Slate) normalises content into its own document model and would strip or
+  rewrite that markup on round-trip. Instead Design mode writes the current HTML
+  into an iframe and sets `contentDocument.designMode = 'on'`, so the browser's
+  native editing operates on the actual markup; the toolbar calls
+  `execCommand` on that document. Reading the content back out
+  (`serializeIframeDocument`) gets back real HTML, tables and all, modulo the
+  user's own edits (browsers do normalise bare `<tr>` into an implicit `<tbody>`
+  on any DOM parse — cosmetic, doesn't affect rendering).
+- **Fragment vs full-document is auto-detected and preserved**
+  (`isFullHtmlDoc` in `lib/htmlEmailFormat.js`, mirrors the backend's
+  `_is_full_doc`). A full document (`<html`/`<body>` present — a pasted/imported
+  template) edits and serializes as a full document. A fragment (a plain-text or
+  simple-HTML compose body) is wrapped in a throwaway shell just for the Design
+  iframe's visual editing surface (`wrapFragmentForEditing`) but only the
+  fragment's inner content is read back out — so the backend's auto-wrap (club
+  shell + mandatory footer) for compose bodies keeps working untouched after a
+  round trip through Design mode.
+- **Tidy-on-switch**: `js-beautify`'s HTML formatter (`tidyHtml`) reformats the
+  code whenever a mode transition, Save, Test or Send happens with pending
+  edits — leaving HTML mode always shows clean, indented markup, whether the
+  edits came from raw code or from Design mode. Verified against a real
+  table-based template that indentation doesn't introduce visible whitespace
+  (inline elements like `<a>` inside a `<p>` are left untouched).
+- **`ref.flush()` is mandatory before persisting.** `EmailEditorTabs` is a
+  `forwardRef` exposing `flush()`, which synchronously returns the latest
+  content (Design-iframe edits read back and tidied, or tidied code) — every
+  Save/Send/Test call site must use its return value directly rather than the
+  `html`/`body` state variable, since the `onChange` callback's state update
+  hasn't necessarily landed yet by the time the API call fires. A debounced
+  (400ms), untidied live-sync also runs while typing in Design mode so
+  Send-button enablement and the unknown-`{{variable}}` warnings don't lag.
+- **No backend change** — tidying happens entirely client-side before the
+  existing `html`/`body_html` string fields are saved.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.
