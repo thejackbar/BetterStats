@@ -1,19 +1,24 @@
-"""Sales budget gauge — a small superadmin-only widget for a Twenty CRM
-dashboard iFrame, folded into the main backend so it needs no separate
-service, container, or API key: it reuses the Twenty credentials
+"""Dashboard gauges — small superadmin-only widgets for Twenty CRM dashboard
+iFrames, folded into the main backend so they need no separate service,
+container, or API key: they reuse the Twenty credentials
 (``settings.twenty_api_url`` / ``twenty_api_key``) already configured for the
 live twenty_sync integration (see ``services/twenty_client.py``).
 
-Shows Won Opportunity revenue against a budget/target — actual closed
-business, not open pipeline (see WON_STAGE_VALUE below).
+Each gauge is one entry in GAUGES below (slug -> title/description/target/
+stage-match function) and gets its own stable, addressable URL pair:
+  - ``GET /public/gauge/{slug}/`` — the gauge HTML page.
+  - ``GET /public/gauge/{slug}/data`` — the JSON `{current, target, currency,
+    currencySymbol, updatedAt, title, desc}` the page fetches.
 
-Two routes, both gated by HTTP Basic Auth (``GAUGE_USERNAME`` /
-``GAUGE_PASSWORD`` — this widget has no user accounts of its own, so it's one
-shared credential handed only to superadmins, not tied to BetterStats' or
-Twenty's own logins):
-  - ``GET /public/gauge/`` — the gauge HTML page.
-  - ``GET /public/gauge/pipeline`` — the JSON `{current, target, currency,
-    currencySymbol, updatedAt}` the page fetches.
+``GET /public/gauge/`` and ``GET /public/gauge/pipeline`` are kept as-is,
+equivalent to the "won" slug — this is the URL already embedded in a live
+Twenty dashboard widget, so it must keep working unchanged rather than move
+to /public/gauge/won/.
+
+All routes are gated by HTTP Basic Auth (``GAUGE_USERNAME`` / ``GAUGE_PASSWORD``
+— these widgets have no user accounts of their own, so it's one shared
+credential handed only to superadmins, not tied to BetterStats' or Twenty's
+own logins).
 
 Twenty request/response shapes (CURRENCY = ``{"amountMicros", "currencyCode"}``,
 list responses = ``{"data": {"opportunities": [...]}, "pageInfo":
@@ -38,23 +43,52 @@ from app.config.settings import settings
 router = APIRouter(prefix="/public/gauge", tags=["public-gauge"])
 
 # Plain constants, not Settings fields — deliberately, to keep the deployment
-# surface to just the two auth env vars below. Edit these directly in code if
-# the target/currency/won-stage value ever needs to change.
-TARGET_AMOUNT = 80000.0
+# surface to just the two auth env vars below. Edit these directly in code
+# (or add a new GAUGES entry) rather than growing the env-var surface.
 CURRENCY_SYMBOL = "$"
 CURRENCY_CODE = "AUD"
-# This workspace's real Opportunity pipeline stage value for a closed-won deal
-# (see docs/twenty-crm-integration.md section 3.4). Only opportunities at this
-# stage count towards the budget — open pipeline (Target/Contacted/Engaged/
-# Trial/Proposal) and Lost / Dormant are both excluded.
-WON_STAGE_VALUE = "won"
 ALLOWED_FRAME_ANCESTORS = "https://twenty.betterat.cricket"
 
 CACHE_TTL_SECONDS = 60
 MAX_PAGES = 200  # safety cap; a page is 60 records so this covers 12k opportunities
 
+# This workspace's real Opportunity pipeline stage value for a closed-won deal
+# (see docs/twenty-crm-integration.md section 3.4).
+_WON = "won"
+_LOST_DORMANT = "lost / dormant"
+
+
+def _match_won(stage: str) -> bool:
+    return stage == _WON
+
+
+def _match_projected(stage: str) -> bool:
+    """Won + every open stage (Target/Contacted/Engaged/Trial/Proposal) — i.e.
+    everything that could still land, excluding only Lost / Dormant. A simple
+    best-case total, not a probability-weighted forecast (Twenty doesn't carry
+    a per-stage win-rate here) — tell me if you want it weighted instead."""
+    return stage != _LOST_DORMANT
+
+
+# One entry per gauge widget. Add a new slug here to get a new
+# /public/gauge/{slug}/ + /public/gauge/{slug}/data pair for free.
+GAUGES = {
+    "won": {
+        "title": "Sales Budget",
+        "desc": "Won revenue vs. target",
+        "target": 80000.0,
+        "match": _match_won,
+    },
+    "projected": {
+        "title": "Projected Revenue",
+        "desc": "Won + open pipeline vs. target",
+        "target": 80000.0,
+        "match": _match_projected,
+    },
+}
+
 _cache_lock = asyncio.Lock()
-_cache: dict = {"current": None, "fetched_at": 0.0, "fetched_at_iso": None}
+_cache: dict[str, dict] = {}  # slug -> {"current", "fetched_at", "fetched_at_iso"}
 
 _basic_auth = HTTPBasic()
 
@@ -81,10 +115,10 @@ class TwentyFetchError(Exception):
     pass
 
 
-async def _fetch_won_total() -> float:
-    """Sum ``amount.amountMicros`` for every Opportunity whose ``stage`` equals
-    WON_STAGE_VALUE, in dollars. Paginates via ``pageInfo.endCursor`` /
-    ``starting_after`` until ``hasNextPage`` is false."""
+async def _fetch_total(match) -> float:
+    """Sum ``amount.amountMicros`` for every Opportunity whose ``stage``
+    satisfies ``match(stage)``, in dollars. Paginates via ``pageInfo.endCursor``
+    / ``starting_after`` until ``hasNextPage`` is false."""
     base = settings.twenty_api_url.rstrip("/")
     headers = {"Authorization": f"Bearer {settings.twenty_api_key}"}
     total_micros = 0
@@ -104,7 +138,7 @@ async def _fetch_won_total() -> float:
             opportunities = data.get("opportunities") or []
             for opp in opportunities:
                 stage = (opp.get("stage") or "").strip().lower()
-                if stage != WON_STAGE_VALUE:
+                if not match(stage):
                     continue
                 amount = opp.get("amount") or {}
                 total_micros += amount.get("amountMicros") or 0
@@ -115,25 +149,28 @@ async def _fetch_won_total() -> float:
     return total_micros / 1_000_000
 
 
-async def _get_current_total() -> float:
-    """60s in-memory cache around the Twenty fetch, so dashboard auto-refresh
-    (every 60s, possibly from several viewers) doesn't hammer the API."""
+async def _get_current_total(slug: str, match) -> float:
+    """60s in-memory cache per gauge, so dashboard auto-refresh (every 60s,
+    possibly from several viewers/widgets) doesn't hammer the API."""
     async with _cache_lock:
         now = time.monotonic()
-        if _cache["current"] is not None and now - _cache["fetched_at"] < CACHE_TTL_SECONDS:
-            return _cache["current"]
-        total = await _fetch_won_total()
-        _cache["current"] = total
-        _cache["fetched_at"] = now
-        _cache["fetched_at_iso"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        entry = _cache.get(slug)
+        if entry is not None and now - entry["fetched_at"] < CACHE_TTL_SECONDS:
+            return entry["current"]
+        total = await _fetch_total(match)
+        _cache[slug] = {
+            "current": total,
+            "fetched_at": now,
+            "fetched_at_iso": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
         return total
 
 
-@router.get("/pipeline", dependencies=[Depends(_require_superadmin)])
-async def pipeline(request: Request):
+async def _gauge_data(slug: str, request: Request):
+    gauge = GAUGES[slug]
     if not settings.twenty_configured:
         return JSONResponse(status_code=502, content={"error": "Twenty is not configured"})
-    target = TARGET_AMOUNT
+    target = gauge["target"]
     target_param = request.query_params.get("target")
     if target_param:
         try:
@@ -141,7 +178,7 @@ async def pipeline(request: Request):
         except ValueError:
             pass
     try:
-        current = await _get_current_total()
+        current = await _get_current_total(slug, gauge["match"])
     except (TwentyFetchError, httpx.HTTPError) as exc:
         return JSONResponse(status_code=502, content={"error": str(exc)})
     return {
@@ -149,16 +186,36 @@ async def pipeline(request: Request):
         "target": target,
         "currency": CURRENCY_CODE,
         "currencySymbol": CURRENCY_SYMBOL,
-        "updatedAt": _cache["fetched_at_iso"],
+        "updatedAt": _cache[slug]["fetched_at_iso"],
+        "title": gauge["title"],
+        "desc": gauge["desc"],
     }
 
 
+@router.get("/pipeline", dependencies=[Depends(_require_superadmin)])
+async def pipeline(request: Request):
+    """Kept at this exact path for backward compatibility — it's already the
+    URL embedded in a live Twenty dashboard widget. Equivalent to GAUGES["won"]."""
+    return await _gauge_data("won", request)
+
+
+@router.get("/{slug}/data", dependencies=[Depends(_require_superadmin)])
+async def gauge_slug_data(slug: str, request: Request):
+    if slug not in GAUGES:
+        raise HTTPException(status_code=404, detail=f"Unknown gauge {slug!r}")
+    return await _gauge_data(slug, request)
+
+
+# %%DATA_URL%% is replaced per-route below: "pipeline" for the legacy root
+# page, "data" for a /{slug}/ page (relative to its own directory-style URL).
+# Title/description are NOT baked in here — they come from the fetched JSON
+# (gauge["title"]/["desc"]), so this one template serves every gauge.
 _PAGE_HTML = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sales Budget</title>
+<title>Dashboard Gauge</title>
 <style>
   :root {
     color-scheme: dark;
@@ -191,7 +248,7 @@ _PAGE_HTML = """<!doctype html>
     flex-direction: column;
     align-items: center;
   }
-  .header { text-align: center; margin-bottom: clamp(2px, 1.5vw, 8px); }
+  .header { text-align: center; margin-bottom: clamp(2px, 1.5vw, 8px); min-height: 1.2em; }
   .title { font-size: clamp(0.8rem, 3.2vw, 1rem); font-weight: 650; letter-spacing: -0.01em; }
   .desc { margin-top: 2px; font-size: clamp(0.6rem, 2.2vw, 0.75rem); color: var(--muted); }
   .gauge-wrap { position: relative; width: 100%; }
@@ -215,8 +272,8 @@ _PAGE_HTML = """<!doctype html>
 <body>
   <div class="card">
     <div class="header">
-      <div class="title">Sales Budget</div>
-      <div class="desc">Won revenue vs. target</div>
+      <div class="title" id="title"></div>
+      <div class="desc" id="desc"></div>
     </div>
     <div class="gauge-wrap">
       <svg viewBox="0 0 200 120" preserveAspectRatio="xMidYMid meet">
@@ -250,6 +307,8 @@ _PAGE_HTML = """<!doctype html>
   const fillEl = document.getElementById("fill");
   const currentEl = document.getElementById("current");
   const subEl = document.getElementById("sub");
+  const titleEl = document.getElementById("title");
+  const descEl = document.getElementById("desc");
 
   trackEl.setAttribute("d", describeArc(180, 0));
 
@@ -264,6 +323,9 @@ _PAGE_HTML = """<!doctype html>
   }
 
   function render(data) {
+    if (data.title) titleEl.textContent = data.title;
+    if (data.desc) descEl.textContent = data.desc;
+
     const symbol = data.currencySymbol || "$";
     const current = Number(data.current) || 0;
     const target = Number(data.target) || 0;
@@ -284,14 +346,14 @@ _PAGE_HTML = """<!doctype html>
 
   async function load() {
     try {
-      let url = "pipeline";
+      let url = "%%DATA_URL%%";
       const override = targetOverride();
       if (override) url += "?target=" + encodeURIComponent(override);
       const resp = await fetch(url, { cache: "no-store" });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       render(await resp.json());
     } catch (err) {
-      subEl.textContent = "Couldn't load pipeline data";
+      subEl.textContent = "Couldn't load data";
       subEl.classList.add("error");
     }
   }
@@ -304,10 +366,17 @@ _PAGE_HTML = """<!doctype html>
 </html>
 """
 
+_CSP_HEADERS = {"Content-Security-Policy": f"frame-ancestors 'self' {ALLOWED_FRAME_ANCESTORS}"}
+
 
 @router.get("/", dependencies=[Depends(_require_superadmin)], response_class=HTMLResponse)
 async def gauge_page():
-    return HTMLResponse(
-        content=_PAGE_HTML,
-        headers={"Content-Security-Policy": f"frame-ancestors 'self' {ALLOWED_FRAME_ANCESTORS}"},
-    )
+    """Kept at this exact path for backward compatibility — see `pipeline` above."""
+    return HTMLResponse(content=_PAGE_HTML.replace("%%DATA_URL%%", "pipeline"), headers=_CSP_HEADERS)
+
+
+@router.get("/{slug}/", dependencies=[Depends(_require_superadmin)], response_class=HTMLResponse)
+async def gauge_slug_page(slug: str):
+    if slug not in GAUGES:
+        raise HTTPException(status_code=404, detail=f"Unknown gauge {slug!r}")
+    return HTMLResponse(content=_PAGE_HTML.replace("%%DATA_URL%%", "data"), headers=_CSP_HEADERS)
