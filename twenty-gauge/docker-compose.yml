@@ -1,0 +1,18 @@
+services:
+  twenty-gauge:
+    build: .
+    container_name: twenty-gauge
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    networks:
+      - docker-shared-net
+
+networks:
+  # Twenty itself runs on this shared external network (see docs/twenty-crm-integration.md
+  # in the main BetterStats repo). Joining it lets nginx-proxy-manager reach this
+  # container by name to give it a real https:// hostname for the iFrame widget's URL.
+  docker-shared-net:
+    external: true
