@@ -7,7 +7,8 @@ sum of open Opportunity amounts against a target, as a semicircular SVG gauge.
 
 - `main.py` — FastAPI proxy. Holds the Twenty API key server-side, exposes one
   endpoint (`GET /api/pipeline`) that returns `{ current, target, currency,
-  currencySymbol, updatedAt }`, and serves `index.html` at `/`.
+  currencySymbol, updatedAt }`, and serves `index.html` at `/`. Both routes sit
+  behind HTTP Basic Auth (see "Access control" below).
 - `index.html` — the gauge page itself. Fetches `/api/pipeline` on load and
   every 60 seconds, no build step, no chart library.
 
@@ -15,9 +16,10 @@ The API key never reaches the browser — only the two aggregate numbers do.
 
 ## Setup
 
-1. `cp .env.example .env` and fill in `TWENTY_API_KEY` (see below). The other
-   defaults already match this workspace (`TWENTY_BASE_URL`,
-   `ALLOWED_FRAME_ANCESTORS`, `EXCLUDED_STAGES`) — check them anyway.
+1. `cp .env.example .env` and fill in `TWENTY_API_KEY`, `GAUGE_USERNAME`,
+   `GAUGE_PASSWORD` (see below). The other defaults already match this
+   workspace (`TWENTY_BASE_URL`, `ALLOWED_FRAME_ANCESTORS`,
+   `EXCLUDED_STAGES`) — check them anyway.
 2. From `/srv/docker/twenty-gauge/` (or wherever this folder lands on the
    server):
    ```bash
@@ -26,14 +28,36 @@ The API key never reaches the browser — only the two aggregate numbers do.
    This runs as its **own** compose project, separate from the main
    `bltbox_docker_app` stack — deliberately, since it's a standalone service
    per the original brief, not part of the BetterStats app itself.
-3. Confirm it's up: `curl http://localhost:8000/api/pipeline` (adjust the
-   port if you changed `PORT`).
-4. Point a reverse-proxy hostname at it (e.g. via nginx-proxy-manager, the
-   same tool that routes Twenty and BetterStats on this box) so the iFrame
-   widget has a real `https://` URL to load — a bare container address won't
-   work from the browsers viewing the dashboard. The compose file joins
-   `docker-shared-net` (the same network Twenty itself is on) so NPM can
-   reach it by container name.
+3. Confirm it's up on the box itself: `curl -u USER:PASS
+   http://localhost:8000/api/pipeline` (adjust the port if you changed
+   `PORT`) — without `-u` you'll correctly get a 401. This only listens on
+   `127.0.0.1`, so it's not reachable from outside the server yet — that's
+   step 4.
+4. **Give it a public URL under the existing `betterat.cricket` domain** —
+   `https://betterat.cricket/admin/gauge/` — instead of minting a new
+   subdomain. `frontend/nginx.conf` (in the main BetterStats repo) already has
+   a location block that reverse-proxies `/admin/gauge/` to the `twenty-gauge`
+   container by name, the same pattern it already uses for `/api/`,
+   `/images/`, etc. This means:
+   - **The main BetterStats app needs a normal redeploy** for that nginx
+     change to take effect (`git pull` + `docker compose build --no-cache
+     betterstats-frontend` + recreate, per the deploy.sh flow) — this isn't
+     optional, the route doesn't exist until the frontend image is rebuilt.
+   - Both containers must be on the same `docker-shared-net` network (already
+     true — `betterstats-frontend` is on it per the main repo's deploy notes,
+     and this compose file joins it too), so nginx can resolve `twenty-gauge`
+     by container name.
+   - No new DNS record, no new nginx-proxy-manager host, no new TLS cert —
+     it rides on `betterat.cricket`'s existing ones.
+   - This path is gated **only** by this app's own Basic Auth (below) — it is
+     not behind BetterStats' own login just because it's under `/admin/`.
+     nginx hands the request straight to this container before the React
+     SPA/router ever sees the path.
+
+   If you'd rather keep it fully separate from the main app's deploy cycle, a
+   dedicated subdomain (its own NPM proxy host + DNS record, pointed at this
+   same container) works too — just skip the nginx.conf change and use that
+   hostname instead everywhere below.
 
 ### Generating the Twenty API key
 
@@ -51,10 +75,18 @@ that step may be out of date if you're on an older Twenty release:
 2. Name the dashboard, then in edit mode click **+** in the tab bar (or use
    an existing tab) and add a widget to it.
 3. Pick the **iFrame** widget type from the widget list.
-4. Paste this app's public URL (the one your reverse proxy serves) as the
-   iFrame source.
-5. Save. The gauge should render immediately and refresh itself every 60s —
-   no dashboard-level refresh needed.
+4. Paste `https://betterat.cricket/admin/gauge/` (or your chosen hostname, if
+   you went with a subdomain instead) as the iFrame source.
+5. Save. The browser should show a native Basic Auth prompt inside the
+   iframe on first load — enter `GAUGE_USERNAME`/`GAUGE_PASSWORD`. Once
+   entered, the browser caches it for that origin, and the gauge refreshes
+   itself every 60s with no further prompts.
+
+If the auth prompt doesn't appear inside the iframe (some browsers restrict
+HTTP-auth dialogs for cross-origin embedded content more than others — this
+wasn't tested inside an actual Twenty dashboard iframe), tell me and I'll
+switch the gate to a token in the URL (`?key=...`) instead, which always
+works in an iframe since it needs no prompt at all.
 
 Twenty doesn't have a native gauge widget (confirmed on the current docs —
 "Tables and gauge charts remain unavailable but are listed as roadmap
@@ -71,6 +103,8 @@ items"), which is exactly why this is an iFrame instead.
 | `CURRENCY_CODE` | `AUD` | see "Deviations from the brief" below |
 | `EXCLUDED_STAGES` | `Lost / Dormant` | comma-separated Opportunity `stage` values to exclude |
 | `ALLOWED_FRAME_ANCESTORS` | `https://twenty.betterat.cricket` | space-separated origins allowed to iframe this page |
+| `GAUGE_USERNAME` | — | required; HTTP Basic Auth, see "Access control" |
+| `GAUGE_PASSWORD` | — | required; app fails closed (500) until both are set |
 | `PORT` | `8000` | |
 
 ## Deviations from the brief — read before deploying
@@ -113,9 +147,18 @@ check): compare `GET /api/pipeline`'s `current` against Twenty's own pipeline
 aggregate for the same stage filter. If it's off, the likely culprits are
 listed above — tell me the actual numbers and I'll adjust.
 
-## Security note
+## Access control
 
-There's no auth on `/` or `/api/pipeline` — by design, since it only exposes
-two aggregate numbers. Don't share the deployed URL publicly if your pipeline
-total is sensitive; rely on `ALLOWED_FRAME_ANCESTORS` + keeping the URL
-unlisted, not authentication.
+Both `/` and `/api/pipeline` require HTTP Basic Auth (`GAUGE_USERNAME` /
+`GAUGE_PASSWORD`). This app has no user accounts or roles of its own and
+isn't wired into BetterStats' or Twenty's logins, so it's one shared
+credential you hand only to the people who should see it (your superadmins)
+— not a per-person login. Generate a real password
+(`openssl rand -base64 24`), never commit it, and rotate it (just change the
+env var + restart) if it's ever shared more widely than intended.
+
+The app **fails closed**: if `GAUGE_USERNAME`/`GAUGE_PASSWORD` aren't set,
+every request 500s rather than silently serving the page unauthenticated.
+
+This is on top of, not instead of, `ALLOWED_FRAME_ANCESTORS` (which controls
+*where* the page can be framed) — keep both set.

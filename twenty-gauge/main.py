@@ -24,9 +24,12 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import secrets
+
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 TWENTY_BASE_URL = os.environ.get("TWENTY_BASE_URL", "https://twenty.betterat.cricket").rstrip("/")
 TWENTY_API_KEY = os.environ.get("TWENTY_API_KEY", "")
@@ -44,6 +47,13 @@ EXCLUDED_STAGES = {
 }
 ALLOWED_FRAME_ANCESTORS = os.environ.get("ALLOWED_FRAME_ANCESTORS", "").split()
 
+# Superadmin-only gate (this app has no user accounts of its own, so it's one
+# shared credential handed only to superadmins — not tied to BetterStats' or
+# Twenty's own logins). Deliberately fails closed: an unset GAUGE_PASSWORD
+# rejects every request rather than silently leaving the page open.
+GAUGE_USERNAME = os.environ.get("GAUGE_USERNAME", "")
+GAUGE_PASSWORD = os.environ.get("GAUGE_PASSWORD", "")
+
 CACHE_TTL_SECONDS = 60
 MAX_PAGES = 200  # safety cap; a page is 60 records so this covers 12k opportunities
 
@@ -54,6 +64,27 @@ _cache: dict = {"current": None, "fetched_at": 0.0, "fetched_at_iso": None}
 
 class TwentyFetchError(Exception):
     pass
+
+
+_basic_auth = HTTPBasic()
+
+
+def require_superadmin(credentials: HTTPBasicCredentials = Depends(_basic_auth)) -> None:
+    """HTTP Basic gate shared by every route. Uses secrets.compare_digest for both
+    fields so a wrong-length guess can't be timed against the real credential."""
+    if not GAUGE_USERNAME or not GAUGE_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GAUGE_USERNAME/GAUGE_PASSWORD not configured",
+        )
+    user_ok = secrets.compare_digest(credentials.username, GAUGE_USERNAME)
+    pass_ok = secrets.compare_digest(credentials.password, GAUGE_PASSWORD)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
 
 async def _fetch_open_opportunities_total(http: httpx.AsyncClient) -> float:
@@ -121,7 +152,7 @@ async def frame_ancestors_csp(request: Request, call_next):
     return response
 
 
-@app.get("/api/pipeline")
+@app.get("/api/pipeline", dependencies=[Depends(require_superadmin)])
 async def pipeline(request: Request):
     target = TARGET_AMOUNT
     target_param = request.query_params.get("target")
@@ -143,6 +174,6 @@ async def pipeline(request: Request):
     }
 
 
-@app.get("/")
+@app.get("/", dependencies=[Depends(require_superadmin)])
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
