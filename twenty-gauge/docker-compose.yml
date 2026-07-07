@@ -1,0 +1,25 @@
+services:
+  twenty-gauge:
+    build: .
+    container_name: twenty-gauge
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Bound to localhost only — the real public path is
+      # https://betterat.cricket/admin/gauge/, reverse-proxied by the
+      # betterstats-frontend container over the network below. This is just
+      # for on-box debugging (curl from the server itself), not a second
+      # public entry point — publishing it on 0.0.0.0 would let Basic Auth
+      # credentials go over plain HTTP instead of through NPM's TLS.
+      - "127.0.0.1:${PORT:-8000}:${PORT:-8000}"
+    networks:
+      - docker-shared-net
+
+networks:
+  # Same shared network betterstats-frontend/backend and Twenty itself are on
+  # (see docs/twenty-crm-integration.md in the main BetterStats repo) — lets
+  # betterstats-frontend's nginx reach this container by name at
+  # /admin/gauge/ (see frontend/nginx.conf).
+  docker-shared-net:
+    external: true
