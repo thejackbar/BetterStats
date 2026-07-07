@@ -197,6 +197,12 @@ class Settings(BaseSettings):
     # these drive the ongoing record sync (twenty_client / twenty_sync).
     twenty_api_url: str = ""   # e.g. https://twenty.betterat.cricket (the SERVER_URL)
     twenty_api_key: str = ""   # a workspace API key with record write
+
+    # ─── Pipeline target gauge (routers/pipeline_gauge.py) ─────────────────────
+    # HTTP Basic Auth for the superadmin-only dashboard-gauge widget. Blank =
+    # every request 500s (fails closed) rather than serving the page open.
+    gauge_username: str = ""
+    gauge_password: str = ""
     # Shared secret for the INBOUND Twenty webhook (POST /webhooks/twenty). When set,
     # a Twenty record-update webhook can raise a module trial request back in
     # BetterCricket (source=twenty). Blank = the endpoint is a no-op (returns 200 and
