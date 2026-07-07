@@ -28,15 +28,36 @@ The API key never reaches the browser — only the two aggregate numbers do.
    This runs as its **own** compose project, separate from the main
    `bltbox_docker_app` stack — deliberately, since it's a standalone service
    per the original brief, not part of the BetterStats app itself.
-3. Confirm it's up: `curl -u USER:PASS http://localhost:8000/api/pipeline`
-   (adjust the port if you changed `PORT`) — without `-u` you'll correctly get
-   a 401.
-4. Point a reverse-proxy hostname at it (e.g. via nginx-proxy-manager, the
-   same tool that routes Twenty and BetterStats on this box) so the iFrame
-   widget has a real `https://` URL to load — a bare container address won't
-   work from the browsers viewing the dashboard. The compose file joins
-   `docker-shared-net` (the same network Twenty itself is on) so NPM can
-   reach it by container name.
+3. Confirm it's up on the box itself: `curl -u USER:PASS
+   http://localhost:8000/api/pipeline` (adjust the port if you changed
+   `PORT`) — without `-u` you'll correctly get a 401. This only listens on
+   `127.0.0.1`, so it's not reachable from outside the server yet — that's
+   step 4.
+4. **Give it a public URL under the existing `betterat.cricket` domain** —
+   `https://betterat.cricket/admin/gauge/` — instead of minting a new
+   subdomain. `frontend/nginx.conf` (in the main BetterStats repo) already has
+   a location block that reverse-proxies `/admin/gauge/` to the `twenty-gauge`
+   container by name, the same pattern it already uses for `/api/`,
+   `/images/`, etc. This means:
+   - **The main BetterStats app needs a normal redeploy** for that nginx
+     change to take effect (`git pull` + `docker compose build --no-cache
+     betterstats-frontend` + recreate, per the deploy.sh flow) — this isn't
+     optional, the route doesn't exist until the frontend image is rebuilt.
+   - Both containers must be on the same `docker-shared-net` network (already
+     true — `betterstats-frontend` is on it per the main repo's deploy notes,
+     and this compose file joins it too), so nginx can resolve `twenty-gauge`
+     by container name.
+   - No new DNS record, no new nginx-proxy-manager host, no new TLS cert —
+     it rides on `betterat.cricket`'s existing ones.
+   - This path is gated **only** by this app's own Basic Auth (below) — it is
+     not behind BetterStats' own login just because it's under `/admin/`.
+     nginx hands the request straight to this container before the React
+     SPA/router ever sees the path.
+
+   If you'd rather keep it fully separate from the main app's deploy cycle, a
+   dedicated subdomain (its own NPM proxy host + DNS record, pointed at this
+   same container) works too — just skip the nginx.conf change and use that
+   hostname instead everywhere below.
 
 ### Generating the Twenty API key
 
@@ -54,8 +75,8 @@ that step may be out of date if you're on an older Twenty release:
 2. Name the dashboard, then in edit mode click **+** in the tab bar (or use
    an existing tab) and add a widget to it.
 3. Pick the **iFrame** widget type from the widget list.
-4. Paste this app's public URL (the one your reverse proxy serves) as the
-   iFrame source.
+4. Paste `https://betterat.cricket/admin/gauge/` (or your chosen hostname, if
+   you went with a subdomain instead) as the iFrame source.
 5. Save. The browser should show a native Basic Auth prompt inside the
    iframe on first load — enter `GAUGE_USERNAME`/`GAUGE_PASSWORD`. Once
    entered, the browser caches it for that origin, and the gauge refreshes

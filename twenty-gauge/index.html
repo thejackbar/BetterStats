@@ -142,7 +142,10 @@
 
   async function load() {
     try {
-      let url = "/api/pipeline";
+      // Relative (no leading slash) so this keeps working whether the app is
+      // served at its own root or reverse-proxied under a path prefix like
+      // /admin/gauge/ — resolves against the current directory-style URL either way.
+      let url = "api/pipeline";
       const override = targetOverride();
       if (override) url += "?target=" + encodeURIComponent(override);
       const resp = await fetch(url, { cache: "no-store" });
