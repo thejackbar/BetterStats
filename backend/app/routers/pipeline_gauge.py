@@ -1,8 +1,11 @@
-"""Pipeline target gauge — a small superadmin-only widget for a Twenty CRM
+"""Sales budget gauge — a small superadmin-only widget for a Twenty CRM
 dashboard iFrame, folded into the main backend so it needs no separate
 service, container, or API key: it reuses the Twenty credentials
 (``settings.twenty_api_url`` / ``twenty_api_key``) already configured for the
 live twenty_sync integration (see ``services/twenty_client.py``).
+
+Shows Won Opportunity revenue against a budget/target — actual closed
+business, not open pipeline (see WON_STAGE_VALUE below).
 
 Two routes, both gated by HTTP Basic Auth (``GAUGE_USERNAME`` /
 ``GAUGE_PASSWORD`` — this widget has no user accounts of its own, so it's one
@@ -36,13 +39,15 @@ router = APIRouter(prefix="/public/gauge", tags=["public-gauge"])
 
 # Plain constants, not Settings fields — deliberately, to keep the deployment
 # surface to just the two auth env vars below. Edit these directly in code if
-# the target/currency/excluded stages ever need to change.
+# the target/currency/won-stage value ever needs to change.
 TARGET_AMOUNT = 80000.0
 CURRENCY_SYMBOL = "$"
 CURRENCY_CODE = "AUD"
-# This workspace's real Opportunity pipeline stage to exclude (see
-# docs/twenty-crm-integration.md section 3.4) — not a generic "LOST" value.
-EXCLUDED_STAGES = {"lost / dormant"}
+# This workspace's real Opportunity pipeline stage value for a closed-won deal
+# (see docs/twenty-crm-integration.md section 3.4). Only opportunities at this
+# stage count towards the budget — open pipeline (Target/Contacted/Engaged/
+# Trial/Proposal) and Lost / Dormant are both excluded.
+WON_STAGE_VALUE = "won"
 ALLOWED_FRAME_ANCESTORS = "https://twenty.betterat.cricket"
 
 CACHE_TTL_SECONDS = 60
@@ -76,9 +81,9 @@ class TwentyFetchError(Exception):
     pass
 
 
-async def _fetch_open_opportunities_total() -> float:
-    """Sum ``amount.amountMicros`` for every Opportunity whose ``stage`` is not
-    in EXCLUDED_STAGES, in dollars. Paginates via ``pageInfo.endCursor`` /
+async def _fetch_won_total() -> float:
+    """Sum ``amount.amountMicros`` for every Opportunity whose ``stage`` equals
+    WON_STAGE_VALUE, in dollars. Paginates via ``pageInfo.endCursor`` /
     ``starting_after`` until ``hasNextPage`` is false."""
     base = settings.twenty_api_url.rstrip("/")
     headers = {"Authorization": f"Bearer {settings.twenty_api_key}"}
@@ -99,7 +104,7 @@ async def _fetch_open_opportunities_total() -> float:
             opportunities = data.get("opportunities") or []
             for opp in opportunities:
                 stage = (opp.get("stage") or "").strip().lower()
-                if stage in EXCLUDED_STAGES:
+                if stage != WON_STAGE_VALUE:
                     continue
                 amount = opp.get("amount") or {}
                 total_micros += amount.get("amountMicros") or 0
@@ -117,7 +122,7 @@ async def _get_current_total() -> float:
         now = time.monotonic()
         if _cache["current"] is not None and now - _cache["fetched_at"] < CACHE_TTL_SECONDS:
             return _cache["current"]
-        total = await _fetch_open_opportunities_total()
+        total = await _fetch_won_total()
         _cache["current"] = total
         _cache["fetched_at"] = now
         _cache["fetched_at_iso"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -153,7 +158,7 @@ _PAGE_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pipeline Target</title>
+<title>Sales Budget</title>
 <style>
   :root {
     color-scheme: dark;
@@ -186,6 +191,9 @@ _PAGE_HTML = """<!doctype html>
     flex-direction: column;
     align-items: center;
   }
+  .header { text-align: center; margin-bottom: clamp(2px, 1.5vw, 8px); }
+  .title { font-size: clamp(0.8rem, 3.2vw, 1rem); font-weight: 650; letter-spacing: -0.01em; }
+  .desc { margin-top: 2px; font-size: clamp(0.6rem, 2.2vw, 0.75rem); color: var(--muted); }
   .gauge-wrap { position: relative; width: 100%; }
   svg { display: block; width: 100%; height: auto; }
   .track { fill: none; stroke: var(--track); stroke-linecap: round; }
@@ -206,6 +214,10 @@ _PAGE_HTML = """<!doctype html>
 </head>
 <body>
   <div class="card">
+    <div class="header">
+      <div class="title">Sales Budget</div>
+      <div class="desc">Won revenue vs. target</div>
+    </div>
     <div class="gauge-wrap">
       <svg viewBox="0 0 200 120" preserveAspectRatio="xMidYMid meet">
         <path class="track" d="" stroke-width="14" id="track"></path>
