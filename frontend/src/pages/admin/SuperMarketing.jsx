@@ -893,21 +893,38 @@ export default function SuperMarketing() {
     return m
   }
 
-  // Poll the background export until it finishes; surfaces the result/error.
-  const pollTwentyExport = async () => {
-    // ~20 min cap at 3s intervals — long exports throttle through Twenty's rate limit.
+  const formatEngagementResult = (r) =>
+    `Refreshed engagement on ${r.refreshed || 0} club(s) in Twenty` + (r.errored ? `, ${r.errored} errored (see logs).` : '.')
+
+  const formatLeadsTasksResult = (r) => {
+    const leads = (r.leads_created || 0) + (r.leads_updated || 0) + (r.leads_adopted || 0)
+    const tasks = (r.tasks_request || 0) + (r.tasks_trial_expiry || 0) + (r.tasks_renewal || 0)
+    return `Twenty leads/tasks: scanned ${r.clubs_scanned || 0} exported club(s), `
+      + `${r.leads_qualified || 0} qualified → ${leads} lead(s). Pending: `
+      + `${r.requests_outstanding || 0} request(s), ${r.trials_in_window || 0} expiring trial(s), `
+      + `${r.renewals_in_window || 0} renewal(s) → ${tasks} new task(s).`
+      + ((r.leads_errored || r.tasks_errored) ? ' Some errored (see logs).' : '')
+  }
+
+  // Poll a background Twenty job's status endpoint until it finishes; surfaces
+  // the result/error. Shared by export, engagement refresh and leads/tasks
+  // refresh — all three run in the background (see marketing.py) since a full
+  // pass over an exported-club list against Twenty's rate limit routinely
+  // exceeds the nginx proxy timeout.
+  const pollTwentyJob = async (statusFn, formatResult, { onDone } = {}) => {
+    // ~20 min cap at 3s intervals — long jobs throttle through Twenty's rate limit.
     for (let i = 0; i < 400; i++) {
       await new Promise((res) => setTimeout(res, 3000))
       let s
       try {
-        s = await api.mktExportTwentyStatus()
+        s = await statusFn()
       } catch { continue } // transient network/poll error — keep waiting
       if (s.running) continue
       if (s.error) { setError(s.error); return }
-      if (s.result) { setMsg(formatTwentyResult(s.result)); loadClubs(); return }
+      if (s.result) { setMsg(formatResult(s.result)); onDone?.(); return }
       return // no result and not running — nothing to report
     }
-    setMsg('Export is still running — check back shortly, then refresh the list.')
+    setMsg('Still running — check back shortly, then refresh the list.')
   }
 
   const exportTwenty = async () => {
@@ -916,32 +933,27 @@ export default function SuperMarketing() {
       const r = await api.mktExportTwenty({ ...filters })
       if (r.error) { setError(r.error); return }
       setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
-      await pollTwentyExport()
+      await pollTwentyJob(api.mktExportTwentyStatus, formatTwentyResult, { onDone: loadClubs })
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
   const refreshTwentyEngagement = async () => {
-    setBusy('twenty-refresh'); setMsg('')
+    setBusy('twenty-refresh'); setMsg(''); setError('')
     try {
       const r = await api.mktRefreshTwentyEngagement()
       if (r.error) { setError(r.error); return }
-      setMsg(`Refreshed engagement on ${r.refreshed || 0} club(s) in Twenty`
-        + (r.errored ? `, ${r.errored} errored (see logs).` : '.'))
+      setMsg('Refreshing engagement scores in Twenty… this can take a while for a large list. You can leave this page.')
+      await pollTwentyJob(api.mktRefreshTwentyEngagementStatus, formatEngagementResult)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
   const refreshTwentyLeadsTasks = async () => {
-    setBusy('twenty-leads-tasks'); setMsg('')
+    setBusy('twenty-leads-tasks'); setMsg(''); setError('')
     try {
       const r = await api.mktRefreshTwentyLeadsTasks()
       if (r.error) { setError(r.error); return }
-      const leads = (r.leads_created || 0) + (r.leads_updated || 0) + (r.leads_adopted || 0)
-      const tasks = (r.tasks_request || 0) + (r.tasks_trial_expiry || 0) + (r.tasks_renewal || 0)
-      setMsg(`Twenty leads/tasks: scanned ${r.clubs_scanned || 0} exported club(s), `
-        + `${r.leads_qualified || 0} qualified → ${leads} lead(s). Pending: `
-        + `${r.requests_outstanding || 0} request(s), ${r.trials_in_window || 0} expiring trial(s), `
-        + `${r.renewals_in_window || 0} renewal(s) → ${tasks} new task(s).`
-        + ((r.leads_errored || r.tasks_errored) ? ' Some errored (see logs).' : ''))
+      setMsg('Refreshing Twenty leads/tasks… this can take a while for a large list. You can leave this page.')
+      await pollTwentyJob(api.mktRefreshTwentyLeadsTasksStatus, formatLeadsTasksResult)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
