@@ -944,6 +944,44 @@ lead or engagement score.
     that gap; the jobs remain correct for their existing job (keeping
     already-exported clubs' scores current day-to-day).
 
+- **A trial — requested or started, either as a prospect or an onboarded
+  club — gets the same forced Hot (100) + Lead treatment**, on top of the
+  enquiry case above. Four distinct code paths all write to the same
+  `trial_modules`/`requested_trial_modules`/`demo_status` (prospect) or
+  `org_module_subscriptions` (onboarded) state, so each is hooked at its own
+  write point rather than centralised:
+  - `club_directory.set_sales_state()` — the super-admin Sales Pipeline panel
+    in the Club Directory (Trialing / Requested Trial checkboxes, Demo
+    dropdown). Tracks the delta of newly-added `trial_modules` /
+    `requested_trial_modules` (already existed, for the `request_trial_modules`
+    presync-Task queueing) and now ALSO fires
+    `push_club_and_contacts(club.id, engagement_override=…)` when a module is
+    newly added OR `demo_status` freshly transitions **into** `in_trial`
+    (transitioning out, or re-saving the same already-in_trial state, doesn't
+    re-push — verified against a real Postgres instance across 7 scenarios).
+  - `club_admin.py::create_module_request` — a club's own admin self-serving a
+    trial request (`kind == "trial"`) from inside the app. This is the
+    "requests a trial" moment for an already-onboarded club.
+  - `club_admin.py::start_module_trial` / `approve_module_request` — a super
+    admin directly granting a trial, or approving a self-serve trial request.
+    This is the "is put on a trial" moment. `approve_module_request` only
+    forces it for `req.kind == "trial"` — a subscribe/cancel approval keeps the
+    ordinary billing-fields-only push.
+  - Both onboarded-club paths go through `_push_club_to_twenty(org_id,
+    force_hot=True)` → `twenty_sync.push_org_company(org_id,
+    engagement_override=…)`, which gained the same `engagement_override`
+    param `push_club_and_contacts` has: only when given does it compute the
+    real `_engagement()` rollup (merging the override on top, so the other
+    real telemetry fields survive) and create-or-refresh the Lead via
+    `twenty_leads_tasks.upsert_lead_for_club()` — an ordinary subscription-change
+    push (activate/cancel/renewal-date edit) is untouched, still the
+    billing-fields-only push it always was.
+  - **Bonus fix surfaced while extending `push_org_company`**: it never
+    actually called `session.commit()` — `_upsert`'s `twenty_links` bookkeeping
+    (the id-mapping/content-hash dedupe row) was silently rolled back on every
+    call, on every existing caller, since the function was first written. Now
+    commits like every sibling push function.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

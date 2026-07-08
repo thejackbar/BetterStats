@@ -1324,10 +1324,20 @@ async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
         engagement_override={"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
 
 
-async def push_org_company(org_id) -> dict:
+async def push_org_company(org_id, engagement_override: "Optional[dict]" = None) -> dict:
     """Push ONE onboarded club's Company fields (paid/trial modules, ARR, subscription
     status, renewal) to Twenty after a subscription change. Best-effort and
-    no-op when Twenty isn't configured or the club has no linked CRM record."""
+    no-op when Twenty isn't configured or the club has no linked CRM record.
+
+    ``engagement_override`` is used for a trial start/grant — a strong enough
+    buying signal that it should read as an immediate Hot (100) score and a
+    real Lead, the same treatment ``push_onboarding_enquiry`` gives a direct
+    "onboard my club" enquiry, rather than the ordinary billing-fields-only push
+    every other subscription change (activate/cancel/renewal-date edit) gets
+    here. Only when given does this also compute the engagement rollup and
+    create-or-refresh the Lead — an ordinary call is unaffected, both to avoid
+    the extra Twenty calls on a routine save and because e.g. a cancel
+    shouldn't raise/refresh a Lead."""
     if not client.configured:
         return {"skipped": "twenty not configured"}
     try:
@@ -1343,9 +1353,16 @@ async def push_org_company(org_id) -> dict:
                 options=[selectinload(Organisation.module_subscriptions)],
             )
             company = _company_values(mc, org)
+            if engagement_override:
+                engagement = {**(await _engagement(session, mc, org)), **engagement_override}
+                company = {**company, **engagement}
             async with httpx.AsyncClient() as http:
-                await _upsert(session, http, "club", mc.grassroots_guid,
-                              "companies", "bcClubId", company)
+                ctid, _act = await _upsert(session, http, "club", mc.grassroots_guid,
+                                           "companies", "bcClubId", company)
+                if engagement_override:
+                    from app.services import twenty_leads_tasks
+                    await twenty_leads_tasks.upsert_lead_for_club(session, http, mc, org, ctid, engagement)
+            await session.commit()
         return {"ok": True}
     except Exception as e:
         logger.error(f"push_org_company failed for {org_id}: {e}")
