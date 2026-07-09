@@ -2342,6 +2342,16 @@ class MarketingClub(Base):
     # Sales disposition: club contacted and explicitly not interested. Manual, and it
     # overrides the computed engagement tier in the CRM (never auto-recomputed away).
     not_interested = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Cached copy of the last-computed Twenty engagementScore/-Tier — written by
+    # every _engagement() call (twenty_sync.py) regardless of what triggered it
+    # (manual export, bulk export, "Refresh Twenty scores", "Refresh Twenty
+    # leads/tasks", or a nightly job), so the Club Directory / BetterComms
+    # Contacts+Lists / Segments can filter on a real number without recomputing
+    # this per-club scan themselves. Can lag the live Twenty value by up to
+    # however long since this club's score was last (re)computed.
+    engagement_score = Column(Integer, nullable=True)
+    engagement_tier = Column(Text, nullable=True)
+    engagement_scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
     detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)

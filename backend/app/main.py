@@ -285,6 +285,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS not_interested "
             "BOOLEAN NOT NULL DEFAULT FALSE"))
+        # Cached Twenty engagementScore/-Tier, written by every _engagement() call —
+        # see the column comment in models/db.py for why.
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score INTEGER"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_tier TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_scored_at "
+            "TIMESTAMPTZ"))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
