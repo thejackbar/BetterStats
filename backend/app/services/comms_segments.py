@@ -112,7 +112,13 @@ def _visited_clause(val):
         "                                    AND ua_s.marketing_club_id IS NOT NULL "
         f"LEFT JOIN marketing_utm_aliases ua_p ON ua_p.utm_value = {path_code} "
         "                                    AND ua_p.marketing_club_id IS NOT NULL "
-        "WHERE ue.event_type = 'page_view' AND ("
+        "WHERE ue.event_type = 'page_view' "
+        # A stale UTM captured once in a browser tab keeps riding along on every
+        # later page view from that tab, including a staff member's own
+        # authenticated admin browsing — exclude that from "this prospect
+        # visited our marketing pages" the same way the Club Directory /
+        # engagement score now do.
+        "AND ue.user_id IS NULL AND split_part(ue.path, '?', 1) !~* '^/admin' AND ("
         "ue.utm_id = marketing_clubs.utm_code OR ue.utm_source = marketing_clubs.utm_code "
         "OR ua_i.marketing_club_id = marketing_clubs.id "
         "OR ua_s.marketing_club_id = marketing_clubs.id "
