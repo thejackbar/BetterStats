@@ -35,9 +35,9 @@ export default function SuperClubs() {
   const [defaultTrialDays, setDefaultTrialDays] = useState(14)
   // In-progress trial start/end edits per module key, before Apply.
   const [trialEdit, setTrialEdit] = useState({})
-  // Global platform General Settings (currently just the default trial length).
+  // Global platform General Settings (trial length + the Marketing section).
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsForm, setSettingsForm] = useState({ default_trial_days: 14 })
+  const [settingsForm, setSettingsForm] = useState({ default_trial_days: 14, direct_enquiry_hot_days: 30 })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
@@ -56,8 +56,11 @@ export default function SuperClubs() {
     setMsg('')
     try {
       const s = await api.superGetGeneralSettings()
-      setSettingsForm({ default_trial_days: s?.default_trial_days ?? 14 })
-    } catch { /* fall back to the default shown */ }
+      setSettingsForm({
+        default_trial_days: s?.default_trial_days ?? 14,
+        direct_enquiry_hot_days: s?.direct_enquiry_hot_days ?? 30,
+      })
+    } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
   }
 
@@ -66,7 +69,10 @@ export default function SuperClubs() {
     setSettingsSaving(true)
     setMsg('')
     try {
-      await api.superUpdateGeneralSettings({ default_trial_days: Number(settingsForm.default_trial_days) || 14 })
+      await api.superUpdateGeneralSettings({
+        default_trial_days: Number(settingsForm.default_trial_days) || 14,
+        direct_enquiry_hot_days: Number(settingsForm.direct_enquiry_hot_days) || 30,
+      })
       setMsg('General settings saved')
       setShowSettings(false)
     } catch (err) {
@@ -344,6 +350,21 @@ export default function SuperClubs() {
                   The trial length used when a module trial is created for a club.
                 </p>
               </div>
+
+              <div className="pt-3 border-t pb-hairline">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Marketing</p>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Direct enquiry hot days</label>
+                <input type="number" min="1" value={settingsForm.direct_enquiry_hot_days}
+                  onChange={e => setSettingsForm(f => ({ ...f, direct_enquiry_hot_days: e.target.value }))}
+                  className={INPUT_CLS} />
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  How many days a direct "onboard my club" website enquiry holds a prospect at a
+                  flat 100/Hot engagement score in Twenty, before it decays back to the ordinary
+                  recency/frequency score. Ends early if the club becomes a paying customer or is
+                  marked Not Interested.
+                </p>
+              </div>
+
               <div className="flex gap-2">
                 <button type="submit" disabled={settingsSaving}
                   className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"

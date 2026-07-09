@@ -19,7 +19,15 @@ logger = logging.getLogger(__name__)
 
 # The whitelist of keys the General Settings UI can set, with validators. Add to this
 # as new settings are introduced.
-_INT_KEYS = {"default_trial_days"}
+_INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
+
+# How long a direct "onboard my club" website enquiry (Contact page or the quick
+# CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
+# decays back to the ordinary recency/frequency formula — see
+# twenty_sync._engagement. A plain in-repo default (not an env var): this is a
+# commercial/marketing parameter a super admin tunes from General Settings, not
+# server configuration.
+DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 30
 
 # ─── SES send-rate settings (super-admin managed, migration 120 blob) ─────────
 # Two live values a super admin controls from the BetterComms limits page:
@@ -140,6 +148,17 @@ async def get_default_trial_days(db: AsyncSession) -> int:
         return days if days > 0 else DEFAULT_TRIAL_DAYS
     except (TypeError, ValueError):
         return DEFAULT_TRIAL_DAYS
+
+
+async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
+    """How many days a direct onboarding enquiry holds a prospect at Hot 100 in
+    Twenty, or DEFAULT_DIRECT_ENQUIRY_HOT_DAYS when unset/invalid."""
+    settings = await get_settings(db)
+    try:
+        days = int(settings.get("direct_enquiry_hot_days"))
+        return days if days > 0 else DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
+    except (TypeError, ValueError):
+        return DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
 
 
 async def update_settings(db: AsyncSession, patch: dict) -> dict:

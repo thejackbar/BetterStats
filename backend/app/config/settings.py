@@ -216,17 +216,6 @@ class Settings(BaseSettings):
     # back-office follow-up owner). Blank = Tasks are created unassigned. Find the id
     # in Twenty under Settings > Members, or via GET /rest/workspaceMembers.
     twenty_task_assignee_id: str = ""
-    # A direct "onboard my club" website enquiry (Contact page or the quick CTA
-    # modal) forces a prospect's Twenty engagementScore to a flat 100/HOT — not
-    # just for the one push at submission time, but held there by
-    # twenty_sync._engagement() on every later recompute (nightly refresh, a
-    # BetterComms send, a manual "Refresh Twenty scores") for this many days
-    # after the enquiry, or until the club becomes a paying customer ("won") or
-    # is marked not_interested ("lost") in the Club Directory, whichever comes
-    # first. A BetterCricket commercial parameter, not a fixed constant — raise
-    # or lower per how long a lead should read as hot before it decays back to
-    # the ordinary recency/frequency formula.
-    twenty_direct_enquiry_hot_days: int = 30
 
     # ─── Meta Ads dashboard (super-admin HQ — BetterCricket's own ad spend) ────
     # System-user token (ads_read + read_insights) for the Meta Marketing API,

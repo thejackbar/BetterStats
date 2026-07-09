@@ -1546,11 +1546,15 @@ async def get_general_settings(
     """Platform-wide settings managed from the All Clubs page. Returns the resolved
     values the UI edits."""
     from app.services import platform_settings as ps
-    return {"default_trial_days": await ps.get_default_trial_days(db)}
+    return {
+        "default_trial_days": await ps.get_default_trial_days(db),
+        "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
+    }
 
 
 class GeneralSettingsUpdate(BaseModel):
     default_trial_days: Optional[int] = None
+    direct_enquiry_hot_days: Optional[int] = None
 
 
 @router.patch("/super/general-settings")
@@ -1565,7 +1569,10 @@ async def patch_general_settings(
         await ps.update_settings(db, patch)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return {"default_trial_days": await ps.get_default_trial_days(db)}
+    return {
+        "default_trial_days": await ps.get_default_trial_days(db),
+        "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
+    }
 
 
 @router.post("/super/clubs", status_code=201)
