@@ -982,6 +982,24 @@ lead or engagement score.
     call, on every existing caller, since the function was first written. Now
     commits like every sibling push function.
 
+- **The forced Hot 100 from a direct enquiry didn't stick.** `push_onboarding_enquiry`
+  only forced `engagementScore: 100` on the ONE push it made at submission time — every
+  later recompute (`refresh_engagement`'s daily 06:00 job, a BetterComms send, a manual
+  "Refresh Twenty scores") called `twenty_sync._engagement()` fresh with no override, so
+  a brand-new prospect with no other web/email history landed back around 30–45 (Warm)
+  overnight. `_engagement()` now holds a non-customer at a flat `engagementScore: 100` /
+  `engagementTier: "HOT"` for `settings.twenty_direct_enquiry_hot_days` (new setting,
+  default **30**, env `TWENTY_DIRECT_ENQUIRY_HOT_DAYS` — a commercial parameter, not a
+  fixed constant) after the most recent `club_onboarding_requests` row attributed to the
+  club (`_onboarding_signal`'s own `onboarding_last`), computed on every call so it self-
+  corrects on the next scheduled/manual refresh with no backfill needed. Ends the moment
+  the deal is **won** (the club becomes a paying customer — `is_customer` routes it to
+  the account-health formula instead) or **lost** (`not_interested`, which already
+  early-returns `_engagement()` before this check is reached) — whichever comes first.
+  Diagnostic-only `_directEnquiryHot` flag added alongside the existing `_recencyPts`/
+  `_freqPts` breakdown (stripped before anything reaches Twenty — `twenty_client.py`
+  drops every underscore-prefixed key), surfaced in `diagnose_club_lead.py`.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.
