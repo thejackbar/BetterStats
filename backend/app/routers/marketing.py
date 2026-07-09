@@ -72,7 +72,7 @@ def _modes_from(obj) -> dict:
 
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
                    person=None, modes=None, associations=None, visited=False,
-                   countries=None):
+                   countries=None, engagement_score_gte=None, engagement_score_lte=None):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
@@ -83,6 +83,8 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
         "visited": bool(visited),
         "associations": [a for a in (associations or []) if a],
         "countries": [c for c in (countries or []) if c],
+        "engagement_score_gte": engagement_score_gte,
+        "engagement_score_lte": engagement_score_lte,
     }
 
 
@@ -165,6 +167,14 @@ async def list_clubs(
     club_sort: str = "asc",
     limit: int = Query(100, le=500),
     offset: int = 0,
+    # "Top N of what's currently filtered" — ranks by the cached page-view /
+    # distinct-visitor count (see club_directory.top_clubs_by_visits) and
+    # supersedes normal pagination while active, same as `visited` is a plain
+    # toggle rather than something that composes with page size.
+    top_n: Optional[int] = Query(None, ge=1, le=1000),
+    top_n_metric: str = Query("views", pattern="^(views|visitors)$"),
+    engagement_score_gte: Optional[int] = None,
+    engagement_score_lte: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_super_admin),
 ):
@@ -177,21 +187,37 @@ async def list_clubs(
     kw = await cd.expand_shortcode(db, _filter_kwargs(
         q, state, association, status, postcode_from, postcode_to, contact,
         person, modes=modes, associations=associations, visited=visited,
-        countries=countries))
+        countries=countries, engagement_score_gte=engagement_score_gte,
+        engagement_score_lte=engagement_score_lte))
     for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
 
-    def _dir(col, d):
-        return col.desc() if (d or "").lower() == "desc" else col.asc()
-    order = []
-    if group_by_association:
-        # group by the primary association; unassigned clubs sort last
-        ac = func.lower(MarketingClub.association_name)
-        order.append((ac.desc() if assoc_sort.lower() == "desc" else ac.asc()).nullslast())
-    order.append(_dir(func.lower(MarketingClub.name), club_sort))
-    stmt = stmt.order_by(*order).limit(limit).offset(offset)
-    clubs = (await db.execute(stmt)).scalars().all()
+    if top_n:
+        # Resolve the candidate set from every OTHER active filter (no order/
+        # limit/offset yet), then rank just that set — "top N of what's
+        # filtered", not top N of the whole directory regardless of filters.
+        candidate_ids = (await db.execute(stmt.with_only_columns(MarketingClub.id))).scalars().all()
+        ranked = await cd.top_clubs_by_visits(db, top_n_metric, top_n, candidate_ids=candidate_ids)
+        ranked_ids = [r["id"] for r in ranked]
+        total = len(ranked_ids)
+        clubs = []
+        if ranked_ids:
+            by_id = {str(c.id): c for c in (await db.execute(
+                select(MarketingClub).where(MarketingClub.id.in_(ranked_ids)))).scalars().all()}
+            clubs = [by_id[rid] for rid in ranked_ids if rid in by_id]
+    else:
+        total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+
+        def _dir(col, d):
+            return col.desc() if (d or "").lower() == "desc" else col.asc()
+        order = []
+        if group_by_association:
+            # group by the primary association; unassigned clubs sort last
+            ac = func.lower(MarketingClub.association_name)
+            order.append((ac.desc() if assoc_sort.lower() == "desc" else ac.asc()).nullslast())
+        order.append(_dir(func.lower(MarketingClub.name), club_sort))
+        stmt = stmt.order_by(*order).limit(limit).offset(offset)
+        clubs = (await db.execute(stmt)).scalars().all()
 
     # Fetch all contacts for this page's clubs in ONE query (was N+1, which under
     # the sweep's DB load could stall the request long enough to 502).
@@ -233,6 +259,12 @@ async def list_clubs(
             "requested_trial_modules": c.requested_trial_modules or [],
             "demo_status": c.demo_status,
             "not_interested": bool(c.not_interested),
+            # Cached at the last _engagement() computation (any trigger — see
+            # twenty_sync.py) — can lag reality up to however long since this
+            # club was last (re)computed; engagement_scored_at says how stale.
+            "engagement_score": c.engagement_score,
+            "engagement_tier": c.engagement_tier,
+            "engagement_scored_at": c.engagement_scored_at.isoformat() if c.engagement_scored_at else None,
             "contacts": [{
                 "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
                 "email": ct.email, "mobile": ct.mobile, "source": ct.source,
