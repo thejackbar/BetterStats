@@ -772,7 +772,9 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  visited: bool = False,
                  associations: Optional[list] = None,
                  association_extra: Optional[list] = None,
-                 countries: Optional[list] = None) -> list:
+                 countries: Optional[list] = None,
+                 engagement_score_gte: Optional[int] = None,
+                 engagement_score_lte: Optional[int] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
     filters. Contact-presence filters use correlated EXISTS over the contacts.
@@ -822,6 +824,13 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
         conds.append(and_(pc_ok, MarketingClub.postcode >= str(postcode_from).zfill(4)))
     if postcode_to:
         conds.append(and_(pc_ok, MarketingClub.postcode <= str(postcode_to).zfill(4)))
+    # Cached score (see MarketingClub.engagement_score) — reuses >=/<= rather than
+    # strict >/< (matches the postcode-range precedent above; a club scored exactly
+    # on the boundary you typed should show, not be excluded by it).
+    if engagement_score_gte is not None:
+        conds.append(MarketingClub.engagement_score >= engagement_score_gte)
+    if engagement_score_lte is not None:
+        conds.append(MarketingClub.engagement_score <= engagement_score_lte)
     if contact_filter == "any_email":
         conds.append(_contact_exists(C.email.isnot(None)))
     elif contact_filter == "named_email":
@@ -1644,6 +1653,31 @@ async def club_visit_stats(session: AsyncSession, club_ids: list) -> dict:
         }
         for r in rows
     }
+
+
+async def top_clubs_by_visits(session: AsyncSession, metric: str, n: int,
+                              candidate_ids: Optional[list] = None) -> list:
+    """Rank clubs by page views or distinct visitors (the same _RESOLVED_VISITS
+    site-visit resolution club_visit_stats uses), returning the top ``n`` as
+    ``[{"id", "views", "visitors"}, ...]`` in rank order — one GROUP BY pass,
+    not a per-club query. ``candidate_ids`` restricts ranking to that set (e.g.
+    "top N of what's currently filtered" — pass the id list the other active
+    filters already produced); pass None (not ``[]``) to rank the whole
+    directory. An empty ``candidate_ids`` list correctly ranks nothing."""
+    metric_col = "COUNT(DISTINCT v.vk)" if metric == "visitors" else "COUNT(*)"
+    if candidate_ids is not None:
+        ids = sorted({str(c) for c in candidate_ids if c})
+        if not ids:
+            return []
+        where, params = "WHERE v.cid = ANY(:ids) ", {"n": n, "ids": ids}
+    else:
+        where, params = "", {"n": n}
+    rows = (await session.execute(text(
+        "SELECT v.cid AS cid, COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors "
+        f"FROM ({_RESOLVED_VISITS}) v {where}"
+        f"GROUP BY v.cid ORDER BY {metric_col} DESC LIMIT :n"), params)).all()
+    return [{"id": r.cid, "views": int(r.views or 0), "visitors": int(r.visitors or 0)}
+            for r in rows]
 
 
 async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> dict:
