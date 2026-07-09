@@ -16,19 +16,22 @@ Smaller pre-existing milestone rows (10/25 matches, 100/250 runs, ...) are
 kept in the DB but filtered out of the display by ``is_displayable``.
 """
 
-MILESTONE_TYPES = {"runs", "wickets", "matches", "catches", "grade_matches"}
+MILESTONE_TYPES = {
+    "runs", "wickets", "matches", "catches", "grade_matches",
+    "grade_runs", "grade_wickets", "grade_catches",
+}
 
 
 def next_threshold(mt: str, current: int) -> int | None:
-    if mt == "runs":
+    if mt in ("runs", "grade_runs"):
         if current < 500:
             return 500
         return ((current // 1000) + 1) * 1000
-    if mt == "wickets":
+    if mt in ("wickets", "grade_wickets"):
         if current < 50:
             return 50
         return ((current // 100) + 1) * 100
-    if mt in ("matches", "grade_matches", "catches"):
+    if mt in ("matches", "grade_matches", "catches", "grade_catches"):
         return ((current // 50) + 1) * 50
     return None
 
@@ -36,19 +39,19 @@ def next_threshold(mt: str, current: int) -> int | None:
 def crossed_thresholds(mt: str, current: int) -> list[int]:
     if current <= 0:
         return []
-    if mt == "runs":
+    if mt in ("runs", "grade_runs"):
         out: list[int] = []
         if current >= 500:
             out.append(500)
         out.extend(range(1000, current + 1, 1000))
         return out
-    if mt == "wickets":
+    if mt in ("wickets", "grade_wickets"):
         out = []
         if current >= 50:
             out.append(50)
         out.extend(range(100, current + 1, 100))
         return out
-    if mt in ("matches", "grade_matches", "catches"):
+    if mt in ("matches", "grade_matches", "catches", "grade_catches"):
         if current < 50:
             return []
         return list(range(50, current + 1, 50))
@@ -56,13 +59,13 @@ def crossed_thresholds(mt: str, current: int) -> list[int]:
 
 
 def reach_window(mt: str, threshold: int) -> int:
-    if mt == "runs":
+    if mt in ("runs", "grade_runs"):
         return 50 if threshold == 500 else 100
-    if mt == "wickets":
+    if mt in ("wickets", "grade_wickets"):
         return 5 if threshold == 50 else 10
     if mt in ("matches", "grade_matches"):
         return 2 if threshold == 50 else 5
-    if mt == "catches":
+    if mt in ("catches", "grade_catches"):
         return 5
     return 0
 
@@ -75,10 +78,10 @@ def is_displayable(mt: str, value: int) -> bool:
     """
     if value is None:
         return False
-    if mt == "runs":
+    if mt in ("runs", "grade_runs"):
         return value == 500 or (value >= 1000 and value % 1000 == 0)
-    if mt == "wickets":
+    if mt in ("wickets", "grade_wickets"):
         return value == 50 or (value >= 100 and value % 100 == 0)
-    if mt in ("matches", "grade_matches", "catches"):
+    if mt in ("matches", "grade_matches", "catches", "grade_catches"):
         return value >= 50 and value % 50 == 0
     return False
