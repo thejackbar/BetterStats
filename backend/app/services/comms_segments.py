@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, func, exists, or_, text
+from sqlalchemy import select, func, exists, or_, text, cast, String, Integer, column
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.models.db import (
     CommsContact, EmailSuppression, Player, PlayerSeasonStats, PlayerAvailability, Season,
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
 )
+from app.services.club_directory import _RESOLVED_VISITS
 
 # Field groups decide which joins a definition needs.
 CONTACT_FIELDS = {"tag", "source"}
@@ -49,12 +50,20 @@ DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
                    "is_trialing", "requested_trial", "had_demo", "visited_page"}
-DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS
+# Numeric club-level metrics: page views / distinct visitors (from the same
+# UTM-resolved usage_events attribution the Club Directory + engagement score
+# use) and the cached Twenty engagement score. gte/lte only (no strict < / >
+# — mirrors the Club Directory's own engagement-score filter).
+DIR_METRIC_FIELDS = {"page_views", "distinct_visitors", "engagement_score"}
+DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
 # Directory fields that need the linked MarketingClub joined in (visited_page
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
-# fields read marketing_clubs columns).
+# fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                  "is_trialing", "requested_trial", "had_demo", "visited_page"}
+                  "is_trialing", "requested_trial", "had_demo", "visited_page"} | DIR_METRIC_FIELDS
+# The two visit-count fields need the extra usage_events aggregate join;
+# engagement_score reads straight off marketing_clubs.engagement_score.
+_DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
 
 # Tracked public pages a prospect can be matched on (key → path filter). A
 # BetterCricket outreach email tags its links with the club's utm_code (as
@@ -190,11 +199,27 @@ def _event_exists(event_type: str):
 
 _LAPSED_STATUSES = ("cancelled", "paused", "past_due")
 
+# Per-club page-view / distinct-visitor counts, aggregated once and joined in —
+# the same UTM/alias/path resolution as club_directory.club_visit_stats, just
+# expressed as a joinable subquery instead of a standalone query.
+_VISIT_STATS_SQL = (
+    "SELECT v.cid AS cid, COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors "
+    f"FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL GROUP BY v.cid"
+)
 
-def _directory_condition(rule: dict, cust):
+
+def _visit_stats_subquery():
+    return text(_VISIT_STATS_SQL).columns(
+        column("cid", String), column("views", Integer), column("visitors", Integer)
+    ).subquery()
+
+
+def _directory_condition(rule: dict, cust, visits=None):
     """A WHERE clause for one directory (outreach) field. ``cust`` is the aliased
     customer Organisation (joined via the marketing club's existing_org_id), only
-    set when a customer_status rule is present."""
+    set when a customer_status rule is present. ``visits`` is the joined
+    per-club page-view/visitor subquery, only set when a page_views /
+    distinct_visitors rule is present."""
     field = (rule or {}).get("field")
     val = (rule or {}).get("value")
 
@@ -247,6 +272,22 @@ def _directory_condition(rule: dict, cust):
         if val == "lapsed":
             return cust.subscription_status.in_(_LAPSED_STATUSES)
         return None
+
+    if field == "engagement_score":
+        n = _num(val)
+        if n is None:
+            return None
+        if (rule or {}).get("op") == "lte":
+            return MarketingClub.engagement_score <= n
+        return MarketingClub.engagement_score >= n  # default / "gte"
+    if field in _DIR_VISIT_FIELDS and visits is not None:
+        n = _num(val)
+        if n is None:
+            return None
+        col = func.coalesce(visits.c.views if field == "page_views" else visits.c.visitors, 0)
+        if (rule or {}).get("op") == "lte":
+            return col <= n
+        return col >= n  # default / "gte"
     return None
 
 
@@ -303,11 +344,15 @@ async def build_query(session: AsyncSession, club, definition: dict):
     # Directory (outreach) joins: the linked prospect club, and — for customer
     # status — the org it converted into.
     cust = None
+    visits = None
     if any(r["field"] in _DIR_MC_FIELDS for r in rules):
         q = q.join(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
     if any(r["field"] == "customer_status" for r in rules):
         cust = aliased(Organisation)
         q = q.outerjoin(cust, cust.id == MarketingClub.existing_org_id)
+    if any(r["field"] in _DIR_VISIT_FIELDS for r in rules):
+        visits = _visit_stats_subquery()
+        q = q.outerjoin(visits, visits.c.cid == cast(MarketingClub.id, String))
 
     stats = None
     if any(r["field"] in STAT_FIELDS for r in rules):
@@ -332,7 +377,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
 
     for rule in rules:
         if rule["field"] in DIRECTORY_FIELDS:
-            cond = _directory_condition(rule, cust)
+            cond = _directory_condition(rule, cust, visits)
         else:
             cond = _condition(rule, stats, club.id)
         if cond is not None:
