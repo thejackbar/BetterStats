@@ -117,6 +117,76 @@ export function SuppressedToggle({ value, onChange }) {
     </div>
   )
 }
+// ─── Engagement score + Top-N (directory contacts only) ───────────────────────
+// club_engagement_score/_views/_visitors are only populated on a directory-
+// linked contact (marketing_club_id set — the marketing-outreach org context;
+// null for an ordinary club's own members, see routers/comms.py _contact_out).
+export function emptyEngagementFilter() {
+  return { gte: '', lte: '', topN: '', topNMetric: 'views' }
+}
+export function matchesEngagementScore(c, gte, lte) {
+  if (!gte && !lte) return true
+  const score = c.club_engagement_score
+  if (score == null) return false
+  if (gte && score < Number(gte)) return false
+  if (lte && score > Number(lte)) return false
+  return true
+}
+// Ranks the DISTINCT clubs represented in `contacts` by page views or distinct
+// visitors and returns the top N club ids as a Set — null when topN isn't set
+// (caller should treat null as "no restriction", not "matches nothing").
+export function topClubIds(contacts, metric, topN) {
+  if (!topN) return null
+  const n = Number(topN)
+  if (!n || n <= 0) return null
+  const byClub = new Map()
+  for (const c of contacts || []) {
+    if (!c.marketing_club_id) continue
+    if (!byClub.has(c.marketing_club_id)) {
+      byClub.set(c.marketing_club_id, {
+        views: c.club_views || 0,
+        visitors: c.club_visitors || 0,
+      })
+    }
+  }
+  const ranked = [...byClub.entries()]
+    .sort((a, b) => (b[1][metric] || 0) - (a[1][metric] || 0))
+    .slice(0, n)
+    .map(([id]) => id)
+  return new Set(ranked)
+}
+export function matchesTopClubs(c, idSet) {
+  if (!idSet) return true
+  return !!c.marketing_club_id && idSet.has(c.marketing_club_id)
+}
+
+// Renders only when at least one visible contact carries directory club data
+// (mirrors DirectoryFilterChips' own gating) — an ordinary club's own members
+// have no club_engagement_score/_views to filter on.
+export function EngagementFilterControls({ value, onChange, hasDirectory }) {
+  if (!hasDirectory) return null
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <input value={value.gte} onChange={e => onChange({ ...value, gte: e.target.value })}
+        placeholder="score min" inputMode="numeric"
+        title="Cached Twenty engagement score — can lag the live value"
+        className="w-20 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent" />
+      <input value={value.lte} onChange={e => onChange({ ...value, lte: e.target.value })}
+        placeholder="score max" inputMode="numeric"
+        className="w-20 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent" />
+      <input value={value.topN} onChange={e => onChange({ ...value, topN: e.target.value })}
+        placeholder="top N" inputMode="numeric"
+        title="Keep only the top N clubs by the chosen metric among the currently-visible contacts"
+        className="w-16 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent" />
+      <select value={value.topNMetric} onChange={e => onChange({ ...value, topNMetric: e.target.value })}
+        className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent">
+        <option value="views">page views</option>
+        <option value="visitors">users viewing</option>
+      </select>
+    </div>
+  )
+}
+
 export function facetOptionsFrom(contacts) {
   const opts = { club: new Set(), association: new Set(), country: new Set(), utm_code: new Set(), state: new Set() }
   for (const c of contacts || []) for (const f of FACETS) { if (c[f.key]) opts[f.key].add(c[f.key]) }

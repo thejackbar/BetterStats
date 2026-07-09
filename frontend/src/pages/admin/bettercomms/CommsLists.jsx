@@ -3,7 +3,8 @@ import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
-  emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint } from './audience'
+  emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
+  emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls } from './audience'
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -91,6 +92,7 @@ function ListDetail({ list, lists, onChanged }) {
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState({ club: [], association: [], country: [], utm_code: [], state: [] })
   const [modes, setModes] = useState(emptyModes)
+  const [engagement, setEngagement] = useState(emptyEngagementFilter)
   const [supp, setSupp] = useState('all')
   const [selected, setSelected] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
@@ -108,7 +110,7 @@ function ListDetail({ list, lists, onChanged }) {
   useEffect(() => { loadMembers() }, [loadMembers])
   useEffect(() => { loadContacts() }, [loadContacts])
   // A fresh list resets the working selection.
-  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all') }, [list.id])
+  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setEngagement(emptyEngagementFilter()) }, [list.id])
 
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
   // Directory include/exclude chips only make sense when contacts carry club data
@@ -116,9 +118,16 @@ function ListDetail({ list, lists, onChanged }) {
   const showDirChips = useMemo(() => (contacts || []).some(c => c.club), [contacts])
 
   const q = query.trim().toLowerCase()
-  const visible = useMemo(() =>
+  // Top N ranks clubs among what every OTHER filter already narrowed to (same
+  // "top N of what's currently filtered" semantics as the Club Directory page).
+  const preFiltered = useMemo(() =>
     (contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp)),
     [contacts, q, filters, modes, supp])
+  const topIds = useMemo(() => topClubIds(preFiltered, engagement.topNMetric, engagement.topN),
+    [preFiltered, engagement.topNMetric, engagement.topN])
+  const visible = useMemo(() =>
+    preFiltered.filter(c => matchesEngagementScore(c, engagement.gte, engagement.lte) && matchesTopClubs(c, topIds)),
+    [preFiltered, engagement, topIds])
   const mids = memberIds || new Set()
   const shownMembers = visible.filter(c => mids.has(c.id))
   const candidates = visible.filter(c => !mids.has(c.id))
@@ -167,8 +176,9 @@ function ListDetail({ list, lists, onChanged }) {
 
   const selectAllFiltered = () => setMany(visible.map(c => c.id), true)
   const clearSelection = () => setSelected(new Set())
-  const clearAll = () => { setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all') }
+  const clearAll = () => { setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setEngagement(emptyEngagementFilter()) }
   const activeFilters = FACETS.some(f => filters[f.key].length) || anyMode(modes) || !!q || supp !== 'all'
+    || engagement.gte || engagement.lte || engagement.topN
 
   return (
     <div className="pb-card p-4">
@@ -200,6 +210,12 @@ function ListDetail({ list, lists, onChanged }) {
           <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Directory</span>
           <DirectoryFilterChips modes={modes} onChange={setModes} />
           <span className="text-pb-faintest text-[10px] ml-1">tap once to exclude, twice to include</span>
+        </div>
+      )}
+      {showDirChips && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Engagement</span>
+          <EngagementFilterControls value={engagement} onChange={setEngagement} hasDirectory={showDirChips} />
         </div>
       )}
 
