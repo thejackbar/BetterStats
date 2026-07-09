@@ -200,6 +200,12 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
     stats["clubs_scanned"] += scanned
     stats["leads_qualified"] += len(snaps)
 
+    # _engagement() above (called on EVERY scanned club, not just qualifying ones)
+    # now caches engagement_score/.engagement_tier onto each club row. Commit here,
+    # before the loop below — which only runs `snaps` times — so a run that
+    # qualifies zero Leads doesn't silently discard every cache write.
+    await session.commit()
+
     for guid, company_tid, values, status in snaps:
         try:
             _, act = await _upsert(

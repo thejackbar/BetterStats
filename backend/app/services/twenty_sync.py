@@ -235,6 +235,20 @@ async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
     return (row[0] or 0, row[1]) if row else (0, None)
 
 
+def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
+    """Every _engagement() call caches its result onto the club row itself —
+    marketing_clubs.engagement_score/.engagement_tier/.engagement_scored_at —
+    regardless of which of the four call sites triggered the computation
+    (manual export, bulk export, "Refresh Twenty scores", or "Refresh Twenty
+    leads/tasks"), so the Club Directory / BetterComms Contacts+Lists /
+    Segments can filter on a real number without recomputing this per-club
+    scan themselves. Just sets attributes on the already-session-attached ORM
+    object — the caller's own commit (every call site has one) persists it."""
+    club.engagement_score = fields.get("engagementScore")
+    club.engagement_tier = fields.get("engagementTier")
+    club.engagement_scored_at = datetime.datetime.now(datetime.timezone.utc)
+
+
 async def _engagement(session, club: MarketingClub,
                       org: "Optional[Organisation]" = None) -> dict:
     """A per-club engagement rollup pushed onto the Company so the CRM can score and
@@ -252,9 +266,11 @@ async def _engagement(session, club: MarketingClub,
     # "Not interested" is a manual disposition that overrides the computed heat, so it
     # isn't recomputed away on the next refresh — set it in the Club Directory.
     if getattr(club, "not_interested", False):
-        return {"engagementScore": 0, "engagementTier": "NOT_INTERESTED",
-                "sessions30d": 0, "emailEngaged30d": 0,
-                "upsellModules": [], "inSalesCycle": False}
+        result = {"engagementScore": 0, "engagementTier": "NOT_INTERESTED",
+                  "sessions30d": 0, "emailEngaged30d": 0,
+                  "upsellModules": [], "inSalesCycle": False}
+        _apply_engagement_cache(club, result)
+        return result
     utm = club.utm_code
     org_id = str(club.existing_org_id) if club.existing_org_id else None
     paid, trial_mods, _renewals = _module_split(org) if org is not None else ([], [], [])
@@ -486,6 +502,7 @@ async def _engagement(session, club: MarketingClub,
         fields["lastWebVisitAt"] = last_web.isoformat()
     if last_email:
         fields["lastEmailAt"] = last_email.isoformat()
+    _apply_engagement_cache(club, fields)
     return fields
 
 
@@ -1625,6 +1642,12 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                 is_paying = bool(paid) or (club.demo_status or "") == "customer"
                 fields["lifecycleStage"] = _lifecycle(club, is_paying, all_unsub)
                 updates.append((guid, tid_by_guid[guid], fields, all_unsub and not is_paying))
+
+            # This function used to be read/PATCH-only (nothing local to persist), so
+            # it never committed. _engagement() above now caches onto each club row —
+            # commit here so that cache isn't silently discarded when the session
+            # context exits, same as every other _engagement() call site already does.
+            await session.commit()
 
             async with httpx.AsyncClient() as http:
                 for guid, tid, fields, suppress in updates:

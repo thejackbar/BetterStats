@@ -799,6 +799,11 @@ export default function SuperMarketing() {
     junior: '', carnival: '', school: '', rep: '', cricket_au: '',
     emailed: '', exported: '', suppressed: '', excluded: '',
     visited: false,
+    // Ranks (rather than paginates) the currently-filtered set by page views
+    // or distinct visitors — see backend club_directory.top_clubs_by_visits.
+    top_n: '', top_n_metric: 'views',
+    // Cached Twenty engagementScore (see marketing_clubs.engagement_score) — >=/<=.
+    engagement_score_gte: '', engagement_score_lte: '',
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
@@ -1136,14 +1141,17 @@ export default function SuperMarketing() {
             {(filters.q || filters.association || filters.associations.length || filters.countries.length
               || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
-              || filters.visited || MODE_FILTERS.some(mf => filters[mf.key])) && (
+              || filters.visited || MODE_FILTERS.some(mf => filters[mf.key])
+              || filters.engagement_score_gte || filters.engagement_score_lte || filters.top_n) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                   countries: [],
                                                   postcode_from: '', postcode_to: '', contact: '',
                                                   person: '', junior: '', carnival: '', school: '',
                                                   rep: '', cricket_au: '', emailed: '', exported: '',
-                                                  suppressed: '', excluded: '', visited: false })}>
+                                                  suppressed: '', excluded: '', visited: false,
+                                                  top_n: '', top_n_metric: 'views',
+                                                  engagement_score_gte: '', engagement_score_lte: '' })}>
                 Clear all
               </button>
             )}
@@ -1205,6 +1213,31 @@ export default function SuperMarketing() {
                 <input className={SELECT_CLS + ' w-full'} placeholder="to" inputMode="numeric"
                        value={filters.postcode_to}
                        onChange={(e) => setFilters(f => ({ ...f, postcode_to: e.target.value }))} />
+              </div>
+            </Field>
+            <Field label="Engagement score">
+              <div className="flex items-center gap-1">
+                <input className={SELECT_CLS + ' w-full'} placeholder="min" inputMode="numeric"
+                       title="Cached score — can lag the live Twenty value; see the club row's 'scored' timestamp"
+                       value={filters.engagement_score_gte}
+                       onChange={(e) => setFilters(f => ({ ...f, engagement_score_gte: e.target.value }))} />
+                <span className="text-pb-faint">–</span>
+                <input className={SELECT_CLS + ' w-full'} placeholder="max" inputMode="numeric"
+                       value={filters.engagement_score_lte}
+                       onChange={(e) => setFilters(f => ({ ...f, engagement_score_lte: e.target.value }))} />
+              </div>
+            </Field>
+            <Field label="Top N by">
+              <div className="flex items-center gap-1">
+                <input className={SELECT_CLS + ' w-20'} placeholder="N" inputMode="numeric"
+                       title="Rank the currently-filtered clubs and show only the top N (supersedes normal paging while set)"
+                       value={filters.top_n}
+                       onChange={(e) => setFilters(f => ({ ...f, top_n: e.target.value }))} />
+                <select className={SELECT_CLS + ' w-full'} value={filters.top_n_metric}
+                        onChange={(e) => setFilters(f => ({ ...f, top_n_metric: e.target.value }))}>
+                  <option value="views">Page views</option>
+                  <option value="visitors">Users viewing</option>
+                </select>
               </div>
             </Field>
             <Field label="Contacts">
@@ -1412,6 +1445,15 @@ export default function SuperMarketing() {
                             <span className="text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1"
                                   title={`${exportedCount} contact(s) already in BetterComms`}>
                               {exportedCount} exported
+                            </span>
+                          )}
+                          {c.engagement_score != null && (
+                            <span className={'text-[10px] rounded px-1 border '
+                              + (c.engagement_tier === 'HOT' ? 'text-red-300 border-red-500/40 bg-red-500/10'
+                                : c.engagement_tier === 'WARM' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+                                : 'text-pb-faint border-pb-hairline')}
+                                  title={`Cached score — as of ${fmtWhen(c.engagement_scored_at) || 'unknown'}`}>
+                              {c.engagement_score} {c.engagement_tier?.toLowerCase()}
                             </span>
                           )}
                         </button>

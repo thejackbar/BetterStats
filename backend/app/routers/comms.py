@@ -54,7 +54,7 @@ from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
 from app.services import twenty_sync
-from app.services.club_directory import CA_EMAIL_DOMAINS
+from app.services.club_directory import CA_EMAIL_DOMAINS, club_visit_stats
 from app.services import name_format
 from app.services.send_rate_limiter import send_limiter
 from app.services.email_service import EmailMessage, get_email_provider, provider_status, email_is_live
@@ -153,9 +153,15 @@ def _dir_flags(club_name: str, email: Optional[str], mc: "Optional[MarketingClub
 
 
 def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
-                 suppressed: bool = False) -> dict:
+                 suppressed: bool = False, visit_stats: "Optional[dict]" = None) -> dict:
     complained = bool(getattr(c, "complained", False))
     dir_fields = _dir_fields(c, mc)
+    # Only meaningful for a directory-linked contact (marketing_club_id set —
+    # i.e. the marketing-outreach org context; null for an ordinary club's own
+    # members). engagement_score/_tier read straight off the cached column
+    # (see MarketingClub.engagement_score); views/visitors come from the
+    # caller's batched club_visit_stats() lookup, keyed by club id.
+    vs = (visit_stats or {}).get(str(mc.id)) if mc is not None else None
     return {
         "id": str(c.id),
         "email": c.email,
@@ -174,6 +180,11 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
         "first_name": str((c.merge_vars or {}).get("first_name") or "").strip(),
         **dir_fields,
         **_dir_flags(dir_fields.get("club", ""), c.email, mc),
+        "marketing_club_id": str(mc.id) if mc is not None else None,
+        "club_engagement_score": mc.engagement_score if mc is not None else None,
+        "club_engagement_tier": mc.engagement_tier if mc is not None else None,
+        "club_views": (vs or {}).get("views"),
+        "club_visitors": (vs or {}).get("visitors"),
     }
 
 
@@ -749,6 +760,10 @@ async def list_contacts(
         stmt = stmt.where(CommsContact.subscribed.is_(subscribed))
     rows = (await db.execute(stmt.order_by(CommsContact.name.nullslast(), CommsContact.email).limit(CONTACTS_LIST_CAP))).scalars().all()
     mc_map = await _mc_map(db, rows)
+    # Page-view/visitor counts for every linked club in ONE batched query (not
+    # per-contact) — only non-empty for directory-linked contacts (the
+    # marketing-outreach org context).
+    visit_stats = await club_visit_stats(db, list(mc_map.keys())) if mc_map else {}
     # Which of these addresses are on the global suppression list (one lookup).
     emails = [c.email.lower() for c in rows if c.email]
     supp_emails = set()
@@ -771,7 +786,8 @@ async def list_contacts(
     )).one()
     return {
         "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id),
-                                  suppressed=(c.email or "").lower() in supp_emails) for c in rows],
+                                  suppressed=(c.email or "").lower() in supp_emails,
+                                  visit_stats=visit_stats) for c in rows],
         "summary": {"total": counts[0], "subscribed": counts[1], "unsubscribed": counts[2],
                     "bounced": counts[3], "excluded": counts[4]},
         "cap": CONTACTS_LIST_CAP,

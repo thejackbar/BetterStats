@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle,
-  emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint } from './audience'
+  emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
+  emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls } from './audience'
 
 function Stat({ label, value, tone }) {
   return (
@@ -18,6 +19,7 @@ export default function CommsContacts() {
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
   const [modes, setModes] = useState(emptyModes)
+  const [engagement, setEngagement] = useState(emptyEngagementFilter)
   const [supp, setSupp] = useState('all')
   const [fnFind, setFnFind] = useState('')
   const [fnReplace, setFnReplace] = useState('')
@@ -54,10 +56,19 @@ export default function CommsContacts() {
     }).length
   }, [data.contacts, fnFind])
   const q = query.trim().toLowerCase()
-  const visible = useMemo(() =>
+  // Top N ranks clubs among what every OTHER filter already narrowed to (same
+  // "top N of what's currently filtered" semantics as the Club Directory page),
+  // so it's computed from preFiltered, not the raw contact list.
+  const preFiltered = useMemo(() =>
     (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp)),
     [data.contacts, q, filters, modes, supp])
+  const topIds = useMemo(() => topClubIds(preFiltered, engagement.topNMetric, engagement.topN),
+    [preFiltered, engagement.topNMetric, engagement.topN])
+  const visible = useMemo(() =>
+    preFiltered.filter(c => matchesEngagementScore(c, engagement.gte, engagement.lte) && matchesTopClubs(c, topIds)),
+    [preFiltered, engagement, topIds])
   const activeFilters = !!q || FACETS.some(f => filters[f.key].length) || anyMode(modes) || supp !== 'all'
+    || engagement.gte || engagement.lte || engagement.topN
 
   const run = async (key, fn, okText) => {
     setBusy(key); setMsg(null)
@@ -185,11 +196,17 @@ export default function CommsContacts() {
         ))}
         <SuppressedToggle value={supp} onChange={setSupp} />
         {activeFilters && (
-          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setModes(emptyModes()); setSupp('all') }}
+          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setModes(emptyModes()); setSupp('all'); setEngagement(emptyEngagementFilter()) }}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
         )}
         <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>
       </div>
+      {showDirChips && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Engagement</span>
+          <EngagementFilterControls value={engagement} onChange={setEngagement} hasDirectory={showDirChips} />
+        </div>
+      )}
       {data.cap && (data.contacts || []).length >= data.cap && (s.total || 0) > data.contacts.length && (
         <div className="text-amber-500/90 text-[11px] mb-3">
           Showing the first {data.contacts.length.toLocaleString()} of {(s.total || 0).toLocaleString()} contacts. Narrow the search to reach the rest.
