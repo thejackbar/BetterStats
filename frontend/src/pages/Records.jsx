@@ -9,6 +9,7 @@ import { useClubData } from '../hooks/useClubData'
 import { Label, Card, PageHeader, PbSpinner, TabBar } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers, formatSeason } from '../lib/cricketFormat'
+import { normalizeGender } from '../lib/playerAttributes'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
@@ -533,11 +534,177 @@ function AllRoundersTab({ data, fmt = n => n }) {
   )
 }
 
+const MILESTONE_CAT_LABELS = { batting: 'BATTING', bowling: 'BOWLING', fielding: 'FIELDING', matches: 'MATCHES' }
+const MILESTONE_CAT_COLORS = {
+  batting: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+  bowling: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
+  fielding: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
+  matches: 'text-purple-400 bg-purple-400/10 border-purple-400/20',
+}
+
+function fmtMilestoneDate(iso) {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function milestoneLabel(item, isUpcoming) {
+  const { type, milestone_value, target } = item
+  const value = isUpcoming ? target : milestone_value
+  if (type === 'grade_matches') return `${value} games`
+  if (type === 'grade_runs' || type === 'runs') return `${Number(value).toLocaleString()} runs`
+  if (type === 'grade_wickets' || type === 'wickets') return `${value} wickets`
+  if (type === 'grade_catches' || type === 'catches') return `${value} catches`
+  if (type === 'matches') return `${value} club games`
+  return `${value}`
+}
+
+function MilestoneCatBadge({ cat }) {
+  return (
+    <span className={`inline-block font-mono text-[9px] tracking-wide3 px-1.5 py-0.5 rounded border ${MILESTONE_CAT_COLORS[cat] || 'text-pb-faint bg-pb-surface2 border-pb-hairline'}`}>
+      {MILESTONE_CAT_LABELS[cat] || (cat || '').toUpperCase()}
+    </span>
+  )
+}
+
+function MilestoneProgressBar({ current, target }) {
+  const pct = Math.min(100, Math.round((current / target) * 100))
+  return (
+    <div className="flex items-center gap-2 justify-end">
+      <div className="w-20 h-1.5 bg-pb-surface2 rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
+      </div>
+      <span className="font-mono text-[10px] text-pb-faint">{pct}%</span>
+    </div>
+  )
+}
+
+function MilestonesTab({ data, loading, gradeName, fmt = n => n }) {
+  const [status, setStatus] = useState('upcoming')
+  const [category, setCategory] = useState('all')
+  const [gender, setGender] = useState('all')
+
+  if (loading) return <PbSpinner message="Loading milestones…" />
+  if (!data) return <p className="text-pb-faint text-sm py-8 text-center">No milestones data available.</p>
+
+  const catMatch = item => category === 'all' || item.category === category
+  const genderMatch = item => gender === 'all' || normalizeGender(item.gender) === gender
+  const upcomingFiltered = (data.upcoming || []).filter(i => catMatch(i) && genderMatch(i))
+  const achievedFiltered = (data.achieved || []).filter(i => catMatch(i) && genderMatch(i))
+  const showUpcoming = status === 'upcoming' || status === 'all'
+  const showAchieved = status === 'achieved' || status === 'all'
+
+  return (
+    <div>
+      <p className="text-pb-faintest text-sm mb-4">
+        {gradeName
+          ? <>Milestones within <span className="text-pb-text">{gradeName}</span> — runs, wickets, catches and games played in that grade specifically.</>
+          : <>Career milestones across the whole club. Pick a grade above to see milestones within that grade instead.</>}
+      </p>
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <div className="flex border pb-hairline rounded overflow-hidden">
+          {[['upcoming', 'Upcoming'], ['achieved', 'Achieved'], ['all', 'All']].map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setStatus(val)}
+              className="px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors hover:text-pb-text"
+              style={status === val ? { color: 'var(--pb-accent)', background: 'var(--pb-surface2)' } : { color: 'var(--pb-faint)' }}
+            >
+              {label.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="flex border pb-hairline rounded overflow-hidden">
+          {[['all', 'All'], ['batting', 'Batting'], ['bowling', 'Bowling'], ['fielding', 'Fielding'], ['matches', 'Matches']].map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setCategory(val)}
+              className="px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors hover:text-pb-text"
+              style={category === val ? { color: 'var(--pb-accent)', background: 'var(--pb-surface2)' } : { color: 'var(--pb-faint)' }}
+            >
+              {label.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="flex border pb-hairline rounded overflow-hidden">
+          {[['all', 'All'], ['male', 'Men'], ['female', 'Women']].map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setGender(val)}
+              className="px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors hover:text-pb-text"
+              style={gender === val ? { color: 'var(--pb-accent)', background: 'var(--pb-surface2)' } : { color: 'var(--pb-faint)' }}
+            >
+              {label.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        {showUpcoming && (
+          <RecordSection title="MILESTONES IN REACH" empty={!upcomingFiltered.length}>
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                  <th className="py-2.5 px-3 font-medium">Player</th>
+                  <th className="py-2.5 px-3 font-medium hidden sm:table-cell">Category</th>
+                  <th className="py-2.5 px-3 font-medium">Milestone</th>
+                  <th className="py-2.5 px-3 font-medium text-right">Progress</th>
+                  <th className="py-2.5 px-3 font-medium text-right">To Go</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingFiltered.map((item, i) => (
+                  <tr key={`${item.player_id}-${item.type}-${item.target}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                    <td className="py-2.5 px-3"><PlayerLink id={item.player_id} name={item.player_name} fmt={fmt} /></td>
+                    <td className="py-2.5 px-3 hidden sm:table-cell"><MilestoneCatBadge cat={item.category} /></td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim">
+                      {milestoneLabel(item, true)}
+                      <span className="block text-pb-faintest text-[10px] mt-0.5">{item.current.toLocaleString()} / {item.target.toLocaleString()}</span>
+                    </td>
+                    <td className="py-2.5 px-3 text-right"><MilestoneProgressBar current={item.current} target={item.target} /></td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{item.needed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </RecordSection>
+        )}
+
+        {showAchieved && (
+          <RecordSection title="ACHIEVED" empty={!achievedFiltered.length}>
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                  <th className="py-2.5 px-3 font-medium">Player</th>
+                  <th className="py-2.5 px-3 font-medium hidden sm:table-cell">Category</th>
+                  <th className="py-2.5 px-3 font-medium">Milestone</th>
+                  <th className="py-2.5 px-3 font-medium text-right">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {achievedFiltered.map((item, i) => (
+                  <tr key={`${item.player_id}-${item.type}-${item.milestone_value}-${item.detail}-${i}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                    <td className="py-2.5 px-3"><PlayerLink id={item.player_id} name={item.player_name} fmt={fmt} /></td>
+                    <td className="py-2.5 px-3 hidden sm:table-cell"><MilestoneCatBadge cat={item.category} /></td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim">{milestoneLabel(item, false)}</td>
+                    <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faintest text-right whitespace-nowrap">{fmtMilestoneDate(item.achieved_at) || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </RecordSection>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const TABS = [
   { key: 'batting',      label: 'BATTING' },
   { key: 'bowling',      label: 'BOWLING' },
   { key: 'partnerships', label: 'PARTNERSHIPS' },
   { key: 'allrounders',  label: 'ALL-ROUNDERS' },
+  { key: 'milestones',   label: 'MILESTONES' },
   { key: 'team',         label: 'TEAM' },
 ]
 
@@ -557,6 +724,8 @@ export default function Records() {
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [milestones, setMilestones] = useState(null)
+  const [milestonesLoading, setMilestonesLoading] = useState(true)
 
   useEffect(() => {
     if (!orgId) return
@@ -576,6 +745,15 @@ export default function Records() {
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender])
+
+  useEffect(() => {
+    if (!orgId) return
+    setMilestonesLoading(true)
+    api.getRecordsMilestones(orgId, selectedGradeName)
+      .then(setMilestones)
+      .catch(() => setMilestones(null))
+      .finally(() => setMilestonesLoading(false))
+  }, [orgId, selectedGradeName])
 
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
@@ -631,6 +809,7 @@ export default function Records() {
             {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} fmt={fmt} />}
             {tab === 'partnerships' && <PartnershipsTab data={records.partnerships}  fmt={fmt} />}
             {tab === 'allrounders'  && <AllRoundersTab  data={records.allrounders}  fmt={fmt} />}
+            {tab === 'milestones'   && <MilestonesTab   data={milestones} loading={milestonesLoading} gradeName={selectedGradeName} fmt={fmt} />}
             {tab === 'team'         && <TeamTab         data={records.team}          fmt={fmt} />}
           </>
         )}

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import re
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1232,3 +1233,261 @@ async def get_records(
             "top_allrounders": top_allrounders,
         },
     }
+
+
+@router.get("/{org_id}/milestones")
+async def get_records_milestones(
+    org_id: str,
+    grade_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Public milestones: career-wide by default, or scoped to one grade.
+
+    Career milestones (runs/wickets/matches/catches) are cumulative across a
+    player's whole time at the club, so they don't filter by grade. The only
+    grade-native milestone is "games played in grade X" (grade_matches). When
+    a grade is selected we instead compute runs/wickets/catches/matches from
+    that grade's own games — a genuinely grade-scoped view, not a filter over
+    career totals.
+    """
+    from app.services.milestone_rules import (
+        next_threshold, reach_window, crossed_thresholds, is_displayable,
+    )
+
+    _CAT = {
+        "runs": "batting", "wickets": "bowling", "catches": "fielding", "matches": "matches",
+        "grade_runs": "batting", "grade_wickets": "bowling", "grade_catches": "fielding", "grade_matches": "matches",
+    }
+    current_year = datetime.date.today().year
+    cutoff = current_year - 2
+    achieved: list[dict] = []
+    upcoming: list[dict] = []
+
+    if not grade_name:
+        # ------------------------------------------------------------------
+        # Career-wide: achieved (persisted milestones table)
+        # ------------------------------------------------------------------
+        ach_rows = await db.execute(
+            text("""
+                SELECT
+                    m.milestone_type, m.milestone_value, m.achieved_at, m.detail,
+                    p.id::text AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS player_name,
+                    p.gender AS gender
+                FROM milestones m
+                JOIN players p ON p.id = m.player_id
+                WHERE p.organisation_id = :org_id
+                  AND p.is_player = TRUE
+                ORDER BY m.achieved_at DESC NULLS LAST, m.milestone_value DESC
+            """),
+            {"org_id": org_id},
+        )
+        for r in ach_rows.mappings().all():
+            mt = r["milestone_type"]
+            mv = r["milestone_value"]
+            if not is_displayable(mt, mv):
+                continue
+            achieved.append({
+                "player_id": r["player_id"],
+                "player_name": r["player_name"],
+                "gender": r["gender"],
+                "type": mt,
+                "category": _CAT.get(mt, "matches"),
+                "milestone_value": mv,
+                "achieved_at": r["achieved_at"].isoformat() if r["achieved_at"] else None,
+                "detail": r["detail"],
+            })
+
+        # Career-wide: upcoming (active players only, last 3 seasons)
+        totals_rows = await db.execute(
+            text("""
+                WITH active_ids AS (
+                    SELECT DISTINCT pss.player_id
+                    FROM player_season_stats pss
+                    JOIN seasons s ON s.id = pss.season_id
+                    WHERE s.organisation_id = :org_id
+                      AND (s.year IS NULL OR s.year >= :cutoff)
+                )
+                SELECT
+                    p.id::text AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS player_name,
+                    p.gender AS gender,
+                    COALESCE(SUM(pss.runs), 0)    AS total_runs,
+                    COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                    COALESCE(SUM(pss.matches), 0) AS total_matches,
+                    COALESCE(SUM(pss.catches), 0) AS total_catches
+                FROM players p
+                JOIN active_ids ai ON ai.player_id = p.id
+                JOIN player_season_stats pss ON pss.player_id = p.id
+                    AND EXISTS (
+                        SELECT 1 FROM seasons s2
+                        WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
+                    )
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
+                ORDER BY COALESCE(p.display_name_override, p.name)
+            """),
+            {"org_id": org_id, "cutoff": cutoff},
+        )
+        stat_defs = [
+            ("runs",    "batting",  "total_runs"),
+            ("wickets", "bowling",  "total_wickets"),
+            ("matches", "matches",  "total_matches"),
+            ("catches", "fielding", "total_catches"),
+        ]
+        for r in totals_rows.mappings().all():
+            for mt, cat, col in stat_defs:
+                current = int(r[col] or 0)
+                target = next_threshold(mt, current)
+                if target is None:
+                    continue
+                needed = target - current
+                if needed > reach_window(mt, target):
+                    continue
+                upcoming.append({
+                    "player_id": r["player_id"],
+                    "player_name": r["player_name"],
+                    "gender": r["gender"],
+                    "type": mt,
+                    "category": cat,
+                    "current": current,
+                    "target": target,
+                    "needed": needed,
+                    "detail": None,
+                })
+    else:
+        # ------------------------------------------------------------------
+        # Grade-scoped: runs / wickets / catches / matches within one grade,
+        # merge-aware (a grade merged/renamed still matches by its canonical
+        # or display name — same scheme as the records grade filter).
+        # ------------------------------------------------------------------
+        _grade_match = (
+            "(COALESCE(gr.display_name_override, gr.name) = :grade_name"
+            " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
+            " WHERE gml.org_id = CAST(:org_id AS UUID)"
+            " AND gml.alias_name = gr.name AND gml.undone_at IS NULL"
+            " AND (gml.canonical_name = :grade_name"
+            " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
+            " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org_id AS UUID)"
+            " AND gr2.display_name_override = :grade_name))))"
+        )
+        params = {"org_id": org_id, "grade_name": grade_name}
+
+        active_rows = await db.execute(
+            text("""
+                SELECT DISTINCT pss.player_id
+                FROM player_season_stats pss
+                JOIN seasons s ON s.id = pss.season_id
+                WHERE s.organisation_id = :org_id
+                  AND (s.year IS NULL OR s.year >= :cutoff)
+            """),
+            {"org_id": org_id, "cutoff": cutoff},
+        )
+        active_ids = {str(r[0]) for r in active_rows.all()}
+
+        grade_stat_queries = [
+            ("grade_runs", "batting", f"""
+                SELECT p.id::text AS player_id,
+                       COALESCE(p.display_name_override, p.name) AS player_name,
+                       p.gender AS gender,
+                       COALESCE(SUM(bi.runs), 0) AS total
+                FROM players p
+                JOIN v_effective_batting_innings bi ON bi.player_id = p.id
+                JOIN v_effective_games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                  AND s.organisation_id = CAST(:org_id AS UUID)
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')
+                  AND {_grade_match}
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
+                HAVING SUM(bi.runs) > 0
+            """),
+            ("grade_wickets", "bowling", f"""
+                SELECT p.id::text AS player_id,
+                       COALESCE(p.display_name_override, p.name) AS player_name,
+                       p.gender AS gender,
+                       COALESCE(SUM(bs.wickets), 0) AS total
+                FROM players p
+                JOIN v_effective_bowling_spells bs ON bs.player_id = p.id
+                JOIN v_effective_games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                  AND s.organisation_id = CAST(:org_id AS UUID)
+                  AND {_grade_match}
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
+                HAVING SUM(bs.wickets) > 0
+            """),
+            ("grade_catches", "fielding", f"""
+                SELECT p.id::text AS player_id,
+                       COALESCE(p.display_name_override, p.name) AS player_name,
+                       p.gender AS gender,
+                       COALESCE(SUM(fs.catches), 0) AS total
+                FROM players p
+                JOIN v_effective_fielding_stats fs ON fs.player_id = p.id
+                JOIN v_effective_games g ON g.id = fs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                  AND s.organisation_id = CAST(:org_id AS UUID)
+                  AND {_grade_match}
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
+                HAVING SUM(fs.catches) > 0
+            """),
+            ("grade_matches", "matches", f"""
+                SELECT p.id::text AS player_id,
+                       COALESCE(p.display_name_override, p.name) AS player_name,
+                       p.gender AS gender,
+                       COUNT(DISTINCT ga.game_id) AS total
+                FROM players p
+                JOIN game_appearances ga ON ga.player_id = p.id
+                JOIN v_effective_games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                  AND s.organisation_id = CAST(:org_id AS UUID)
+                  AND {_grade_match}
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
+                HAVING COUNT(DISTINCT ga.game_id) > 0
+            """),
+        ]
+
+        for mt, cat, sql in grade_stat_queries:
+            rows = await db.execute(text(sql), params)
+            for r in rows.mappings().all():
+                n = int(r["total"])
+                for threshold in crossed_thresholds(mt, n):
+                    achieved.append({
+                        "player_id": r["player_id"],
+                        "player_name": r["player_name"],
+                        "gender": r["gender"],
+                        "type": mt,
+                        "category": cat,
+                        "milestone_value": threshold,
+                        "achieved_at": None,
+                        "detail": grade_name,
+                    })
+                if r["player_id"] not in active_ids:
+                    continue
+                target = next_threshold(mt, n)
+                if target is None:
+                    continue
+                needed = target - n
+                if needed > reach_window(mt, target):
+                    continue
+                upcoming.append({
+                    "player_id": r["player_id"],
+                    "player_name": r["player_name"],
+                    "gender": r["gender"],
+                    "type": mt,
+                    "category": cat,
+                    "current": n,
+                    "target": target,
+                    "needed": needed,
+                    "detail": grade_name,
+                })
+
+    upcoming.sort(key=lambda m: m["needed"])
+    return {"upcoming": upcoming, "achieved": achieved, "scope": "grade" if grade_name else "career"}

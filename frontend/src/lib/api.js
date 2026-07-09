@@ -1276,6 +1276,11 @@ export const api = {
     if (seasonId) params.set('season_id', seasonId)
     return request(`/records/${orgId}/grades?${params}`)
   },
+  getRecordsMilestones: (orgId, gradeName) => {
+    const params = new URLSearchParams()
+    if (gradeName) params.set('grade_name', gradeName)
+    return request(`/records/${orgId}/milestones?${params}`)
+  },
 
   // Leaderboard
   battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender, overseas } = {}) => {
