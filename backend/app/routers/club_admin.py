@@ -44,14 +44,22 @@ _background_tasks: set = set()
 _player_sync_running: set = set()
 
 
-def _push_club_to_twenty(org_id) -> None:
+def _push_club_to_twenty(org_id, force_hot: bool = False) -> None:
     """Fire-and-forget: push one club's Company fields (paid/trial modules, ARR,
     renewal) to Twenty after a subscription change. No-op when Twenty isn't
-    configured; never raises into the request."""
+    configured; never raises into the request.
+
+    ``force_hot=True`` (a trial actually starting — see start_module_trial and
+    approve_module_request's trial branch) also forces the engagement score to
+    Hot (100) and upserts a real Lead, same treatment as a direct "onboard my
+    club" enquiry — a club being put on a trial is too strong a signal to wait
+    on the gradual recency/frequency formula or the nightly refresh."""
     async def _run():
         try:
             from app.services import twenty_sync
-            await twenty_sync.push_org_company(org_id)
+            override = ({"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True}
+                       if force_hot else None)
+            await twenty_sync.push_org_company(org_id, engagement_override=override)
         except Exception:
             _logging.getLogger(__name__).exception("twenty push failed")
     task = asyncio.create_task(_run())
@@ -1920,8 +1928,10 @@ async def start_module_trial(
     await db.refresh(org, attribute_names=["module_subscriptions"])
     # A new trial is a strong engagement signal (see twenty_sync._engagement's
     # per-module upsell calc) — push it to Twenty now rather than waiting for the
-    # nightly refresh, same as the approve_module_request path below.
-    _push_club_to_twenty(org.id)
+    # nightly refresh, same as the approve_module_request path below. force_hot
+    # forces the score to 100 and upserts a Lead rather than waiting for the
+    # gradual formula to notice.
+    _push_club_to_twenty(org.id, force_hot=True)
     return _club_payload(org)
 
 
@@ -2194,6 +2204,11 @@ async def create_module_request(
         ref_table="module_action_requests", ref_id=req.id)
     await db.commit()
     club_requests.fire_twenty_task(ev.id)
+    if body.kind == "trial":
+        # A club asking for a trial itself is as strong a signal as being put on
+        # one — force the same Hot(100)+Lead treatment (start_module_trial /
+        # approve_module_request give it at the grant end; this is the ask end).
+        _push_club_to_twenty(club.id, force_hot=True)
     await db.refresh(req)
     return _request_payload(req, org_name=club.name, requester=current_user.username)
 
@@ -2328,7 +2343,10 @@ async def approve_module_request(
         req.result_subscription_id = result_sub.id
     await db.commit()
     # Keep Twenty in step with the new paid/trial split (best-effort, configured-only).
-    _push_club_to_twenty(org.id)
+    # A trial approval is put-on-a-trial in every sense a direct grant is
+    # (start_module_trial above) — force the same Hot(100)+Lead treatment;
+    # subscribe/cancel stay the ordinary billing-fields-only push.
+    _push_club_to_twenty(org.id, force_hot=(req.kind == "trial"))
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return {"ok": True, "club": _club_payload(org)}
 

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import ClubOnboardingRequest, get_db
 from app.services import meta_capi
 from app.services.login_audit import client_ip
-from app.services.twenty_sync import mark_contact_source
+from app.services.twenty_sync import mark_contact_source, push_onboarding_enquiry
 from app.services.usage_tracker import record_event_bg
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,13 @@ async def submit_contact(
     # contact via the website. Runs after the response so a CRM hiccup can't slow
     # or fail the form (Formspree is the primary delivery either way).
     background.add_task(mark_contact_source, email, "WEBSITE")
+    # A direct "onboard my club" enquiry — from either this short CTA-modal form
+    # or the full Contact page (both post here) — is the strongest buying signal
+    # a prospect can give, so the club is immediately upserted into Twenty as a
+    # Company + Lead at a forced Hot (100) engagement score, regardless of
+    # whether it was already exported. Backgrounded; never raises.
+    background.add_task(push_onboarding_enquiry, club_name=club, contact_name=name,
+                        email=email, phone=payload.phone)
     # Server-side Lead event (Meta Conversions API), sharing the browser pixel's
     # event_id so Meta dedupes the pair. Best-effort + backgrounded — a CAPI
     # hiccup never affects this response (see meta_capi.send_lead_event).

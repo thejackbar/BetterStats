@@ -2,22 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
-
-// Render the compose body for preview: plain text → escaped + <br>; if the
-// author already wrote HTML, trust it. Mirrors the backend _body_to_html.
-function bodyToHtml(body) {
-  const b = body || ''
-  if (b.includes('<') && b.includes('>')) return b
-  const esc = b.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return esc.replace(/\n/g, '<br>')
-}
-function mergeSample(s) {
-  return (s || '')
-    .replace(/\{\{\s*first_name\s*\}\}/g, 'there')
-    .replace(/\{\{\s*name\s*\}\}/g, 'there')
-    .replace(/\{\{\s*club_name\s*\}\}/g, 'your club')
-    .replace(/\{\{\s*email\s*\}\}/g, 'you@example.com')
-}
+import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 
 export default function CommsCompose() {
   const { id } = useParams()
@@ -37,16 +22,15 @@ export default function CommsCompose() {
   const [knownVars, setKnownVars] = useState(null) // Set of valid merge-variable names
   const [utm, setUtm] = useState({})
   const [isMarketing, setIsMarketing] = useState(false)
-  const [preview, setPreview] = useState(null) // { total, index, html, subject, contact }
-  const [previewBusy, setPreviewBusy] = useState(false)
   const [testEmail, setTestEmail] = useState('')
-  const [showPreview, setShowPreview] = useState(false)
   const [live, setLive] = useState(true)
   const [busy, setBusy] = useState('')          // 'save' | 'test' | 'send'
   const [msg, setMsg] = useState(null)          // { kind, text }
   const [loading, setLoading] = useState(true)
   const [sentHtml, setSentHtml] = useState(null)   // rendered HTML for a sent email view
+  const [editorKey, setEditorKey] = useState(0) // bumped to force-remount the editor when body is replaced wholesale
   const pollRef = useRef(null)
+  const editorRef = useRef(null)
 
   const load = useCallback(async () => {
     const c = await api.commsGetCampaign(id)
@@ -58,6 +42,7 @@ export default function CommsCompose() {
     setAudience(c.audience && ['all', 'segment', 'saved_list', 'list', 'squad'].includes(c.audience.type) ? c.audience : { type: '' })
     setUtm(c.utm || {})
     setTemplateId(c.template_id || '')
+    setEditorKey(k => k + 1)
     return c
   }, [id])
 
@@ -122,8 +107,9 @@ export default function CommsCompose() {
     }, 2000)
   }
 
-  const save = async () => {
-    const c = await api.commsUpdateCampaign(id, { subject, name, description, body_html: body, audience, utm, template_id: templateId || null })
+  const save = async (bodyOverride) => {
+    const finalBody = bodyOverride ?? body
+    const c = await api.commsUpdateCampaign(id, { subject, name, description, body_html: finalBody, audience, utm, template_id: templateId || null })
     setCampaign(c)
     return c
   }
@@ -148,23 +134,18 @@ export default function CommsCompose() {
   }, [knownVars, subject, body, utm, campaign])
 
   // Render the email exactly as a real recipient in the audience will see it.
-  // Saves the draft first so the server renders current content.
-  const openPreview = async () => {
-    setPreviewBusy(true); setMsg(null)
-    try {
-      await save()
-      setPreview(await api.commsPreviewCampaign(id, 0))
-    } catch (e) { setMsg({ kind: 'error', text: e.message }) }
-    finally { setPreviewBusy(false) }
-  }
-  const pagePreview = async (delta) => {
-    if (!preview) return
-    const next = Math.max(0, Math.min((preview.total || 1) - 1, (preview.index || 0) + delta))
-    if (next === preview.index) return
-    setPreviewBusy(true)
-    try { setPreview(await api.commsPreviewCampaign(id, next)) }
-    catch (e) { setMsg({ kind: 'error', text: e.message }) }
-    finally { setPreviewBusy(false) }
+  // Saves the draft first (with the freshest content) so the server renders it.
+  const onEnterPreview = async ({ html: currentBody, index }) => {
+    await save(currentBody)
+    const r = await api.commsPreviewCampaign(id, index)
+    return {
+      html: r.html || '',
+      total: r.total || 1,
+      index: r.index ?? index,
+      label: r.contact
+        ? `To ${r.contact.name || r.contact.email} · contact ${(r.index ?? index) + 1} of ${r.total}`
+        : 'No audience selected yet — showing a sample recipient.',
+    }
   }
 
   // Pick a template from the dropdown. Selecting the one that's already assigned
@@ -178,12 +159,13 @@ export default function CommsCompose() {
     try {
       const t = await api.commsGetTemplate(tid)
       setBody(t.html || '')
+      setEditorKey(k => k + 1)
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
   }
 
   const onSave = async () => {
     setBusy('save'); setMsg(null)
-    try { await save(); setMsg({ kind: 'ok', text: 'Draft saved.' }) }
+    try { await save(editorRef.current?.flush()); setMsg({ kind: 'ok', text: 'Draft saved.' }) }
     catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setBusy('') }
   }
@@ -192,7 +174,7 @@ export default function CommsCompose() {
     if (!testEmail.trim()) { setMsg({ kind: 'error', text: 'Enter an email to send the test to.' }); return }
     setBusy('test'); setMsg(null)
     try {
-      await save()
+      await save(editorRef.current?.flush())
       const r = await api.commsTestCampaign(id, testEmail.trim())
       setMsg({ kind: 'ok', text: r.live ? `Test sent to ${testEmail.trim()}.` : `Test rendered (preview mode — not delivered).` })
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
@@ -200,15 +182,16 @@ export default function CommsCompose() {
   }
 
   const onSend = async () => {
+    const finalBody = editorRef.current?.flush() ?? body
     if (!subject.trim()) { setMsg({ kind: 'error', text: 'Add a subject before sending.' }); return }
     if (!audienceSelected) { setMsg({ kind: 'error', text: 'Choose an audience before sending.' }); return }
-    if (!(templateId || body.trim())) { setMsg({ kind: 'error', text: 'Add a message (or pick a template) before sending.' }); return }
+    if (!(templateId || finalBody.trim())) { setMsg({ kind: 'error', text: 'Add a message (or pick a template) before sending.' }); return }
     const n = audienceCount ?? 0
     const who = audience.type === 'all' ? 'ALL subscribed contacts' : 'the selected audience'
     if (!window.confirm(`Send this email to ${n} contact${n === 1 ? '' : 's'} (${who})?`)) return
     setBusy('send'); setMsg(null)
     try {
-      await save()
+      await save(finalBody)
       const r = await api.commsSendCampaign(id)
       // Sending runs in the background; return to the Emails list where the
       // campaign shows its live sending → sent status (don't leave the user
@@ -299,18 +282,11 @@ export default function CommsCompose() {
               </div>
             )}
 
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm text-pb-faint">Message</label>
-              <button onClick={openPreview} disabled={previewBusy} className="text-xs text-pb-faint hover:text-pb-text underline disabled:opacity-50">
-                {previewBusy ? 'Loading…' : 'Preview email'}
-              </button>
-            </div>
-
-            <textarea value={body} onChange={e => setBody(e.target.value)} rows={10}
-              placeholder={'Hi {{first_name}},\n\nWrite your message here…'}
-              className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline font-sans text-sm mb-2" />
-            <div className="text-pb-faintest text-xs mb-3">
+            <label className="block text-sm text-pb-faint mb-1">Message</label>
+            <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={360} />
+            <div className="text-pb-faintest text-xs mb-3 mt-1">
               Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club}}'}</code>.
+              Switching out of HTML mode tidies the code automatically; Preview renders it exactly as a send would.
             </div>
 
             {warnings.length > 0 && (
@@ -415,36 +391,6 @@ export default function CommsCompose() {
           </>
         )}
       </div>
-
-      {preview && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setPreview(null)}>
-          <div className="bg-pb-surface border pb-hairline rounded-lg shadow-xl w-full max-w-2xl mt-[6vh]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3 pb-hairline-b gap-3">
-              <div className="min-w-0">
-                <div className="text-pb-text font-medium truncate">{preview.subject || '(no subject)'}</div>
-                <div className="text-pb-faintest text-xs truncate">
-                  {preview.contact
-                    ? <>To {preview.contact.name || preview.contact.email} · contact {(preview.index || 0) + 1} of {preview.total}</>
-                    : 'No audience selected yet — showing a sample recipient.'}
-                </div>
-              </div>
-              <button onClick={() => setPreview(null)} className="text-pb-faint hover:text-pb-text text-lg px-1 shrink-0">✕</button>
-            </div>
-            <div className="p-3">
-              <iframe title="email preview" srcDoc={preview.html} className="w-full rounded border pb-hairline bg-white" style={{ height: 460 }} />
-              {preview.total > 1 && (
-                <div className="flex items-center justify-between mt-3">
-                  <button onClick={() => pagePreview(-1)} disabled={previewBusy || preview.index <= 0}
-                    className="px-3 py-1.5 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-40">← Previous</button>
-                  <span className="text-pb-faintest text-xs">{(preview.index || 0) + 1} / {preview.total}</span>
-                  <button onClick={() => pagePreview(1)} disabled={previewBusy || preview.index >= preview.total - 1}
-                    className="px-3 py-1.5 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-40">Next →</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </BetterCommsLayout>
   )
 }

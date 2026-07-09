@@ -16,11 +16,12 @@ import datetime
 import hashlib
 import json
 import logging
+import uuid
 from collections import defaultdict
 from typing import Optional
 
 import httpx
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1153,7 +1154,8 @@ async def handle_contact_opt_out(session, email: str) -> None:
         logger.exception("twenty handle_contact_opt_out failed for %s", email)
 
 
-async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" = None) -> dict:
+async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" = None,
+                                 engagement_override: "Optional[dict]" = None) -> dict:
     """Best-effort: upsert ONE prospect club's Company + the given
     MarketingClubContact ids (People) into Twenty. This is the "every email sent
     should upsert a record" hook: sending a BetterComms campaign to a club's
@@ -1162,6 +1164,17 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
     fresh, landing at its computed lifecycle stage (Target, for a first-ever send).
 
     ``contact_ids`` defaults to the club's outreach-selected officers when omitted.
+    ``engagement_override`` merges over the normally-computed engagement rollup —
+    used by ``push_onboarding_enquiry`` to force a direct "onboard my club"
+    enquiry to score as an immediate Hot (100) lead rather than whatever the
+    gradual recency/frequency formula would give a brand-new signal. When given,
+    this ALSO upserts a real Lead (create-or-refresh) instead of only mirroring
+    onto one that already exists, so a first-touch enquiry gets a Lead in Twenty
+    right away rather than waiting for tomorrow's 07:00 refresh to notice it —
+    ordinary callers (a campaign send) are unaffected, since Twenty's own "does
+    this club currently qualify as a Lead" rule (``_lead_signal``) already gates
+    against a routine send alone creating one.
+
     Opens its own session + http client; never raises — a CRM hiccup must never
     break a send."""
     if not client.configured or not marketing_club_id:
@@ -1184,14 +1197,20 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
                 cq = cq.where(MarketingClubContact.outreach_selected.is_(True))
             contacts = (await session.execute(cq)).scalars().all()
             all_unsub = await _all_contacts_unsubscribed(session, club.id)
-            company = {**_company_values(club, org, all_unsub=all_unsub),
-                       **(await _engagement(session, club, org))}
+            engagement = await _engagement(session, club, org)
+            if engagement_override:
+                engagement = {**engagement, **engagement_override}
+            company = {**_company_values(club, org, all_unsub=all_unsub), **engagement}
             club_stage = company["lifecycleStage"]
 
             async with httpx.AsyncClient() as http:
                 ctid, _cact = await _upsert(session, http, "club", club.grassroots_guid,
                                             "companies", "bcClubId", company)
-                await _sync_lead_from_company(session, http, club.grassroots_guid, company)
+                if engagement_override:
+                    from app.services import twenty_leads_tasks
+                    await twenty_leads_tasks.upsert_lead_for_club(session, http, club, org, ctid, engagement)
+                else:
+                    await _sync_lead_from_company(session, http, club.grassroots_guid, company)
                 for ct in contacts:
                     try:
                         person_vals = {**_person_values(ct, club.country),
@@ -1230,10 +1249,114 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
         return {"error": str(e)}
 
 
-async def push_org_company(org_id) -> dict:
+async def _resolve_onboarding_club(session, *, club_name: str, contact_name: str,
+                                   email: str, phone: "Optional[str]"):
+    """Find-or-create the MarketingClub + MarketingClubContact a direct 'onboard
+    my club' enquiry belongs to. Matching mirrors ``_onboarding_signal``'s own
+    priority — the submitter's email against a known officer first (the
+    strongest signal: this exact person is already on file for a specific
+    club), then an exact club-name match, else a brand-new prospect club is
+    created from what the form gave us, so a first-touch enquiry from a club
+    the PlayHQ crawler hasn't found yet is never silently dropped. Commits
+    nothing itself — the caller commits."""
+    name = (club_name or "").strip()
+    email_l = (email or "").strip().lower()
+
+    club = None
+    if email_l:
+        club = (await session.execute(
+            select(MarketingClub).join(
+                MarketingClubContact, MarketingClubContact.marketing_club_id == MarketingClub.id)
+            .where(func.lower(MarketingClubContact.email) == email_l)
+            .limit(1)
+        )).scalars().first()
+    if club is None and name:
+        club = (await session.execute(
+            select(MarketingClub).where(func.lower(MarketingClub.name) == name.lower()).limit(1)
+        )).scalars().first()
+    if club is None:
+        if not name:
+            return None, None
+        # No real PlayHQ GUID for a club that hasn't been crawled — a
+        # deterministic synthetic one keyed on the name, so a second enquiry
+        # from the same club (matched by name above) upserts the same row
+        # rather than minting a duplicate.
+        club = MarketingClub(
+            grassroots_guid=f"manual:{uuid.uuid5(uuid.NAMESPACE_URL, name.lower())}",
+            name=name[:200], kind="club", status="contacted", source="onboarding_form",
+            contact_email=email_l or None, contact_phone=phone,
+        )
+        session.add(club)
+        await session.flush()
+
+    contact = None
+    if email_l:
+        contact = (await session.execute(
+            select(MarketingClubContact).where(
+                MarketingClubContact.marketing_club_id == club.id,
+                func.lower(MarketingClubContact.email) == email_l)
+        )).scalars().first()
+    if contact is None:
+        contact = MarketingClubContact(
+            marketing_club_id=club.id, full_name=(contact_name or "").strip()[:200] or None,
+            email=email_l or None, mobile=phone, role="Enquirer", role_rank=1,
+            source="website", subscribed=True, outreach_selected=True,
+        )
+        session.add(contact)
+        await session.flush()
+    elif not contact.outreach_selected:
+        contact.outreach_selected = True
+
+    return club, contact
+
+
+async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
+                                  email: str = "", phone: "Optional[str]" = None) -> dict:
+    """A direct "onboard my club" / trial-request enquiry — from EITHER the short
+    'Get your club on BetterCricket' CTA modal or the full Contact page, both of
+    which post to the same ``/public/contact`` endpoint — is the single strongest
+    buying signal a prospect can give. Rather than let it filter through as one
+    input among several in the gradual engagement formula (and wait on a club
+    already being in the CRM at all), this immediately upserts the club into
+    Twenty as a Company AND a Lead, forced to a Hot (100) engagement score, the
+    moment the enquiry lands — regardless of whether the club was already
+    exported. Best-effort and backgrounded by the caller; never raises."""
+    if not client.configured:
+        return {"skipped": "not configured"}
+    if not (club_name or "").strip():
+        return {"skipped": "no club name"}
+    try:
+        async with async_session_maker() as session:
+            club, contact = await _resolve_onboarding_club(
+                session, club_name=club_name, contact_name=contact_name,
+                email=email, phone=phone)
+            if club is None:
+                return {"skipped": "no club"}
+            await session.commit()
+            club_id, contact_id = club.id, contact.id
+    except Exception as e:  # noqa: BLE001 — never let a CRM error affect the caller
+        logger.exception("twenty push_onboarding_enquiry: club resolve failed for %r", club_name)
+        return {"error": str(e)}
+
+    return await push_club_and_contacts(
+        club_id, contact_ids=[contact_id],
+        engagement_override={"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
+
+
+async def push_org_company(org_id, engagement_override: "Optional[dict]" = None) -> dict:
     """Push ONE onboarded club's Company fields (paid/trial modules, ARR, subscription
     status, renewal) to Twenty after a subscription change. Best-effort and
-    no-op when Twenty isn't configured or the club has no linked CRM record."""
+    no-op when Twenty isn't configured or the club has no linked CRM record.
+
+    ``engagement_override`` is used for a trial start/grant — a strong enough
+    buying signal that it should read as an immediate Hot (100) score and a
+    real Lead, the same treatment ``push_onboarding_enquiry`` gives a direct
+    "onboard my club" enquiry, rather than the ordinary billing-fields-only push
+    every other subscription change (activate/cancel/renewal-date edit) gets
+    here. Only when given does this also compute the engagement rollup and
+    create-or-refresh the Lead — an ordinary call is unaffected, both to avoid
+    the extra Twenty calls on a routine save and because e.g. a cancel
+    shouldn't raise/refresh a Lead."""
     if not client.configured:
         return {"skipped": "twenty not configured"}
     try:
@@ -1249,9 +1372,16 @@ async def push_org_company(org_id) -> dict:
                 options=[selectinload(Organisation.module_subscriptions)],
             )
             company = _company_values(mc, org)
+            if engagement_override:
+                engagement = {**(await _engagement(session, mc, org)), **engagement_override}
+                company = {**company, **engagement}
             async with httpx.AsyncClient() as http:
-                await _upsert(session, http, "club", mc.grassroots_guid,
-                              "companies", "bcClubId", company)
+                ctid, _act = await _upsert(session, http, "club", mc.grassroots_guid,
+                                           "companies", "bcClubId", company)
+                if engagement_override:
+                    from app.services import twenty_leads_tasks
+                    await twenty_leads_tasks.upsert_lead_for_club(session, http, mc, org, ctid, engagement)
+            await session.commit()
         return {"ok": True}
     except Exception as e:
         logger.error(f"push_org_company failed for {org_id}: {e}")

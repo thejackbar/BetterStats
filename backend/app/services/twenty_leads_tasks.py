@@ -118,6 +118,35 @@ def _lead_values(sig: dict, lifecycle_stage: str) -> dict:
     }
 
 
+async def upsert_lead_for_club(session, http, club: MarketingClub, org: "Optional[Organisation]",
+                               company_tid: str, eng: dict) -> "Optional[str]":
+    """Create or refresh the Lead for ONE club, given an already-computed engagement
+    rollup and the Company's Twenty id. The single-club counterpart to
+    ``_seed_and_refresh_leads``'s daily batch sweep (which only ever looks at clubs
+    already in ``twenty_links``) — used for an immediate push where the caller
+    already has the Company upsert's result in hand and can't wait for tomorrow's
+    07:00 refresh to notice the signal (see ``twenty_sync.push_onboarding_enquiry``,
+    for a direct "onboard my club" enquiry). Returns the Lead's Twenty id, or None
+    if it doesn't currently qualify (see ``_lead_signal``) or every contact has
+    opted out."""
+    paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
+    is_paying = bool(paid) or (club.demo_status or "") == "customer"
+    all_unsub = await _all_contacts_unsubscribed(session, club.id)
+    if all_unsub and not is_paying:
+        return None
+    synced = bool(club.existing_org_id) and not is_paying
+    sig = _lead_signal(club, org, eng, synced=synced)
+    if sig is None:
+        return None
+    values = _lead_values(sig, _lifecycle(club, is_paying, all_unsub))
+    values["name"] = club.name
+    lid, _act = await _upsert(
+        session, http, "lead", club.grassroots_guid, "leads", "bcLeadKey", values,
+        create_extra={"bcLeadKey": club.grassroots_guid, "leadStatus": sig["status"],
+                      "companyId": company_tid})
+    return lid
+
+
 async def _seed_and_refresh_leads(session, http, stats) -> None:
     """Create or refresh a Lead for every exported club that qualifies now. Snapshot
     the ORM data before the IO loop (same greenlet-safety pattern as the export)."""

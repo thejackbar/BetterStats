@@ -819,6 +819,169 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
 - **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
   `betterstats-backend` shares a Docker network with `klubpro-postgres`.
 
+## BetterComms — HTML / Design / Preview editor (Jul 2026)
+
+Template (`CommsTemplates.jsx`) and Email compose (`CommsCompose.jsx`) both used
+to be a plain `<textarea>` + a read-only iframe. Both now share one editor,
+`frontend/src/components/admin/EmailEditorTabs.jsx`, with three modes: **HTML**
+(the textarea), **Design** (WYSIWYG), **Preview** (unchanged — server-rendered
+`srcDoc` iframe, footer injected, exactly what a send produces).
+
+- **Design mode edits the real DOM, not a schema.** Real templates are
+  table-based layouts (`role="presentation"`, `cellpadding`, inline styles) for
+  email-client compatibility — a schema-based rich-text library (TipTap/Quill/
+  Slate) normalises content into its own document model and would strip or
+  rewrite that markup on round-trip. Instead Design mode writes the current HTML
+  into an iframe and sets `contentDocument.designMode = 'on'`, so the browser's
+  native editing operates on the actual markup; the toolbar calls
+  `execCommand` on that document. Reading the content back out
+  (`serializeIframeDocument`) gets back real HTML, tables and all, modulo the
+  user's own edits (browsers do normalise bare `<tr>` into an implicit `<tbody>`
+  on any DOM parse — cosmetic, doesn't affect rendering).
+- **Fragment vs full-document is auto-detected and preserved**
+  (`isFullHtmlDoc` in `lib/htmlEmailFormat.js`, mirrors the backend's
+  `_is_full_doc`). A full document (`<html`/`<body>` present — a pasted/imported
+  template) edits and serializes as a full document. A fragment (a plain-text or
+  simple-HTML compose body) is wrapped in a throwaway shell just for the Design
+  iframe's visual editing surface (`wrapFragmentForEditing`) but only the
+  fragment's inner content is read back out — so the backend's auto-wrap (club
+  shell + mandatory footer) for compose bodies keeps working untouched after a
+  round trip through Design mode.
+- **Tidy-on-switch**: `js-beautify`'s HTML formatter (`tidyHtml`) reformats the
+  code whenever a mode transition, Save, Test or Send happens with pending
+  edits — leaving HTML mode always shows clean, indented markup, whether the
+  edits came from raw code or from Design mode. Verified against a real
+  table-based template that indentation doesn't introduce visible whitespace
+  (inline elements like `<a>` inside a `<p>` are left untouched).
+- **`ref.flush()` is mandatory before persisting.** `EmailEditorTabs` is a
+  `forwardRef` exposing `flush()`, which synchronously returns the latest
+  content (Design-iframe edits read back and tidied, or tidied code) — every
+  Save/Send/Test call site must use its return value directly rather than the
+  `html`/`body` state variable, since the `onChange` callback's state update
+  hasn't necessarily landed yet by the time the API call fires. A debounced
+  (400ms), untidied live-sync also runs while typing in Design mode so
+  Send-button enablement and the unknown-`{{variable}}` warnings don't lag.
+- **No backend change** — tidying happens entirely client-side before the
+  existing `html`/`body_html` string fields are saved.
+
+## Marketing Club Directory — Twenty sync fixes (Jul 2026)
+
+Two related fixes to the super-admin Club Directory (`/admin/super/marketing`)'s
+Twenty CRM integration, prompted by a live "Gateway Time-out" on Refresh
+Twenty leads/tasks and a club whose direct enquiry never showed up as a Twenty
+lead or engagement score.
+
+- **Background-task pattern extended to the two Refresh buttons** (`backend/app/routers/marketing.py`).
+  `/refresh-twenty-engagement` and `/refresh-twenty-leads-tasks` used to `await`
+  the whole sweep synchronously — fine for a small exported-club set, but
+  `twenty_client.py`'s self-imposed 90-req/60s rate limiter means a sweep over a
+  meaningful number of clubs routinely exceeds nginx's default 60s
+  `proxy_read_timeout` (`frontend/nginx.conf` has no override for `/api/`),
+  producing a proxy-level "Gateway Time-out" — the backend kept running to
+  completion regardless, the browser just gave up first. Both now follow the
+  exact pattern `/export-twenty` already used (documented in its own comment,
+  same reasoning): `POST` kicks off a `BackgroundTasks` runner and returns
+  `{"status": "started"}` immediately; the UI polls a new `GET .../status`
+  endpoint (`/refresh-twenty-engagement/status`, `/refresh-twenty-leads-tasks/status`).
+  In-process module-level state dicts (`_twenty_engagement_refresh`,
+  `_twenty_leads_refresh`), same shape as the existing `_twenty_export` —
+  a `_bg_stale()` helper (extracted from the export's own `_export_stale()`) is
+  now shared by all three. Frontend: `SuperMarketing.jsx`'s `pollTwentyExport`
+  was generalised into `pollTwentyJob(statusFn, formatResult, {onDone})`, reused
+  by all three buttons.
+  **Bonus fix surfaced while mirroring the pattern**: `export_to_twenty` /
+  `refresh_engagement` / `refresh_leads_and_tasks` all document "never raises,
+  returns `{"error": ...}` instead" — but the original `_export_twenty_bg`
+  stored that dict straight into `state["result"]`, so the UI's
+  `formatTwentyResult` tried to format an error dict as a success shape
+  (`"Exported to Twenty: undefined club(s) matched…"`) instead of showing the
+  real error. New `_settle_bg(state, res)` helper (used by all three background
+  runners) detects a truthy `res["error"]` and routes it into `state["error"]`
+  instead, so the UI's existing `if (s.error)` branch catches it correctly —
+  fixes this for the pre-existing export button too, not just the two new ones.
+
+- **A direct "onboard my club" enquiry now immediately upserts a Company +
+  Lead in Twenty at a forced Hot (100) score**, regardless of whether the club
+  was ever exported before (`backend/app/services/twenty_sync.py`,
+  wired from `routers/public_contact.py`). Previously, BOTH the daily 06:00/07:00
+  cron jobs AND the on-demand Refresh buttons only ever touched clubs already
+  in `twenty_links` — nothing in the `/public/contact` submission path (used
+  identically by the short "Get your club on BetterCricket" CTA modal
+  and the full Contact page, distinguished only by `source`) auto-exported a
+  new prospect, so a club that enquired but was never separately exported
+  showed no engagement score and no Twenty lead until someone noticed and
+  clicked "Export to Twenty" manually.
+  - `_resolve_onboarding_club()` finds-or-creates the `MarketingClub` +
+    `MarketingClubContact` the enquiry belongs to, mirroring
+    `_onboarding_signal()`'s own existing priority: the submitter's email
+    against a known officer first, then an exact case-insensitive club-name
+    match, else a brand-new prospect club is created from what the form gave
+    us (synthetic `grassroots_guid = "manual:" + uuid5(name)` — deterministic,
+    so a second enquiry from the same club upserts the same row rather than
+    duplicating). Verified against a real Postgres instance: name-match reuse,
+    email-match-wins-over-a-mismatched-typed-name, and no duplicate rows across
+    repeated submissions.
+  - `push_club_and_contacts()` gained an `engagement_override` param — when
+    given, it's merged over the normally-computed `_engagement()` rollup
+    (preserving the other real telemetry fields — sessions, upsell modules,
+    etc. — only `engagementScore`/`engagementTier`/`inSalesCycle` are forced).
+    It also switches from the existing mirror-only `_sync_lead_from_company`
+    (which no-ops if the club has no Lead yet) to a REAL create-or-refresh via
+    the new `twenty_leads_tasks.upsert_lead_for_club()` — a single-club
+    extraction of `_seed_and_refresh_leads`'s per-club body, so a Lead is
+    actually created immediately rather than only mirrored onto one that
+    already exists. **Scoped to the `engagement_override` path only** — an
+    ordinary campaign-send call to `push_club_and_contacts` (its original
+    caller) is untouched, since `_lead_signal`'s own qualifying-signal gate
+    already prevents a routine send alone from creating a Lead.
+  - `push_onboarding_enquiry(club_name, contact_name, email, phone)` is the
+    top-level orchestration, backgrounded from `public_contact.py`'s
+    `submit_contact` alongside the existing `mark_contact_source` call — never
+    raises, no-ops cleanly when Twenty isn't configured (verified).
+  - The **daily 06:00 engagement / 07:00 lead refresh jobs still can't discover
+    a brand-new club on their own** — they're unchanged, still scoped to
+    `twenty_links`. This enquiry-triggered push is now the one path that closes
+    that gap; the jobs remain correct for their existing job (keeping
+    already-exported clubs' scores current day-to-day).
+
+- **A trial — requested or started, either as a prospect or an onboarded
+  club — gets the same forced Hot (100) + Lead treatment**, on top of the
+  enquiry case above. Four distinct code paths all write to the same
+  `trial_modules`/`requested_trial_modules`/`demo_status` (prospect) or
+  `org_module_subscriptions` (onboarded) state, so each is hooked at its own
+  write point rather than centralised:
+  - `club_directory.set_sales_state()` — the super-admin Sales Pipeline panel
+    in the Club Directory (Trialing / Requested Trial checkboxes, Demo
+    dropdown). Tracks the delta of newly-added `trial_modules` /
+    `requested_trial_modules` (already existed, for the `request_trial_modules`
+    presync-Task queueing) and now ALSO fires
+    `push_club_and_contacts(club.id, engagement_override=…)` when a module is
+    newly added OR `demo_status` freshly transitions **into** `in_trial`
+    (transitioning out, or re-saving the same already-in_trial state, doesn't
+    re-push — verified against a real Postgres instance across 7 scenarios).
+  - `club_admin.py::create_module_request` — a club's own admin self-serving a
+    trial request (`kind == "trial"`) from inside the app. This is the
+    "requests a trial" moment for an already-onboarded club.
+  - `club_admin.py::start_module_trial` / `approve_module_request` — a super
+    admin directly granting a trial, or approving a self-serve trial request.
+    This is the "is put on a trial" moment. `approve_module_request` only
+    forces it for `req.kind == "trial"` — a subscribe/cancel approval keeps the
+    ordinary billing-fields-only push.
+  - Both onboarded-club paths go through `_push_club_to_twenty(org_id,
+    force_hot=True)` → `twenty_sync.push_org_company(org_id,
+    engagement_override=…)`, which gained the same `engagement_override`
+    param `push_club_and_contacts` has: only when given does it compute the
+    real `_engagement()` rollup (merging the override on top, so the other
+    real telemetry fields survive) and create-or-refresh the Lead via
+    `twenty_leads_tasks.upsert_lead_for_club()` — an ordinary subscription-change
+    push (activate/cancel/renewal-date edit) is untouched, still the
+    billing-fields-only push it always was.
+  - **Bonus fix surfaced while extending `push_org_company`**: it never
+    actually called `session.commit()` — `_upsert`'s `twenty_links` bookkeeping
+    (the id-mapping/content-hash dedupe row) was silently rolled back on every
+    call, on every existing caller, since the function was first written. Now
+    commits like every sibling push function.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

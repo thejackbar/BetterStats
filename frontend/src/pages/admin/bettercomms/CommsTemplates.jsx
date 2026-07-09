@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 
 const STARTER = `<!doctype html>
 <html>
@@ -57,13 +58,13 @@ function rtfToText(rtf) {
 function Editor({ initial, onSaved, onCancel, onDeleted }) {
   const [name, setName] = useState(initial?.name || '')
   const [html, setHtml] = useState(initial?.html ?? STARTER)
-  const [preview, setPreview] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
   const [vars, setVars] = useState({ is_marketing: false, variables: [] })
   const [copied, setCopied] = useState('')
   const fileRef = useRef(null)
+  const editorRef = useRef(null)
 
   useEffect(() => { api.commsMergeVariables().then(setVars).catch(() => {}) }, [])
 
@@ -72,14 +73,12 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
     setCopied(name); setTimeout(() => setCopied(''), 1200)
   }
 
-  // Live preview, debounced — rendered exactly as a send would (footer injected).
-  useEffect(() => {
-    let live = true
-    const t = setTimeout(() => {
-      api.commsPreviewTemplate(html).then(r => { if (live) setPreview(r.html || '') }).catch(() => {})
-    }, 400)
-    return () => { live = false; clearTimeout(t) }
-  }, [html])
+  // Rendered exactly as a send would (footer injected) — fetched when the
+  // Preview tab is opened rather than on every keystroke.
+  const onEnterPreview = async ({ html: currentHtml }) => {
+    const r = await api.commsPreviewTemplate(currentHtml)
+    return { html: r.html || '', total: 1, index: 0 }
+  }
 
   const importFile = (e) => {
     const f = e.target.files?.[0]
@@ -108,9 +107,10 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
     if (!name.trim()) { setErr('Give the template a name.'); return }
     setBusy(true); setErr('')
     try {
+      const finalHtml = editorRef.current?.flush() ?? html
       const saved = initial?.id
-        ? await api.commsUpdateTemplate(initial.id, name.trim(), html)
-        : await api.commsCreateTemplate(name.trim(), html)
+        ? await api.commsUpdateTemplate(initial.id, name.trim(), finalHtml)
+        : await api.commsCreateTemplate(name.trim(), finalHtml)
       onSaved(saved)
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -157,17 +157,11 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div>
-          <div className="text-pb-faintest text-xs mb-1">HTML — paste your own, or import a file. Use {'{{first_name}}'}, {'{{club_name}}'} etc.</div>
-          <textarea value={html} onChange={e => setHtml(e.target.value)} rows={20} spellCheck={false}
-            className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline font-mono text-xs" />
-        </div>
-        <div>
-          <div className="text-pb-faintest text-xs mb-1">Preview (the unsubscribe footer is added automatically)</div>
-          <iframe title="preview" srcDoc={preview} className="w-full rounded border pb-hairline bg-white" style={{ height: 480 }} />
-        </div>
+      <div className="text-pb-faintest text-xs mb-1">
+        HTML — paste your own, or import a file. Use {'{{first_name}}'}, {'{{club_name}}'} etc. Switching out of HTML mode
+        tidies the code automatically; Preview adds the unsubscribe footer, exactly as a send would.
       </div>
+      <EmailEditorTabs ref={editorRef} html={html} onChange={setHtml} onEnterPreview={onEnterPreview} height={480} />
     </div>
   )
 }

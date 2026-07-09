@@ -1121,6 +1121,7 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
         return None
     old_trial = set(club.trial_modules or [])
     old_requested = set(club.requested_trial_modules or [])
+    old_demo_status = club.demo_status
     if trial_modules is not None:
         club.trial_modules = _clean_modules(trial_modules)
     if requested_trial_modules is not None:
@@ -1133,6 +1134,7 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     club.updated_at = func.now()
     added_trial = set(club.trial_modules or []) - old_trial
     added_requested = set(club.requested_trial_modules or []) - old_requested
+    became_in_trial = club.demo_status == "in_trial" and old_demo_status != "in_trial"
     await session.commit()
     await session.refresh(club)
     added_modules = sorted(added_trial | added_requested)
@@ -1145,6 +1147,18 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
                                         source="app", ext_key=f"app:{club.grassroots_guid}")
         except Exception:  # noqa: BLE001 - queueing the follow-up must never block the save
             logger.exception("club_directory: failed to queue trial request for %s", club.id)
+    if added_modules or became_in_trial:
+        # Requesting or starting a trial here is as strong a buying signal as a
+        # direct "onboard my club" enquiry — force the same immediate Hot (100)
+        # + Lead treatment rather than letting it filter through as partial
+        # credit in the gradual engagement formula (see push_onboarding_enquiry).
+        try:
+            from app.services.twenty_sync import push_club_and_contacts
+            await push_club_and_contacts(
+                club.id, engagement_override={
+                    "engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
+        except Exception:  # noqa: BLE001 - the CRM push must never block the save
+            logger.exception("club_directory: failed to push trial engagement for %s", club.id)
     return {
         "id": str(club.id),
         "trial_modules": club.trial_modules or [],
