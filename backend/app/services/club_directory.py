@@ -1515,7 +1515,16 @@ _RESOLVED_VISITS = (
     ")::text AS cid, "
     "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, "
     "ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
-    "FROM usage_events ue WHERE ue.event_type = 'page_view'"
+    "FROM usage_events ue WHERE ue.event_type = 'page_view' "
+    # A stale UTM captured once in a browser tab (see visitor.js getLinkCode())
+    # keeps riding along on every later page view from that tab, including a
+    # staff member's own authenticated admin browsing — which would otherwise
+    # get misattributed to a prospect club as "visits"/"pages viewed" and
+    # corrupt the engagement score built on this same CTE (twenty_sync.py
+    # _engagement). Same guard usage.py's campaigns()/live() already use to
+    # keep staff activity out of visitor numbers.
+    "AND ue.user_id IS NULL "
+    "AND split_part(ue.path, '?', 1) !~* '^/admin'"
 )
 
 # Single-pass form for the directory "visited" filter + the dashboard count.
@@ -1688,18 +1697,22 @@ async def list_utm_values(session: AsyncSession) -> list:
     UTM-matching panel, so a slug like 'willetton-cricket-club' that matches no
     club can be mapped to the right one by hand."""
     seg = "split_part(split_part(ue.path, '?', 1), '/', 2)"
+    # Staff-noise guard (see _RESOLVED_VISITS above) so a UTM's view count here
+    # reflects genuine visitor traffic, not a staff member's own admin browsing
+    # in a tab that once carried this value.
+    staff_guard = "AND ue.user_id IS NULL AND split_part(ue.path, '?', 1) !~* '^/admin' "
     rows = (await session.execute(text(
         "SELECT val, source, SUM(n) AS views FROM ("
         "  SELECT ue.utm_source AS val, 'utm' AS source, COUNT(*) n FROM usage_events ue "
         "  WHERE ue.event_type='page_view' AND ue.utm_source IS NOT NULL "
-        "  AND ue.utm_source <> '' GROUP BY 1 "
+        f"  AND ue.utm_source <> '' {staff_guard}GROUP BY 1 "
         "  UNION ALL "
         "  SELECT ue.utm_id AS val, 'utm' AS source, COUNT(*) n FROM usage_events ue "
         "  WHERE ue.event_type='page_view' AND ue.utm_id IS NOT NULL "
-        "  AND ue.utm_id <> '' GROUP BY 1 "
+        f"  AND ue.utm_id <> '' {staff_guard}GROUP BY 1 "
         "  UNION ALL "
         f"  SELECT {seg} AS val, 'path' AS source, COUNT(*) n FROM usage_events ue "
-        f"  WHERE ue.event_type='page_view' AND {seg} ~* 'cricket|club' GROUP BY 1 "
+        f"  WHERE ue.event_type='page_view' AND {seg} ~* 'cricket|club' {staff_guard}GROUP BY 1 "
         ") t GROUP BY val, source"))).all()
     # Collapse to one row per value, summing views and collecting the sources.
     by_val: dict = {}

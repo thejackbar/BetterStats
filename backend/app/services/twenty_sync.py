@@ -226,7 +226,9 @@ async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
                  WHERE ue.visitor_id IS NOT NULL
                    AND ((CAST(:utm AS text) IS NOT NULL
                          AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
-                              OR {_PATH_CODE} = CAST(:utm AS text)))
+                              OR {_PATH_CODE} = CAST(:utm AS text))
+                         AND ue.user_id IS NULL
+                         AND split_part(ue.path, '?', 1) !~* '^/admin')
                      OR (CAST(:org_slug AS text) IS NOT NULL AND {_PATH_CODE} = CAST(:org_slug AS text)))))
            OR (cor.club IS NOT NULL AND lower(cor.club) = lower(:name))
     """), {"cid": str(club.id), "utm": utm, "org_slug": org_slug, "name": club.name or ""})).first()
@@ -302,15 +304,32 @@ async def _engagement(session, club: MarketingClub,
                    ELSE 0.0
                END), 0.0)::float AS web_decay_pts
         FROM usage_events ue
-        WHERE (CAST(:utm AS text) IS NOT NULL
-               AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
-                    OR {_PATH_CODE} = CAST(:utm AS text)))
-           OR (CAST(:org AS text) IS NOT NULL AND ue.org_id::text = CAST(:org AS text))
-           OR (CAST(:org_slug AS text) IS NOT NULL AND {_PATH_CODE} = CAST(:org_slug AS text))
-           OR EXISTS (
-                SELECT 1 FROM marketing_utm_aliases a
-                WHERE a.marketing_club_id = CAST(:cid AS uuid)
-                  AND a.utm_value IN (ue.utm_id, ue.utm_source, {_PATH_CODE})
+        WHERE (
+                -- UTM-based attribution is for anonymous/prospect marketing traffic
+                -- only. A UTM captured once in a browser tab (visitor.js
+                -- getLinkCode()) keeps riding along on every later page view from
+                -- that tab, including a staff member's own authenticated admin
+                -- browsing — which has nothing to do with this club and would
+                -- otherwise inflate its score. The org_id/org_slug branches below
+                -- are deliberately NOT guarded the same way: for an actual
+                -- customer, their own staff logging into their own club's admin
+                -- IS the "product use" signal this score means to capture.
+                (CAST(:utm AS text) IS NOT NULL
+                 AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
+                      OR {_PATH_CODE} = CAST(:utm AS text))
+                 AND ue.user_id IS NULL
+                 AND split_part(ue.path, '?', 1) !~* '^/admin')
+                OR (CAST(:org AS text) IS NOT NULL AND ue.org_id::text = CAST(:org AS text))
+                OR (CAST(:org_slug AS text) IS NOT NULL AND {_PATH_CODE} = CAST(:org_slug AS text))
+                OR (
+                     EXISTS (
+                          SELECT 1 FROM marketing_utm_aliases a
+                          WHERE a.marketing_club_id = CAST(:cid AS uuid)
+                            AND a.utm_value IN (ue.utm_id, ue.utm_source, {_PATH_CODE})
+                     )
+                     AND ue.user_id IS NULL
+                     AND split_part(ue.path, '?', 1) !~* '^/admin'
+                )
               )
     """), {"utm": utm, "org": org_id, "org_slug": org_slug, "cid": str(club.id)})).first()
     last_web = web[0] if web else None

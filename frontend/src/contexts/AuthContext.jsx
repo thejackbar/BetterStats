@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { clearAttribution } from '../lib/visitor'
 
 const AuthContext = createContext(null)
 
@@ -35,6 +36,10 @@ export function AuthProvider({ children }) {
     const data = await res.json()
     setUser(data)
     setJustLoggedIn(true)
+    // A stale marketing UTM sitting in this tab (e.g. from testing/copying a
+    // club's own outreach link) shouldn't keep riding along on this staff
+    // member's admin browsing from here on.
+    clearAttribution()
     return data
   }
 

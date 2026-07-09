@@ -138,3 +138,17 @@ export function getAttribution() {
   }
   return next || { has_signal: false, ...landing }
 }
+
+// Called on login so a staff member's admin browsing can't keep inheriting
+// whatever marketing UTM happened to be sitting in this tab (e.g. from
+// testing/copying a club's own outreach link) — the backend now also guards
+// against this (usage_events with a user_id are excluded from UTM
+// attribution), but clearing it here stops a stale value being sent at all.
+// bs_visitor_id is untouched — that's a stable anonymous-browser id, not
+// attribution, and losing it would just fragment the same visitor's history.
+export function clearAttribution() {
+  try {
+    sessionStorage.removeItem(LINK_CODE_KEY)
+    localStorage.removeItem(ATTR_KEY)
+  } catch (_) { /* ignore */ }
+}
