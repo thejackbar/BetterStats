@@ -92,3 +92,33 @@ async def receive_twenty_webhook(request: Request, db: AsyncSession = Depends(ge
         logger.exception("Twenty webhook dispatch failed")
         # Swallow so Twenty doesn't retry-storm; we logged it.
         return {"status": "error"}
+
+
+@router.post("/twenty-opportunity")
+async def receive_twenty_opportunity_trigger(request: Request):
+    """The Opportunity cascade trigger: a Twenty Manual Trigger Workflow's "Send
+    Webhook" step, one per object (Lead / Company / Person), each posting
+    ``{"source": "lead"|"company"|"person", "recordId": "{{record.id}}"}`` — see
+    docs/twenty-crm-integration.md §19 for the exact Twenty-side workflow setup.
+    Same shared-secret auth as ``/twenty`` (the bearer ``X-Webhook-Secret`` header
+    is the simplest to hand-type into a Workflow's custom headers). Always 200
+    after auth so a misconfigured payload doesn't retry-storm."""
+    if not settings.twenty_webhook_configured:
+        return {"status": "ignored", "reason": "webhook not configured"}
+    raw = await request.body()
+    if not _verify_twenty(request, raw):
+        logger.warning("Twenty opportunity webhook signature mismatch; header names=%s",
+                       list(request.headers.keys()))
+        return Response(status_code=401)
+    try:
+        import json
+        payload = json.loads(raw or b"{}")
+    except Exception:
+        return Response(status_code=400)
+    source = str(payload.get("source") or "").strip().lower()
+    record_id = str(payload.get("recordId") or payload.get("record_id") or "").strip()
+    from app.services.twenty_opportunity import run_cascade
+    result = await run_cascade(source, record_id)
+    if result.get("error"):
+        logger.warning("Twenty opportunity cascade (source=%s, id=%s): %s", source, record_id, result["error"])
+    return {"status": "ok" if not result.get("error") else "error", **result}

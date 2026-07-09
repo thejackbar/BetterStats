@@ -1032,3 +1032,95 @@ tracking is off, not that nobody's reading the emails).
 Emitted `emailEngaged30d`/`sessions30d`/`events_30d` display fields are
 unchanged (still flat counts, for CRM-visible "how many" context) — only the
 internal scoring formula now reads the decayed sums instead of the flat ones.
+
+## 19. July 2026 — Opportunity cascade (Lead / Company / Contact → Opportunity)
+
+**The ask**: generate an Opportunity from a Lead, a Company (Club), or a
+Person (Contact) record. From a Company or Contact, upsert a Lead first, then
+the Opportunity. From a Contact, that Contact becomes the Opportunity's Point
+of Contact. And: how does a user in Twenty actually action this — is there a
+button field, or a dropdown that fires on change?
+
+**Twenty has no button field type.** The field types this integration's
+metadata bootstrap can create are TEXT / NUMBER / BOOLEAN / SELECT /
+MULTI_SELECT / DATE_TIME / CURRENCY / LINKS / FULL_NAME / EMAILS / ARRAY (see
+`twenty_client.py`'s module docstring) — there's no clickable-field type among
+them. The nearest first-class "click to fire an action" affordance Twenty
+ships today is a **Workflow with a Manual Trigger**, which renders as a "Run
+workflow" button on a record's detail page (Settings → Workflows → New →
+trigger = "Manual trigger", scoped to the object). Per the standing decision
+to keep cascade logic in BetterStats rather than Twenty's no-code builder, the
+Workflow itself does nothing but forward the click to us — one step, no
+branching, no field writes:
+
+1. **Trigger**: Manual trigger, on the object (Lead / Company / Person — one
+   Workflow per object, three total).
+2. **Action**: "Send Webhook" (Twenty's built-in HTTP action).
+   - URL: `https://betterat.cricket/api/webhooks/twenty-opportunity`
+   - Method: POST
+   - Headers: `X-Webhook-Secret: <the same TWENTY_WEBHOOK_SECRET already set
+     for the /webhooks/twenty inbound route>`
+   - Body (JSON):
+     - On the Lead workflow: `{"source": "lead", "recordId": "{{record.id}}"}`
+     - On the Company workflow: `{"source": "company", "recordId": "{{record.id}}"}`
+     - On the Person workflow: `{"source": "person", "recordId": "{{record.id}}"}`
+
+That's the entire Twenty-side configuration — everything else (resolving the
+club, upserting the Lead, upserting the Opportunity, setting the Point of
+Contact) runs in `app/services/twenty_opportunity.py`.
+
+**Why not react to `Lead.modulesToPursue` changing instead** (the field
+`bootstrap_twenty.py` already comments as "the convert trigger")? A Manual
+Trigger is unambiguous — a deliberate click — where a "record is updated"
+watch on a MULTI_SELECT field can't tell a genuine "start the deal" edit
+apart from an operator merely correcting the list of modules on an
+already-working Lead. `modulesToPursue`/`modulesOfInterest` are still read as
+the **initial modulesInScope** when cascading from a Lead; they're just not
+themselves the trigger.
+
+**The cascade** (`app/services/twenty_opportunity.py`, `run_cascade(source,
+record_id)`), one Opportunity per club, upserted (never duplicated) on
+`bcOpportunityKey = club.grassroots_guid` — re-running any of the three
+refreshes the same deal rather than spawning a second one:
+
+- **`lead`**: the Lead already carries `bcLeadKey` (= the club's
+  `grassroots_guid`) and `companyId`, so the club is already known. Upserts
+  the Opportunity directly (`modulesInScope` = `modulesToPursue` or, if that's
+  empty, `modulesOfInterest`) and marks the Lead `leadStatus = CONVERTED`.
+- **`company`**: resolves the club via the Company's `bcClubId`, then
+  **force**-upserts the club's Lead (skipping the normal `_lead_signal`
+  qualification gate — a human just explicitly asked for a deal, so the Lead
+  must exist even if the club's engagement wouldn't organically raise one
+  today) straight to `leadStatus = CONVERTED`, then upserts the Opportunity.
+  `modulesInScope` defaults to whatever the club has already flagged as
+  interested-in/trialing (`requested_trial_modules` ∪ `trial_modules`) — a
+  starting guess a human refines in Twenty afterwards.
+- **`person`**: resolves the club via the Person's `bcContactId` (looked up
+  against `marketing_club_contacts`), or failing that via the Person's native
+  `companyId` (reverse-mapped through `twenty_links`, entity_type `club` —
+  `idx_twenty_links_twenty` exists for exactly this direction). Same
+  force-upsert-Lead-then-Opportunity as the Company path, PLUS the
+  Opportunity's `pointOfContactId` is set to this Person — and unlike every
+  other Opportunity field, it's written on **every** trigger, not just at
+  creation (`_upsert`'s `create_extra` only applies once; `pointOfContactId`
+  goes in `values` instead), since re-triggering from a Contact is a
+  deliberate "this person is now the point of contact" reassignment, not a
+  default that should stick from whoever happened to be first.
+
+**Route**: `POST /webhooks/twenty-opportunity` (`routers/webhooks.py`) reuses
+the exact same shared-secret verification as the existing `/webhooks/twenty`
+inbound route (`_verify_twenty` — HMAC over the raw body against any request
+header, OR a plain `X-Webhook-Secret` bearer match, which is the one to
+hand-type into a Workflow's Send Webhook headers). Always returns 200 once
+authenticated (even on a resolution error, e.g. an unlinked record) so a
+misconfigured Workflow can't retry-storm; the error reason is in the response
+body and the server log for diagnosis.
+
+**Unverified against a live workspace** (no test instance to hand at build
+time, same caveat `twenty_leads_tasks.py` already carries for its Task field
+paths): `companyId` and `pointOfContactId` as the Opportunity's relation field
+names follow Twenty's documented `<fieldName>Id` convention
+(`twenty_client.py`) for what should be the two standard built-in Opportunity
+relations (Company, Point of Contact) — confirm both resolve as expected
+against the real workspace before relying on the `person` cascade in
+production, and adjust `twenty_opportunity.py` if the live field names differ.

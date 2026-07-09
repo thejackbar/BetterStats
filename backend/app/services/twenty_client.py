@@ -192,6 +192,18 @@ class TwentyClient:
             _raise(r, "GET", plural)
         return r.json()
 
+    async def get_by_id(self, http: httpx.AsyncClient, plural: str, record_id: str) -> Optional[dict]:
+        """One record by its Twenty id. Returns None on a 404 or any error — the
+        caller treats a miss as "nothing to cascade from" rather than a hard fail."""
+        try:
+            r = await self._send(http, "GET", f"{self.base}/rest/{plural}/{record_id}")
+            if r.status_code >= 400:
+                return None
+            return _record(r.json())
+        except httpx.HTTPError as e:
+            logger.warning("twenty get_by_id %s/%s failed: %s", plural, record_id, e)
+            return None
+
     async def find_by(self, http: httpx.AsyncClient, plural: str, field: str,
                       value: str) -> Optional[dict]:
         """First record whose ``field`` equals ``value`` (the external-key dedupe
