@@ -78,6 +78,9 @@ const DIRECTORY_FIELD_DEFS = {
   club_state: { label: 'Club state', input: 'select', ops: IS_OP, optionsKey: 'states' },
   association: { label: 'Association', input: 'select', ops: IS_OP, optionsKey: 'associations' },
   country: { label: 'Country', input: 'select', ops: IS_OP, optionsKey: 'countries' },
+  page_views: { label: 'Page views', input: 'number', ops: STAT_OPS },
+  distinct_visitors: { label: 'Users viewing', input: 'number', ops: STAT_OPS },
+  engagement_score: { label: 'Engagement score', input: 'number', ops: STAT_OPS },
 }
 
 function defsFor(opts) {
