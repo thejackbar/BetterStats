@@ -96,11 +96,13 @@ async def receive_twenty_webhook(request: Request, db: AsyncSession = Depends(ge
 
 @router.post("/twenty-opportunity")
 async def receive_twenty_opportunity_trigger(request: Request):
-    """The Opportunity cascade trigger: a Twenty Manual Trigger Workflow's "Send
-    Webhook" step, one per object (Lead / Company / Person), each posting
-    ``{"source": "lead"|"company"|"person", "recordId": "{{record.id}}"}`` — see
-    docs/twenty-crm-integration.md §19 for the exact Twenty-side workflow setup.
-    Same shared-secret auth as ``/twenty`` (the bearer ``X-Webhook-Secret`` header
+    """Alternate Opportunity-cascade entry point for a Manual Trigger Workflow's
+    "Send Webhook" step (one per object — Lead / Company / Person), posting
+    ``{"source": "lead"|"company"|"person", "recordId": "{{record.id}}"}``. NOT
+    the day-to-day path — the primary trigger is the ``createOpportunity``
+    field on Company/Person/Lead, dispatched through the plain ``/twenty``
+    route below (see docs/twenty-crm-integration.md §19a/§19b). Same
+    shared-secret auth as ``/twenty`` (the bearer ``X-Webhook-Secret`` header
     is the simplest to hand-type into a Workflow's custom headers). Always 200
     after auth so a misconfigured payload doesn't retry-storm."""
     if not settings.twenty_webhook_configured:

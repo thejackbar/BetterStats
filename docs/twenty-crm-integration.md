@@ -1045,38 +1045,59 @@ button field, or a dropdown that fires on change?
 metadata bootstrap can create are TEXT / NUMBER / BOOLEAN / SELECT /
 MULTI_SELECT / DATE_TIME / CURRENCY / LINKS / FULL_NAME / EMAILS / ARRAY (see
 `twenty_client.py`'s module docstring) — there's no clickable-field type among
-them. The nearest first-class "click to fire an action" affordance Twenty
-ships today is a **Workflow with a Manual Trigger**, which renders as a "Run
-workflow" button on a record's detail page (Settings → Workflows → New →
-trigger = "Manual trigger", scoped to the object). Per the standing decision
-to keep cascade logic in BetterStats rather than Twenty's no-code builder, the
-Workflow itself does nothing but forward the click to us — one step, no
-branching, no field writes:
+them. Two ways to fire an action from a plain field then, both explored;
+**the field-driven one is what's actually wired up**:
 
-1. **Trigger**: Manual trigger, on the object (Lead / Company / Person — one
-   Workflow per object, three total).
-2. **Action**: "Send Webhook" (Twenty's built-in HTTP action).
-   - URL: `https://betterat.cricket/api/webhooks/twenty-opportunity`
-   - Method: POST
-   - Headers: `X-Webhook-Secret: <the same TWENTY_WEBHOOK_SECRET already set
-     for the /webhooks/twenty inbound route>`
-   - Body (JSON):
-     - On the Lead workflow: `{"source": "lead", "recordId": "{{record.id}}"}`
-     - On the Company workflow: `{"source": "company", "recordId": "{{record.id}}"}`
-     - On the Person workflow: `{"source": "person", "recordId": "{{record.id}}"}`
+### 19a. Field-driven trigger (shipped, primary path)
 
-That's the entire Twenty-side configuration — everything else (resolving the
-club, upserting the Lead, upserting the Opportunity, setting the Point of
-Contact) runs in `app/services/twenty_opportunity.py`.
+A **`createOpportunity` SELECT field** (options No / Yes) was added to
+Company, Person, AND Lead (`bootstrap_twenty.py` FIELDS). Flip it to Yes on
+any of the three objects and Twenty's own per-object webhook (Settings → APIs
+& Webhooks → Webhooks — a **native subscription**, not a Workflow: pick the
+object, subscribe to its `updated` event, point it at
+`https://betterat.cricket/api/webhooks/twenty` with the same
+`X-Webhook-Secret` as everything else) fires automatically on that save. No
+Workflow, no manual click beyond editing the field itself.
+
+- `twenty_inbound.dispatch_webhook` now runs `_object_type_from(event, record)`
+  first, on every inbound event (Company/Person/Lead alike, not just Company as
+  before) — matches on the `eventName` (e.g. `company.updated`) or, failing
+  that, on which `bc*` id field the record carries.
+- `_maybe_create_opportunity` checks `record.createOpportunity == "YES"`. If
+  so it calls `twenty_opportunity.run_cascade(obj, record_id)` and, on success,
+  **writes the field back to No** (`client.update(..., {"createOpportunity":
+  "NO"})`) — so it reads as a momentary trigger, not a persistent state. An
+  unrelated later edit to the same row (phone number, notes, whatever) with the
+  flag still sitting on Yes would otherwise silently re-fire the cascade on
+  every single save; the auto-reset closes that off. The cascade itself is
+  idempotent (`bcOpportunityKey = club guid`) regardless, so an occasional
+  double-fire from a race between the reset and a near-simultaneous edit is
+  harmless — same "best-effort, safe to double-run" posture as every other
+  webhook-driven write in this integration (`_raise_task`'s ext_ref dedupe,
+  `_upsert`'s content hash).
+- This runs through the SAME `/webhooks/twenty` route and `_verify_twenty`
+  shared-secret check the module-interest webhook already used — no new secret,
+  no new route to secure.
 
 **Why not react to `Lead.modulesToPursue` changing instead** (the field
-`bootstrap_twenty.py` already comments as "the convert trigger")? A Manual
-Trigger is unambiguous — a deliberate click — where a "record is updated"
+`bootstrap_twenty.py` already comments as "the convert trigger")? A dedicated
+Yes/No field is unambiguous — a deliberate flip — where a "record is updated"
 watch on a MULTI_SELECT field can't tell a genuine "start the deal" edit
 apart from an operator merely correcting the list of modules on an
 already-working Lead. `modulesToPursue`/`modulesOfInterest` are still read as
 the **initial modulesInScope** when cascading from a Lead; they're just not
 themselves the trigger.
+
+### 19b. Manual Trigger Workflow (built, kept as a fallback — not the intended path)
+
+Before settling on 19a, a Manual Trigger Workflow (Twenty's "Run workflow"
+button on a record) was built and still works: `POST
+/webhooks/twenty-opportunity` (`routers/webhooks.py`) takes `{"source":
+"lead"|"company"|"person", "recordId": "..."}`, same shared-secret auth as
+`/webhooks/twenty`. Wire a Workflow per object (trigger = Manual trigger,
+action = Send Webhook to that URL with a hand-typed JSON body) if a click-to-
+fire button is ever wanted alongside the field. Not required for day-to-day
+use now that 19a covers it field-side.
 
 **The cascade** (`app/services/twenty_opportunity.py`, `run_cascade(source,
 record_id)`), one Opportunity per club, upserted (never duplicated) on

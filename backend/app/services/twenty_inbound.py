@@ -15,6 +15,12 @@ Twenty-origin request types plug into the same entrypoint. Verified against a re
 Twenty payload may need the field paths below tweaked; they follow the shape we
 export in twenty_sync (``bcClubId``, ``interestedModules``/``trialModules`` as
 uppercase keys).
+
+Also dispatches the Opportunity cascade (see ``twenty_opportunity.py``): a
+``createOpportunity`` SELECT field (Company / Person / Lead, bootstrap_twenty)
+flipped to Yes fires ``twenty_opportunity.run_cascade`` and is reset to No —
+a field-driven trigger fired by Twenty's native per-object webhook subscription
+(Settings → APIs & Webhooks), not a Workflow.
 """
 from __future__ import annotations
 
@@ -28,8 +34,12 @@ from app.auth.modules import BILLABLE_MODULES, billing_key_for
 from app.models.db import (
     MarketingClub, ModuleActionRequest, Organisation, OrgModuleSubscription,
 )
+from app.services.twenty_client import client
 
 logger = logging.getLogger(__name__)
+
+# plural REST path per object, for the create-opportunity flag's write-back reset.
+_PLURAL = {"company": "companies", "person": "people", "lead": "leads"}
 
 
 def _record_from(payload: dict) -> dict:
@@ -39,6 +49,47 @@ def _record_from(payload: dict) -> dict:
         return {}
     rec = payload.get("record")
     return rec if isinstance(rec, dict) else payload
+
+
+def _object_type_from(event: str, record: dict) -> "str | None":
+    """Which of Company / Person / Lead this webhook event is about. Prefers the
+    event name (e.g. ``company.updated``); falls back to a bc* field only that
+    object carries, in case eventName is ever missing or unrecognised."""
+    for obj in ("company", "lead", "person"):
+        if obj in event:
+            return obj
+    if record.get("bcClubId") or record.get("bcclubid"):
+        return "company"
+    if record.get("bcLeadKey") or record.get("bcleadkey"):
+        return "lead"
+    if record.get("bcContactId") or record.get("bccontactid"):
+        return "person"
+    return None
+
+
+async def _maybe_create_opportunity(db: AsyncSession, obj: str, record: dict) -> "dict | None":
+    """The field-driven cascade trigger: createOpportunity == Yes on a Company /
+    Person / Lead row. Returns a result dict if it fired, else None so the caller
+    falls through to its other event handling untouched."""
+    flag = str(record.get("createOpportunity") or record.get("createopportunity") or "").strip().upper()
+    if flag != "YES":
+        return None
+    record_id = str(record.get("id") or "")
+    if not record_id:
+        return {"handled": True, "event": "create_opportunity", "source": obj,
+                "error": "webhook record carried no id"}
+    from app.services import twenty_opportunity  # deferred: avoid a cycle
+    result = await twenty_opportunity.run_cascade(obj, record_id)
+    # Best-effort reset so the field reads as a momentary trigger, not a
+    # persistent state — an unrelated LATER edit to the same record (with the
+    # flag still Yes) must not silently re-fire the cascade every time.
+    if not result.get("error"):
+        try:
+            async with httpx.AsyncClient() as http:
+                await client.update(http, _PLURAL[obj], record_id, {"createOpportunity": "NO"})
+        except Exception:  # noqa: BLE001 - the Opportunity already exists either way
+            logger.exception("twenty: failed to reset createOpportunity flag on %s %s", obj, record_id)
+    return {"handled": True, "event": "create_opportunity", "source": obj, **result}
 
 
 def _modules_from(value) -> list[str]:
@@ -176,12 +227,20 @@ async def request_trial_modules(db: AsyncSession, mc: MarketingClub, org: "Organ
 
 
 async def dispatch_webhook(db: AsyncSession, payload: dict) -> dict:
-    """Route a verified Twenty webhook. Returns a small summary for the response/log.
-    Only company create/update events carrying interested or trial modules do
-    anything today."""
+    """Route a verified Twenty webhook. Returns a small summary for the response/log."""
     event = str((payload or {}).get("eventName") or (payload or {}).get("event") or "").lower()
     record = _record_from(payload)
-    # Only act on company events (ignore people/associations/etc).
+
+    # The Opportunity cascade trigger — Company, Person, OR Lead — checked first
+    # and independent of everything below, since it can fire alongside any other
+    # edit to the same row.
+    obj = _object_type_from(event, record)
+    if obj is not None:
+        cascade_result = await _maybe_create_opportunity(db, obj, record)
+        if cascade_result is not None:
+            return cascade_result
+
+    # Only act on company events from here (ignore people/associations/etc).
     if "company" not in event and "bcClubId" not in record and "bcclubid" not in record:
         return {"handled": False, "reason": "not a company event"}
 
