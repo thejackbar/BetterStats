@@ -69,6 +69,11 @@ async def receive_twenty_webhook(request: Request, db: AsyncSession = Depends(ge
     when the webhook secret isn't configured, so it's safe to leave unwired. Always
     returns 200 (after auth) so Twenty doesn't retry-storm on a benign payload."""
     if not settings.twenty_webhook_configured:
+        # Logged at WARNING (not silent): a request reaching here with no secret
+        # configured is otherwise completely invisible in the logs — no line at
+        # all — which reads identically to "the request never arrived" and
+        # wastes a diagnosis cycle telling the two apart.
+        logger.warning("Twenty webhook received but TWENTY_WEBHOOK_SECRET is not set — ignoring")
         return {"status": "ignored", "reason": "webhook not configured"}
     raw = await request.body()
     if not _verify_twenty(request, raw):
