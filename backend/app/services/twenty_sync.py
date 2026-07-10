@@ -28,6 +28,7 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
+from app.services import platform_settings
 from app.services.club_directory import _PATH_CODE, club_filters
 from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
                                         full_name, link, phone)
@@ -465,6 +466,25 @@ async def _engagement(session, club: MarketingClub,
     # field actually pushed to Twenty reads as a whole number.
     score = int(round(score))
 
+    # A direct "onboard my club" enquiry (Contact page or the quick CTA modal)
+    # holds a prospect at a flat Hot 100 for a super-admin-configured number of
+    # days (Club Directory > General Settings > Marketing) — not just the
+    # one-off push push_onboarding_enquiry() makes the moment the enquiry
+    # lands, but on every later recompute too (the nightly refresh, a
+    # BetterComms send, a manual "Refresh Twenty scores"), so it doesn't quietly
+    # decay back to the ordinary recency/frequency score overnight. Ends the
+    # moment the deal is "won" (the club becomes a paying customer — is_customer
+    # switches it to the account-health formula above instead) or "lost"
+    # (``not_interested``, handled by the early return at the top of this
+    # function), whichever comes first.
+    hot_days = await platform_settings.get_direct_enquiry_hot_days(session)
+    direct_enquiry_hot = (
+        not is_customer and onboarding_last is not None
+        and (datetime.datetime.now(datetime.timezone.utc) - onboarding_last).days <= hot_days
+    )
+    if direct_enquiry_hot:
+        score, tier = 100, "HOT"
+
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # RECENT engagement (so it's a deal to work, not just a name on a list). Uses
     # ``sessions``/``eng_30d`` (both 30-day-windowed), not the all-time ``last_touch``
@@ -495,6 +515,7 @@ async def _engagement(session, club: MarketingClub,
         "_emailDecayPts": round(email_decay_pts, 1),
         "_webDecayPts": round(web_decay_pts, 1),
         "_freqPts": round(freq_pts, 1),
+        "_directEnquiryHot": direct_enquiry_hot,
     }
     if last_touch:
         fields["lastSeenAt"] = last_touch.isoformat()

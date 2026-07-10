@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
+from app.services import platform_settings
 from app.services.twenty_leads_tasks import _lead_signal
 from app.services.twenty_sync import (
     _all_contacts_unsubscribed, _engagement, _link_get, _module_split,
@@ -91,6 +92,11 @@ async def diagnose(name_query: str) -> None:
                   f"freqPts={eng.get('_freqPts')} (reach capped 24 + depth capped 40 "
                   f"= 64 max; emailDecayPts=0 with real opens/clicks sent means SES open/click "
                   f"tracking is likely OFF — see app.scripts.email_opens)")
+            if eng.get('_directEnquiryHot'):
+                hot_days = await platform_settings.get_direct_enquiry_hot_days(session)
+                print(f"    -> score is forced to 100/HOT: a direct onboarding enquiry within "
+                      f"the last {hot_days} days (General Settings > Marketing > Direct "
+                      f"enquiry hot days), not yet won (paying) or lost (not_interested).")
 
             synced = bool(club.existing_org_id) and not is_paying
             sig = _lead_signal(club, org, eng, synced=synced)
