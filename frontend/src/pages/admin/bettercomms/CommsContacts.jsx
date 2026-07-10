@@ -3,7 +3,8 @@ import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
-  emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls } from './audience'
+  emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
+  matchesUnsubscribed, UnsubscribedToggle } from './audience'
 
 function Stat({ label, value, tone }) {
   return (
@@ -21,6 +22,7 @@ export default function CommsContacts() {
   const [modes, setModes] = useState(emptyModes)
   const [engagement, setEngagement] = useState(emptyEngagementFilter)
   const [supp, setSupp] = useState('all')
+  const [unsub, setUnsub] = useState('all')
   const [fnFind, setFnFind] = useState('')
   const [fnReplace, setFnReplace] = useState('')
   const [selected, setSelected] = useState(() => new Set())
@@ -60,14 +62,14 @@ export default function CommsContacts() {
   // "top N of what's currently filtered" semantics as the Club Directory page),
   // so it's computed from preFiltered, not the raw contact list.
   const preFiltered = useMemo(() =>
-    (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp)),
-    [data.contacts, q, filters, modes, supp])
+    (data.contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp) && matchesUnsubscribed(c, unsub)),
+    [data.contacts, q, filters, modes, supp, unsub])
   const topIds = useMemo(() => topClubIds(preFiltered, engagement.topNMetric, engagement.topN),
     [preFiltered, engagement.topNMetric, engagement.topN])
   const visible = useMemo(() =>
     preFiltered.filter(c => matchesEngagementScore(c, engagement.gte, engagement.lte) && matchesTopClubs(c, topIds)),
     [preFiltered, engagement, topIds])
-  const activeFilters = !!q || FACETS.some(f => filters[f.key].length) || anyMode(modes) || supp !== 'all'
+  const activeFilters = !!q || FACETS.some(f => filters[f.key].length) || anyMode(modes) || supp !== 'all' || unsub !== 'all'
     || engagement.gte || engagement.lte || engagement.topN
 
   const run = async (key, fn, okText) => {
@@ -195,8 +197,9 @@ export default function CommsContacts() {
             selected={filters[f.key]} onChange={(v) => setFilters(s => ({ ...s, [f.key]: v }))} />
         ))}
         <SuppressedToggle value={supp} onChange={setSupp} />
+        <UnsubscribedToggle value={unsub} onChange={setUnsub} />
         {activeFilters && (
-          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setModes(emptyModes()); setSupp('all'); setEngagement(emptyEngagementFilter()) }}
+          <button onClick={() => { setQuery(''); setFilters(emptyFilters()); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()) }}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
         )}
         <span className="text-pb-faintest text-xs ml-auto">{visible.length} shown</span>
