@@ -1249,6 +1249,14 @@ async def get_records_milestones(
     a grade is selected we instead compute runs/wickets/catches/matches from
     that grade's own games — a genuinely grade-scoped view, not a filter over
     career totals.
+
+    Grade totals are cross-club: a player who moved from another club carries
+    their history in that grade with them (same convention as
+    get_batting_by_grade/get_bowling_by_grade and the grade-filtered
+    leaderboards — org_id there only resolves grade-name aliases/merges, it
+    never restricts which club's games get summed). Only the player's own
+    club membership (players.organisation_id) is scoped here; the games
+    themselves are not.
     """
     from app.services.milestone_rules import (
         next_threshold, reach_window, crossed_thresholds, is_displayable,
@@ -1395,9 +1403,7 @@ async def get_records_milestones(
                 JOIN v_effective_batting_innings bi ON bi.player_id = p.id
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
                 WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-                  AND s.organisation_id = CAST(:org_id AS UUID)
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')
                   AND {_grade_match}
@@ -1413,9 +1419,7 @@ async def get_records_milestones(
                 JOIN v_effective_bowling_spells bs ON bs.player_id = p.id
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
                 WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-                  AND s.organisation_id = CAST(:org_id AS UUID)
                   AND {_grade_match}
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
                 HAVING SUM(bs.wickets) > 0
@@ -1429,9 +1433,7 @@ async def get_records_milestones(
                 JOIN v_effective_fielding_stats fs ON fs.player_id = p.id
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
                 WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-                  AND s.organisation_id = CAST(:org_id AS UUID)
                   AND {_grade_match}
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
                 HAVING SUM(fs.catches) > 0
@@ -1445,9 +1447,7 @@ async def get_records_milestones(
                 JOIN game_appearances ga ON ga.player_id = p.id
                 JOIN v_effective_games g ON g.id = ga.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
                 WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-                  AND s.organisation_id = CAST(:org_id AS UUID)
                   AND {_grade_match}
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
                 HAVING COUNT(DISTINCT ga.game_id) > 0
