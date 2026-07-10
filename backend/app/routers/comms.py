@@ -211,7 +211,74 @@ def campaign_warnings(subject: str, body_html: str, utm: dict) -> list[str]:
     return warnings
 
 
-def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict:
+async def _audience_labels(db: AsyncSession, rows: "list[CommsCampaign]") -> dict:
+    """Human-readable "who this was sent to" per campaign, keyed by str(id) —
+    the Emails list has no other record of which List/Segment/Squad an
+    audience was built from once the campaign itself is showing, so this
+    resolves the audience JSON blob's id(s) into a name at read time (batched,
+    not N+1). A deleted list/segment/team degrades to a "(deleted)" label
+    rather than dropping off the row."""
+    seg_ids, list_ids, team_ids = set(), set(), set()
+    for c in rows:
+        a = c.audience or {}
+        atype = a.get("type")
+        if atype == "segment" and a.get("segment_id"):
+            seg_ids.add(str(a["segment_id"]))
+        elif atype == "saved_list" and a.get("list_id"):
+            list_ids.add(str(a["list_id"]))
+        elif atype == "squad" and a.get("team_id"):
+            team_ids.add(str(a["team_id"]))
+
+    def _uuids(ids):
+        out = []
+        for raw in ids:
+            try:
+                out.append(uuid.UUID(raw))
+            except (ValueError, TypeError):
+                continue
+        return out
+
+    seg_names, list_names, team_names = {}, {}, {}
+    if seg_ids:
+        for sid, name in (await db.execute(
+            select(CommsSegment.id, CommsSegment.name).where(CommsSegment.id.in_(_uuids(seg_ids)))
+        )).all():
+            seg_names[str(sid)] = name
+    if list_ids:
+        for lid, name in (await db.execute(
+            select(CommsList.id, CommsList.name).where(CommsList.id.in_(_uuids(list_ids)))
+        )).all():
+            list_names[str(lid)] = name
+    if team_ids:
+        for tid, name in (await db.execute(
+            select(Team.id, Team.name).where(Team.id.in_(_uuids(team_ids)))
+        )).all():
+            team_names[str(tid)] = name
+
+    out = {}
+    for c in rows:
+        a = c.audience or {}
+        atype = a.get("type")
+        if atype == "segment":
+            sid = str(a.get("segment_id") or "")
+            out[str(c.id)] = f"Segment: {seg_names.get(sid, 'deleted segment')}"
+        elif atype == "saved_list":
+            lid = str(a.get("list_id") or "")
+            out[str(c.id)] = f"List: {list_names.get(lid, 'deleted list')}"
+        elif atype == "squad":
+            tid = str(a.get("team_id") or "")
+            out[str(c.id)] = f"Squad: {team_names.get(tid, 'deleted team')}"
+        elif atype == "list":
+            n = len(a.get("contact_ids") or [])
+            out[str(c.id)] = f"{n} selected contact{'' if n == 1 else 's'}"
+        elif atype == "all":
+            out[str(c.id)] = "All subscribed contacts"
+        else:
+            out[str(c.id)] = None
+    return out
+
+
+def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None, audience_label: "Optional[str]" = None) -> dict:
     return {
         "id": str(c.id),
         "subject": c.subject,
@@ -220,6 +287,7 @@ def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict
         "preheader": c.preheader,
         "body_html": c.body_html,
         "audience": c.audience or {},
+        "audience_label": audience_label,
         "utm": c.utm or {},
         "template_id": str(c.template_id) if c.template_id else None,
         "warnings": campaign_warnings(c.subject, c.body_html, c.utm or {}),
@@ -1186,7 +1254,9 @@ async def list_campaigns(
         CommsCampaign.organisation_id == club.id
     ).order_by(CommsCampaign.created_at.desc()).limit(200))).scalars().all()
     eng = await _campaign_engagement(db, [c.id for c in rows])
-    return [_campaign_out(c, engagement=_engagement_block(c, eng)) for c in rows]
+    labels = await _audience_labels(db, rows)
+    return [_campaign_out(c, engagement=_engagement_block(c, eng), audience_label=labels.get(str(c.id)))
+            for c in rows]
 
 
 @router.get("/campaigns/{campaign_id}/recipients")
@@ -1331,7 +1401,8 @@ async def create_campaign(
     )
     db.add(c)
     await db.commit()
-    return _campaign_out(c)
+    labels = await _audience_labels(db, [c])
+    return _campaign_out(c, audience_label=labels.get(str(c.id)))
 
 
 @router.get("/campaigns/{campaign_id}")
@@ -1343,7 +1414,8 @@ async def get_campaign(
 ):
     c = await _campaign_or_404(db, club, campaign_id)
     eng = await _campaign_engagement(db, [c.id])
-    return _campaign_out(c, engagement=_engagement_block(c, eng))
+    labels = await _audience_labels(db, [c])
+    return _campaign_out(c, engagement=_engagement_block(c, eng), audience_label=labels.get(str(c.id)))
 
 
 @router.patch("/campaigns/{campaign_id}")
@@ -1372,7 +1444,8 @@ async def update_campaign(
         c.template_id = _parse_template_id(data.template_id)
     c.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return _campaign_out(c)
+    labels = await _audience_labels(db, [c])
+    return _campaign_out(c, audience_label=labels.get(str(c.id)))
 
 
 @router.delete("/campaigns/{campaign_id}")

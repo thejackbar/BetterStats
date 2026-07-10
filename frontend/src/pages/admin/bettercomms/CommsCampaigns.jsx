@@ -118,6 +118,9 @@ export default function CommsCampaigns() {
                       <span className="text-pb-faintest">utm_campaign=</span><span className="text-pb-faint">{c.utm.utm_campaign}</span>
                     </div>
                   )}
+                  {c.audience_label && (
+                    <div className="text-pb-faint text-[11px] mt-0.5 truncate">Audience: {c.audience_label}</div>
+                  )}
                   <div className="text-pb-faintest text-xs mt-0.5">
                     {c.status === 'sent' && c.sent_at ? `Sent ${fmtDate(c.sent_at)}` : `Created ${fmtDate(c.created_at)}`}
                     {(c.status === 'sent' || c.status === 'error' || c.status === 'sending') && c.engagement && (c.engagement.sent > 0 || c.engagement.bounced > 0 || c.engagement.unsub_supp > 0) && (
