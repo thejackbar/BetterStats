@@ -82,11 +82,25 @@ async def receive_twenty_webhook(request: Request, db: AsyncSession = Depends(ge
         payload = json.loads(raw or b"{}")
     except Exception:
         return Response(status_code=400)
+    # First-contact diagnostics: the exact shape of a real Twenty webhook payload
+    # (eventName, and which top-level keys the record carries) has never been
+    # confirmed against a live workspace — every field path in twenty_inbound is
+    # a documented best guess. Log it (keys only, not values, to avoid dumping
+    # PII) so a "the flag was Yes but nothing happened" report is diagnosable
+    # from the container logs alone, no reproduction needed.
+    try:
+        _rec = payload.get("record") if isinstance(payload, dict) else None
+        logger.info("Twenty webhook received: eventName=%r top_keys=%s record_keys=%s",
+                   (payload or {}).get("eventName") or (payload or {}).get("event"),
+                   sorted((payload or {}).keys()) if isinstance(payload, dict) else None,
+                   sorted(_rec.keys()) if isinstance(_rec, dict) else None)
+    except Exception:  # noqa: BLE001 - diagnostics must never break the real dispatch
+        pass
     try:
         from app.services import twenty_inbound
         result = await twenty_inbound.dispatch_webhook(db, payload)
-        if result.get("created"):
-            logger.info(f"Twenty webhook queued module request(s): {result}")
+        if result.get("created") or result.get("event") == "create_opportunity":
+            logger.info(f"Twenty webhook result: {result}")
         return {"status": "ok", **result}
     except Exception:
         logger.exception("Twenty webhook dispatch failed")
