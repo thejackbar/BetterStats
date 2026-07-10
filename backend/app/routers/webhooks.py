@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import hmac
 import logging
@@ -29,38 +28,38 @@ async def receive_webhook(request: Request):
 
 
 def _verify_twenty(request: Request, raw: bytes) -> bool:
-    """Authenticate an inbound Twenty webhook against the shared secret (the value set
-    in the webhook's Secret field, used to compute the HMAC signature of the payload).
+    """Authenticate an inbound Twenty webhook against the shared secret (the value
+    set in the webhook's Secret field).
 
-    We don't depend on the exact signature HEADER NAME (it varies by sender/version):
-    we compute HMAC-SHA256(secret, raw body) and accept the request if ANY header value
-    matches it (hex or base64, tolerating a ``sha256=`` / ``v1=`` prefix). A plain bearer
-    header (``X-Webhook-Secret``) equal to the secret is also accepted for manual tests.
-    All comparisons are constant-time."""
+    Twenty's real scheme (confirmed both against docs.twenty.com/developers/
+    extend/capabilities/webhooks and a live capture of its headers —
+    ``x-twenty-webhook-timestamp`` / ``x-twenty-webhook-signature`` /
+    ``x-twenty-webhook-nonce``): HMAC-SHA256 of ``f"{timestamp}:{raw body}"``,
+    hex-encoded, in ``X-Twenty-Webhook-Signature``, timestamp in
+    ``X-Twenty-Webhook-Timestamp``. An EARLIER version of this function guessed
+    at a generic "HMAC of the raw body alone, try every header" scheme, which
+    never matched — Twenty mixes the timestamp into the signed string, so it
+    silently 401'd every real delivery. A plain bearer header
+    (``X-Webhook-Secret``) equal to the secret is also accepted, for a manual
+    curl test or the Manual Trigger Workflow path (twenty-opportunity), where
+    hand-computing the real signature isn't practical. All comparisons are
+    constant-time."""
     secret = settings.twenty_webhook_secret
     if not secret:
         return False
     bearer = request.headers.get("x-webhook-secret") or ""
     if bearer and hmac.compare_digest(bearer, secret):
         return True
-    digest = hmac.new(secret.encode(), raw, hashlib.sha256)
-    expected_hex = digest.hexdigest()
-    expected_b64 = base64.b64encode(digest.digest()).decode()
-    for value in request.headers.values():
-        if not value:
-            continue
-        v = value.strip()
-        # Try the raw value (covers base64, which can contain '=' padding) AND the part
-        # after a "sha256=" / "v1=" style scheme prefix.
-        candidates = {v}
-        if "=" in v:
-            candidates.add(v.split("=", 1)[1].strip())
-        for c in candidates:
-            if c and len(c) == len(expected_hex) and hmac.compare_digest(c.lower(), expected_hex):
-                return True
-            if c and len(c) == len(expected_b64) and hmac.compare_digest(c, expected_b64):
-                return True
-    return False
+    timestamp = request.headers.get("x-twenty-webhook-timestamp")
+    signature = request.headers.get("x-twenty-webhook-signature")
+    if not (timestamp and signature):
+        return False
+    to_sign = f"{timestamp}:".encode() + raw
+    expected = hmac.new(secret.encode(), to_sign, hashlib.sha256).hexdigest()
+    try:
+        return hmac.compare_digest(signature.strip().lower(), expected)
+    except (TypeError, ValueError):
+        return False
 
 
 @router.post("/twenty")
