@@ -3659,7 +3659,15 @@ async def list_milestones_report(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return upcoming + achieved milestones for all club players for admin reporting."""
+    """Return upcoming + achieved milestones for all club players for admin reporting.
+
+    grade_matches (games played in a named grade) is cross-club: a player who
+    moved from another club carries their history in that grade with them,
+    matching get_batting_by_grade/get_bowling_by_grade, the grade leaderboards,
+    and the public Milestones endpoint (records.py). org_id here only scopes
+    which players belong to this club and resolves this club's own grade-name
+    aliases/merges; it never restricts which club's games get summed.
+    """
     import datetime
     from app.services.milestone_rules import (
         next_threshold, reach_window, crossed_thresholds, is_displayable,
@@ -3724,7 +3732,6 @@ async def list_milestones_report(
             JOIN players p ON p.id = ga.player_id
             JOIN games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -3739,7 +3746,7 @@ async def list_milestones_report(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE s.organisation_id = :org_id AND p.is_player = TRUE
+            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             HAVING COUNT(DISTINCT ga.game_id) >= 50
@@ -3850,7 +3857,6 @@ async def list_milestones_report(
             JOIN active_ids ai ON ai.player_id = p.id
             JOIN games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -3865,7 +3871,7 @@ async def list_milestones_report(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE s.organisation_id = :org_id AND p.is_player = TRUE
+            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
