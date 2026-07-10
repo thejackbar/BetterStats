@@ -4,6 +4,82 @@ import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 
+function fmtWhen(s) {
+  if (!s) return ''
+  try { return new Date(s).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+  catch { return '' }
+}
+
+// Who, by name/email, is behind this campaign's bounced / unsub / spam counts —
+// the aggregate badge on the Emails list has no drill-down otherwise. Tabs are
+// lazy-loaded (only the filtered subset the operator actually wants, not the
+// full send for a large campaign) and default to whichever problem exists.
+function RecipientsPanel({ campaignId, unsubCount, bouncedCount }) {
+  const [tab, setTab] = useState(unsubCount > 0 ? 'unsub_supp' : (bouncedCount > 0 ? 'bounced' : null))
+  const [rows, setRows] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [loadedTab, setLoadedTab] = useState(null)
+
+  useEffect(() => {
+    if (!tab || tab === loadedTab) return
+    setLoading(true)
+    api.commsCampaignRecipients(campaignId, tab === 'all' ? null : tab)
+      .then(r => { setRows(r.recipients || []); setLoadedTab(tab) })
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [tab, campaignId, loadedTab])
+
+  const TABS = [
+    ['unsub_supp', `Unsubscribed / spam (${unsubCount})`],
+    ['bounced', `Bounced (${bouncedCount})`],
+    ['all', 'All recipients'],
+  ]
+
+  return (
+    <div className="mt-4 pt-4 pb-hairline-t">
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+        <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Recipients</span>
+        {TABS.map(([v, label]) => (
+          <button key={v} type="button" onClick={() => setTab(v)}
+            className={`px-2.5 py-1 rounded text-xs border pb-hairline ${tab === v ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
+            style={tab === v ? { background: 'var(--pb-accent)' } : undefined}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab && (
+        loading ? <div className="text-pb-faint text-sm">Loading…</div>
+        : !rows || rows.length === 0 ? <div className="text-pb-faint text-sm">No contacts here.</div>
+        : (
+          <div className="pb-card overflow-hidden max-h-80 overflow-y-auto">
+            {rows.map((r, i) => (
+              <div key={r.id || r.email} className={`px-3 py-2 text-sm ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 truncate">
+                    <span className="text-pb-text">{r.name || r.email}</span>
+                    {r.name && <span className="text-pb-faintest text-xs ml-1.5">{r.email}</span>}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    {r.unsubscribed && <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-500">unsub</span>}
+                    {r.complained && <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-pb-red/40 text-pb-red">spam</span>}
+                    {r.bounced && <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-pb-red/40 text-pb-red">bounced</span>}
+                  </div>
+                </div>
+                {r.events?.length > 0 && (
+                  <div className="text-pb-faintest text-[11px] mt-0.5 truncate"
+                    title={r.events.map(e => `${e.type}${e.subtype ? ` (${e.subtype})` : ''}${e.reason ? ` — ${e.reason}` : ''}`).join(' · ')}>
+                    {r.events.map(e => `${e.type}${e.at ? ` · ${fmtWhen(e.at)}` : ''}`).join(' · ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  )
+}
+
 export default function CommsCompose() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -243,6 +319,11 @@ export default function CommsCompose() {
             </div>
             {campaign.status === 'sending' && <div className="text-pb-faint text-sm mt-3">Sending in progress…</div>}
             {campaign.error && <div className="text-pb-red text-sm mt-3">{campaign.error}</div>}
+            {campaign.status !== 'sending' && (
+              <RecipientsPanel campaignId={id}
+                unsubCount={campaign.engagement?.unsub_supp ?? 0}
+                bouncedCount={campaign.engagement?.bounced ?? 0} />
+            )}
             <div className="mt-4 pt-4 pb-hairline-t" />
             <div className="text-pb-faintest text-xs mb-2">Email as recipients see it</div>
             {sentHtml
