@@ -4,7 +4,8 @@ import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
-  emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls } from './audience'
+  emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
+  matchesUnsubscribed, UnsubscribedToggle } from './audience'
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -94,6 +95,7 @@ function ListDetail({ list, lists, onChanged }) {
   const [modes, setModes] = useState(emptyModes)
   const [engagement, setEngagement] = useState(emptyEngagementFilter)
   const [supp, setSupp] = useState('all')
+  const [unsub, setUnsub] = useState('all')
   const [selected, setSelected] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [detailId, setDetailId] = useState(null)
@@ -110,7 +112,7 @@ function ListDetail({ list, lists, onChanged }) {
   useEffect(() => { loadMembers() }, [loadMembers])
   useEffect(() => { loadContacts() }, [loadContacts])
   // A fresh list resets the working selection.
-  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setEngagement(emptyEngagementFilter()) }, [list.id])
+  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()) }, [list.id])
 
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
   // Directory include/exclude chips only make sense when contacts carry club data
@@ -121,8 +123,8 @@ function ListDetail({ list, lists, onChanged }) {
   // Top N ranks clubs among what every OTHER filter already narrowed to (same
   // "top N of what's currently filtered" semantics as the Club Directory page).
   const preFiltered = useMemo(() =>
-    (contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp)),
-    [contacts, q, filters, modes, supp])
+    (contacts || []).filter(c => matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes) && matchesSuppressed(c, supp) && matchesUnsubscribed(c, unsub)),
+    [contacts, q, filters, modes, supp, unsub])
   const topIds = useMemo(() => topClubIds(preFiltered, engagement.topNMetric, engagement.topN),
     [preFiltered, engagement.topNMetric, engagement.topN])
   const visible = useMemo(() =>
@@ -176,8 +178,8 @@ function ListDetail({ list, lists, onChanged }) {
 
   const selectAllFiltered = () => setMany(visible.map(c => c.id), true)
   const clearSelection = () => setSelected(new Set())
-  const clearAll = () => { setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setEngagement(emptyEngagementFilter()) }
-  const activeFilters = FACETS.some(f => filters[f.key].length) || anyMode(modes) || !!q || supp !== 'all'
+  const clearAll = () => { setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()) }
+  const activeFilters = FACETS.some(f => filters[f.key].length) || anyMode(modes) || !!q || supp !== 'all' || unsub !== 'all'
     || engagement.gte || engagement.lte || engagement.topN
 
   return (
@@ -199,6 +201,7 @@ function ListDetail({ list, lists, onChanged }) {
             selected={filters[f.key]} onChange={(v) => setFilters(s => ({ ...s, [f.key]: v }))} />
         ))}
         <SuppressedToggle value={supp} onChange={setSupp} />
+        <UnsubscribedToggle value={unsub} onChange={setUnsub} />
         {activeFilters && (
           <button onClick={clearAll}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>

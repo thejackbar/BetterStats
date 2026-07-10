@@ -117,6 +117,31 @@ export function SuppressedToggle({ value, onChange }) {
     </div>
   )
 }
+// Unsubscribed is its own axis, separate from Suppressed: clicking the
+// one-click unsubscribe link only flips CommsContact.subscribed (see
+// routers/public_comms.py _unsubscribe) — it does NOT set bounced/complained/
+// excluded or land the address on the global suppression list, so a
+// plain unsubscribe is invisible to the Suppressed toggle. A spam complaint
+// sets BOTH (complained AND subscribed=false), so it shows under both toggles.
+export function matchesUnsubscribed(c, mode) {
+  if (mode === 'unsubscribed') return c.subscribed === false
+  if (mode === 'subscribed') return c.subscribed !== false
+  return true
+}
+export function UnsubscribedToggle({ value, onChange }) {
+  const opts = [['all', 'All'], ['subscribed', 'Subscribed'], ['unsubscribed', 'Unsubscribed']]
+  return (
+    <div className="inline-flex rounded border pb-hairline overflow-hidden shrink-0">
+      {opts.map(([v, label], i) => (
+        <button key={v} type="button" onClick={() => onChange(v)}
+          className={`px-2.5 py-1.5 text-xs ${i > 0 ? 'pb-hairline-l' : ''} ${value === v ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
+          style={value === v ? { background: 'var(--pb-accent)' } : undefined}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
 // ─── Engagement score + Top-N (directory contacts only) ───────────────────────
 // club_engagement_score/_views/_visitors are only populated on a directory-
 // linked contact (marketing_club_id set — the marketing-outreach org context;
