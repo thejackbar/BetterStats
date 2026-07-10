@@ -142,6 +142,12 @@ FIELDS = [
      _options(["No", "Yes", "Previous"])),
     ("company", "publicProfileUrl", "Public profile URL", "LINKS", None),
     ("company", "lastSyncedAt", "Last synced at", "DATE_TIME", None),
+    # Field-driven Opportunity cascade trigger (no Workflow involved): flip to
+    # Yes on a Company/Person/Lead row and the inbound webhook
+    # (routers/webhooks.py /webhooks/twenty -> services/twenty_inbound.py)
+    # upserts the club's Lead-then-Opportunity (see twenty_opportunity.py) and
+    # flips this back to No, so it reads as a momentary action, not a state.
+    ("company", "createOpportunity", "Create Opportunity", "SELECT", _options(["No", "Yes"])),
     # ---- Person ----
     ("person", "bcContactId", "BC Contact Id", "TEXT", None),
     ("person", "clubRole", "Club role", "SELECT",
@@ -166,6 +172,9 @@ FIELDS = [
     # visible/filterable on the Contact (Twenty can't show a nested relation field).
     ("person", "clubLifecycleStage", "Club lifecycle stage", "SELECT",
      _options(["Target", "Prospect", "Engaged", "Trial", "Customer", "Churned", "Suppressed"])),
+    # Same field-driven Opportunity cascade trigger as Company — see there. On a
+    # Person, this Contact becomes the resulting Opportunity's Point of Contact.
+    ("person", "createOpportunity", "Create Opportunity", "SELECT", _options(["No", "Yes"])),
     # ---- Opportunity ----
     ("opportunity", "bcOpportunityKey", "BC Opportunity key", "TEXT", None),
     ("opportunity", "modulesInScope", "Modules in scope", "MULTI_SELECT", MODULE_OPTS),
@@ -195,6 +204,8 @@ FIELDS = [
     # Setting this in Twenty is the convert trigger: it both flags "pursue" and carries
     # which modules go into the resulting Opportunity's scope.
     ("lead", "modulesToPursue", "Modules to pursue", "MULTI_SELECT", MODULE_OPTS),
+    # Same field-driven Opportunity cascade trigger as Company/Person — see there.
+    ("lead", "createOpportunity", "Create Opportunity", "SELECT", _options(["No", "Yes"])),
     # ---- Association ----
     ("association", "bcAssociationId", "BC Association Id", "TEXT", None),
     ("association", "shortCode", "Short code", "TEXT", None),

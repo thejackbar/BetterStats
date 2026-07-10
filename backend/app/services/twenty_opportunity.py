@@ -1,15 +1,16 @@
 """Twenty CRM — Opportunity cascade (Lead / Company / Contact -> Opportunity).
 
-Twenty has no "button" field type reachable through the metadata API this
-integration uses (TEXT / NUMBER / BOOLEAN / SELECT / MULTI_SELECT / DATE_TIME /
-CURRENCY / LINKS / FULL_NAME / EMAILS / ARRAY — see twenty_client.py's module
-docstring). The nearest first-class "click to fire an action" affordance Twenty
-ships is a Workflow's Manual Trigger, which renders as a "Run workflow" button
-on a record's detail page. So the intended wiring — one single-step Manual
-Trigger Workflow per object (Lead / Company / Person), each doing nothing but a
-"Send Webhook" call to ``POST /webhooks/twenty-opportunity`` — keeps the actual
-cascade logic here in BetterStats rather than Twenty's no-code builder (see
-docs/twenty-crm-integration.md §19 for the exact workflow steps to configure).
+Triggered from Twenty by a plain field, not a Workflow: flip the
+``createOpportunity`` SELECT (No/Yes, on Company / Person / Lead —
+bootstrap_twenty.py) to Yes and Twenty's own native per-object webhook
+(Settings -> APIs & Webhooks, subscribed to that object's ``updated`` event —
+NOT the no-code Workflow builder) fires ``POST /webhooks/twenty`` ->
+``twenty_inbound.dispatch_webhook`` -> ``run_cascade`` below, which resets the
+flag back to No once it succeeds so it reads as a momentary trigger rather
+than a persistent state. See docs/twenty-crm-integration.md §19 for the full
+design (§19a) and the Manual-Trigger-Workflow alternative this module also
+still supports via ``POST /webhooks/twenty-opportunity`` (§19b, not the
+intended day-to-day path).
 
 Three entry points, one shared outcome: an Opportunity for the club, upserted
 (never duplicated) on ``bcOpportunityKey = club.grassroots_guid`` — a re-trigger
