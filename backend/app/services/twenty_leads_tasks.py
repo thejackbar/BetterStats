@@ -156,8 +156,15 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
     guids = list(tid_by_guid)
     if not guids:
         return
+    # Ordered by id so this bulk UPDATE always locks marketing_clubs rows in the
+    # same sequence as refresh_engagement's equivalent bulk load — two unordered
+    # loads over an overlapping row set can lock in opposite order when run
+    # concurrently (the two Refresh buttons, or the daily 06:00/07:00 jobs
+    # overlapping this), which is a textbook Postgres deadlock. Consistent lock
+    # order rules that out.
     clubs = {c.grassroots_guid: c for c in (await session.execute(
-        select(MarketingClub).where(MarketingClub.grassroots_guid.in_(guids)))).scalars().all()}
+        select(MarketingClub).where(MarketingClub.grassroots_guid.in_(guids))
+        .order_by(MarketingClub.id))).scalars().all()}
 
     snaps = []
     scanned = 0
