@@ -1637,9 +1637,16 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
             # Map exported club guids back to their MarketingClub rows.
             guids = [r[0] for r in rows]
             tid_by_guid = {r[0]: r[1] for r in rows}
+            # Ordered by id so this bulk UPDATE always locks marketing_clubs rows in
+            # the same sequence as _seed_and_refresh_leads's equivalent bulk load —
+            # two unordered loads over an overlapping row set can lock in opposite
+            # order when run concurrently (the two Refresh buttons, or the daily
+            # 06:00/07:00 jobs overlapping this), which is a textbook Postgres
+            # deadlock. Consistent lock order rules that out.
             clubs = {c.grassroots_guid: c for c in (await session.execute(
                 select(MarketingClub).where(
-                    MarketingClub.grassroots_guid.in_(guids)))).scalars().all()
+                    MarketingClub.grassroots_guid.in_(guids)
+                ).order_by(MarketingClub.id))).scalars().all()
             } if guids else {}
             # Snapshot the engagement fields per company before any IO. Load the
             # linked org (if any) so a customer is scored on health + expansion.
