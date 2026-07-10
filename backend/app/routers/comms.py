@@ -229,7 +229,7 @@ def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict
         "sent_at": c.sent_at.isoformat() if c.sent_at else None,
         "created_at": c.created_at.isoformat() if c.created_at else None,
         # Per-campaign deliverability (sent / bounced / unsub+complaint), when the
-        # caller has computed it (the list endpoint batches it).
+        # caller has computed it (both the list and single-campaign endpoints do).
         "engagement": engagement,
     }
 
@@ -1170,6 +1170,12 @@ async def _campaign_engagement(db: AsyncSession, campaign_ids: list) -> dict:
     return out
 
 
+def _engagement_block(c: CommsCampaign, eng_map: dict) -> dict:
+    e = eng_map.get(str(c.id), {})
+    return {"sent": e.get("sent", int((c.stats or {}).get("sent", 0) or 0)),
+            "bounced": e.get("bounced", 0), "unsub_supp": e.get("unsub_supp", 0)}
+
+
 @router.get("/campaigns")
 async def list_campaigns(
     _: User = _require,
@@ -1180,12 +1186,63 @@ async def list_campaigns(
         CommsCampaign.organisation_id == club.id
     ).order_by(CommsCampaign.created_at.desc()).limit(200))).scalars().all()
     eng = await _campaign_engagement(db, [c.id for c in rows])
+    return [_campaign_out(c, engagement=_engagement_block(c, eng)) for c in rows]
 
-    def _eng(c):
-        e = eng.get(str(c.id), {})
-        return {"sent": e.get("sent", int((c.stats or {}).get("sent", 0) or 0)),
-                "bounced": e.get("bounced", 0), "unsub_supp": e.get("unsub_supp", 0)}
-    return [_campaign_out(c, engagement=_eng(c)) for c in rows]
+
+@router.get("/campaigns/{campaign_id}/recipients")
+async def campaign_recipients(
+    campaign_id: str,
+    only: Optional[str] = None,   # 'unsub_supp' | 'bounced' | None (all)
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Who, by name/email, is behind this campaign's bounced / unsub / spam
+    counts — the aggregate on the Emails list has no drill-down today, so a
+    "1 unsub/spam" badge can't say WHO. Backed by the exact same email_events
+    rows _campaign_engagement counts, so this always explains that number."""
+    c = await _campaign_or_404(db, club, campaign_id)
+    rows = (await db.execute(
+        select(CommsRecipient).where(CommsRecipient.campaign_id == c.id)
+        .order_by(CommsRecipient.email)
+    )).scalars().all()
+    ev_rows = (await db.execute(
+        select(EmailEvent.email, EmailEvent.event_type, EmailEvent.event_subtype,
+               EmailEvent.reason, EmailEvent.created_at)
+        .where(EmailEvent.campaign_id == c.id)
+    )).all()
+    events_by_email: dict = {}
+    for email, etype, subtype, reason, created_at in ev_rows:
+        events_by_email.setdefault((email or "").lower(), []).append({
+            "type": etype, "subtype": subtype, "reason": reason,
+            "at": created_at.isoformat() if created_at else None,
+        })
+
+    def _out(email, name, status, error, sent_at, rid=None):
+        evs = sorted(events_by_email.get((email or "").lower(), []), key=lambda e: e["at"] or "")
+        types = {e["type"] for e in evs}
+        return {
+            "id": str(rid) if rid else None, "email": email, "name": name,
+            "status": status, "error": error,
+            "sent_at": sent_at.isoformat() if sent_at else None,
+            "unsubscribed": "unsubscribe" in types, "complained": "complaint" in types,
+            "bounced": "bounce" in types, "events": evs,
+        }
+
+    out = [_out(r.email, r.name, r.status, r.error, r.sent_at, r.id) for r in rows]
+    # A recipient row can be missing (e.g. cleaned up since) even though its
+    # email_events survive — surface those too, so the drill-down list always
+    # accounts for the full aggregate count shown on the Emails list.
+    covered = {(r.email or "").lower() for r in rows}
+    for email in events_by_email:
+        if email not in covered:
+            out.append(_out(email, None, None, None, None))
+
+    if only == "unsub_supp":
+        out = [o for o in out if o["unsubscribed"] or o["complained"]]
+    elif only == "bounced":
+        out = [o for o in out if o["bounced"]]
+    return {"campaign": {"id": str(c.id), "name": c.name or c.subject}, "recipients": out}
 
 
 @router.get("/campaigns/engagement")
@@ -1285,7 +1342,8 @@ async def get_campaign(
     db: AsyncSession = Depends(get_db),
 ):
     c = await _campaign_or_404(db, club, campaign_id)
-    return _campaign_out(c)
+    eng = await _campaign_engagement(db, [c.id])
+    return _campaign_out(c, engagement=_engagement_block(c, eng))
 
 
 @router.patch("/campaigns/{campaign_id}")
