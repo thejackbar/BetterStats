@@ -221,8 +221,11 @@ async def get_records(
     # Grade filter fragment for use-game-level queries that don't use _grade_match
     _match_grade_filter = f"AND {_grade_match}" if grade_name else ""
 
-    # For the no-grade-name + finals_only path: same joins as grade_name but without grade filter
-    if (finals_only or captain_only) and not grade_name:
+    # For the no-grade-name path (with or without finals_only/captain_only): same joins as
+    # grade_name but without the grade filter. Also used (unconditionally, regardless of
+    # use_game_level) by the per-innings high-score/best-figures queries below, so this must
+    # stay correct for the plain "no filters at all" case too.
+    if not grade_name:
         _bat_join_ng = (
             "JOIN v_effective_batting_innings bi ON bi.player_id = p.id"
             " JOIN v_effective_games g ON g.id = bi.game_id"
@@ -298,33 +301,16 @@ async def get_records(
             ORDER BY runs DESC LIMIT :limit
         """)
 
-    if use_game_level:
-        top_high_scores = await q(f"""
-            WITH best AS (
-                SELECT DISTINCT ON (p.id)
-                    p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                    bi.runs, bi.not_out, s.name AS season_name
-                FROM players p {_eff_bat_join}
-                {_eff_bat_where}
-                  AND bi.runs IS NOT NULL AND bi.runs > 0
-                ORDER BY p.id, bi.runs DESC
-            )
-            SELECT * FROM best ORDER BY runs DESC LIMIT :limit
-        """)
-    else:
-        top_high_scores = await q("""
-            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                   pss.high_score AS runs,
-                   pss.is_hs_not_out AS not_out,
-                   s.name AS season_name
-            FROM v_effective_player_season_stats pss
-            JOIN players p ON p.id = pss.player_id
-            JOIN seasons s ON s.id = pss.season_id
-            WHERE p.organisation_id = :org_id
-              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
-              AND pss.high_score IS NOT NULL AND pss.high_score > 0
-            ORDER BY pss.high_score DESC LIMIT :limit
-        """)
+    # Every qualifying innings competes for a leaderboard slot, not just each player's single
+    # best — a player can legitimately hold more than one of the top spots.
+    top_high_scores = await q(f"""
+        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               bi.runs, bi.not_out, s.name AS season_name
+        FROM players p {_eff_bat_join}
+        {_eff_bat_where}
+          AND bi.runs IS NOT NULL AND bi.runs > 0
+        ORDER BY bi.runs DESC LIMIT :limit
+    """)
 
     if use_game_level:
         top_batting_avg = await q(f"""
@@ -498,37 +484,16 @@ async def get_records(
             ORDER BY wickets DESC LIMIT :limit
         """)
 
-    if use_game_level:
-        best_innings_figures = await q(f"""
-            WITH best AS (
-                SELECT DISTINCT ON (p.id)
-                    p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                    bs.wickets, bs.runs, s.name AS season_name
-                FROM players p {_eff_bowl_join}
-                {_eff_bowl_where}
-                  AND bs.wickets > 0
-                ORDER BY p.id, bs.wickets DESC, bs.runs ASC
-            )
-            SELECT * FROM best ORDER BY wickets DESC, runs ASC LIMIT :limit
-        """)
-    else:
-        best_innings_figures = await q("""
-            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                   SPLIT_PART(pss.best_bowling_figures, '-', 1)::integer AS wickets,
-                   SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer AS runs,
-                   s.name AS season_name
-            FROM v_effective_player_season_stats pss
-            JOIN players p ON p.id = pss.player_id
-            JOIN seasons s ON s.id = pss.season_id
-            WHERE p.organisation_id = :org_id
-              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
-              AND pss.best_bowling_figures IS NOT NULL
-              AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'
-              AND pss.best_bowling_wickets > 0
-            ORDER BY pss.best_bowling_wickets DESC,
-                     SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer ASC
-            LIMIT :limit
-        """)
+    # Every qualifying spell competes for a leaderboard slot, not just each player's single
+    # best — a player can legitimately hold more than one of the top spots.
+    best_innings_figures = await q(f"""
+        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               bs.wickets, bs.runs, s.name AS season_name
+        FROM players p {_eff_bowl_join}
+        {_eff_bowl_where}
+          AND bs.wickets > 0
+        ORDER BY bs.wickets DESC, bs.runs ASC LIMIT :limit
+    """)
 
     if use_game_level:
         top_bowling_avg = await q(f"""
