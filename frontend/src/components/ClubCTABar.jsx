@@ -16,10 +16,14 @@ import QuickEnquiryModal from './QuickEnquiryModal'
 //   "switch to us" pitch on the club's own page. Applecross is our demo, so ad
 //   traffic there still sees it, which is what we want.
 // - Never on /contact (already converting) or /admin*, /login.
+// - ?cta=form on any BetterCricket marketing page pops the short form open
+//   immediately (once per session) — for campaign links that should land on
+//   the form rather than on the sticky bar (e.g. a social post CTA).
 
 const AD_VISITOR_KEY = 'bc:adVisitor'
 const DISMISS_KEY = 'bc:ctaDismissed'
 const QUERY_KEY = 'bc:utmQuery'
+const AUTO_OPEN_KEY = 'bc:ctaAutoOpened'
 
 function isPaidVisitor() {
   const params = (() => {
@@ -56,6 +60,26 @@ export default function ClubCTABar() {
     if (dismissed) { setShow(false); return }
 
     setShow(isMarketingPath(pathname) || isPaidVisitor())
+  }, [pathname])
+
+  // Jump straight to the short form, once per session, for links tagged
+  // ?cta=form — e.g. a social post CTA that should land on the form open
+  // rather than making the visitor find and click the sticky bar.
+  useEffect(() => {
+    const onContact = pathname === '/contact'
+    const onAdmin = pathname.startsWith('/admin') || pathname === '/login'
+    if (onContact || onAdmin || !isMarketingPath(pathname)) return
+
+    let params
+    try { params = new URLSearchParams(window.location.search) } catch { return }
+    if (params.get('cta') !== 'form') return
+
+    try {
+      if (sessionStorage.getItem(AUTO_OPEN_KEY) === '1') return
+      sessionStorage.setItem(AUTO_OPEN_KEY, '1')
+    } catch { /* ignore */ }
+
+    setModalOpen(true)
   }, [pathname])
 
   if (!show) return null
