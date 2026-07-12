@@ -17,13 +17,16 @@ import QuickEnquiryModal from './QuickEnquiryModal'
 //   traffic there still sees it, which is what we want.
 // - Never on /contact (already converting) or /admin*, /login.
 // - ?cta=form on any BetterCricket marketing page pops the short form open
-//   immediately (once per session) — for campaign links that should land on
-//   the form rather than on the sticky bar (e.g. a social post CTA).
+//   after a short delay (once per session) — for campaign links that should
+//   land on the form rather than on the sticky bar (e.g. a social post CTA).
+//   The delay gives a video/post visitor a moment to land on the page before
+//   a modal covers it.
 
 const AD_VISITOR_KEY = 'bc:adVisitor'
 const DISMISS_KEY = 'bc:ctaDismissed'
 const QUERY_KEY = 'bc:utmQuery'
 const AUTO_OPEN_KEY = 'bc:ctaAutoOpened'
+const AUTO_OPEN_DELAY_MS = 15000
 
 function isPaidVisitor() {
   const params = (() => {
@@ -79,7 +82,8 @@ export default function ClubCTABar() {
       sessionStorage.setItem(AUTO_OPEN_KEY, '1')
     } catch { /* ignore */ }
 
-    setModalOpen(true)
+    const timer = setTimeout(() => setModalOpen(true), AUTO_OPEN_DELAY_MS)
+    return () => clearTimeout(timer)
   }, [pathname])
 
   if (!show) return null
