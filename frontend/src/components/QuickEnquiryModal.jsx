@@ -107,14 +107,14 @@ export default function QuickEnquiryModal({ onClose }) {
       className="fixed inset-0 z-[70] flex items-center justify-center p-4"
       onMouseDown={onClose}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm qe-modal-backdrop" />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-enquiry-title"
         onMouseDown={(e) => e.stopPropagation()}
-        className="surface relative w-full max-w-md p-6 sm:p-7 rounded-2xl"
+        className="surface relative w-full max-w-md p-6 sm:p-7 rounded-2xl qe-modal-dialog"
       >
         <button
           onClick={onClose}

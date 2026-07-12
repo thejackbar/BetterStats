@@ -317,6 +317,18 @@
   .bs-lightbox-backdrop, .bs-lightbox-figure { animation: none; }
 }
 
+/* ── Quick enquiry modal (CTA bar) — a softer, slower fade than the lightbox ── */
+@keyframes qe-modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes qe-modal-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.qe-modal-backdrop { animation: qe-modal-fade 0.5s ease-out; }
+.qe-modal-dialog   { animation: qe-modal-in 0.5s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .qe-modal-backdrop, .qe-modal-dialog { animation: none; }
+}
+
 /* ── Rich text (website CMS content + WYSIWYG editor body) ─────────────────
    Tailwind preflight strips default heading/list styling, so the HTML our
    club admins author needs explicit rules. Shared by the editor and the

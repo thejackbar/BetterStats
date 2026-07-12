@@ -26,7 +26,7 @@ const AD_VISITOR_KEY = 'bc:adVisitor'
 const DISMISS_KEY = 'bc:ctaDismissed'
 const QUERY_KEY = 'bc:utmQuery'
 const AUTO_OPEN_KEY = 'bc:ctaAutoOpened'
-const AUTO_OPEN_DELAY_MS = 15000
+const AUTO_OPEN_DELAY_MS = 10000
 
 function isPaidVisitor() {
   const params = (() => {
