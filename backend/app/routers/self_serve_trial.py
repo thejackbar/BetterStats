@@ -11,7 +11,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 
 import bcrypt
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -605,3 +605,41 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         "modules": [MODULE_CORE, *requested_modules],
         "replayed": False,
     }
+
+
+@router.post("/login-as/{user_id}")
+async def login_as_registered_admin(user_id: str, response: Response, db: AsyncSession = Depends(get_db)):
+    """Internal-testing convenience: lets the Super Admin operator who just ran
+    a self-serve registration actually see what the new club admin sees,
+    without a second browser/incognito window. Deliberately NOT wired into
+    `/submit` itself — auto-setting the session cookie there would silently
+    swap the operator's own `bs_session` for the new admin's the instant they
+    register a test club, ending their super-admin session without asking.
+    This is an explicit, separate action instead (mirrors `switch-club` being
+    an explicit, visible action rather than an automatic side effect).
+
+    Scoped tightly to accounts THIS flow created — a `SelfServeIdempotencyKey`
+    row must reference the exact user id — so it can never become a general
+    impersonation backdoor for arbitrary users.
+
+    This is also the real "establish a session" primitive a future public
+    self-serve flow will call automatically and unconditionally right after
+    account creation (Decision 5: build the complete thing now, so going
+    public later is wiring, not new backend work) — only the caller and the
+    "is this OK to do silently" judgement change, not the session-minting
+    logic itself."""
+    uid = _parse_uuid(user_id)
+    if not uid:
+        raise HTTPException(status_code=422, detail="Invalid user id")
+    key_row = await db.scalar(
+        select(SelfServeIdempotencyKey).where(SelfServeIdempotencyKey.user_id == uid))
+    if key_row is None:
+        raise HTTPException(status_code=404, detail="This user wasn't created by self-serve trial registration")
+    user = await db.get(User, uid)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.routers.auth import _build_me, create_session_token, set_session_cookie
+    token = create_session_token(str(user.id))
+    set_session_cookie(response, token)
+    return await _build_me(user, db)

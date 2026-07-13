@@ -26,12 +26,18 @@ MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
 
 
-def _create_token(user_id: str) -> str:
+def create_session_token(user_id: str) -> str:
+    """Mint a session JWT for a user id — no password check, so callers must
+    already have established the right to log this user in (a verified
+    password, or an equivalently-authorized flow like self-serve trial
+    registration, routers/self_serve_trial.py). Not module-private: this is
+    the one real "establish a session" primitive, reused wherever a user
+    needs logging in without going through the login form."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
     return jwt.encode({"sub": user_id, "exp": expire}, settings.secret_key, algorithm=settings.algorithm)
 
 
-def _set_session_cookie(response: Response, token: str) -> None:
+def set_session_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
@@ -252,8 +258,8 @@ async def login(data: LoginRequest, response: Response, request: Request, db: As
     await db.commit()
     await _log(True, user_id=user.id, org_id=membership.club_id)
 
-    token = _create_token(str(user.id))
-    _set_session_cookie(response, token)
+    token = create_session_token(str(user.id))
+    set_session_cookie(response, token)
 
     return await _build_me(user, db)
 

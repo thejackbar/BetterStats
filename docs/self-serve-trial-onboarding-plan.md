@@ -271,7 +271,38 @@ now polls `GET /organisations/{id}/sync-logs` (the same endpoint
 once it's no longer `running`. Revisit once Phase 14/15 exist — the new
 admin's own dashboard becomes the more natural home for this.
 
-**Phase 14 — Auto-login/redirect.** Reuse existing session mechanism.
+**Phase 14 — Auto-login/redirect (done, deliberately not automatic yet).**
+Session auth turned out to be a plain HttpOnly JWT cookie (`bs_session`),
+minted by two small, previously module-private helpers in `auth.py`
+(`_create_token`/`_set_session_cookie` — de-privatised to
+`create_session_token`/`set_session_cookie` since they're now a real
+cross-router primitive). Auto-login the naive way — set that cookie on
+`/submit`'s own response — turns out to be actively wrong in THIS phase: the
+router is `require_super_admin`-gated, so the only caller is ever the
+operator's own Super Admin session, and silently swapping their session
+cookie for the new club admin's would eject them from Super Admin without
+asking, every single test registration. (Confirmed there's no existing
+"impersonate" mechanism to reuse — the closest analogue, `active_club_id`/
+`switch-club`, is a same-session scope switch that never touches the cookie
+at all, a different and safer shape than "mint a new session and swap it
+in".)
+
+Built the real thing anyway, per Decision 5's "build the complete primitive
+now" philosophy, just gated behind an explicit action instead of an automatic
+one: `POST /self-serve-trial/login-as/{user_id}` mints and sets the session
+cookie for the given user — scoped tightly to accounts THIS flow created (a
+`SelfServeIdempotencyKey` row must reference the exact user id), so it can
+never become a general impersonation backdoor. `SelfServeTrialModal.jsx`'s
+success screen gained a "Log in as new admin" button (explicit
+`window.confirm`, since it deliberately ends the operator's own session) that
+calls it then hard-reloads to `/admin` (mirroring `switchClub`'s own hard
+reload, so every already-mounted page refetches under the new session).
+
+**When this goes public**: the exact same `create_session_token`/
+`set_session_cookie` primitive is what a public registration endpoint should
+call unconditionally right after account creation — no new backend work,
+only a different (unauthenticated) caller and no more explicit-action gate,
+since there's no super-admin session to protect from a public visitor.
 
 **Phase 15 — Onboarding wizard (net new).** Launches without sync-dependent steps
 (Import Historical Stats, Import Honours, Merge Grades) while sync is running. Once

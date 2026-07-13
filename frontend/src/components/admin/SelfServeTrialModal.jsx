@@ -295,6 +295,8 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   const [submitted, setSubmitted] = useState(false)
   const [submitResult, setSubmitResult] = useState(null)
   const [syncRun, setSyncRun] = useState(null)
+  const [loggingInAs, setLoggingInAs] = useState(false)
+  const [loginAsError, setLoginAsError] = useState('')
   // Minted once per modal instance and reused across retries — a double
   // click or a retry after a network error replays the same key rather than
   // registering as a second attempt. Lazily initialised so a fresh UUID isn't
@@ -370,6 +372,26 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     intervalId = setInterval(poll, 4000)
     return () => { cancelled = true; if (intervalId) clearInterval(intervalId) }
   }, [submitted, submitResult?.org_id, submitResult?.run_id])
+
+  const loginAsNewAdmin = async () => {
+    if (!submitResult?.user_id) return
+    if (!window.confirm(
+      "This will end your Super Admin session and log you in as the new club "
+      + "admin instead, so you can see exactly what they'll see. Continue?"
+    )) return
+    setLoggingInAs(true)
+    setLoginAsError('')
+    try {
+      await api.selfServeTrialLoginAs(submitResult.user_id)
+      // Hard reload (not a client-side route change) — matches switchClub's
+      // own pattern, so every already-mounted admin page refetches under the
+      // new session rather than showing stale super-admin-scoped data.
+      window.location.assign('/admin')
+    } catch (e) {
+      setLoginAsError(e?.message || 'Could not log in as the new admin.')
+      setLoggingInAs(false)
+    }
+  }
 
   const syncProgressLabel = (s) => {
     const phase = s?.progress_phase || 'Starting'
@@ -770,10 +792,26 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                     />
                   </div>
 
+                  <div className="mt-3 pt-3 border-t pb-hairline">
+                    <button
+                      onClick={loginAsNewAdmin}
+                      disabled={loggingInAs}
+                      className="font-mono text-[11px] px-3 py-1.5 rounded border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50"
+                    >
+                      {loggingInAs ? 'Logging in…' : 'Log in as new admin'}
+                    </button>
+                    <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+                      Internal-testing only — ends your Super Admin session and logs
+                      you in as the club admin just created, so you can see their
+                      admin dashboard directly. On the eventual public site this
+                      happens automatically right after registration.
+                    </p>
+                    {loginAsError && <p className="font-mono text-[10px] text-pb-red mt-1">{loginAsError}</p>}
+                  </div>
+
                   <p className="font-mono text-[11px] text-pb-faint mt-3">
-                    Auto-login and onboarding follow in later phases of
-                    docs/self-serve-trial-onboarding-plan.md — for now, check the new
-                    club in All Clubs.
+                    Onboarding follow-through (the wizard, yearbook generation, etc.)
+                    lands in later phases of docs/self-serve-trial-onboarding-plan.md.
                   </p>
                 </div>
               ) : (
