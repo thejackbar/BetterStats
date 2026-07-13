@@ -37,7 +37,10 @@ export default function SuperClubs() {
   const [trialEdit, setTrialEdit] = useState({})
   // Global platform General Settings (trial length + the Marketing section).
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsForm, setSettingsForm] = useState({ default_trial_days: 14, direct_enquiry_hot_days: 30 })
+  const [settingsForm, setSettingsForm] = useState({
+    default_trial_days: 14, direct_enquiry_hot_days: 30,
+    self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
+  })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
@@ -59,6 +62,8 @@ export default function SuperClubs() {
       setSettingsForm({
         default_trial_days: s?.default_trial_days ?? 14,
         direct_enquiry_hot_days: s?.direct_enquiry_hot_days ?? 30,
+        self_serve_registration_enabled: !!s?.self_serve_registration_enabled,
+        onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -72,6 +77,8 @@ export default function SuperClubs() {
       await api.superUpdateGeneralSettings({
         default_trial_days: Number(settingsForm.default_trial_days) || 14,
         direct_enquiry_hot_days: Number(settingsForm.direct_enquiry_hot_days) || 30,
+        self_serve_registration_enabled: !!settingsForm.self_serve_registration_enabled,
+        onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -363,6 +370,26 @@ export default function SuperClubs() {
                   recency/frequency score. Ends early if the club becomes a paying customer or is
                   marked Not Interested.
                 </p>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Self-serve trial onboarding (internal)
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Not public yet — these only expose the flow from the Super Admin menu, for
+                  internal testing.
+                </p>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.self_serve_registration_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, self_serve_registration_enabled: e.target.checked }))} />
+                  Self-serve club registration enabled
+                </label>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.onboarding_wizard_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, onboarding_wizard_enabled: e.target.checked }))} />
+                  Onboarding wizard enabled
+                </label>
               </div>
 
               <div className="flex gap-2">
