@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { MODULE_TOGGLES } from '../../lib/modules'
+import { moduleBrand } from '../../lib/moduleBrand'
 import { ProgressBar } from '../ProgressBar'
 
 // BetterStats (core) is mandatory, not a selectable trial — same reasoning as
@@ -283,13 +284,13 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   // deliberately deferred to right before submission (Phase 4's original
   // decision), so it spends less time sitting in state. /submit revalidates
   // everything, then creates the real club and admin account.
-  // BetterStats trials everything by default (Phase 10) — the operator
-  // deselects rather than opts in, matching the source doc's framing.
-  const [moduleSelections, setModuleSelections] = useState(
-    () => Object.fromEntries(SELECTABLE_MODULES.map((m) => [m.key, true]))
-  )
+  // Every club gets every module on trial — not a choice, so there's no
+  // selection state to track; the checkboxes below are shown checked and
+  // disabled purely to communicate what's included.
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [submitted, setSubmitted] = useState(false)
@@ -333,7 +334,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
         mobile_number: adminForm.mobile_number,
         password,
         confirm_password: confirmPassword,
-        modules: SELECTABLE_MODULES.filter((m) => moduleSelections[m.key]).map((m) => m.key),
+        modules: SELECTABLE_MODULES.map((m) => m.key),
       })
       if (result?.status === 'completed') {
         setSubmitResult(result)
@@ -818,30 +819,43 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                 <>
                   <div>
                     <p className="font-mono text-[10px] text-pb-faint block mb-1">Modules to trial</p>
-                    <label className="flex items-center gap-2 font-mono text-[11px] text-pb-faintest mb-1">
-                      <input type="checkbox" checked disabled />
-                      BetterStats (included)
-                    </label>
-                    {SELECTABLE_MODULES.map((m) => (
-                      <label key={m.key} className="flex items-center gap-2 font-mono text-[11px] text-pb-faint mb-1">
-                        <input type="checkbox" checked={!!moduleSelections[m.key]}
-                          onChange={(e) => setModuleSelections((s) => ({ ...s, [m.key]: e.target.checked }))} />
-                        {m.label}
-                      </label>
+                    <p className="font-mono text-[10px] text-pb-faintest mb-2">
+                      Every club gets every module on trial — nothing to choose here.
+                    </p>
+                    {MODULE_TOGGLES.map((m) => (
+                      <div key={m.key} className="flex items-center gap-2 mb-1.5">
+                        <img src={moduleBrand(m.key).logo} alt="" className="w-5 h-5 rounded shrink-0" />
+                        <span className="font-mono text-[11px] text-pb-faint flex-1">{m.label}</span>
+                        <input type="checkbox" checked disabled />
+                      </div>
                     ))}
                   </div>
 
                   <div>
                     <label className="font-mono text-[10px] text-pb-faint block mb-1">Password</label>
-                    <input type="password" value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className={FIELD_CLS} />
+                    <div className="relative">
+                      <input type={showPassword ? 'text' : 'password'} value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="new-password"
+                        className={`${FIELD_CLS} pr-14`} />
+                      <button type="button" onClick={() => setShowPassword((s) => !s)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
+                        {showPassword ? 'HIDE' : 'SHOW'}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="font-mono text-[10px] text-pb-faint block mb-1">Repeat password</label>
-                    <input type="password" value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className={FIELD_CLS} />
+                    <div className="relative">
+                      <input type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        autoComplete="new-password"
+                        className={`${FIELD_CLS} pr-14`} />
+                      <button type="button" onClick={() => setShowConfirmPassword((s) => !s)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
+                        {showConfirmPassword ? 'HIDE' : 'SHOW'}
+                      </button>
+                    </div>
                   </div>
 
                   <ul className="font-mono text-[10px] space-y-0.5">
