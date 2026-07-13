@@ -95,6 +95,22 @@ class SelfServeAcknowledgement(Base):
     user_agent = Column(Text, nullable=True)
 
 
+class SelfServeIdempotencyKey(Base):
+    """The safety rail around the self-serve trial registration's eventual
+    atomic transaction (migration 138, Phase 8 — see
+    docs/self-serve-trial-onboarding-plan.md). The key itself is the primary
+    key: a repeat submission with the same key is recognised (found here) and
+    never reprocessed, so a double-click, browser refresh, or network retry
+    can't create duplicate clubs/users/trials once Phase 9's real transaction
+    lands in this same code path."""
+    __tablename__ = "self_serve_idempotency_keys"
+
+    idempotency_key = Column(Text, primary_key=True)
+    email = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, server_default="validated")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class UserBookmark(Base):
     """A page an admin user has starred for quick access in the sidebar.
 

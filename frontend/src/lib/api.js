@@ -892,6 +892,8 @@ export const api = {
     request(`/self-serve-trial/verify-email/status?email=${encodeURIComponent(email)}`),
   selfServeTrialAcknowledge: (data) =>
     request('/self-serve-trial/acknowledge', { method: 'POST', body: JSON.stringify(data) }),
+  selfServeTrialSubmit: (data) =>
+    request('/self-serve-trial/submit', { method: 'POST', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

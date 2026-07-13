@@ -272,6 +272,62 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     }
   }
 
+  // ─── Step 5: password + final submission (Phase 8) ──────────────────────
+  // Password is collected here, not with the rest of the admin details —
+  // deliberately deferred to right before submission (Phase 4's original
+  // decision), so it spends less time sitting in state. Nothing is actually
+  // created yet: /submit only revalidates everything and records the
+  // idempotency key — the real club/user creation is a later phase.
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+  // Minted once per modal instance and reused across retries — a double
+  // click or a retry after a network error replays the same key rather than
+  // registering as a second attempt. Lazily initialised so a fresh UUID isn't
+  // generated (and discarded) on every render.
+  const idempotencyKeyRef = useRef(null)
+  if (idempotencyKeyRef.current === null) {
+    idempotencyKeyRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+  }
+
+  const passwordChecks = {
+    length: password.length >= 10,
+    upper: /[A-Z]/.test(password),
+    digit: /\d/.test(password),
+    special: /[^A-Za-z0-9]/.test(password),
+    match: !!password && password === confirmPassword,
+  }
+  const passwordValid = Object.values(passwordChecks).every(Boolean)
+  const canSubmit = !!preparedClub && adminValid && verified && ackAccepted && passwordValid && !submitting
+
+  const submitRegistration = async () => {
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      const result = await api.selfServeTrialSubmit({
+        idempotency_key: idempotencyKeyRef.current,
+        org_id: preparedClub.org_id,
+        name: preparedClub.name,
+        first_name: adminForm.first_name,
+        last_name: adminForm.last_name,
+        display_name: adminForm.display_name,
+        username: adminForm.username,
+        email: adminForm.email,
+        mobile_number: adminForm.mobile_number,
+        password,
+        confirm_password: confirmPassword,
+      })
+      if (result?.status === 'validated') setSubmitted(true)
+    } catch (e) {
+      setSubmitError(e?.message || 'Could not submit registration.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
@@ -628,17 +684,53 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
 
           {step === 'submit' && (
             <div className="space-y-3">
-              {ackAccepted && (
+              {submitted ? (
                 <div className="pb-card p-4 bg-pb-surface2">
-                  <p className="font-mono text-[11px] text-emerald-400">✓ Acknowledgements recorded</p>
+                  <p className="font-mono text-[11px] text-emerald-400">
+                    ✓ Registration validated and ready
+                  </p>
+                  <p className="font-mono text-[11px] text-pb-faint mt-2">
+                    Actually creating the club and admin account isn't built yet — it
+                    lands in the next phase of docs/self-serve-trial-onboarding-plan.md.
+                    Nothing has been created; this only confirms every check passed.
+                  </p>
                 </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="font-mono text-[10px] text-pb-faint block mb-1">Password</label>
+                    <input type="password" value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className={FIELD_CLS} />
+                  </div>
+                  <div>
+                    <label className="font-mono text-[10px] text-pb-faint block mb-1">Repeat password</label>
+                    <input type="password" value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className={FIELD_CLS} />
+                  </div>
+
+                  <ul className="font-mono text-[10px] space-y-0.5">
+                    <li className={passwordChecks.length ? 'text-emerald-400' : 'text-pb-faintest'}>
+                      {passwordChecks.length ? '✓' : '·'} At least 10 characters
+                    </li>
+                    <li className={passwordChecks.upper ? 'text-emerald-400' : 'text-pb-faintest'}>
+                      {passwordChecks.upper ? '✓' : '·'} One uppercase letter
+                    </li>
+                    <li className={passwordChecks.digit ? 'text-emerald-400' : 'text-pb-faintest'}>
+                      {passwordChecks.digit ? '✓' : '·'} One number
+                    </li>
+                    <li className={passwordChecks.special ? 'text-emerald-400' : 'text-pb-faintest'}>
+                      {passwordChecks.special ? '✓' : '·'} One special character
+                    </li>
+                    <li className={passwordChecks.match ? 'text-emerald-400' : 'text-pb-faintest'}>
+                      {passwordChecks.match ? '✓' : '·'} Passwords match
+                    </li>
+                  </ul>
+
+                  {submitError && <p className="font-mono text-[10px] text-pb-red">{submitError}</p>}
+                </>
               )}
-              <div className="pb-card p-4 bg-pb-surface2">
-                <p className="font-mono text-[11px] text-pb-faint">
-                  Final submission (creating the club and admin account) isn't built
-                  yet — it lands in a later phase of docs/self-serve-trial-onboarding-plan.md.
-                </p>
-              </div>
             </div>
           )}
         </div>
@@ -731,12 +823,13 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
             )}
             {step === 'submit' && (
               <button
-                disabled
-                title="Not wired up yet — final submission lands in a later phase."
+                onClick={submitRegistration}
+                disabled={!canSubmit || submitted}
+                title={canSubmit || submitted ? '' : 'Fix the highlighted requirements first'}
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
                 style={{ background: 'var(--pb-accent)' }}
               >
-                START FREE TRIAL
+                {submitted ? 'VALIDATED' : submitting ? 'PROCESSING…' : `START ${defaultTrialDays} DAY FREE TRIAL`}
               </button>
             )}
           </div>

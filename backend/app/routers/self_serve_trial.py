@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, SelfServeAcknowledgement, User, get_db
+from app.models.db import Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import platform_settings as ps
 from app.services import playhq_client
@@ -165,11 +165,12 @@ class ValidateAdminRequest(BaseModel):
     mobile_number: str = ""
 
 
-@router.post("/validate-admin")
-async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
-    """Validate-as-you-type for the admin-details step. Reuses the exact
-    username rules (lowercase, 3-32 chars, uniqueness) the existing
-    POST /super/users already enforces.
+async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -> dict:
+    """The admin-details field checks, shared by the as-you-type validator
+    below and the final /submit revalidation (Phase 8) — one set of rules,
+    not two copies that could drift. Reuses the exact username rules
+    (lowercase, 3-32 chars, uniqueness) the existing POST /super/users already
+    enforces.
 
     Email: format-checked, then checked against existing users and BLOCKED if
     already taken (Phase 5, see docs/self-serve-trial-onboarding-plan.md Decision
@@ -215,10 +216,20 @@ async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(
     if not mobile or not _mobile_valid(mobile):
         errors["mobile_number"] = "Enter a valid Australian mobile number, or an international number starting with +"
 
+    return errors
+
+
+@router.post("/validate-admin")
+async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
+    """Validate-as-you-type for the admin-details step."""
+    errors = await _validate_admin_fields(db, data)
     return {
         "valid": not errors,
         "errors": errors,
-        "normalised": {"username": username, "email": email},
+        "normalised": {
+            "username": (data.username or "").strip().lower(),
+            "email": (data.email or "").strip().lower(),
+        },
     }
 
 
@@ -371,3 +382,105 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
         "privacy_version": PRIVACY_VERSION,
         "accepted_at": accepted_at.isoformat(),
     }
+
+
+# ─── Step 5: final submission readiness (Phase 8) ────────────────────────────
+# Password is collected here, not in Phase 4's admin-details step — deliberately
+# deferred to immediately before submission (see that router comment) so it
+# spends less time sitting in client state. Nothing is created here yet: no
+# club, no user, no trial — that's Phase 9's atomic transaction, which extends
+# this same handler rather than adding a new one. This phase's job is the
+# safety rail around it: full revalidation + an idempotency guard, so a
+# double-click, refresh, or network retry can be proven safe before there's
+# anything real to protect against duplicating.
+
+# Union of the existing rule (POST /super/users: >= 10 chars) and the source
+# document's minimum (upper + digit + special) — "use existing rules where
+# stronger" cuts both ways when neither is a strict superset of the other.
+_PASSWORD_MIN_LEN = 10
+_HAS_UPPER = re.compile(r"[A-Z]")
+_HAS_DIGIT = re.compile(r"\d")
+_HAS_SPECIAL = re.compile(r"[^A-Za-z0-9]")
+
+
+def _password_errors(password: str, confirm: str) -> list[str]:
+    errors = []
+    if len(password or "") < _PASSWORD_MIN_LEN:
+        errors.append(f"Password must be at least {_PASSWORD_MIN_LEN} characters")
+    if not _HAS_UPPER.search(password or ""):
+        errors.append("Password must contain an uppercase letter")
+    if not _HAS_DIGIT.search(password or ""):
+        errors.append("Password must contain a number")
+    if not _HAS_SPECIAL.search(password or ""):
+        errors.append("Password must contain a special character")
+    if password != confirm:
+        errors.append("Passwords do not match")
+    return errors
+
+
+class SubmitRequest(BaseModel):
+    idempotency_key: str
+    org_id: str
+    name: str
+    first_name: str = ""
+    last_name: str = ""
+    display_name: str = ""
+    username: str = ""
+    email: str = ""
+    mobile_number: str = ""
+    password: str = ""
+    confirm_password: str = ""
+
+
+@router.post("/submit")
+async def submit(data: SubmitRequest, db: AsyncSession = Depends(get_db)):
+    key = (data.idempotency_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=422, detail="Missing idempotency key")
+
+    # Idempotent replay: a key already seen returns its stored outcome instead
+    # of reprocessing — the actual guarantee Phase 9's transaction will rely
+    # on for double-click/refresh/retry safety.
+    existing_key = await db.get(SelfServeIdempotencyKey, key)
+    if existing_key is not None:
+        return {"status": existing_key.status, "replayed": True}
+
+    email = (data.email or "").strip().lower()
+
+    org_id = _parse_uuid(data.org_id)
+    if not org_id:
+        raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
+    if await find_matching_organisation(db, org_id, data.name):
+        raise HTTPException(status_code=409, detail="This club has already been registered in BetterCricket.")
+    if not await playhq_client.get_organisation(str(org_id)):
+        raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
+
+    admin_errors = await _validate_admin_fields(db, ValidateAdminRequest(
+        first_name=data.first_name, last_name=data.last_name, display_name=data.display_name,
+        username=data.username, email=data.email, mobile_number=data.mobile_number,
+    ))
+    if admin_errors:
+        raise HTTPException(status_code=422, detail={"errors": list(admin_errors.values())})
+
+    if not email or not await verification.is_verified(db, email):
+        raise HTTPException(status_code=422, detail="Email is not verified")
+
+    ack = await db.execute(
+        select(SelfServeAcknowledgement).where(SelfServeAcknowledgement.email == email)
+        .order_by(SelfServeAcknowledgement.accepted_at.desc()).limit(1)
+    )
+    if ack.scalar_one_or_none() is None:
+        raise HTTPException(status_code=422, detail="Acknowledgements have not been accepted")
+
+    password_errors = _password_errors(data.password, data.confirm_password)
+    if password_errors:
+        raise HTTPException(status_code=422, detail={"errors": password_errors})
+
+    # Every check passed. Record the key so a repeat submission replays this
+    # outcome rather than re-running any of the above (or, once Phase 9 lands,
+    # rather than creating a second club/user). Nothing else is written yet —
+    # see the module comment above.
+    db.add(SelfServeIdempotencyKey(idempotency_key=key, email=email, status="validated"))
+    await db.commit()
+
+    return {"status": "validated", "replayed": False}

@@ -334,6 +334,15 @@ async def lifespan(app: FastAPI):
             CREATE INDEX IF NOT EXISTS ix_self_serve_acknowledgements_email
             ON self_serve_acknowledgements(email)
         """))
+        # Self-serve trial registration idempotency keys (migration 138).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS self_serve_idempotency_keys (
+                idempotency_key TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'validated',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
