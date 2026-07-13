@@ -32,6 +32,11 @@ class User(Base):
     username = Column(Text, unique=True, nullable=True)
     password_hash = Column(Text)
     display_name = Column(Text, nullable=True)
+    # First/last name + mobile: added for the self-serve trial registration
+    # admin-details form (migration 135) — nullable, nothing else reads them yet.
+    first_name = Column(Text, nullable=True)
+    last_name = Column(Text, nullable=True)
+    mobile_number = Column(Text, nullable=True)
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
     failed_login_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)

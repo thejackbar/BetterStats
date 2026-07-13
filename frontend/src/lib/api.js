@@ -882,6 +882,8 @@ export const api = {
   selfServeTrialSearch: (q) => request(`/self-serve-trial/search?q=${encodeURIComponent(q)}`),
   selfServeTrialPrepare: (data) =>
     request('/self-serve-trial/prepare', { method: 'POST', body: JSON.stringify(data) }),
+  selfServeTrialValidateAdmin: (data) =>
+    request('/self-serve-trial/validate-admin', { method: 'POST', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

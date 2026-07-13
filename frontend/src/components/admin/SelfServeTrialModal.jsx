@@ -3,9 +3,9 @@ import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 
 // Step scaffold for the self-serve trial registration flow (see
-// docs/self-serve-trial-onboarding-plan.md). Steps after 'club' aren't built yet —
-// each lands in its own later phase. Keeping the list here now so the stepper UI
-// doesn't need reshaping when a step's content arrives.
+// docs/self-serve-trial-onboarding-plan.md). Steps after 'admin' aren't built
+// yet — each lands in its own later phase. Keeping the list here now so the
+// stepper UI doesn't need reshaping when a step's content arrives.
 const STEPS = [
   { key: 'club', label: 'Club' },
   { key: 'admin', label: 'Admin details' },
@@ -15,6 +15,8 @@ const STEPS = [
 ]
 
 const orgName = (org) => org.name || org.shortName || org.organisationName || org.id || ''
+
+const FIELD_CLS = 'w-full bg-pb-surface2 text-pb-text border pb-hairline rounded px-3 py-2 text-sm outline-none focus:border-pb-accent'
 
 /**
  * The self-serve club trial registration modal shell. Internal-only for now —
@@ -29,6 +31,7 @@ const orgName = (org) => org.name || org.shortName || org.organisationName || or
 export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   const closeBtnRef = useRef(null)
   const previouslyFocused = useRef(null)
+  const [step, setStep] = useState('club')
 
   useEffect(() => {
     previouslyFocused.current = document.activeElement
@@ -128,6 +131,47 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     setResults([])
   }
 
+  // ─── Step 2: Primary Club Admin details (Phase 4) ───────────────────────
+  // Password isn't collected here — deliberately deferred to immediately
+  // before final submission (a later phase), so a plaintext password spends
+  // less time sitting in client state across email verification and
+  // acknowledgements.
+  const [adminForm, setAdminForm] = useState({
+    first_name: '', last_name: '', display_name: '', username: '', email: '', mobile_number: '',
+  })
+  const [adminErrors, setAdminErrors] = useState({})
+  const [adminValidating, setAdminValidating] = useState(false)
+  const [adminValid, setAdminValid] = useState(false)
+  const adminDebounceRef = useRef(null)
+
+  const setAdminField = (field, value) => setAdminForm((f) => ({ ...f, [field]: value }))
+
+  useEffect(() => {
+    if (step !== 'admin') return
+    if (adminDebounceRef.current) clearTimeout(adminDebounceRef.current)
+    const hasAnything = Object.values(adminForm).some((v) => v.trim())
+    if (!hasAnything) {
+      setAdminErrors({})
+      setAdminValid(false)
+      return
+    }
+    adminDebounceRef.current = setTimeout(async () => {
+      setAdminValidating(true)
+      try {
+        const result = await api.selfServeTrialValidateAdmin(adminForm)
+        setAdminErrors(result?.errors || {})
+        setAdminValid(!!result?.valid)
+      } catch {
+        setAdminValid(false)
+      } finally {
+        setAdminValidating(false)
+      }
+    }, 350)
+    return () => clearTimeout(adminDebounceRef.current)
+  }, [adminForm, step])
+
+  const canContinueFromClub = !!preparedClub && !preparing && !prepareError
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
@@ -160,150 +204,248 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
           </p>
 
           <ol className="flex flex-wrap gap-2">
-            {STEPS.map((s, i) => (
-              <li key={s.key}
-                className={`px-2 py-1 rounded font-mono text-[10px] tracking-wide2 border pb-hairline ${
-                  i === 0 ? 'text-pb-text' : 'text-pb-faintest'
-                }`}>
-                {i + 1}. {s.label}
-              </li>
-            ))}
+            {STEPS.map((s, i) => {
+              const currentIndex = STEPS.findIndex((x) => x.key === step)
+              return (
+                <li key={s.key}
+                  className={`px-2 py-1 rounded font-mono text-[10px] tracking-wide2 border pb-hairline ${
+                    i === currentIndex ? 'text-pb-text' : 'text-pb-faintest'
+                  }`}>
+                  {i + 1}. {s.label}
+                </li>
+              )
+            })}
           </ol>
 
-          <div className="relative">
-            <label className="font-mono text-[10px] text-pb-faint block mb-1">Search for your club</label>
-            <input
-              type="text"
-              value={query}
-              disabled={!!selectedClub}
-              onChange={(e) => { setQuery(e.target.value); setDuplicateClub(null) }}
-              onFocus={() => { if (results.length > 0) setShowResults(true) }}
-              placeholder="Start typing your club's name…"
-              className="w-full bg-pb-surface2 text-pb-text border pb-hairline rounded px-3 py-2 text-sm outline-none focus:border-pb-accent disabled:opacity-60"
-            />
+          {step === 'club' && (
+            <>
+              <div className="relative">
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Search for your club</label>
+                <input
+                  type="text"
+                  value={query}
+                  disabled={!!selectedClub}
+                  onChange={(e) => { setQuery(e.target.value); setDuplicateClub(null) }}
+                  onFocus={() => { if (results.length > 0) setShowResults(true) }}
+                  placeholder="Start typing your club's name…"
+                  className={`${FIELD_CLS} disabled:opacity-60`}
+                />
 
-            {showResults && results.length > 0 && !selectedClub && (
-              <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface max-h-64 overflow-y-auto">
-                {results.map((org) => (
-                  <button
-                    key={org.id}
-                    type="button"
-                    onClick={() => selectClub(org)}
-                    className="w-full text-left px-3 py-2 hover:bg-pb-surface2 border-b pb-hairline last:border-b-0"
-                  >
-                    <div className="text-pb-text text-sm flex items-center justify-between gap-2">
-                      <span>{orgName(org)}</span>
-                      {org.already_registered && (
-                        <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase shrink-0">
-                          Registered
-                        </span>
-                      )}
-                    </div>
-                    {org.shortName && org.shortName !== org.name && (
-                      <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {showResults && !searching && results.length === 0 && query.trim().length >= 2 && !selectedClub && (
-              <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface px-3 py-2">
-                <p className="font-mono text-[11px] text-pb-faintest">No clubs found for "{query.trim()}".</p>
-              </div>
-            )}
-
-            {searching && (
-              <p className="font-mono text-[10px] text-pb-faintest mt-1">Searching…</p>
-            )}
-            {searchError && (
-              <p className="font-mono text-[10px] text-pb-red mt-1">{searchError}</p>
-            )}
-          </div>
-
-          {duplicateClub && (
-            <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
-              <p className="font-mono text-[11px] text-pb-text">
-                {orgName(duplicateClub)} has already been registered in BetterCricket.
-                Please contact your club's administrator or email{' '}
-                <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
-                if you think your club has been incorrectly registered.
-              </p>
-            </div>
-          )}
-
-          {selectedClub && (
-            <div className="pb-card p-4 bg-pb-surface2 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Selected club</p>
-                <button
-                  type="button"
-                  onClick={clearClub}
-                  className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline shrink-0"
-                >
-                  Change
-                </button>
-              </div>
-
-              {preparing && (
-                <p className="font-mono text-[11px] text-pb-faintest">Preparing club details…</p>
-              )}
-
-              {!preparing && prepareError && (
-                <p className="font-mono text-[11px] text-pb-red">{prepareError}</p>
-              )}
-
-              {!preparing && !prepareError && preparedClub && (
-                <dl className="space-y-2">
-                  <div>
-                    <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Club name</dt>
-                    <dd className="text-pb-text text-sm">{preparedClub.name}</dd>
+                {showResults && results.length > 0 && !selectedClub && (
+                  <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface max-h-64 overflow-y-auto">
+                    {results.map((org) => (
+                      <button
+                        key={org.id}
+                        type="button"
+                        onClick={() => selectClub(org)}
+                        className="w-full text-left px-3 py-2 hover:bg-pb-surface2 border-b pb-hairline last:border-b-0"
+                      >
+                        <div className="text-pb-text text-sm flex items-center justify-between gap-2">
+                          <span>{orgName(org)}</span>
+                          {org.already_registered && (
+                            <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase shrink-0">
+                              Registered
+                            </span>
+                          )}
+                        </div>
+                        {org.shortName && org.shortName !== org.name && (
+                          <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
+                        )}
+                      </button>
+                    ))}
                   </div>
-                  {preparedClub.short_name && (
-                    <div>
-                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Short name</dt>
-                      <dd className="text-pb-text text-sm">{preparedClub.short_name}</dd>
-                    </div>
+                )}
+
+                {showResults && !searching && results.length === 0 && query.trim().length >= 2 && !selectedClub && (
+                  <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface px-3 py-2">
+                    <p className="font-mono text-[11px] text-pb-faintest">No clubs found for "{query.trim()}".</p>
+                  </div>
+                )}
+
+                {searching && (
+                  <p className="font-mono text-[10px] text-pb-faintest mt-1">Searching…</p>
+                )}
+                {searchError && (
+                  <p className="font-mono text-[10px] text-pb-red mt-1">{searchError}</p>
+                )}
+              </div>
+
+              {duplicateClub && (
+                <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
+                  <p className="font-mono text-[11px] text-pb-text">
+                    {orgName(duplicateClub)} has already been registered in BetterCricket.
+                    Please contact your club's administrator or email{' '}
+                    <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
+                    if you think your club has been incorrectly registered.
+                  </p>
+                </div>
+              )}
+
+              {selectedClub && (
+                <div className="pb-card p-4 bg-pb-surface2 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Selected club</p>
+                    <button
+                      type="button"
+                      onClick={clearClub}
+                      className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline shrink-0"
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  {preparing && (
+                    <p className="font-mono text-[11px] text-pb-faintest">Preparing club details…</p>
                   )}
-                  <div>
-                    <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">URL</dt>
-                    <dd className="text-pb-text text-sm">betterat.cricket/{preparedClub.slug}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Source club ID</dt>
-                    <dd className="text-pb-faint text-xs font-mono">{preparedClub.org_id}</dd>
-                  </div>
-                </dl>
+
+                  {!preparing && prepareError && (
+                    <p className="font-mono text-[11px] text-pb-red">{prepareError}</p>
+                  )}
+
+                  {!preparing && !prepareError && preparedClub && (
+                    <dl className="space-y-2">
+                      <div>
+                        <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Club name</dt>
+                        <dd className="text-pb-text text-sm">{preparedClub.name}</dd>
+                      </div>
+                      {preparedClub.short_name && (
+                        <div>
+                          <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Short name</dt>
+                          <dd className="text-pb-text text-sm">{preparedClub.short_name}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">URL</dt>
+                        <dd className="text-pb-text text-sm">betterat.cricket/{preparedClub.slug}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Source club ID</dt>
+                        <dd className="text-pb-faint text-xs font-mono">{preparedClub.org_id}</dd>
+                      </div>
+                    </dl>
+                  )}
+                </div>
               )}
-            </div>
+
+              {!selectedClub && (
+                <div className="pb-card p-4 bg-pb-surface2">
+                  <p className="font-mono text-[11px] text-pb-faint">
+                    Search for and select an unregistered club to continue.
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
-          {!selectedClub && (
-            <div className="pb-card p-4 bg-pb-surface2">
-              <p className="font-mono text-[11px] text-pb-faint">
-                The rest of registration (admin details, email verification,
-                acknowledgements, submission) isn't built yet — it lands in later
-                phases of docs/self-serve-trial-onboarding-plan.md.
-              </p>
+          {step === 'admin' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">First name</label>
+                  <input type="text" value={adminForm.first_name}
+                    onChange={(e) => setAdminField('first_name', e.target.value)}
+                    className={FIELD_CLS} />
+                  {adminErrors.first_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.first_name}</p>}
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Last name</label>
+                  <input type="text" value={adminForm.last_name}
+                    onChange={(e) => setAdminField('last_name', e.target.value)}
+                    className={FIELD_CLS} />
+                  {adminErrors.last_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.last_name}</p>}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Preferred display name</label>
+                <input type="text" value={adminForm.display_name}
+                  onChange={(e) => setAdminField('display_name', e.target.value)}
+                  className={FIELD_CLS} />
+                {adminErrors.display_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.display_name}</p>}
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Username</label>
+                <input type="text" value={adminForm.username}
+                  onChange={(e) => setAdminField('username', e.target.value)}
+                  className={FIELD_CLS} />
+                {adminErrors.username && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.username}</p>}
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Email address</label>
+                <input type="email" value={adminForm.email}
+                  onChange={(e) => setAdminField('email', e.target.value)}
+                  className={FIELD_CLS} />
+                {adminErrors.email && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.email}</p>}
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile number</label>
+                <input type="tel" value={adminForm.mobile_number}
+                  onChange={(e) => setAdminField('mobile_number', e.target.value)}
+                  placeholder="04XX XXX XXX"
+                  className={FIELD_CLS} />
+                {adminErrors.mobile_number && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.mobile_number}</p>}
+              </div>
+
+              {adminValidating && (
+                <p className="font-mono text-[10px] text-pb-faintest">Checking…</p>
+              )}
+              {!adminValidating && adminValid && (
+                <p className="font-mono text-[10px] text-emerald-400">✓ All details valid</p>
+              )}
+
+              <div className="pb-card p-4 bg-pb-surface2">
+                <p className="font-mono text-[11px] text-pb-faint">
+                  Password isn't set here — you'll set it right before submitting, once
+                  email verification and acknowledgements are built (later phases of
+                  docs/self-serve-trial-onboarding-plan.md).
+                </p>
+              </div>
             </div>
           )}
         </div>
 
-        <div className="px-5 py-3 border-t pb-hairline shrink-0 flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            disabled
-            title="Not wired up yet — the remaining registration steps land in later phases."
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}
-          >
-            START FREE TRIAL
-          </button>
+        <div className="px-5 py-3 border-t pb-hairline shrink-0 flex items-center justify-between gap-2">
+          <div>
+            {step === 'admin' && (
+              <button
+                onClick={() => setStep('club')}
+                className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+              >
+                Back
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+            >
+              Cancel
+            </button>
+            {step === 'club' ? (
+              <button
+                onClick={() => setStep('admin')}
+                disabled={!canContinueFromClub}
+                title={canContinueFromClub ? '' : 'Select an unregistered club first'}
+                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                CONTINUE
+              </button>
+            ) : (
+              <button
+                disabled
+                title="Not wired up yet — email verification, acknowledgements and submission land in later phases."
+                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                START FREE TRIAL
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, get_db
+from app.models.db import Organisation, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import platform_settings as ps
 from app.services import playhq_client
@@ -127,4 +127,73 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
         "name": name,
         "short_name": (data.short_name or "").strip(),
         "slug": slug,
+    }
+
+
+# ─── Step 2: Primary Club Admin details (Phase 4) ────────────────────────────
+# Password isn't collected here — deliberately deferred to immediately before
+# final submission (a later phase) so a plaintext password spends less time
+# sitting in client state across email verification and acknowledgements.
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# AU mobile: 04xxxxxxxx, +614xxxxxxxx or 614xxxxxxxx, spaces/dashes ignored.
+_AU_MOBILE_RE = re.compile(r"^(\+?61|0)4\d{8}$")
+# Generic international fallback: a leading + and 8-15 digits — the codebase
+# has no phone-validation library anywhere (Player.phone is stored as free text,
+# see routers/availability.py's phone_last4), so this is a light sanity check,
+# not a claim of full E.164 validation.
+_INTL_MOBILE_RE = re.compile(r"^\+\d{8,15}$")
+
+
+def _mobile_valid(raw: str) -> bool:
+    compact = re.sub(r"[\s-]", "", raw or "")
+    return bool(_AU_MOBILE_RE.match(compact) or _INTL_MOBILE_RE.match(compact))
+
+
+class ValidateAdminRequest(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    display_name: str = ""
+    username: str = ""
+    email: str = ""
+    mobile_number: str = ""
+
+
+@router.post("/validate-admin")
+async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
+    """Validate-as-you-type for the admin-details step. Reuses the exact
+    username rules (lowercase, 3-32 chars, uniqueness) the existing
+    POST /super/users already enforces. Email is format-checked only here —
+    whether an email already belongs to an existing BetterCricket user is
+    handled by the next phase (linking an existing admin to a second club is a
+    valid outcome there, not an error), so this step doesn't block on it."""
+    errors = {}
+
+    if not (data.first_name or "").strip():
+        errors["first_name"] = "First name is required"
+    if not (data.last_name or "").strip():
+        errors["last_name"] = "Last name is required"
+    if not (data.display_name or "").strip():
+        errors["display_name"] = "Preferred display name is required"
+
+    username = (data.username or "").strip().lower()
+    if not username or len(username) < 3 or len(username) > 32:
+        errors["username"] = "Username must be 3-32 characters"
+    else:
+        existing = await db.execute(select(User).where(User.username == username))
+        if existing.scalar_one_or_none():
+            errors["username"] = "Username already taken"
+
+    email = (data.email or "").strip().lower()
+    if not email or not _EMAIL_RE.match(email):
+        errors["email"] = "Enter a valid email address"
+
+    mobile = (data.mobile_number or "").strip()
+    if not mobile or not _mobile_valid(mobile):
+        errors["mobile_number"] = "Enter a valid Australian mobile number, or an international number starting with +"
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "normalised": {"username": username, "email": email},
     }
