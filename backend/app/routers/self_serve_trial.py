@@ -252,10 +252,14 @@ async def send_verification_code(data: SendCodeRequest, db: AsyncSession = Depen
 
     try:
         await verification.start_verification(db, email)
-    except RuntimeError:
-        # Never surface provider error details (Stripe-adjacent principle from
-        # the plan doc, Phase 13: don't expose sensitive exception detail).
-        raise HTTPException(status_code=502, detail="Could not send the verification email. Try again shortly.")
+    except RuntimeError as e:
+        # This router is Super Admin-gated in this phase, so the caller is
+        # already a trusted operator, not a public visitor — showing the real
+        # provider error here is a diagnostic aid, not an information leak.
+        # TIGHTEN BEFORE PUBLIC LAUNCH (see docs/self-serve-trial-onboarding-plan.md,
+        # "go public" checklist): swap back to a generic message once this is
+        # reachable by anyone other than a super admin.
+        raise HTTPException(status_code=502, detail=f"Could not send the verification email: {e}")
 
     return {"sent": True}
 

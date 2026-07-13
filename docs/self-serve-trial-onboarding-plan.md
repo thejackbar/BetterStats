@@ -247,6 +247,14 @@ Captured now so nothing is forgotten later, not actioned here:
   specifically (club enumeration, username/email enumeration, abuse economics).
 - Updating `docs/onboarding-runbook.md` and `docs/invoicing-runbook.md`, both of
   which still describe the retired tier model and manual-only onboarding.
+- `POST /self-serve-trial/verify-email/send` currently returns the *real*
+  provider error on a delivery failure (added for live diagnosis during
+  internal testing, since the caller is already a super admin) — swap back
+  to a generic message before this is reachable by anyone else.
+- Associations aren't shown in club search results (not available from this
+  search endpoint; a separate per-club GraphQL call would be needed — see
+  `services/playhq_directory_client.discover_associations`). Deliberately
+  skipped for now (extra latency/dependency on a live per-keystroke search).
 
 ## Related docs
 
