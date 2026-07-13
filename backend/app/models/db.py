@@ -55,6 +55,27 @@ class User(Base):
     memberships = relationship("ClubMembership", back_populates="user")
 
 
+class SelfServeEmailVerification(Base):
+    """A 4-digit email verification code issued for the self-serve trial
+    registration flow (migration 136, Phase 6 — see
+    docs/self-serve-trial-onboarding-plan.md). Only ``code_hash`` (bcrypt) is
+    stored, never the plaintext code. Keyed by email, not by user (no user
+    exists yet at this point in registration) — a fresh send sets
+    ``superseded_at`` on any earlier unverified row for the same email so only
+    the latest is ever valid.
+    """
+    __tablename__ = "self_serve_email_verifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    code_hash = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    verified_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    superseded_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    attempt_count = Column(Integer, default=0, nullable=False, server_default="0")
+
+
 class UserBookmark(Base):
     """A page an admin user has starred for quick access in the sidebar.
 

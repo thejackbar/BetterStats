@@ -3,7 +3,7 @@ import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 
 // Step scaffold for the self-serve trial registration flow (see
-// docs/self-serve-trial-onboarding-plan.md). Steps after 'admin' aren't built
+// docs/self-serve-trial-onboarding-plan.md). Steps after 'verify' aren't built
 // yet — each lands in its own later phase. Keeping the list here now so the
 // stepper UI doesn't need reshaping when a step's content arrives.
 const STEPS = [
@@ -171,6 +171,50 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   }, [adminForm, step])
 
   const canContinueFromClub = !!preparedClub && !preparing && !prepareError
+
+  // ─── Step 3: email verification (Phase 6) ───────────────────────────────
+  const [codeSent, setCodeSent] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState('')
+  const [verifyCode, setVerifyCode] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [verifyError, setVerifyError] = useState('')
+  const [verified, setVerified] = useState(false)
+
+  // Changing the email restarts verification from scratch.
+  useEffect(() => {
+    setCodeSent(false)
+    setSendError('')
+    setVerifyCode('')
+    setVerifyError('')
+    setVerified(false)
+  }, [adminForm.email])
+
+  const sendCode = async () => {
+    setSending(true)
+    setSendError('')
+    try {
+      await api.selfServeTrialSendCode(adminForm.email)
+      setCodeSent(true)
+    } catch (e) {
+      setSendError(e?.message || 'Could not send the verification email.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const checkCode = async () => {
+    setChecking(true)
+    setVerifyError('')
+    try {
+      await api.selfServeTrialCheckCode(adminForm.email, verifyCode.trim())
+      setVerified(true)
+    } catch (e) {
+      setVerifyError(e?.message || 'Incorrect code.')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   return (
     <div
@@ -405,6 +449,77 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               </div>
             </div>
           )}
+
+          {step === 'verify' && (
+            <div className="space-y-3">
+              <p className="font-mono text-[11px] text-pb-faint">
+                We'll send a 4-digit code to <span className="text-pb-text">{adminForm.email}</span>.
+                It's valid for 24 hours.
+              </p>
+
+              {verified ? (
+                <div className="pb-card p-4 bg-pb-surface2">
+                  <p className="font-mono text-[11px] text-emerald-400">✓ Email verified</p>
+                </div>
+              ) : (
+                <>
+                  {!codeSent ? (
+                    <button
+                      type="button"
+                      onClick={sendCode}
+                      disabled={sending}
+                      className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+                      style={{ background: 'var(--pb-accent)' }}
+                    >
+                      {sending ? 'Sending…' : 'SEND CODE'}
+                    </button>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="font-mono text-[10px] text-pb-faint block mb-1">4-digit code</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={4}
+                          value={verifyCode}
+                          onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                          className={`${FIELD_CLS} tracking-[0.5em] text-center`}
+                        />
+                        {verifyError && <p className="font-mono text-[10px] text-pb-red mt-1">{verifyError}</p>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={checkCode}
+                          disabled={checking || verifyCode.length !== 4}
+                          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+                          style={{ background: 'var(--pb-accent)' }}
+                        >
+                          {checking ? 'Checking…' : 'VERIFY'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={sendCode}
+                          disabled={sending}
+                          className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline disabled:opacity-40"
+                        >
+                          {sending ? 'Sending…' : 'Resend code'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {sendError && <p className="font-mono text-[10px] text-pb-red">{sendError}</p>}
+                </>
+              )}
+
+              <div className="pb-card p-4 bg-pb-surface2">
+                <p className="font-mono text-[11px] text-pb-faint">
+                  Acknowledgements and final submission aren't built yet — they land
+                  in later phases of docs/self-serve-trial-onboarding-plan.md.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t pb-hairline shrink-0 flex items-center justify-between gap-2">
@@ -412,6 +527,14 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
             {step === 'admin' && (
               <button
                 onClick={() => setStep('club')}
+                className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+              >
+                Back
+              </button>
+            )}
+            {step === 'verify' && (
+              <button
+                onClick={() => setStep('admin')}
                 className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
               >
                 Back
@@ -425,7 +548,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
             >
               Cancel
             </button>
-            {step === 'club' ? (
+            {step === 'club' && (
               <button
                 onClick={() => setStep('admin')}
                 disabled={!canContinueFromClub}
@@ -435,10 +558,22 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               >
                 CONTINUE
               </button>
-            ) : (
+            )}
+            {step === 'admin' && (
+              <button
+                onClick={() => setStep('verify')}
+                disabled={!adminValid}
+                title={adminValid ? '' : 'Fix the highlighted fields first'}
+                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                CONTINUE
+              </button>
+            )}
+            {step === 'verify' && (
               <button
                 disabled
-                title="Not wired up yet — email verification, acknowledgements and submission land in later phases."
+                title="Not wired up yet — acknowledgements and submission land in later phases."
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
                 style={{ background: 'var(--pb-accent)' }}
               >

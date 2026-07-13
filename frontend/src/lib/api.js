@@ -884,6 +884,12 @@ export const api = {
     request('/self-serve-trial/prepare', { method: 'POST', body: JSON.stringify(data) }),
   selfServeTrialValidateAdmin: (data) =>
     request('/self-serve-trial/validate-admin', { method: 'POST', body: JSON.stringify(data) }),
+  selfServeTrialSendCode: (email) =>
+    request('/self-serve-trial/verify-email/send', { method: 'POST', body: JSON.stringify({ email }) }),
+  selfServeTrialCheckCode: (email, code) =>
+    request('/self-serve-trial/verify-email/check', { method: 'POST', body: JSON.stringify({ email, code }) }),
+  selfServeTrialVerificationStatus: (email) =>
+    request(`/self-serve-trial/verify-email/status?email=${encodeURIComponent(email)}`),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

@@ -300,6 +300,23 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number TEXT"))
+        # Self-serve trial registration email verification codes (migration 136).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS self_serve_email_verifications (
+                id UUID PRIMARY KEY,
+                email TEXT NOT NULL,
+                code_hash TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                verified_at TIMESTAMPTZ,
+                superseded_at TIMESTAMPTZ,
+                attempt_count INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_self_serve_email_verifications_email
+            ON self_serve_email_verifications(email)
+        """))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))

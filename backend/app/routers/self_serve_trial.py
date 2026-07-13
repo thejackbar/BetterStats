@@ -16,6 +16,8 @@ from app.models.db import Organisation, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import platform_settings as ps
 from app.services import playhq_client
+from app.services import rate_limit
+from app.services import self_serve_verification as verification
 from app.services.sync import _parse_uuid, find_matching_organisation
 
 # Both guards apply to every route in this router, present and future: the flag
@@ -214,3 +216,83 @@ async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(
         "errors": errors,
         "normalised": {"username": username, "email": email},
     }
+
+
+# ─── Step 3: email verification (Phase 6) ────────────────────────────────────
+# Full OTP flow, not a stub — built now so a future public launch only needs UI
+# wiring (see docs/self-serve-trial-onboarding-plan.md, Decision 5).
+
+SEND_LIMIT = 5
+SEND_WINDOW_SECONDS = 3600  # 1 hour — code generation + resend share this cap
+VERIFY_MAX_FAILURES = 5
+VERIFY_LOCKOUT_SECONDS = 15 * 60  # same threshold as the BetterSelect PIN check
+
+
+class SendCodeRequest(BaseModel):
+    email: str
+
+
+@router.post("/verify-email/send")
+async def send_verification_code(data: SendCodeRequest, db: AsyncSession = Depends(get_db)):
+    """Send (or resend) a verification code. The same endpoint covers both —
+    a resend and a "restart after changing email" are the same operation
+    (issue a fresh code, superseding whatever was active for that email)."""
+    email = (data.email or "").strip().lower()
+    if not email or not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+
+    rate_limit.enforce(
+        f"ssvr:send:{email}", SEND_LIMIT, SEND_WINDOW_SECONDS,
+        detail="Too many verification codes requested for this email — try again later.",
+    )
+
+    try:
+        await verification.start_verification(db, email)
+    except RuntimeError:
+        # Never surface provider error details (Stripe-adjacent principle from
+        # the plan doc, Phase 13: don't expose sensitive exception detail).
+        raise HTTPException(status_code=502, detail="Could not send the verification email. Try again shortly.")
+
+    return {"sent": True}
+
+
+class CheckCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+@router.post("/verify-email/check")
+async def check_verification_code(data: CheckCodeRequest, db: AsyncSession = Depends(get_db)):
+    email = (data.email or "").strip().lower()
+    code = (data.code or "").strip()
+    if not email or not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+
+    lock_key = f"ssvr:verify:{email}"
+    rate_limit.assert_not_locked(
+        lock_key, VERIFY_MAX_FAILURES, VERIFY_LOCKOUT_SECONDS,
+        detail="Too many incorrect attempts — try again later or request a new code.",
+    )
+
+    outcome = await verification.check_code(db, email, code)
+
+    if outcome in (verification.VerifyOutcome.OK, verification.VerifyOutcome.ALREADY_VERIFIED):
+        rate_limit.clear_failures(lock_key)
+        return {"verified": True}
+
+    if outcome == verification.VerifyOutcome.EXPIRED:
+        # About the caller's own code, not another account — safe to be specific.
+        raise HTTPException(status_code=422, detail="This code has expired. Request a new one.")
+
+    # NO_ACTIVE_CODE and INCORRECT get the same generic message — don't reveal
+    # whether this email ever had a code issued (non-enumerating, per the plan).
+    rate_limit.record_failure(lock_key, VERIFY_LOCKOUT_SECONDS)
+    raise HTTPException(status_code=422, detail="Incorrect code.")
+
+
+@router.get("/verify-email/status")
+async def verification_status(email: str = "", db: AsyncSession = Depends(get_db)):
+    email = (email or "").strip().lower()
+    if not email:
+        return {"verified": False}
+    return {"verified": await verification.is_verified(db, email)}
