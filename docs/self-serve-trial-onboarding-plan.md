@@ -160,9 +160,23 @@ and audited. [NET-NEW, small]
 **Phase 8 — Idempotent submission.** Disable-on-click, idempotency key, no duplicate
 clubs/users/trials on retry/refresh/double-click. [NET-NEW, small]
 
-**Phase 9 — Atomic registration transaction.** Extend `POST /organisations/onboard`
-with an account-creation step, rather than building a new transaction from scratch.
-[REUSE + extend]
+**Phase 9 — Atomic registration transaction (done).** `_onboard_club_core` was
+extracted from `POST /organisations/onboard` (club creation + sync kickoff +
+marketing-directory link) so `self-serve-trial/submit` reuses it instead of a
+parallel implementation; `/submit` now creates a real `User` + `Organisation` +
+`ClubMembership` (primary admin) and starts the first full sync. **Known
+atomicity gap**: `upsert_organisation` commits internally (pre-existing,
+shared with the ordinary onboarding path — not changed here), so club+user
+creation lands in that one commit, but the `ClubMembership` step after it
+isn't covered by it. A failure there (needs a genuine DB fault; no external
+calls happen in that window) leaves a club+user with no membership and 500s
+with an explicit "don't retry, contact support with this org_id/user_id"
+message, since a retry would just hit "club already registered" against the
+very club the failed attempt created. Judged proportionate for an internal,
+Super-Admin-only phase rather than building compensating-transaction
+machinery. **This is also where the Phase 5 multi-club-identity gap becomes
+real**, not just theoretical: real `Organisation`/`User` rows now exist per
+submission.
 
 **Phase 10 — Module trials**, including BetterFantasyCricket. Reuse
 `org_module_subscriptions` + `mod_subs.start_trial_billing()` wholesale. [REUSE,

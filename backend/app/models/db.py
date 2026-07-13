@@ -96,19 +96,22 @@ class SelfServeAcknowledgement(Base):
 
 
 class SelfServeIdempotencyKey(Base):
-    """The safety rail around the self-serve trial registration's eventual
-    atomic transaction (migration 138, Phase 8 — see
+    """The safety rail around the self-serve trial registration's atomic
+    registration transaction (migration 138 + 139, Phases 8-9 — see
     docs/self-serve-trial-onboarding-plan.md). The key itself is the primary
     key: a repeat submission with the same key is recognised (found here) and
-    never reprocessed, so a double-click, browser refresh, or network retry
-    can't create duplicate clubs/users/trials once Phase 9's real transaction
-    lands in this same code path."""
+    replayed rather than reprocessed, so a double-click, browser refresh, or
+    network retry can't create duplicate clubs/users/trials. ``org_id``/
+    ``user_id`` (migration 139) record what was actually created, so a replay
+    can return it."""
     __tablename__ = "self_serve_idempotency_keys"
 
     idempotency_key = Column(Text, primary_key=True)
     email = Column(Text, nullable=False)
     status = Column(Text, nullable=False, server_default="validated")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    org_id = Column(UUID(as_uuid=True), nullable=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True)
 
 
 class UserBookmark(Base):

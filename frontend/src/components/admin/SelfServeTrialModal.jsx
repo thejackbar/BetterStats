@@ -272,17 +272,17 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     }
   }
 
-  // ─── Step 5: password + final submission (Phase 8) ──────────────────────
+  // ─── Step 5: password + final submission (Phases 8-9) ────────────────────
   // Password is collected here, not with the rest of the admin details —
   // deliberately deferred to right before submission (Phase 4's original
-  // decision), so it spends less time sitting in state. Nothing is actually
-  // created yet: /submit only revalidates everything and records the
-  // idempotency key — the real club/user creation is a later phase.
+  // decision), so it spends less time sitting in state. /submit revalidates
+  // everything, then creates the real club and admin account.
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [submitResult, setSubmitResult] = useState(null)
   // Minted once per modal instance and reused across retries — a double
   // click or a retry after a network error replays the same key rather than
   // registering as a second attempt. Lazily initialised so a fresh UUID isn't
@@ -320,7 +320,10 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
         password,
         confirm_password: confirmPassword,
       })
-      if (result?.status === 'validated') setSubmitted(true)
+      if (result?.status === 'completed') {
+        setSubmitResult(result)
+        setSubmitted(true)
+      }
     } catch (e) {
       setSubmitError(e?.message || 'Could not submit registration.')
     } finally {
@@ -687,12 +690,22 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               {submitted ? (
                 <div className="pb-card p-4 bg-pb-surface2">
                   <p className="font-mono text-[11px] text-emerald-400">
-                    ✓ Registration validated and ready
+                    ✓ Club and admin account created — sync started
                   </p>
-                  <p className="font-mono text-[11px] text-pb-faint mt-2">
-                    Actually creating the club and admin account isn't built yet — it
-                    lands in the next phase of docs/self-serve-trial-onboarding-plan.md.
-                    Nothing has been created; this only confirms every check passed.
+                  <dl className="mt-2 space-y-1">
+                    <div>
+                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Club ID</dt>
+                      <dd className="text-pb-faint text-xs font-mono">{submitResult?.org_id}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Sync run ID</dt>
+                      <dd className="text-pb-faint text-xs font-mono">{submitResult?.run_id}</dd>
+                    </div>
+                  </dl>
+                  <p className="font-mono text-[11px] text-pb-faint mt-3">
+                    Auto-login and onboarding follow in later phases of
+                    docs/self-serve-trial-onboarding-plan.md — for now, check the new
+                    club in All Clubs.
                   </p>
                 </div>
               ) : (
@@ -829,7 +842,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
                 style={{ background: 'var(--pb-accent)' }}
               >
-                {submitted ? 'VALIDATED' : submitting ? 'PROCESSING…' : `START ${defaultTrialDays} DAY FREE TRIAL`}
+                {submitted ? 'CREATED' : submitting ? 'PROCESSING…' : `START ${defaultTrialDays} DAY FREE TRIAL`}
               </button>
             )}
           </div>

@@ -3,26 +3,32 @@
 See docs/self-serve-trial-onboarding-plan.md. Everything here sits behind the
 ``self_serve_registration_enabled`` platform flag (off by default) as well as
 ``require_super_admin`` — the flag hides the feature, it is not itself an
-authorization boundary. Registration and submission land in later phases.
+authorization boundary.
 """
+import logging
 import re
 import uuid as _uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import bcrypt
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
+from app.models.db import ClubMembership, Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
 from app.services import self_serve_verification as verification
 from app.services.login_audit import client_ip
+from app.services.memberships import ensure_primary_admin
 from app.services.sync import _parse_uuid, find_matching_organisation
 from app.services.usage_tracker import hash_ip
+
+logger = logging.getLogger(__name__)
 
 # Both guards apply to every route in this router, present and future: the flag
 # check alone is not an authorization boundary (see require_self_serve_registration_
@@ -384,15 +390,28 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
     }
 
 
-# ─── Step 5: final submission readiness (Phase 8) ────────────────────────────
+# ─── Step 5: final submission (Phases 8-9) ────────────────────────────────────
 # Password is collected here, not in Phase 4's admin-details step — deliberately
 # deferred to immediately before submission (see that router comment) so it
-# spends less time sitting in client state. Nothing is created here yet: no
-# club, no user, no trial — that's Phase 9's atomic transaction, which extends
-# this same handler rather than adding a new one. This phase's job is the
-# safety rail around it: full revalidation + an idempotency guard, so a
-# double-click, refresh, or network retry can be proven safe before there's
-# anything real to protect against duplicating.
+# spends less time sitting in client state.
+#
+# ATOMICITY CAVEAT (read before touching this): _onboard_club_core (in
+# organisations.py) calls upsert_organisation, which commits internally —
+# pre-existing behaviour, out of scope to change here since it's shared with
+# the ordinary Super Admin "New Club" / authenticated-user onboarding paths.
+# That commit durably commits the WHOLE session, including the User row this
+# handler creates earlier in the same request. So club+user creation is
+# effectively atomic with each other (both land in that one commit), but the
+# ClubMembership + primary-admin step that follows is NOT covered by it — if
+# that narrow window fails (a genuine DB outage; no external calls happen in
+# it), the club and user already exist with no membership between them. That
+# failure path returns a 500 naming the org_id/user_id and explicitly says not
+# to retry, since a retry would just hit "club already registered" against the
+# very club the failed attempt created — it needs a human to finish the
+# membership manually via existing Super Admin tooling. Given this whole
+# router requires super_admin already and the failure mode needs an actual
+# infra fault to trigger, that's judged proportionate for this phase rather
+# than building compensating-transaction machinery for it.
 
 # Union of the existing rule (POST /super/users: >= 10 chars) and the source
 # document's minimum (upper + digit + special) — "use existing rules where
@@ -433,17 +452,22 @@ class SubmitRequest(BaseModel):
 
 
 @router.post("/submit")
-async def submit(data: SubmitRequest, db: AsyncSession = Depends(get_db)):
+async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     key = (data.idempotency_key or "").strip()
     if not key:
         raise HTTPException(status_code=422, detail="Missing idempotency key")
 
     # Idempotent replay: a key already seen returns its stored outcome instead
-    # of reprocessing — the actual guarantee Phase 9's transaction will rely
-    # on for double-click/refresh/retry safety.
+    # of reprocessing — the guarantee that makes a double-click, refresh, or
+    # network retry provably safe rather than a second club/user.
     existing_key = await db.get(SelfServeIdempotencyKey, key)
     if existing_key is not None:
-        return {"status": existing_key.status, "replayed": True}
+        return {
+            "status": existing_key.status,
+            "org_id": str(existing_key.org_id) if existing_key.org_id else None,
+            "user_id": str(existing_key.user_id) if existing_key.user_id else None,
+            "replayed": True,
+        }
 
     email = (data.email or "").strip().lower()
 
@@ -476,11 +500,66 @@ async def submit(data: SubmitRequest, db: AsyncSession = Depends(get_db)):
     if password_errors:
         raise HTTPException(status_code=422, detail={"errors": password_errors})
 
-    # Every check passed. Record the key so a repeat submission replays this
-    # outcome rather than re-running any of the above (or, once Phase 9 lands,
-    # rather than creating a second club/user). Nothing else is written yet —
-    # see the module comment above.
-    db.add(SelfServeIdempotencyKey(idempotency_key=key, email=email, status="validated"))
-    await db.commit()
+    # Every check passed. Create the account first (flush only, not committed
+    # yet — see the atomicity caveat above): if this races against a
+    # concurrent signup for the same username/email despite the pre-check,
+    # the unique-constraint violation surfaces here, cleanly, before anything
+    # else exists.
+    username = (data.username or "").strip().lower()
+    user = User(
+        username=username,
+        email=email,
+        password_hash=bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode(),
+        display_name=(data.display_name or "").strip(),
+        first_name=(data.first_name or "").strip(),
+        last_name=(data.last_name or "").strip(),
+        mobile_number=(data.mobile_number or "").strip(),
+    )
+    db.add(user)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="That username or email was just taken — try again.")
 
-    return {"status": "validated", "replayed": False}
+    # Club creation + sync kickoff + marketing-directory link: the same
+    # underlying logic the existing authenticated-user "onboard" flow uses
+    # (organisations.py), not a parallel implementation. Commits internally
+    # (see the atomicity caveat above) — this also durably commits the user
+    # row created just above.
+    from app.routers.organisations import _onboard_club_core
+    org, run_id, name = await _onboard_club_core(db, background_tasks, str(org_id), data.name)
+
+    try:
+        db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
+        await db.flush()
+        await ensure_primary_admin(db, org.id)
+        db.add(SelfServeIdempotencyKey(
+            idempotency_key=key, email=email, status="completed",
+            org_id=org.id, user_id=user.id,
+        ))
+        await db.commit()
+    except Exception:
+        logger.error(
+            "self-serve registration: club %s / user %s were created but "
+            "membership linking failed — needs manual completion via existing "
+            "Super Admin tooling, do not retry this submission",
+            org.id, user.id, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The club and account were created, but linking them failed. "
+                f"Contact support with reference {org.id}/{user.id} — don't "
+                "retry, this needs manual completion."
+            ),
+        )
+
+    return {
+        "status": "completed",
+        "org_id": str(org.id),
+        "user_id": str(user.id),
+        "run_id": str(run_id),
+        "name": name,
+        "replayed": False,
+    }

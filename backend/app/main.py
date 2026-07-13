@@ -343,6 +343,12 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Result refs on the idempotency key (migration 139) — so a replayed
+        # submission can return which club/user it created.
+        await conn.execute(text(
+            "ALTER TABLE self_serve_idempotency_keys ADD COLUMN IF NOT EXISTS org_id UUID"))
+        await conn.execute(text(
+            "ALTER TABLE self_serve_idempotency_keys ADD COLUMN IF NOT EXISTS user_id UUID"))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
