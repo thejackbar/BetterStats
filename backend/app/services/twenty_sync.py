@@ -1193,7 +1193,9 @@ async def handle_contact_opt_out(session, email: str) -> None:
 
 
 async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" = None,
-                                 engagement_override: "Optional[dict]" = None) -> dict:
+                                 engagement_override: "Optional[dict]" = None,
+                                 create_opportunity: bool = False,
+                                 opportunity_modules: "Optional[list]" = None) -> dict:
     """Best-effort: upsert ONE prospect club's Company + the given
     MarketingClubContact ids (People) into Twenty. This is the "every email sent
     should upsert a record" hook: sending a BetterComms campaign to a club's
@@ -1212,6 +1214,13 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
     ordinary callers (a campaign send) are unaffected, since Twenty's own "does
     this club currently qualify as a Lead" rule (``_lead_signal``) already gates
     against a routine send alone creating one.
+
+    ``create_opportunity`` additionally upserts an Opportunity right after the
+    Lead — used only by a self-serve trial registration (a materially stronger
+    signal than a bare enquiry, which still waits on a human to flip Twenty's
+    own ``createOpportunity`` cascade field). ``opportunity_modules`` scopes it;
+    falls back to ``twenty_opportunity._default_modules(club)`` when omitted.
+    Every other caller leaves this off and is unaffected.
 
     Opens its own session + http client; never raises — a CRM hiccup must never
     break a send."""
@@ -1249,6 +1258,11 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
                     await twenty_leads_tasks.upsert_lead_for_club(session, http, club, org, ctid, engagement)
                 else:
                     await _sync_lead_from_company(session, http, club.grassroots_guid, company)
+                if create_opportunity:
+                    from app.services import twenty_opportunity
+                    modules = (opportunity_modules if opportunity_modules is not None
+                               else twenty_opportunity._default_modules(club))
+                    await twenty_opportunity._upsert_opportunity(session, http, club, ctid, modules)
                 for ct in contacts:
                     try:
                         person_vals = {**_person_values(ct, club.country),
@@ -1379,6 +1393,98 @@ async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
     return await push_club_and_contacts(
         club_id, contact_ids=[contact_id],
         engagement_override={"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
+
+
+async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_name: str,
+                                   email: str, phone: "Optional[str]"):
+    """Find-or-create the MarketingClub + registering-admin MarketingClubContact
+    a self-serve trial registration (routers/self_serve_trial.py) belongs to.
+    Checked in order: (1) a directory row already linked to this exact org —
+    ``_onboard_club_core`` (organisations.py), which always runs first as part
+    of the same registration, may already have matched-and-linked one by
+    playhq_id or name; reusing it here is what stops this function minting a
+    duplicate row for a club the directory already knows; (2) a row keyed on
+    the same CA org id the directory crawler would itself have used had it
+    found this club (``_link_existing_org``'s own fallback: BetterStats
+    ``Organisation.id`` == the grassroots org guid for a grassroots-sourced
+    club) — covers a retried registration whose earlier attempt already
+    created this row; (3) an exact name match; (4) create fresh. Unlike
+    ``_resolve_onboarding_club`` (a bare contact-form enquiry with no real CA
+    identifier at all, so it mints a synthetic ``manual:`` guid), a self-serve
+    registration always has a real org to key (2) on. Always (re-)stamps
+    ``existing_org_id`` — the row is now definitely a real BetterCricket
+    customer. Commits nothing itself — the caller commits."""
+    guid = str(org_id)
+    club = await session.scalar(
+        select(MarketingClub).where(MarketingClub.existing_org_id == org_id))
+    if club is None:
+        club = await session.scalar(
+            select(MarketingClub).where(MarketingClub.grassroots_guid == guid))
+    if club is None:
+        club = await session.scalar(
+            select(MarketingClub).where(func.lower(MarketingClub.name) == org_name.lower()))
+    email_l = (email or "").strip().lower()
+    if club is None:
+        club = MarketingClub(
+            grassroots_guid=guid, name=org_name[:200], kind="club",
+            status="contacted", source="self_serve_trial",
+            contact_email=email_l or None, contact_phone=phone,
+        )
+        session.add(club)
+        await session.flush()
+    club.existing_org_id = org_id
+
+    contact = None
+    if email_l:
+        contact = (await session.execute(
+            select(MarketingClubContact).where(
+                MarketingClubContact.marketing_club_id == club.id,
+                func.lower(MarketingClubContact.email) == email_l)
+        )).scalars().first()
+    if contact is None:
+        contact = MarketingClubContact(
+            marketing_club_id=club.id, full_name=(contact_name or "").strip()[:200] or None,
+            email=email_l or None, mobile=phone, role="Club Admin", role_rank=1,
+            source="self_serve_trial", subscribed=True, outreach_selected=True,
+        )
+        session.add(contact)
+        await session.flush()
+    elif not contact.outreach_selected:
+        contact.outreach_selected = True
+
+    return club, contact
+
+
+async def push_self_serve_registration(*, org_id, org_name: str, contact_name: str = "",
+                                       email: str = "", phone: "Optional[str]" = None,
+                                       modules: "Optional[list]" = None) -> dict:
+    """A self-serve trial registration is the strongest signal a prospect can
+    give — a real person just created real login credentials for a real club,
+    with no enquiry-then-follow-up gap at all. Find-or-create the linked
+    MarketingClub + registering-admin Contact (``_resolve_self_serve_club``),
+    then push Company + Lead + Contact forced Hot (100 — same treatment
+    ``push_onboarding_enquiry`` gives a plain enquiry) AND an Opportunity,
+    scoped to the modules the admin actually selected a trial for. Unlike a
+    bare enquiry, a registration doesn't wait on a human to flip Twenty's own
+    ``createOpportunity`` field — the deal is real from the moment the club
+    exists. Best-effort and backgrounded by the caller; never raises."""
+    if not client.configured:
+        return {"skipped": "not configured"}
+    try:
+        async with async_session_maker() as session:
+            club, contact = await _resolve_self_serve_club(
+                session, org_id=org_id, org_name=org_name, contact_name=contact_name,
+                email=email, phone=phone)
+            await session.commit()
+            club_id, contact_id = club.id, contact.id
+    except Exception as e:  # noqa: BLE001 — never let a CRM error affect the caller
+        logger.exception("twenty push_self_serve_registration: club resolve failed for org %s", org_id)
+        return {"error": str(e)}
+
+    return await push_club_and_contacts(
+        club_id, contact_ids=[contact_id],
+        engagement_override={"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True},
+        create_opportunity=True, opportunity_modules=_twenty_modules(modules or []))
 
 
 async def push_org_company(org_id, engagement_override: "Optional[dict]" = None) -> dict:

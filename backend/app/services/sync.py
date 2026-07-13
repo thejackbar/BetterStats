@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import uuid
@@ -497,7 +498,38 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
         return inserted
 
 
+# Caps how many org-level syncs can be pulling from the shared, rate-sensitive
+# Grassroots proxy at once (see CLAUDE.md's Data Source Topology notes on
+# politeness/pagination). Each sync already fans out up to 6 concurrent
+# scorecard requests via grassroots_scores_client's own semaphore, so 2
+# concurrent org syncs already means up to 12 concurrent proxy requests. The
+# weekly scheduled sync (jobs/scheduler.py) awaits one org at a time already,
+# so this never affects it — it exists for the case several "Sync Now"
+# clicks or self-serve trial registrations land close together from the
+# admin UI.
+_SYNC_GOVERNOR = asyncio.Semaphore(2)
+
+
 async def sync_organisation(
+    org_id_str: str,
+    run_id: Optional[uuid.UUID] = None,
+    kind: str = "org_full",
+) -> dict:
+    """Thin concurrency gate in front of ``_sync_organisation_impl`` — every
+    caller (weekly cron, manual Sync Now, Full Rebuild, self-serve trial
+    registration) goes through here so the governor above applies uniformly,
+    at the one place that actually talks to the shared proxy, rather than
+    each call site needing to know about it."""
+    if run_id is not None and _SYNC_GOVERNOR.locked():
+        await update_sync_run(run_id, {
+            "progress_phase": "Queued — waiting for another club's sync to finish",
+            "progress_pct": 0, "progress_done": None, "progress_total": None,
+        })
+    async with _SYNC_GOVERNOR:
+        return await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind)
+
+
+async def _sync_organisation_impl(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
     kind: str = "org_full",

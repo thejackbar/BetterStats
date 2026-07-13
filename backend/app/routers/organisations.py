@@ -70,6 +70,64 @@ async def search_organisations(q: str = "", _: User = Depends(get_current_user))
     return results
 
 
+async def _onboard_club_core(
+    db: AsyncSession, background_tasks: BackgroundTasks, org_id: str, org_name: str = "",
+) -> tuple[Organisation, uuid.UUID, str]:
+    """Create/upsert the club, kick off its first full sync, and best-effort
+    link + push its Marketing Directory row — the part of onboarding that's
+    identical regardless of who's attaching to it afterwards: an already-
+    authenticated user (onboard_organisation, below) or a brand-new one
+    created in the same breath (self-serve trial registration,
+    routers/self_serve_trial.py). Deliberately does NOT touch club membership
+    — callers attach the user themselves, since that part genuinely differs
+    (an existing user vs. a new one; a super admin is never attached at all).
+
+    NOTE on atomicity: upsert_organisation commits internally (pre-existing
+    behaviour, out of scope to change here — it's used elsewhere too). That
+    commit durably commits the *whole* session, including anything the caller
+    added earlier but hasn't committed yet. Callers that need "nothing exists
+    until everything succeeds" should do their own pre-org-creation writes
+    (e.g. a new User row) as flush-only before calling this, and treat
+    anything after this call's return as no longer cleanly rollback-able."""
+    org_data = await playhq_client.get_organisation(org_id)
+    if not org_data:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    name = org_name.strip() or org_data.get("name") or org_id
+    org_data["name"] = name
+
+    from app.services.sync import start_sync_run
+    org = await upsert_organisation(db, org_data)
+    run_id = await start_sync_run(org.id, "org_full")
+    # Same in-memory guard trigger_sync uses, so an admin who clicks "Sync
+    # Now" on this club while its own first sync is still running gets
+    # "already_running" instead of a second sync racing the first.
+    _org_sync_running.add(org_id)
+    background_tasks.add_task(_sync_safe, org_id, run_id, "org_full")
+
+    # Link this now-synced org back to its Marketing Directory row immediately —
+    # otherwise the link only happens the next time the directory crawler
+    # revisits this club (club_directory._link_existing_org), which could be
+    # days away. Same matching priority (PlayHQ id, then name), reversed to look
+    # up FROM the org. Best-effort: a club that isn't in the directory at all is
+    # a normal no-op. Pushing to Twenty now (rather than waiting for the nightly
+    # refresh) is what makes "we synced the club" show up in the CRM lifecycle/
+    # engagement score right away.
+    mc = await db.scalar(
+        select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
+                                    MarketingClub.playhq_id == org_id))
+    if mc is None:
+        mc = await db.scalar(
+            select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
+                                        func.lower(MarketingClub.name) == name.lower()))
+    if mc is not None:
+        mc.existing_org_id = org.id
+        await db.commit()
+        _push_club_to_twenty(org.id)
+
+    return org, run_id, name
+
+
 @router.post("/onboard", status_code=202)
 async def onboard_organisation(
     data: OnboardRequest,
@@ -97,37 +155,7 @@ async def onboard_organisation(
                 detail="Your account is already linked to a club. Contact a super admin to onboard another.",
             )
 
-    org_data = await playhq_client.get_organisation(data.org_id)
-    if not org_data:
-        raise HTTPException(status_code=404, detail="Organisation not found")
-
-    name = data.org_name.strip() or org_data.get("name") or data.org_id
-    org_data["name"] = name
-
-    from app.services.sync import start_sync_run
-    org = await upsert_organisation(db, org_data)
-    run_id = await start_sync_run(org.id, "org_full")
-    background_tasks.add_task(_sync_safe, data.org_id, run_id, "org_full")
-
-    # Link this now-synced org back to its Marketing Directory row immediately —
-    # otherwise the link only happens the next time the directory crawler
-    # revisits this club (club_directory._link_existing_org), which could be
-    # days away. Same matching priority (PlayHQ id, then name), reversed to look
-    # up FROM the org. Best-effort: a club that isn't in the directory at all is
-    # a normal no-op. Pushing to Twenty now (rather than waiting for the nightly
-    # refresh) is what makes "we synced the club" show up in the CRM lifecycle/
-    # engagement score right away.
-    mc = await db.scalar(
-        select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
-                                    MarketingClub.playhq_id == data.org_id))
-    if mc is None:
-        mc = await db.scalar(
-            select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
-                                        func.lower(MarketingClub.name) == name.lower()))
-    if mc is not None:
-        mc.existing_org_id = org.id
-        await db.commit()
-        _push_club_to_twenty(org.id)
+    org, run_id, name = await _onboard_club_core(db, background_tasks, data.org_id, data.org_name)
 
     # The onboarded club becomes the club admin's linked club.
     if not is_super:

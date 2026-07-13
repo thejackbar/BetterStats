@@ -160,38 +160,188 @@ and audited. [NET-NEW, small]
 **Phase 8 — Idempotent submission.** Disable-on-click, idempotency key, no duplicate
 clubs/users/trials on retry/refresh/double-click. [NET-NEW, small]
 
-**Phase 9 — Atomic registration transaction.** Extend `POST /organisations/onboard`
-with an account-creation step, rather than building a new transaction from scratch.
-[REUSE + extend]
+**Phase 9 — Atomic registration transaction (done).** `_onboard_club_core` was
+extracted from `POST /organisations/onboard` (club creation + sync kickoff +
+marketing-directory link) so `self-serve-trial/submit` reuses it instead of a
+parallel implementation; `/submit` now creates a real `User` + `Organisation` +
+`ClubMembership` (primary admin) and starts the first full sync. **Known
+atomicity gap**: `upsert_organisation` commits internally (pre-existing,
+shared with the ordinary onboarding path — not changed here), so club+user
+creation lands in that one commit, but the `ClubMembership` step after it
+isn't covered by it. A failure there (needs a genuine DB fault; no external
+calls happen in that window) leaves a club+user with no membership and 500s
+with an explicit "don't retry, contact support with this org_id/user_id"
+message, since a retry would just hit "club already registered" against the
+very club the failed attempt created. Judged proportionate for an internal,
+Super-Admin-only phase rather than building compensating-transaction
+machinery. **This is also where the Phase 5 multi-club-identity gap becomes
+real**, not just theoretical: real `Organisation`/`User` rows now exist per
+submission.
 
-**Phase 10 — Module trials**, including BetterFantasyCricket. Reuse
-`org_module_subscriptions` + `mod_subs.start_trial_billing()` wholesale. [REUSE,
-near-total]
+**Phase 10 — Module trials (done)**, including BetterFantasyCricket. Reused
+`mod_subs.ensure_core_subscription` (BetterStats, mandatory, active not
+trialled) + `mod_subs.start_trial_billing` (everything else, at the platform's
+configured default trial length) wholesale — no new trial logic. Modal
+defaults all five optional modules to selected (deselect rather than opt in,
+per the source document's framing). Surfaced a real MissingGreenlet trap:
+`_onboard_club_core`'s internal commit leaves `module_subscriptions` unloaded
+on the now-persistent org, so an explicit `db.refresh(org,
+attribute_names=["module_subscriptions"])` (the same idiom `club_admin.py`'s
+`patch_club` already uses) is required before touching it — the exact hazard
+`create_club`'s own comment warns about.
 
-**Phase 11 — BetterComms defaults + paywall.** Sandbox defaults configured only when
-BetterAdmin is selected. Intercept `request_limit_increase` for trial-only BetterAdmin
-clubs: return "Production limits are only available to subscribers" + an invitation to
-subscribe to BetterAdmin now, instead of creating the upgrade request.
+**Phase 11 — BetterComms defaults + paywall (done).** Part 1 (sandbox defaults
+"configured only when BetterAdmin is selected") turned out to need zero new code:
+`Organisation.comms_tier` already defaults to `'sandbox'` at the schema level
+(migration 125, `server_default="sandbox"`) for every club regardless of module
+selection, and the cap fields are nullable and inherit the platform-wide defaults
+dynamically — there is no per-club "configure" step to gate. Part 2 (the paywall) is
+a small guard clause added to the top of `request_limit_increase` in `comms.py`: if
+the club's `MODULE_COMMS` subscription is `STATUS_TRIAL`, raise `402` with "Production
+sending limits are only available to subscribers... subscribe to BetterAdmin to
+request production sending" instead of creating the upgrade request. Relies on
+`get_current_club` already eager-loading `module_subscriptions`, so no extra query.
+No frontend change needed — `CommsSettings.jsx`'s `requestLimit` already displays
+`e.message` generically for any thrown error, so the 402's plain-string `detail`
+renders correctly as-is.
 
-**Phase 12 — MarketingClub + Twenty Lead/Opportunity creation.** On successful
-registration: find-or-create the linked `MarketingClub` row (mirroring the existing
-`_resolve_onboarding_club` pattern), then fire the existing
-`create_opportunity_from_company` cascade so the club and the registering admin land
-as a Twenty Lead + Opportunity simultaneously.
+**Phase 12 — MarketingClub + Twenty Lead/Opportunity creation (done).** New
+`twenty_sync._resolve_self_serve_club` finds-or-creates the `MarketingClub` +
+registering-admin `MarketingClubContact` for a completed registration — checked in
+order: a row `_onboard_club_core` already linked to this exact org (it runs first,
+inside the same registration, and may already have matched-and-linked one by
+playhq_id or name), else a row keyed on the org's own id (the same guid the
+directory crawler would itself use for a grassroots-sourced club), else an exact
+name match, else create fresh. Unlike a bare "onboard my club" enquiry
+(`_resolve_onboarding_club`, no real CA identifier, mints a synthetic guid), a
+registration always has a real org to key on, so no synthetic id is ever needed.
+`push_club_and_contacts` gained `create_opportunity`/`opportunity_modules` params
+(off by default, so every existing caller — campaign sends, the enquiry path — is
+unaffected) that, right after the Lead upsert, also call
+`twenty_opportunity._upsert_opportunity` directly. Rather than going through the
+webhook cascade (`create_opportunity_from_company`, which expects a human to flip
+Twenty's own field and round-trips through the Twenty API to re-derive the club),
+calling the same underlying upsert directly is simpler here since the club/company
+id are already in hand from the same request. New `push_self_serve_registration`
+(`twenty_sync.py`) ties it together: resolve club/contact, commit, then
+`push_club_and_contacts(..., engagement_override=<forced Hot 100>,
+create_opportunity=True, opportunity_modules=<the modules the admin selected>)` —
+same forced-Hot treatment `push_onboarding_enquiry` gives a plain enquiry, plus the
+Opportunity a registration (a materially stronger signal) doesn't wait on. Wired
+into `self_serve_trial.py`'s `/submit` as a `background_tasks.add_task` right after
+the transaction commits — best-effort, never blocks or fails the registration
+response.
 
-**Phase 13 — Sync trigger + queue governor + progress + admin-home display.** Reuse
-the Full Rebuild implementation and `sync_runs`. Build the concurrency governor
-properly (the source document's neglected "Phase 6.2") — protects the shared,
-rate-sensitive Grassroots proxy from contention if multiple internal test
-registrations run syncs concurrently.
+**Phase 13 — Sync trigger + queue governor + progress + admin-home display
+(done).** The sync trigger itself needed no new code — `_onboard_club_core`
+(Phase 9) already kicks off the org's first full sync via the same
+`start_sync_run`/`_sync_safe` machinery `POST /organisations/{id}/sync` uses.
+Found (and fixed) a small pre-existing gap while reviewing it: that call never
+added the org to `organisations.py`'s `_org_sync_running` in-memory guard, so
+an operator clicking "Sync Now" on a brand-new self-serve club while its own
+first sync was still running could race a second sync of the same org — now
+added right alongside `start_sync_run`.
 
-**Phase 14 — Auto-login/redirect.** Reuse existing session mechanism.
+**Concurrency governor**: `sync.py`'s `sync_organisation` was renamed to
+`_sync_organisation_impl` (body untouched) and re-exported as a thin wrapper
+that acquires a new module-level `_SYNC_GOVERNOR = asyncio.Semaphore(2)`
+before calling it — every caller (weekly cron, manual Sync Now, Full
+Rebuild, per-player deep sync, self-serve registration) goes through the
+same public `sync_organisation` name, so the cap applies uniformly at the
+one place that actually talks to the shared, rate-sensitive Grassroots
+proxy, with zero changes to the sync logic itself. The weekly cron already
+awaits one org at a time (`jobs/scheduler.py`), so it's unaffected in
+practice — this exists for the case several "Sync Now" clicks or self-serve
+registrations land close together. When a sync has to wait for a slot, it
+stamps `progress_phase: "Queued — waiting for another club's sync to
+finish"` onto its `sync_runs` row so it reads as waiting, not stuck.
 
-**Phase 15 — Onboarding wizard (net new).** Launches without sync-dependent steps
-(Import Historical Stats, Import Honours, Merge Grades) while sync is running. Once
-sync completes successfully, those steps are added and the wizard reopens
-automatically if not already open — reusing the same "last seen/dismissed" state
-pattern already established for the notification bell.
+**Progress**: already fully persisted by the existing `sync_runs.stats`
+`progress_phase`/`progress_pct`/`progress_done`/`progress_total` fields
+(`_progress`/`update_sync_run`, called throughout `sync_organisation`'s
+phases) — no new persistence needed, just the new queued phase above.
+
+**Admin-home display**: since Phase 14 (auto-login) and Phase 15 (onboarding
+wizard) don't exist yet, a self-serve-registered club has no "own admin
+home" to show this on yet — the meaningful place for THIS phase is where the
+Super Admin operator already is. `SelfServeTrialModal.jsx`'s success screen
+now polls `GET /organisations/{id}/sync-logs` (the same endpoint
+`AdminSync.jsx` already polls, 4s cadence) and renders a live `ProgressBar`
+(reusing `components/ProgressBar.jsx`) against the just-started run, stopping
+once it's no longer `running`. Revisit once Phase 14/15 exist — the new
+admin's own dashboard becomes the more natural home for this.
+
+**Phase 14 — Auto-login/redirect (done, deliberately not automatic yet).**
+Session auth turned out to be a plain HttpOnly JWT cookie (`bs_session`),
+minted by two small, previously module-private helpers in `auth.py`
+(`_create_token`/`_set_session_cookie` — de-privatised to
+`create_session_token`/`set_session_cookie` since they're now a real
+cross-router primitive). Auto-login the naive way — set that cookie on
+`/submit`'s own response — turns out to be actively wrong in THIS phase: the
+router is `require_super_admin`-gated, so the only caller is ever the
+operator's own Super Admin session, and silently swapping their session
+cookie for the new club admin's would eject them from Super Admin without
+asking, every single test registration. (Confirmed there's no existing
+"impersonate" mechanism to reuse — the closest analogue, `active_club_id`/
+`switch-club`, is a same-session scope switch that never touches the cookie
+at all, a different and safer shape than "mint a new session and swap it
+in".)
+
+Built the real thing anyway, per Decision 5's "build the complete primitive
+now" philosophy, just gated behind an explicit action instead of an automatic
+one: `POST /self-serve-trial/login-as/{user_id}` mints and sets the session
+cookie for the given user — scoped tightly to accounts THIS flow created (a
+`SelfServeIdempotencyKey` row must reference the exact user id), so it can
+never become a general impersonation backdoor. `SelfServeTrialModal.jsx`'s
+success screen gained a "Log in as new admin" button (explicit
+`window.confirm`, since it deliberately ends the operator's own session) that
+calls it then hard-reloads to `/admin` (mirroring `switchClub`'s own hard
+reload, so every already-mounted page refetches under the new session).
+
+**When this goes public**: the exact same `create_session_token`/
+`set_session_cookie` primitive is what a public registration endpoint should
+call unconditionally right after account creation — no new backend work,
+only a different (unauthenticated) caller and no more explicit-action gate,
+since there's no super-admin session to protect from a public visitor.
+
+**Phase 15 — Onboarding wizard (done).** New `onboarding_wizard_state` table
+(migration 140, one row per club, not per user — onboarding is a club property,
+so a second admin invited later sees the same progress rather than starting
+over): `completed_steps` (JSON array), `dismissed_at`, `sync_steps_shown_at`.
+New router `routers/onboarding_wizard.py` (`/club-admin/onboarding-wizard/*`,
+gated by the already-existing-but-previously-unwired
+`require_onboarding_wizard_enabled` flag dependency) computes a dynamic step
+list rather than storing one: a fixed set of always-shown steps (branding,
+invite another admin, one "Explore <Module>" step per module the club is
+actually entitled to via `org_entitled_modules`), plus — only once the club's
+first `kind='org_full'` sync has a `success` row in `sync_runs` — the three
+sync-dependent steps named in Decision 11: Import Historical Stats
+(`/admin/import`), Import Honours (`/admin/awards`), Merge Grades
+(`/admin/grades`). Every step links to an existing admin tool (found via a
+research pass first — branding/invite-admin/historical-stats-import/honours-
+import/grade-merge all already existed); this wizard is a guided checklist
+over them, not a reimplementation of any of them.
+
+**Auto-open logic** mirrors the notification bell's `last_notification_seen_at`
+pattern but needed a second flag for Decision 11's specific "reopens once sync
+completes" requirement: `should_auto_open` is true when nothing is dismissed
+yet, OR when sync just became ready and the sync-dependent steps haven't been
+shown even once (`sync_steps_shown_at IS NULL`) — gated on there being
+anything left undone at all, so a club that's finished every step doesn't keep
+popping the wizard on every login. `POST /onboarding-wizard/opened` (called by
+the modal itself on open, auto or manual) stamps `sync_steps_shown_at`, which
+is what makes the reopen fire exactly once per sync completion rather than on
+every subsequent login. `AdminLayout.jsx` checks on every fresh login (the
+same `justLoggedIn` signal the bell's own auto-open reuses, so a genuine login
+event — not every page navigation — is what re-checks this) and shows a
+"Setup guide" header button whenever the state fetch succeeds (a 404 — flag
+off — just hides the entry point, same "doesn't exist" convention as the rest
+of this project's feature flags). `OnboardingWizardModal.jsx` is otherwise
+self-contained: fetches its own state, lets each step be ticked done/undone
+independently of navigating to it (so an admin who already did something
+manually, e.g. inviting an admin before ever seeing the wizard, can just tick
+it), and each step's title is a link that closes the modal and navigates
+there.
 
 **Phase 16 — Trial lifecycle notifications + onboarding nudges (net new,
 scheduler-based).** Extends the `_scan_trials_and_renewals` pattern into real

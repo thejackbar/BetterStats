@@ -3,26 +3,39 @@
 See docs/self-serve-trial-onboarding-plan.md. Everything here sits behind the
 ``self_serve_registration_enabled`` platform flag (off by default) as well as
 ``require_super_admin`` — the flag hides the feature, it is not itself an
-authorization boundary. Registration and submission land in later phases.
+authorization boundary.
 """
+import logging
 import re
 import uuid as _uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import bcrypt
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, SelfServeAcknowledgement, User, get_db
+from app.auth.modules import BILLABLE_MODULES, MODULE_CORE
+from app.models.db import ClubMembership, Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
+from app.services import module_subscriptions as mod_subs
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
 from app.services import self_serve_verification as verification
 from app.services.login_audit import client_ip
+from app.services.memberships import ensure_primary_admin
 from app.services.sync import _parse_uuid, find_matching_organisation
 from app.services.usage_tracker import hash_ip
+
+# The optional add-on modules a trial can select (BetterStats/Core is always
+# on, not a choice — handled via mod_subs.ensure_core_subscription, not a
+# trial). Same set routers/club_admin.py's SuperClubs module editor manages.
+_SELECTABLE_MODULES = tuple(k for k in BILLABLE_MODULES if k != MODULE_CORE)
+
+logger = logging.getLogger(__name__)
 
 # Both guards apply to every route in this router, present and future: the flag
 # check alone is not an authorization boundary (see require_self_serve_registration_
@@ -165,11 +178,12 @@ class ValidateAdminRequest(BaseModel):
     mobile_number: str = ""
 
 
-@router.post("/validate-admin")
-async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
-    """Validate-as-you-type for the admin-details step. Reuses the exact
-    username rules (lowercase, 3-32 chars, uniqueness) the existing
-    POST /super/users already enforces.
+async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -> dict:
+    """The admin-details field checks, shared by the as-you-type validator
+    below and the final /submit revalidation (Phase 8) — one set of rules,
+    not two copies that could drift. Reuses the exact username rules
+    (lowercase, 3-32 chars, uniqueness) the existing POST /super/users already
+    enforces.
 
     Email: format-checked, then checked against existing users and BLOCKED if
     already taken (Phase 5, see docs/self-serve-trial-onboarding-plan.md Decision
@@ -215,10 +229,20 @@ async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(
     if not mobile or not _mobile_valid(mobile):
         errors["mobile_number"] = "Enter a valid Australian mobile number, or an international number starting with +"
 
+    return errors
+
+
+@router.post("/validate-admin")
+async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
+    """Validate-as-you-type for the admin-details step."""
+    errors = await _validate_admin_fields(db, data)
     return {
         "valid": not errors,
         "errors": errors,
-        "normalised": {"username": username, "email": email},
+        "normalised": {
+            "username": (data.username or "").strip().lower(),
+            "email": (data.email or "").strip().lower(),
+        },
     }
 
 
@@ -371,3 +395,251 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
         "privacy_version": PRIVACY_VERSION,
         "accepted_at": accepted_at.isoformat(),
     }
+
+
+# ─── Step 5: final submission (Phases 8-9) ────────────────────────────────────
+# Password is collected here, not in Phase 4's admin-details step — deliberately
+# deferred to immediately before submission (see that router comment) so it
+# spends less time sitting in client state.
+#
+# ATOMICITY CAVEAT (read before touching this): _onboard_club_core (in
+# organisations.py) calls upsert_organisation, which commits internally —
+# pre-existing behaviour, out of scope to change here since it's shared with
+# the ordinary Super Admin "New Club" / authenticated-user onboarding paths.
+# That commit durably commits the WHOLE session, including the User row this
+# handler creates earlier in the same request. So club+user creation is
+# effectively atomic with each other (both land in that one commit), but the
+# ClubMembership + primary-admin + module-trial step that follows is NOT
+# covered by it — if that narrow window fails (a genuine DB outage; no
+# external calls happen in it), the club and user already exist with no
+# membership or trials attached. That failure path returns a 500 naming the
+# org_id/user_id and explicitly says not to retry, since a retry would just
+# hit "club already registered" against the very club the failed attempt
+# created — it needs a human to finish the rest manually via existing Super
+# Admin tooling. Given this whole router requires super_admin already and the
+# failure mode needs an actual infra fault to trigger, that's judged
+# proportionate for this phase rather than building compensating-transaction
+# machinery for it.
+
+# Union of the existing rule (POST /super/users: >= 10 chars) and the source
+# document's minimum (upper + digit + special) — "use existing rules where
+# stronger" cuts both ways when neither is a strict superset of the other.
+_PASSWORD_MIN_LEN = 10
+_HAS_UPPER = re.compile(r"[A-Z]")
+_HAS_DIGIT = re.compile(r"\d")
+_HAS_SPECIAL = re.compile(r"[^A-Za-z0-9]")
+
+
+def _password_errors(password: str, confirm: str) -> list[str]:
+    errors = []
+    if len(password or "") < _PASSWORD_MIN_LEN:
+        errors.append(f"Password must be at least {_PASSWORD_MIN_LEN} characters")
+    if not _HAS_UPPER.search(password or ""):
+        errors.append("Password must contain an uppercase letter")
+    if not _HAS_DIGIT.search(password or ""):
+        errors.append("Password must contain a number")
+    if not _HAS_SPECIAL.search(password or ""):
+        errors.append("Password must contain a special character")
+    if password != confirm:
+        errors.append("Passwords do not match")
+    return errors
+
+
+class SubmitRequest(BaseModel):
+    idempotency_key: str
+    org_id: str
+    name: str
+    first_name: str = ""
+    last_name: str = ""
+    display_name: str = ""
+    username: str = ""
+    email: str = ""
+    mobile_number: str = ""
+    password: str = ""
+    confirm_password: str = ""
+    modules: list[str] = []
+
+
+@router.post("/submit")
+async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    key = (data.idempotency_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=422, detail="Missing idempotency key")
+
+    # Idempotent replay: a key already seen returns its stored outcome instead
+    # of reprocessing — the guarantee that makes a double-click, refresh, or
+    # network retry provably safe rather than a second club/user.
+    existing_key = await db.get(SelfServeIdempotencyKey, key)
+    if existing_key is not None:
+        return {
+            "status": existing_key.status,
+            "org_id": str(existing_key.org_id) if existing_key.org_id else None,
+            "user_id": str(existing_key.user_id) if existing_key.user_id else None,
+            "replayed": True,
+        }
+
+    email = (data.email or "").strip().lower()
+
+    org_id = _parse_uuid(data.org_id)
+    if not org_id:
+        raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
+    if await find_matching_organisation(db, org_id, data.name):
+        raise HTTPException(status_code=409, detail="This club has already been registered in BetterCricket.")
+    if not await playhq_client.get_organisation(str(org_id)):
+        raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
+
+    admin_errors = await _validate_admin_fields(db, ValidateAdminRequest(
+        first_name=data.first_name, last_name=data.last_name, display_name=data.display_name,
+        username=data.username, email=data.email, mobile_number=data.mobile_number,
+    ))
+    if admin_errors:
+        raise HTTPException(status_code=422, detail={"errors": list(admin_errors.values())})
+
+    if not email or not await verification.is_verified(db, email):
+        raise HTTPException(status_code=422, detail="Email is not verified")
+
+    ack = await db.execute(
+        select(SelfServeAcknowledgement).where(SelfServeAcknowledgement.email == email)
+        .order_by(SelfServeAcknowledgement.accepted_at.desc()).limit(1)
+    )
+    if ack.scalar_one_or_none() is None:
+        raise HTTPException(status_code=422, detail="Acknowledgements have not been accepted")
+
+    password_errors = _password_errors(data.password, data.confirm_password)
+    if password_errors:
+        raise HTTPException(status_code=422, detail={"errors": password_errors})
+
+    # Every check passed. Create the account first (flush only, not committed
+    # yet — see the atomicity caveat above): if this races against a
+    # concurrent signup for the same username/email despite the pre-check,
+    # the unique-constraint violation surfaces here, cleanly, before anything
+    # else exists.
+    username = (data.username or "").strip().lower()
+    user = User(
+        username=username,
+        email=email,
+        password_hash=bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode(),
+        display_name=(data.display_name or "").strip(),
+        first_name=(data.first_name or "").strip(),
+        last_name=(data.last_name or "").strip(),
+        mobile_number=(data.mobile_number or "").strip(),
+    )
+    db.add(user)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="That username or email was just taken — try again.")
+
+    # Club creation + sync kickoff + marketing-directory link: the same
+    # underlying logic the existing authenticated-user "onboard" flow uses
+    # (organisations.py), not a parallel implementation. Commits internally
+    # (see the atomicity caveat above) — this also durably commits the user
+    # row created just above.
+    from app.routers.organisations import _onboard_club_core
+    org, run_id, name = await _onboard_club_core(db, background_tasks, str(org_id), data.name)
+
+    # That internal commit leaves module_subscriptions unloaded on this now-
+    # persistent org — the exact trap club_admin.py's create_club comment
+    # warns about ("accessing the collection after a flush ... raises
+    # MissingGreenlet"). Explicit refresh before ensure_core_subscription /
+    # start_trial_billing touch it (same idiom as club_admin.py's patch_club).
+    await db.refresh(org, attribute_names=["module_subscriptions"])
+
+    requested_modules = sorted({m for m in (data.modules or []) if m in _SELECTABLE_MODULES})
+
+    try:
+        db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
+        await db.flush()
+        await ensure_primary_admin(db, org.id)
+
+        # BetterStats is mandatory, not a trial choice — active from day one,
+        # same as the ordinary Super Admin "New Club" flow. Everything else
+        # the operator selected starts a trial at the configured length.
+        mod_subs.ensure_core_subscription(org)
+        default_days = await ps.get_default_trial_days(db)
+        for module_key in requested_modules:
+            mod_subs.start_trial_billing(org, module_key, days=default_days)
+
+        db.add(SelfServeIdempotencyKey(
+            idempotency_key=key, email=email, status="completed",
+            org_id=org.id, user_id=user.id,
+        ))
+        await db.commit()
+
+        # Best-effort, backgrounded: land the club + registering admin in
+        # Twenty as a Company/Contact/Lead/Opportunity immediately (per the
+        # user's explicit call — a self-serve registration is the strongest
+        # buying signal there is, stronger even than a direct "onboard my
+        # club" enquiry, so it doesn't wait on the nightly refresh or a human
+        # flipping Twenty's own createOpportunity field). Never raises;
+        # a CRM hiccup can't undo the registration that already committed.
+        from app.services import twenty_sync
+        background_tasks.add_task(
+            twenty_sync.push_self_serve_registration,
+            org_id=org.id, org_name=name, contact_name=user.display_name,
+            email=email, phone=user.mobile_number or None, modules=list(requested_modules),
+        )
+    except Exception:
+        logger.error(
+            "self-serve registration: club %s / user %s were created but "
+            "membership/module-trial linking failed — needs manual completion "
+            "via existing Super Admin tooling, do not retry this submission",
+            org.id, user.id, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The club and account were created, but finishing setup failed. "
+                f"Contact support with reference {org.id}/{user.id} — don't "
+                "retry, this needs manual completion."
+            ),
+        )
+
+    return {
+        "status": "completed",
+        "org_id": str(org.id),
+        "user_id": str(user.id),
+        "run_id": str(run_id),
+        "name": name,
+        "modules": [MODULE_CORE, *requested_modules],
+        "replayed": False,
+    }
+
+
+@router.post("/login-as/{user_id}")
+async def login_as_registered_admin(user_id: str, response: Response, db: AsyncSession = Depends(get_db)):
+    """Internal-testing convenience: lets the Super Admin operator who just ran
+    a self-serve registration actually see what the new club admin sees,
+    without a second browser/incognito window. Deliberately NOT wired into
+    `/submit` itself — auto-setting the session cookie there would silently
+    swap the operator's own `bs_session` for the new admin's the instant they
+    register a test club, ending their super-admin session without asking.
+    This is an explicit, separate action instead (mirrors `switch-club` being
+    an explicit, visible action rather than an automatic side effect).
+
+    Scoped tightly to accounts THIS flow created — a `SelfServeIdempotencyKey`
+    row must reference the exact user id — so it can never become a general
+    impersonation backdoor for arbitrary users.
+
+    This is also the real "establish a session" primitive a future public
+    self-serve flow will call automatically and unconditionally right after
+    account creation (Decision 5: build the complete thing now, so going
+    public later is wiring, not new backend work) — only the caller and the
+    "is this OK to do silently" judgement change, not the session-minting
+    logic itself."""
+    uid = _parse_uuid(user_id)
+    if not uid:
+        raise HTTPException(status_code=422, detail="Invalid user id")
+    key_row = await db.scalar(
+        select(SelfServeIdempotencyKey).where(SelfServeIdempotencyKey.user_id == uid))
+    if key_row is None:
+        raise HTTPException(status_code=404, detail="This user wasn't created by self-serve trial registration")
+    user = await db.get(User, uid)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.routers.auth import _build_me, create_session_token, set_session_cookie
+    token = create_session_token(str(user.id))
+    set_session_cookie(response, token)
+    return await _build_me(user, db)
