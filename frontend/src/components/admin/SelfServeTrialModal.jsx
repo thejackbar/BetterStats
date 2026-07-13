@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
+import { MODULE_TOGGLES } from '../../lib/modules'
+
+// BetterStats (core) is mandatory, not a selectable trial — same reasoning as
+// the Super Admin per-club module editor this list is shared with.
+const SELECTABLE_MODULES = MODULE_TOGGLES.filter((m) => m.key !== 'core')
 
 // Step scaffold for the self-serve trial registration flow (see
 // docs/self-serve-trial-onboarding-plan.md). Steps after 'verify' aren't built
@@ -272,11 +277,16 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     }
   }
 
-  // ─── Step 5: password + final submission (Phases 8-9) ────────────────────
+  // ─── Step 5: modules + password + final submission (Phases 8-10) ─────────
   // Password is collected here, not with the rest of the admin details —
   // deliberately deferred to right before submission (Phase 4's original
   // decision), so it spends less time sitting in state. /submit revalidates
   // everything, then creates the real club and admin account.
+  // BetterStats trials everything by default (Phase 10) — the operator
+  // deselects rather than opts in, matching the source doc's framing.
+  const [moduleSelections, setModuleSelections] = useState(
+    () => Object.fromEntries(SELECTABLE_MODULES.map((m) => [m.key, true]))
+  )
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -319,6 +329,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
         mobile_number: adminForm.mobile_number,
         password,
         confirm_password: confirmPassword,
+        modules: SELECTABLE_MODULES.filter((m) => moduleSelections[m.key]).map((m) => m.key),
       })
       if (result?.status === 'completed') {
         setSubmitResult(result)
@@ -701,6 +712,13 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                       <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Sync run ID</dt>
                       <dd className="text-pb-faint text-xs font-mono">{submitResult?.run_id}</dd>
                     </div>
+                    <div>
+                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Modules on trial</dt>
+                      <dd className="text-pb-faint text-xs font-mono">
+                        {(submitResult?.modules || []).map((k) =>
+                          MODULE_TOGGLES.find((m) => m.key === k)?.label || k).join(', ')}
+                      </dd>
+                    </div>
                   </dl>
                   <p className="font-mono text-[11px] text-pb-faint mt-3">
                     Auto-login and onboarding follow in later phases of
@@ -710,6 +728,21 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                 </div>
               ) : (
                 <>
+                  <div>
+                    <p className="font-mono text-[10px] text-pb-faint block mb-1">Modules to trial</p>
+                    <label className="flex items-center gap-2 font-mono text-[11px] text-pb-faintest mb-1">
+                      <input type="checkbox" checked disabled />
+                      BetterStats (included)
+                    </label>
+                    {SELECTABLE_MODULES.map((m) => (
+                      <label key={m.key} className="flex items-center gap-2 font-mono text-[11px] text-pb-faint mb-1">
+                        <input type="checkbox" checked={!!moduleSelections[m.key]}
+                          onChange={(e) => setModuleSelections((s) => ({ ...s, [m.key]: e.target.checked }))} />
+                        {m.label}
+                      </label>
+                    ))}
+                  </div>
+
                   <div>
                     <label className="font-mono text-[10px] text-pb-faint block mb-1">Password</label>
                     <input type="password" value={password}

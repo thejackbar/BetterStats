@@ -178,9 +178,17 @@ machinery. **This is also where the Phase 5 multi-club-identity gap becomes
 real**, not just theoretical: real `Organisation`/`User` rows now exist per
 submission.
 
-**Phase 10 — Module trials**, including BetterFantasyCricket. Reuse
-`org_module_subscriptions` + `mod_subs.start_trial_billing()` wholesale. [REUSE,
-near-total]
+**Phase 10 — Module trials (done)**, including BetterFantasyCricket. Reused
+`mod_subs.ensure_core_subscription` (BetterStats, mandatory, active not
+trialled) + `mod_subs.start_trial_billing` (everything else, at the platform's
+configured default trial length) wholesale — no new trial logic. Modal
+defaults all five optional modules to selected (deselect rather than opt in,
+per the source document's framing). Surfaced a real MissingGreenlet trap:
+`_onboard_club_core`'s internal commit leaves `module_subscriptions` unloaded
+on the now-persistent org, so an explicit `db.refresh(org,
+attribute_names=["module_subscriptions"])` (the same idiom `club_admin.py`'s
+`patch_club` already uses) is required before touching it — the exact hazard
+`create_club`'s own comment warns about.
 
 **Phase 11 — BetterComms defaults + paywall.** Sandbox defaults configured only when
 BetterAdmin is selected. Intercept `request_limit_increase` for trial-only BetterAdmin

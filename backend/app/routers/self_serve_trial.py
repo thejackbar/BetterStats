@@ -17,8 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.modules import BILLABLE_MODULES, MODULE_CORE
 from app.models.db import ClubMembership, Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
+from app.services import module_subscriptions as mod_subs
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
@@ -27,6 +29,11 @@ from app.services.login_audit import client_ip
 from app.services.memberships import ensure_primary_admin
 from app.services.sync import _parse_uuid, find_matching_organisation
 from app.services.usage_tracker import hash_ip
+
+# The optional add-on modules a trial can select (BetterStats/Core is always
+# on, not a choice — handled via mod_subs.ensure_core_subscription, not a
+# trial). Same set routers/club_admin.py's SuperClubs module editor manages.
+_SELECTABLE_MODULES = tuple(k for k in BILLABLE_MODULES if k != MODULE_CORE)
 
 logger = logging.getLogger(__name__)
 
@@ -402,16 +409,17 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
 # That commit durably commits the WHOLE session, including the User row this
 # handler creates earlier in the same request. So club+user creation is
 # effectively atomic with each other (both land in that one commit), but the
-# ClubMembership + primary-admin step that follows is NOT covered by it — if
-# that narrow window fails (a genuine DB outage; no external calls happen in
-# it), the club and user already exist with no membership between them. That
-# failure path returns a 500 naming the org_id/user_id and explicitly says not
-# to retry, since a retry would just hit "club already registered" against the
-# very club the failed attempt created — it needs a human to finish the
-# membership manually via existing Super Admin tooling. Given this whole
-# router requires super_admin already and the failure mode needs an actual
-# infra fault to trigger, that's judged proportionate for this phase rather
-# than building compensating-transaction machinery for it.
+# ClubMembership + primary-admin + module-trial step that follows is NOT
+# covered by it — if that narrow window fails (a genuine DB outage; no
+# external calls happen in it), the club and user already exist with no
+# membership or trials attached. That failure path returns a 500 naming the
+# org_id/user_id and explicitly says not to retry, since a retry would just
+# hit "club already registered" against the very club the failed attempt
+# created — it needs a human to finish the rest manually via existing Super
+# Admin tooling. Given this whole router requires super_admin already and the
+# failure mode needs an actual infra fault to trigger, that's judged
+# proportionate for this phase rather than building compensating-transaction
+# machinery for it.
 
 # Union of the existing rule (POST /super/users: >= 10 chars) and the source
 # document's minimum (upper + digit + special) — "use existing rules where
@@ -449,6 +457,7 @@ class SubmitRequest(BaseModel):
     mobile_number: str = ""
     password: str = ""
     confirm_password: str = ""
+    modules: list[str] = []
 
 
 @router.post("/submit")
@@ -530,10 +539,28 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     from app.routers.organisations import _onboard_club_core
     org, run_id, name = await _onboard_club_core(db, background_tasks, str(org_id), data.name)
 
+    # That internal commit leaves module_subscriptions unloaded on this now-
+    # persistent org — the exact trap club_admin.py's create_club comment
+    # warns about ("accessing the collection after a flush ... raises
+    # MissingGreenlet"). Explicit refresh before ensure_core_subscription /
+    # start_trial_billing touch it (same idiom as club_admin.py's patch_club).
+    await db.refresh(org, attribute_names=["module_subscriptions"])
+
+    requested_modules = sorted({m for m in (data.modules or []) if m in _SELECTABLE_MODULES})
+
     try:
         db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
         await db.flush()
         await ensure_primary_admin(db, org.id)
+
+        # BetterStats is mandatory, not a trial choice — active from day one,
+        # same as the ordinary Super Admin "New Club" flow. Everything else
+        # the operator selected starts a trial at the configured length.
+        mod_subs.ensure_core_subscription(org)
+        default_days = await ps.get_default_trial_days(db)
+        for module_key in requested_modules:
+            mod_subs.start_trial_billing(org, module_key, days=default_days)
+
         db.add(SelfServeIdempotencyKey(
             idempotency_key=key, email=email, status="completed",
             org_id=org.id, user_id=user.id,
@@ -542,14 +569,14 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     except Exception:
         logger.error(
             "self-serve registration: club %s / user %s were created but "
-            "membership linking failed — needs manual completion via existing "
-            "Super Admin tooling, do not retry this submission",
+            "membership/module-trial linking failed — needs manual completion "
+            "via existing Super Admin tooling, do not retry this submission",
             org.id, user.id, exc_info=True,
         )
         raise HTTPException(
             status_code=500,
             detail=(
-                "The club and account were created, but linking them failed. "
+                "The club and account were created, but finishing setup failed. "
                 f"Contact support with reference {org.id}/{user.id} — don't "
                 "retry, this needs manual completion."
             ),
@@ -561,5 +588,6 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         "user_id": str(user.id),
         "run_id": str(run_id),
         "name": name,
+        "modules": [MODULE_CORE, *requested_modules],
         "replayed": False,
     }
