@@ -80,6 +80,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
+  { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
   { to: '/admin/super/meta-ads', label: 'Meta Ads' },
   { to: '/admin/super/login-attempts', label: 'Login Attempts' },
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
@@ -103,6 +104,9 @@ export default function AdminLayout({ children }) {
     api.superCountCommsRequests()
       .then(d => { if (alive) setCommsReqCount(d?.total || 0) })
       .catch(() => {})
+    api.superGetGeneralSettings()
+      .then(s => { if (alive) setSelfServeEnabled(!!s?.self_serve_registration_enabled) })
+      .catch(() => {})
     return () => { alive = false }
   }, [user?.role])
   const location = useLocation()
@@ -112,6 +116,9 @@ export default function AdminLayout({ children }) {
   const [moduleReqCount, setModuleReqCount] = useState(0)
   // Pending BetterComms tier requests + breaker-suspended clubs (badge).
   const [commsReqCount, setCommsReqCount] = useState(0)
+  // Self-serve trial registration platform flag — off by default; hides the
+  // internal-only menu item until a super admin turns it on (General Settings).
+  const [selfServeEnabled, setSelfServeEnabled] = useState(false)
   const [bellOpen, setBellOpen] = useState(false)
   const [bellSummary, setBellSummary] = useState(null)
   const [bellError, setBellError] = useState(null)
@@ -124,6 +131,12 @@ export default function AdminLayout({ children }) {
     ...s,
     items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
   })).filter(s => s.items.length > 0)
+
+  // Flag-gated Better HQ links (currently just self-serve registration) — hidden
+  // until a super admin turns the platform flag on, same reasoning as the cap
+  // filter above.
+  const visibleSuperLinks = SUPER_LINKS.filter(l =>
+    l.flag !== 'selfServeRegistration' || selfServeEnabled)
 
   // Give a bookmarked page a sensible name. Known nav routes carry their own
   // label; anything else (a deep/dynamic page) falls back to a tidied-up last
@@ -334,7 +347,7 @@ export default function AdminLayout({ children }) {
                 <div className="pb-1 px-2 pt-1 font-mono text-[10px] tracking-wide3 uppercase" style={{ color: 'var(--pb-accent)' }}>
                   Better HQ
                 </div>
-                {SUPER_LINKS.map(link => (
+                {visibleSuperLinks.map(link => (
                   <Link
                     key={link.to}
                     to={link.to}

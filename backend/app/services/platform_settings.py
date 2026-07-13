@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 # as new settings are introduced.
 _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
 
+# Boolean feature flags, off by default until a super admin turns them on from
+# General Settings. Each new self-serve-trial-onboarding surface (see
+# docs/self-serve-trial-onboarding-plan.md) is built behind one of these so it stays
+# inert in production until explicitly enabled — there is no staging environment, so
+# this is the only safety net between "merged" and "live".
+_BOOL_KEYS = {"self_serve_registration_enabled", "onboarding_wizard_enabled"}
+
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
 # CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
 # decays back to the ordinary recency/frequency formula — see
@@ -178,6 +185,13 @@ async def update_settings(db: AsyncSession, patch: dict) -> dict:
             if ival <= 0:
                 raise ValueError(f"{key} must be a positive integer")
             out[key] = ival
+        elif key in _BOOL_KEYS:
+            if value is None:
+                out.pop(key, None)
+                continue
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be true or false")
+            out[key] = value
         # Unknown keys are ignored (forward-compatible).
     await db.execute(
         text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
@@ -185,6 +199,25 @@ async def update_settings(db: AsyncSession, patch: dict) -> dict:
     )
     await db.commit()
     return out
+
+
+async def get_feature_flag(db: AsyncSession, key: str) -> bool:
+    """A boolean feature flag from the settings blob, off (False) when unset. Only
+    keys in ``_BOOL_KEYS`` are meaningful here."""
+    settings = await get_settings(db)
+    return bool(settings.get(key) is True)
+
+
+async def get_self_serve_registration_enabled(db: AsyncSession) -> bool:
+    """Whether the internal self-serve club trial registration flow (Super
+    Admin-only in this phase — see docs/self-serve-trial-onboarding-plan.md) is
+    switched on. Off by default."""
+    return await get_feature_flag(db, "self_serve_registration_enabled")
+
+
+async def get_onboarding_wizard_enabled(db: AsyncSession) -> bool:
+    """Whether the club onboarding wizard is switched on. Off by default."""
+    return await get_feature_flag(db, "onboarding_wizard_enabled")
 
 
 # ─── SES send rates ──────────────────────────────────────────────────────────

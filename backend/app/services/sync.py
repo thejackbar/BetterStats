@@ -170,32 +170,30 @@ async def _resolve_org_grade(
     return new_id
 
 
-async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
-    org_id = _parse_uuid(org_data.get("id", ""))
-    incoming_name = (org_data.get("name") or "").strip()
+async def find_matching_organisation(
+    session: AsyncSession, org_id: Optional[uuid.UUID], name: str = "",
+) -> Optional[Organisation]:
+    """Read-only lookup for "is this external club already an Organisation row",
+    used both to guard upsert_organisation against duplicates and, at search time
+    (self_serve_trial.py), to tell an operator a club is already registered before
+    they try to create it again. Three layered checks, same order in both callers:
+      1. id match — direct.
+      2. playhq_id match — deterministic. If an existing org already has its
+         playhq_id populated with the incoming id, this is unambiguously the same
+         club seen from the PHQ side.
+      3. name match (case-insensitive) — fuzzy fallback for cases where the
+         cross-ID-space link was never recorded (e.g. legacy data, or sync came in
+         via PHQ before the GR-side playhq_id lookup ran).
+    """
+    org = await session.get(Organisation, org_id) if org_id else None
 
-    org = await session.get(Organisation, org_id)
-
-    # Guard against duplicate rows when the same club has been synced under
-    # a different ID namespace (e.g. Grassroots GUID then PlayHQ UUID).
-    # Two layered checks before creating a new row:
-    #   1. playhq_id match — deterministic. If an existing org already has its
-    #      playhq_id populated with the incoming id, this is unambiguously the
-    #      same club seen from the PHQ side.
-    #   2. name match (case-insensitive) — fuzzy fallback for cases where the
-    #      cross-ID-space link was never recorded (e.g. legacy data, or sync
-    #      came in via PHQ before the GR-side playhq_id lookup ran).
     if not org and org_id:
         result = await session.execute(
             select(Organisation).where(Organisation.playhq_id == str(org_id))
         )
         org = result.scalar_one_or_none()
-        if org:
-            logger.warning(
-                f"upsert_organisation: incoming id {org_id} matches existing "
-                f"org {org.id}'s playhq_id — reusing to avoid duplicate"
-            )
 
+    incoming_name = (name or "").strip()
     if not org and incoming_name:
         result = await session.execute(
             select(Organisation).where(
@@ -203,11 +201,20 @@ async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisa
             )
         )
         org = result.scalar_one_or_none()
-        if org:
-            logger.warning(
-                f"upsert_organisation: id {org_id} not found but name "
-                f"'{incoming_name}' matches existing org {org.id} — reusing to avoid duplicate"
-            )
+
+    return org
+
+
+async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
+    org_id = _parse_uuid(org_data.get("id", ""))
+    incoming_name = (org_data.get("name") or "").strip()
+
+    org = await find_matching_organisation(session, org_id, incoming_name)
+    if org and org.id != org_id:
+        logger.warning(
+            f"upsert_organisation: incoming id {org_id} / name '{incoming_name}' "
+            f"matches existing org {org.id} — reusing to avoid duplicate"
+        )
 
     if not org:
         org = Organisation(

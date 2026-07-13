@@ -113,6 +113,28 @@ async def require_super_admin(
     return current_user
 
 
+async def require_self_serve_registration_enabled(db: AsyncSession = Depends(get_db)) -> None:
+    """Route dependency for the internal self-serve club trial registration flow
+    (see docs/self-serve-trial-onboarding-plan.md). 404s, not 403s, when the
+    ``self_serve_registration_enabled`` platform flag is off, so a disabled feature
+    reads as "doesn't exist" rather than revealing a gated feature. This is a
+    feature-flag check, not an authorization check — every route it guards must
+    also depend on ``require_super_admin`` (or, once this flow goes public, whatever
+    the public-facing auth model turns out to be)."""
+    from app.services import platform_settings as ps
+    if not await ps.get_self_serve_registration_enabled(db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+async def require_onboarding_wizard_enabled(db: AsyncSession = Depends(get_db)) -> None:
+    """Route dependency for the club onboarding wizard. 404s when the
+    ``onboarding_wizard_enabled`` platform flag is off. See
+    ``require_self_serve_registration_enabled`` for the rationale."""
+    from app.services import platform_settings as ps
+    if not await ps.get_onboarding_wizard_enabled(db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
 def _effective_club_id(membership: ClubMembership | None, user: User) -> uuid.UUID | None:
     """The club a request is scoped to.
 

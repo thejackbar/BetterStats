@@ -876,6 +876,22 @@ export const api = {
   superGetGeneralSettings: () => request('/club-admin/super/general-settings'),
   superUpdateGeneralSettings: (data) =>
     request('/club-admin/super/general-settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Self-serve club trial registration (internal, flag-gated — see
+  // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
+  selfServeTrialStatus: () => request('/self-serve-trial/status'),
+  selfServeTrialSearch: (q) => request(`/self-serve-trial/search?q=${encodeURIComponent(q)}`),
+  selfServeTrialPrepare: (data) =>
+    request('/self-serve-trial/prepare', { method: 'POST', body: JSON.stringify(data) }),
+  selfServeTrialValidateAdmin: (data) =>
+    request('/self-serve-trial/validate-admin', { method: 'POST', body: JSON.stringify(data) }),
+  selfServeTrialSendCode: (email) =>
+    request('/self-serve-trial/verify-email/send', { method: 'POST', body: JSON.stringify({ email }) }),
+  selfServeTrialCheckCode: (email, code) =>
+    request('/self-serve-trial/verify-email/check', { method: 'POST', body: JSON.stringify({ email, code }) }),
+  selfServeTrialVerificationStatus: (email) =>
+    request(`/self-serve-trial/verify-email/status?email=${encodeURIComponent(email)}`),
+  selfServeTrialAcknowledge: (data) =>
+    request('/self-serve-trial/acknowledge', { method: 'POST', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

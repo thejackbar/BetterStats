@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -294,6 +294,46 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_scored_at "
             "TIMESTAMPTZ"))
+        # Self-serve trial registration admin-details form (migration 135) — nothing
+        # downstream reads these yet, defensive idempotent add so the API boots even
+        # if alembic lags.
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number TEXT"))
+        # Self-serve trial registration email verification codes (migration 136).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS self_serve_email_verifications (
+                id UUID PRIMARY KEY,
+                email TEXT NOT NULL,
+                code_hash TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                verified_at TIMESTAMPTZ,
+                superseded_at TIMESTAMPTZ,
+                attempt_count INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_self_serve_email_verifications_email
+            ON self_serve_email_verifications(email)
+        """))
+        # Self-serve trial registration legal acknowledgements (migration 137).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS self_serve_acknowledgements (
+                id UUID PRIMARY KEY,
+                email TEXT NOT NULL,
+                club_name TEXT NOT NULL,
+                terms_version TEXT NOT NULL,
+                privacy_version TEXT NOT NULL,
+                accepted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                ip_hash TEXT,
+                user_agent TEXT
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_self_serve_acknowledgements_email
+            ON self_serve_acknowledgements(email)
+        """))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
@@ -2410,6 +2450,7 @@ app.include_router(marketing.router)  # Marketing club directory crawl + outreac
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
+app.include_router(self_serve_trial.router)  # Self-serve club trial registration (internal, flag-gated — see docs/self-serve-trial-onboarding-plan.md)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

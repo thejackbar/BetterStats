@@ -32,6 +32,11 @@ class User(Base):
     username = Column(Text, unique=True, nullable=True)
     password_hash = Column(Text)
     display_name = Column(Text, nullable=True)
+    # First/last name + mobile: added for the self-serve trial registration
+    # admin-details form (migration 135) — nullable, nothing else reads them yet.
+    first_name = Column(Text, nullable=True)
+    last_name = Column(Text, nullable=True)
+    mobile_number = Column(Text, nullable=True)
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
     failed_login_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -48,6 +53,46 @@ class User(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     memberships = relationship("ClubMembership", back_populates="user")
+
+
+class SelfServeEmailVerification(Base):
+    """A 4-digit email verification code issued for the self-serve trial
+    registration flow (migration 136, Phase 6 — see
+    docs/self-serve-trial-onboarding-plan.md). Only ``code_hash`` (bcrypt) is
+    stored, never the plaintext code. Keyed by email, not by user (no user
+    exists yet at this point in registration) — a fresh send sets
+    ``superseded_at`` on any earlier unverified row for the same email so only
+    the latest is ever valid.
+    """
+    __tablename__ = "self_serve_email_verifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    code_hash = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    verified_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    superseded_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    attempt_count = Column(Integer, default=0, nullable=False, server_default="0")
+
+
+class SelfServeAcknowledgement(Base):
+    """Terms of Service / Privacy Policy / club-authority acceptance for the
+    self-serve trial registration flow (migration 137, Phase 7 — see
+    docs/self-serve-trial-onboarding-plan.md). Keyed by email, same reasoning as
+    SelfServeEmailVerification (no user/org exists yet). ``ip_hash`` mirrors
+    login_attempts' privacy-conscious approach (truncated SHA-256, never the raw
+    IP — see services/usage_tracker.hash_ip)."""
+    __tablename__ = "self_serve_acknowledgements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    club_name = Column(Text, nullable=False)
+    terms_version = Column(Text, nullable=False)
+    privacy_version = Column(Text, nullable=False)
+    accepted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    ip_hash = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
 
 
 class UserBookmark(Base):
