@@ -146,6 +146,32 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
 
   const setAdminField = (field, value) => setAdminForm((f) => ({ ...f, [field]: value }))
 
+  // Preferred display name and username are predicted from first/last name,
+  // but only until the person edits that field directly — after that, typing
+  // more of their name doesn't overwrite what they've already changed.
+  const [displayNameTouched, setDisplayNameTouched] = useState(false)
+  const [usernameTouched, setUsernameTouched] = useState(false)
+
+  const editAdminField = (field, value) => {
+    if (field === 'display_name') setDisplayNameTouched(true)
+    if (field === 'username') setUsernameTouched(true)
+    setAdminField(field, value)
+  }
+
+  useEffect(() => {
+    const first = adminForm.first_name.trim()
+    const last = adminForm.last_name.trim()
+    if (!displayNameTouched) {
+      const predicted = [first, last].filter(Boolean).join(' ')
+      setAdminForm((f) => (f.display_name === predicted ? f : { ...f, display_name: predicted }))
+    }
+    if (!usernameTouched) {
+      const predicted = (first + last).toLowerCase().replace(/[^a-z0-9]/g, '')
+      setAdminForm((f) => (f.username === predicted ? f : { ...f, username: predicted }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminForm.first_name, adminForm.last_name, displayNameTouched, usernameTouched])
+
   useEffect(() => {
     if (step !== 'admin') return
     if (adminDebounceRef.current) clearTimeout(adminDebounceRef.current)
@@ -306,27 +332,33 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                 />
 
                 {showResults && results.length > 0 && !selectedClub && (
-                  <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface max-h-64 overflow-y-auto">
-                    {results.map((org) => (
-                      <button
-                        key={org.id}
-                        type="button"
-                        onClick={() => selectClub(org)}
-                        className="w-full text-left px-3 py-2 hover:bg-pb-surface2 border-b pb-hairline last:border-b-0"
-                      >
-                        <div className="text-pb-text text-sm flex items-center justify-between gap-2">
-                          <span>{orgName(org)}</span>
-                          {org.already_registered && (
-                            <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase shrink-0">
-                              Registered
-                            </span>
+                  <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface max-h-[440px] overflow-y-auto">
+                    {results.map((org) => {
+                      const location = [org.suburb, org.stateName].filter(Boolean).join(', ')
+                      return (
+                        <button
+                          key={org.id}
+                          type="button"
+                          onClick={() => selectClub(org)}
+                          className="w-full text-left px-3 py-2.5 hover:bg-pb-surface2 border-b pb-hairline last:border-b-0"
+                        >
+                          <div className="text-pb-text text-sm flex items-center justify-between gap-2">
+                            <span>{orgName(org)}</span>
+                            {org.already_registered && (
+                              <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase shrink-0">
+                                Registered
+                              </span>
+                            )}
+                          </div>
+                          {org.shortName && org.shortName !== org.name && (
+                            <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
                           )}
-                        </div>
-                        {org.shortName && org.shortName !== org.name && (
-                          <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
-                        )}
-                      </button>
-                    ))}
+                          {location && (
+                            <div className="text-pb-faintest text-xs mt-0.5">{location}</div>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
 
@@ -433,7 +465,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Preferred display name</label>
                 <input type="text" value={adminForm.display_name}
-                  onChange={(e) => setAdminField('display_name', e.target.value)}
+                  onChange={(e) => editAdminField('display_name', e.target.value)}
                   className={FIELD_CLS} />
                 {adminErrors.display_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.display_name}</p>}
               </div>
@@ -441,7 +473,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Username</label>
                 <input type="text" value={adminForm.username}
-                  onChange={(e) => setAdminField('username', e.target.value)}
+                  onChange={(e) => editAdminField('username', e.target.value)}
                   className={FIELD_CLS} />
                 {adminErrors.username && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.username}</p>}
               </div>
