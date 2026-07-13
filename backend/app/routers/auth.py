@@ -270,6 +270,80 @@ async def logout(response: Response):
     return {"status": "logged_out"}
 
 
+class InviteAcceptRequest(BaseModel):
+    password: str
+    confirm_password: str
+
+
+@router.get("/invite/{token}")
+async def get_invite(token: str, db: AsyncSession = Depends(get_db)):
+    """Public: resolve a club-user invite token (routers/club_admin.py's
+    "Invite admin" — create_club_user) to the invited person's basic
+    identity, so the accept-invite step on the login page can greet them by
+    name before asking for a password. Generic "invalid or expired" on any
+    failure — doesn't leak whether a token ever existed."""
+    result = await db.execute(select(User).where(User.invite_token == token))
+    user = result.scalar_one_or_none()
+    if user is None or user.password_hash is not None:
+        raise HTTPException(status_code=404, detail="This invite link is invalid or has already been used")
+    expires = user.invite_token_expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(
+                status_code=410,
+                detail="This invite link has expired — ask an admin at your club to invite you again",
+            )
+
+    membership_res = await db.execute(select(ClubMembership).where(ClubMembership.user_id == user.id))
+    membership = membership_res.scalar_one_or_none()
+    club = await db.get(Organisation, membership.club_id) if membership else None
+    return {
+        "username": user.username,
+        "display_name": user.display_name,
+        "club_name": club.name if club else None,
+    }
+
+
+@router.post("/invite/{token}/accept")
+async def accept_invite(token: str, data: InviteAcceptRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    """Set the invited user's own password (the "first login must set a
+    password" step) and log them in immediately — same session-minting
+    primitive login() itself uses. Same password rule as self-serve trial
+    registration (services/password_policy.py), so the two flows can never
+    silently diverge."""
+    from app.services import password_policy
+
+    result = await db.execute(select(User).where(User.invite_token == token))
+    user = result.scalar_one_or_none()
+    if user is None or user.password_hash is not None:
+        raise HTTPException(status_code=404, detail="This invite link is invalid or has already been used")
+    expires = user.invite_token_expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(
+                status_code=410,
+                detail="This invite link has expired — ask an admin at your club to invite you again",
+            )
+
+    errors = password_policy.password_errors(data.password, data.confirm_password)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    user.password_hash = _hash_password(data.password)
+    user.invite_token = None
+    user.invite_token_expires_at = None
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    token_value = create_session_token(str(user.id))
+    set_session_cookie(response, token_value)
+    return await _build_me(user, db)
+
+
 async def _build_me(current_user: User, db: AsyncSession) -> dict:
     """The shared identity payload returned by /login, /me and /switch-club.
 

@@ -1,10 +1,162 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { api } from '../lib/api'
+
+const PASSWORD_MIN_LEN = 10
+
+function Brand() {
+  return (
+    <div className="text-center mb-8">
+      <div className="inline-flex items-center gap-2.5 mb-3">
+        <span
+          className="w-8 h-8 rounded font-mono font-bold text-sm flex items-center justify-center text-pb-bg"
+          style={{ background: 'var(--pb-accent)' }}
+        >
+          BC
+        </span>
+        <span className="font-display font-bold text-xl tracking-wider uppercase text-pb-text">
+          BetterCricket
+        </span>
+      </div>
+      <p className="font-mono text-[11px] tracking-wide3 text-pb-faint">CLUB ADMIN LOGIN</p>
+    </div>
+  )
+}
+
+function ShowHideInput({ value, onChange, show, onToggleShow, autoComplete }) {
+  return (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={onChange}
+        required
+        className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 pr-14 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+      />
+      <button
+        type="button"
+        onClick={onToggleShow}
+        className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
+      >
+        {show ? 'HIDE' : 'SHOW'}
+      </button>
+    </div>
+  )
+}
+
+// A club-user invite (routers/club_admin.py's "Invite admin") lands here via
+// betterat.cricket/login?invite=<token> — no separate accept-invite page, per
+// the explicit ask. Same password rule as self-serve trial registration
+// (services/password_policy.py on the backend).
+function AcceptInvite({ token }) {
+  const { acceptInvite } = useAuth()
+  const navigate = useNavigate()
+  const [invite, setInvite] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const [accepting, setAccepting] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api.getInvite(token)
+      .then((d) => { if (!cancelled) setInvite(d) })
+      .catch((e) => { if (!cancelled) setLoadError(e?.message || 'This invite link is invalid or has expired.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [token])
+
+  const checks = {
+    length: password.length >= PASSWORD_MIN_LEN,
+    upper: /[A-Z]/.test(password),
+    digit: /\d/.test(password),
+    special: /[^A-Za-z0-9]/.test(password),
+    match: !!password && password === confirmPassword,
+  }
+  const valid = Object.values(checks).every(Boolean)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setSubmitError('')
+    setAccepting(true)
+    try {
+      await acceptInvite(token, password, confirmPassword)
+      navigate('/admin')
+    } catch (err) {
+      setSubmitError(err.message || 'Could not set your password')
+    } finally {
+      setAccepting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="pb-card p-6">
+        <p className="font-mono text-[11px] text-pb-faint">Loading your invite…</p>
+      </div>
+    )
+  }
+
+  if (!invite) {
+    return (
+      <div className="pb-card p-6">
+        <p className="font-mono text-[11px] text-pb-red">{loadError}</p>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="pb-card p-6 space-y-4">
+      <p className="text-pb-text text-sm">
+        Welcome{invite.display_name ? `, ${invite.display_name}` : ''} — set a password to
+        activate your admin account{invite.club_name ? ` for ${invite.club_name}` : ''}.
+      </p>
+
+      <div>
+        <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">Password</label>
+        <ShowHideInput value={password} onChange={(e) => setPassword(e.target.value)}
+          show={showPassword} onToggleShow={() => setShowPassword((s) => !s)} autoComplete="new-password" />
+      </div>
+      <div>
+        <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">Repeat password</label>
+        <ShowHideInput value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+          show={showConfirmPassword} onToggleShow={() => setShowConfirmPassword((s) => !s)} autoComplete="new-password" />
+      </div>
+
+      <ul className="font-mono text-[10px] space-y-0.5">
+        <li className={checks.length ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.length ? '✓' : '·'} At least 10 characters</li>
+        <li className={checks.upper ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.upper ? '✓' : '·'} One uppercase letter</li>
+        <li className={checks.digit ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.digit ? '✓' : '·'} One number</li>
+        <li className={checks.special ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.special ? '✓' : '·'} One special character</li>
+        <li className={checks.match ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.match ? '✓' : '·'} Passwords match</li>
+      </ul>
+
+      {submitError && <p className="font-mono text-[11px] text-pb-red">{submitError}</p>}
+
+      <button
+        type="submit"
+        disabled={!valid || accepting}
+        className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed text-pb-bg"
+        style={{ background: 'var(--pb-accent)' }}
+      >
+        {accepting ? 'ACTIVATING…' : 'SET PASSWORD & SIGN IN'}
+      </button>
+    </form>
+  )
+}
 
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const inviteToken = searchParams.get('invite')
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -28,80 +180,57 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-pb-bg flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        {/* Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2.5 mb-3">
-            <span
-              className="w-8 h-8 rounded font-mono font-bold text-sm flex items-center justify-center text-pb-bg"
-              style={{ background: 'var(--pb-accent)' }}
-            >
-              BC
-            </span>
-            <span className="font-display font-bold text-xl tracking-wider uppercase text-pb-text">
-              BetterCricket
-            </span>
-          </div>
-          <p className="font-mono text-[11px] tracking-wide3 text-pb-faint">CLUB ADMIN LOGIN</p>
-        </div>
+        <Brand />
 
-        <form onSubmit={handleSubmit} className="pb-card p-6 space-y-4">
-          <div>
-            <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
-              Username
-            </label>
-            <input
-              type="text"
-              autoComplete="username"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              required
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
-            />
-          </div>
+        {inviteToken ? (
+          <AcceptInvite token={inviteToken} />
+        ) : (
+          <>
+            <form onSubmit={handleSubmit} className="pb-card p-6 space-y-4">
+              <div>
+                <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  required
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
+                />
+              </div>
 
-          <div>
-            <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="current-password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 pr-14 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-              />
+              <div>
+                <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
+                  Password
+                </label>
+                <ShowHideInput value={password} onChange={e => setPassword(e.target.value)}
+                  show={showPassword} onToggleShow={() => setShowPassword(s => !s)} autoComplete="current-password" />
+              </div>
+
+              {error && (
+                <p className="font-mono text-[11px] text-pb-red">{error}</p>
+              )}
+
               <button
-                type="button"
-                onClick={() => setShowPassword(s => !s)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
               >
-                {showPassword ? 'HIDE' : 'SHOW'}
+                {loading ? 'SIGNING IN…' : 'SIGN IN'}
               </button>
-            </div>
-          </div>
+            </form>
 
-          {error && (
-            <p className="font-mono text-[11px] text-pb-red">{error}</p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}
-          >
-            {loading ? 'SIGNING IN…' : 'SIGN IN'}
-          </button>
-        </form>
-
-        <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
-          Forgot your password? Contact{' '}
-          <a href="mailto:cricket@bettersports.com.au" className="text-pb-faint hover:text-pb-text transition-colors">
-            cricket@bettersports.com.au
-          </a>
-        </p>
+            <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
+              Forgot your password? Contact{' '}
+              <a href="mailto:cricket@bettersports.com.au" className="text-pb-faint hover:text-pb-text transition-colors">
+                cricket@bettersports.com.au
+              </a>
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

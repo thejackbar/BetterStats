@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import { dashboardTiles, statusLabel, statusIsLive } from '../../lib/modules'
+import { dashboardTiles, statusLabel, statusIsLive, MODULE_TOGGLES } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
+import SyncRunCard from '../../components/admin/SyncRunCard'
 import { formatSeason } from '../../lib/cricketFormat'
 
 // Render "BetterX" with the suffix in the club accent colour, matching the
@@ -117,12 +118,41 @@ export default function AdminDashboard() {
   const [seasons, setSeasons] = useState([])
   const [myRequests, setMyRequests] = useState([])
   const [requesting, setRequesting] = useState('')
+  const [latestSyncRun, setLatestSyncRun] = useState(null)
 
   useEffect(() => {
     api.adminGetSettings().then(setSettings).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
     api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
   }, [])
+
+  // Live sync progress — driven entirely by re-fetching sync_runs, so it's
+  // correct on every fresh page load / re-login with no client-side state to
+  // keep in sync itself (the running/finished status the admin sees is
+  // whatever the backend says right now, not something remembered locally).
+  // Polls only while the latest run is still going.
+  useEffect(() => {
+    if (!user?.club_id) return undefined
+    let cancelled = false
+    let intervalId = null
+    const poll = async () => {
+      try {
+        const logs = await api.getSyncLogs(user.club_id)
+        if (cancelled) return
+        const latest = logs?.[0] || null
+        setLatestSyncRun(latest)
+        if (latest?.status !== 'running' && intervalId) {
+          clearInterval(intervalId)
+          intervalId = null
+        }
+      } catch {
+        // best-effort — the section just won't show if this fails
+      }
+    }
+    poll()
+    intervalId = setInterval(poll, 4000)
+    return () => { cancelled = true; if (intervalId) clearInterval(intervalId) }
+  }, [user?.club_id])
 
   // Raise a trial / subscription request for a billable module (BetterAdmin covers
   // fees + comms + merch as one). Queued for a super admin to action.
@@ -140,9 +170,21 @@ export default function AdminDashboard() {
   }
 
   const isSuper = user?.role === 'super_admin'
-  const activeModules = user?.entitlements?.modules || []
   const planStatus = user?.entitlements?.status || 'active'
   const renewalDate = user?.entitlements?.renewal_date
+  // One row per billable module (BetterAdmin as a single module, not its 3
+  // underlying entitlement keys — see auth/modules.py::_billing_module_summary),
+  // each labelled Trial or Subscribed. Only present when the club's per-module
+  // subscription rows are loaded (every club synced since the per-module model
+  // shipped); older/legacy data falls back to a plain grouped count below.
+  const billingModules = user?.entitlements?.billing_modules || []
+  // Fallback grouped count for a club with no subscription rows loaded (bare
+  // module_overrides only) — groups fees/comms/merch into one "module" so the
+  // count isn't inflated by BetterAdmin's 3 backend entitlement keys.
+  const overrides = user?.entitlements?.overrides || []
+  const fallbackGroupCount = new Set(
+    overrides.map(ov => MODULE_TOGGLES.find(t => t.modules.includes(ov))?.key).filter(Boolean)
+  ).size
 
   // Core admin tasks (BetterStats / Core — always available). BetterSocials is
   // now represented by its own module tile, so it's dropped from here.
@@ -184,9 +226,22 @@ export default function AdminDashboard() {
         <p className="text-pb-faintest text-xs mb-6">
           {isSuper ? (
             'Super admin — all modules available'
+          ) : billingModules.length ? (
+            <>
+              Plan:{' '}
+              <span className="text-pb-faint">
+                {billingModules.map((m, i) => (
+                  <span key={m.module}>
+                    {i > 0 && ', '}
+                    {m.module === 'core' ? 'BetterStats (Core)' : m.name} - {m.status === 'trial' ? 'Trial' : 'Subscribed'}
+                  </span>
+                ))}
+              </span>
+              {renewalDate && <> · renews {new Date(renewalDate).toLocaleDateString('en-AU')}</>}
+            </>
           ) : (
             <>
-              Plan: <span className="text-pb-faint">{activeModules.length ? `Core + ${activeModules.length} module${activeModules.length > 1 ? 's' : ''}` : 'Core (BetterStats)'}</span>
+              Plan: <span className="text-pb-faint">{fallbackGroupCount ? `Core + ${fallbackGroupCount} module${fallbackGroupCount > 1 ? 's' : ''}` : 'Core (BetterStats)'}</span>
               {planStatus !== 'active' && (
                 <span className={statusIsLive(planStatus) ? 'text-pb-faint' : 'text-pb-red'}> · {statusLabel(planStatus)}</span>
               )}
@@ -215,6 +270,21 @@ export default function AdminDashboard() {
             )
           })}
         </div>
+
+        {/* Data sync — the club's own most recent sync run, live while running.
+            Re-fetched from sync_runs on every load, so it's correct regardless
+            of navigation or logging out and back in. */}
+        {latestSyncRun && (
+          <>
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Data sync</p>
+            <div className="mb-8">
+              <SyncRunCard entry={latestSyncRun} isLatest />
+              <Link to="/admin/sync" className="inline-block mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors">
+                View full sync history →
+              </Link>
+            </div>
+          </>
+        )}
 
         {/* Core admin quick links */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Quick links</p>

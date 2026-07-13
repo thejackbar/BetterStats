@@ -49,6 +49,16 @@ class User(Base):
     # (see auth._effective_club_id). ON DELETE SET NULL so deleting a club never
     # strands the staff account (migration 073).
     active_club_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="SET NULL"), nullable=True)
+    # Club-user invite flow (migration 141): a user created via "Invite admin"
+    # (routers/club_admin.py::create_club_user) with an email address gets
+    # password_hash=NULL (there is genuinely no usable password yet — the
+    # column has always been nullable, this is the first thing to rely on
+    # that) plus this random urlsafe token, emailed as a set-your-password
+    # link. Cleared the moment the invite is accepted (routers/auth.py). A
+    # user invited without an email still gets a password set on the spot by
+    # the inviting admin, same as before — these columns just stay NULL.
+    invite_token = Column(Text, unique=True, nullable=True)
+    invite_token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

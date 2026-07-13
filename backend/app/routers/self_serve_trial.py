@@ -21,6 +21,7 @@ from app.auth.modules import BILLABLE_MODULES, MODULE_CORE
 from app.models.db import ClubMembership, Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import module_subscriptions as mod_subs
+from app.services import password_policy
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
@@ -424,25 +425,8 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
 # Union of the existing rule (POST /super/users: >= 10 chars) and the source
 # document's minimum (upper + digit + special) — "use existing rules where
 # stronger" cuts both ways when neither is a strict superset of the other.
-_PASSWORD_MIN_LEN = 10
-_HAS_UPPER = re.compile(r"[A-Z]")
-_HAS_DIGIT = re.compile(r"\d")
-_HAS_SPECIAL = re.compile(r"[^A-Za-z0-9]")
-
-
-def _password_errors(password: str, confirm: str) -> list[str]:
-    errors = []
-    if len(password or "") < _PASSWORD_MIN_LEN:
-        errors.append(f"Password must be at least {_PASSWORD_MIN_LEN} characters")
-    if not _HAS_UPPER.search(password or ""):
-        errors.append("Password must contain an uppercase letter")
-    if not _HAS_DIGIT.search(password or ""):
-        errors.append("Password must contain a number")
-    if not _HAS_SPECIAL.search(password or ""):
-        errors.append("Password must contain a special character")
-    if password != confirm:
-        errors.append("Passwords do not match")
-    return errors
+# Password rule lives in services/password_policy.py — shared with the club-
+# user invite accept flow (routers/auth.py) so the two can't drift apart.
 
 
 class SubmitRequest(BaseModel):
@@ -505,7 +489,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     if ack.scalar_one_or_none() is None:
         raise HTTPException(status_code=422, detail="Acknowledgements have not been accepted")
 
-    password_errors = _password_errors(data.password, data.confirm_password)
+    password_errors = password_policy.password_errors(data.password, data.confirm_password)
     if password_errors:
         raise HTTPException(status_code=422, detail={"errors": password_errors})
 
