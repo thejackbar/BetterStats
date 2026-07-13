@@ -658,6 +658,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ app_version: appVersion || null }),
     }),
+  // Club onboarding wizard (flag-gated — 404s when onboarding_wizard_enabled is off)
+  getOnboardingWizardState: () => request('/club-admin/onboarding-wizard/state'),
+  markOnboardingWizardOpened: () => request('/club-admin/onboarding-wizard/opened', { method: 'POST' }),
+  dismissOnboardingWizard: () => request('/club-admin/onboarding-wizard/dismiss', { method: 'POST' }),
+  setOnboardingWizardStep: (stepKey, done = true) =>
+    request(`/club-admin/onboarding-wizard/steps/${stepKey}`, { method: 'POST', body: JSON.stringify({ done }) }),
   // Admin sidebar bookmarks (per-user favourites)
   listBookmarks: () => request('/club-admin/bookmarks'),
   addBookmark: (path, label) =>

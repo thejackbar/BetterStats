@@ -304,11 +304,44 @@ call unconditionally right after account creation — no new backend work,
 only a different (unauthenticated) caller and no more explicit-action gate,
 since there's no super-admin session to protect from a public visitor.
 
-**Phase 15 — Onboarding wizard (net new).** Launches without sync-dependent steps
-(Import Historical Stats, Import Honours, Merge Grades) while sync is running. Once
-sync completes successfully, those steps are added and the wizard reopens
-automatically if not already open — reusing the same "last seen/dismissed" state
-pattern already established for the notification bell.
+**Phase 15 — Onboarding wizard (done).** New `onboarding_wizard_state` table
+(migration 140, one row per club, not per user — onboarding is a club property,
+so a second admin invited later sees the same progress rather than starting
+over): `completed_steps` (JSON array), `dismissed_at`, `sync_steps_shown_at`.
+New router `routers/onboarding_wizard.py` (`/club-admin/onboarding-wizard/*`,
+gated by the already-existing-but-previously-unwired
+`require_onboarding_wizard_enabled` flag dependency) computes a dynamic step
+list rather than storing one: a fixed set of always-shown steps (branding,
+invite another admin, one "Explore <Module>" step per module the club is
+actually entitled to via `org_entitled_modules`), plus — only once the club's
+first `kind='org_full'` sync has a `success` row in `sync_runs` — the three
+sync-dependent steps named in Decision 11: Import Historical Stats
+(`/admin/import`), Import Honours (`/admin/awards`), Merge Grades
+(`/admin/grades`). Every step links to an existing admin tool (found via a
+research pass first — branding/invite-admin/historical-stats-import/honours-
+import/grade-merge all already existed); this wizard is a guided checklist
+over them, not a reimplementation of any of them.
+
+**Auto-open logic** mirrors the notification bell's `last_notification_seen_at`
+pattern but needed a second flag for Decision 11's specific "reopens once sync
+completes" requirement: `should_auto_open` is true when nothing is dismissed
+yet, OR when sync just became ready and the sync-dependent steps haven't been
+shown even once (`sync_steps_shown_at IS NULL`) — gated on there being
+anything left undone at all, so a club that's finished every step doesn't keep
+popping the wizard on every login. `POST /onboarding-wizard/opened` (called by
+the modal itself on open, auto or manual) stamps `sync_steps_shown_at`, which
+is what makes the reopen fire exactly once per sync completion rather than on
+every subsequent login. `AdminLayout.jsx` checks on every fresh login (the
+same `justLoggedIn` signal the bell's own auto-open reuses, so a genuine login
+event — not every page navigation — is what re-checks this) and shows a
+"Setup guide" header button whenever the state fetch succeeds (a 404 — flag
+off — just hides the entry point, same "doesn't exist" convention as the rest
+of this project's feature flags). `OnboardingWizardModal.jsx` is otherwise
+self-contained: fetches its own state, lets each step be ticked done/undone
+independently of navigating to it (so an admin who already did something
+manually, e.g. inviting an admin before ever seeing the wizard, can just tick
+it), and each step's title is a link that closes the modal and navigates
+there.
 
 **Phase 16 — Trial lifecycle notifications + onboarding nudges (net new,
 scheduler-based).** Extends the `_scan_trials_and_renewals` pattern into real

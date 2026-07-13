@@ -13,6 +13,7 @@ import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import BrandLogo from '../BrandLogo'
+import OnboardingWizardModal from './OnboardingWizardModal'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -123,6 +124,11 @@ export default function AdminLayout({ children }) {
   const [bellSummary, setBellSummary] = useState(null)
   const [bellError, setBellError] = useState(null)
   const [bellRefresh, setBellRefresh] = useState(0)
+  // Onboarding wizard (Phase 15) — availability is only known once the first
+  // state fetch succeeds (the endpoint 404s outright when the platform flag
+  // is off, same "doesn't exist" convention as the self-serve flag).
+  const [wizardAvailable, setWizardAvailable] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
 
   // Filter nav: drop links the user lacks the cap for. Empty sections are
   // dropped too so a heading never renders with nothing under it. (Club admins
@@ -214,6 +220,26 @@ export default function AdminLayout({ children }) {
     return () => { cancelled = true }
   }, [justLoggedIn, user, clearJustLoggedIn])
 
+  // Onboarding wizard: check on every fresh login (not on every navigation —
+  // this only needs to catch "first run" and "sync just finished, reopen
+  // once" moments, both of which happen around a login). 404 (flag off) is
+  // treated the same as "nothing to show" — silently.
+  useEffect(() => {
+    if (!justLoggedIn || !user) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const s = await api.getOnboardingWizardState()
+        if (cancelled) return
+        setWizardAvailable(true)
+        if (s.should_auto_open) setWizardOpen(true)
+      } catch {
+        // 404 (flag off) or any other failure — just hide the entry point
+      }
+    })()
+    return () => { cancelled = true }
+  }, [justLoggedIn, user])
+
   const handleLogout = async () => {
     await logout()
     navigate('/login')
@@ -253,6 +279,15 @@ export default function AdminLayout({ children }) {
               </Link>
             )}
             <BookmarkButton pageLabel={labelForPath(location.pathname)} />
+            {wizardAvailable && (
+              <button
+                onClick={() => setWizardOpen(true)}
+                title="Setup guide"
+                className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
+              >
+                SETUP GUIDE
+              </button>
+            )}
             <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
@@ -459,6 +494,7 @@ export default function AdminLayout({ children }) {
       </div>
 
       <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
+      {wizardOpen && <OnboardingWizardModal onClose={() => setWizardOpen(false)} />}
     </div>
   )
 }

@@ -114,6 +114,31 @@ class SelfServeIdempotencyKey(Base):
     user_id = Column(UUID(as_uuid=True), nullable=True)
 
 
+class OnboardingWizardState(Base):
+    """One row per club tracking its onboarding wizard progress (migration 140,
+    Phase 15 — see docs/self-serve-trial-onboarding-plan.md). Scoped to the
+    ORG, not a single user — onboarding is a property of the club, so a second
+    admin invited later sees the same progress rather than starting over.
+
+    ``dismissed_at`` is set whenever the admin closes the wizard; the wizard
+    auto-opens again whenever it's unset, mirroring the notification bell's
+    own ``last_notification_seen_at`` pattern. ``sync_steps_shown_at`` is the
+    one-time trigger for Decision 11's "reopens automatically once sync
+    completes" — it's stamped the first time the wizard is shown (auto or
+    manual) after the sync-dependent steps (Import Historical Stats, Import
+    Honours, Merge Grades) become available, so that reopen fires exactly
+    once rather than on every subsequent page load."""
+    __tablename__ = "onboarding_wizard_state"
+
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"),
+                             primary_key=True)
+    completed_steps = Column(JSON, nullable=False, default=list)
+    dismissed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    sync_steps_shown_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class UserBookmark(Base):
     """A page an admin user has starred for quick access in the sidebar.
 
