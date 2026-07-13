@@ -38,6 +38,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import require_cap, MANAGE_COMMS
+from app.auth.modules import MODULE_COMMS, STATUS_TRIAL
 from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player, FeeMember, ClubMembership, Team,
@@ -1765,7 +1766,24 @@ async def request_limit_increase(
 ):
     """A club asks BetterCricket to lift it out of the sandbox. Queues a
     super-admin decision, records telemetry, and raises an automated Twenty task.
-    One open request at a time."""
+    One open request at a time.
+
+    Production sending is a paid-only feature: a club trialling BetterAdmin
+    (self-serve trial registration, Phase 11 — see
+    docs/self-serve-trial-onboarding-plan.md) can't request it, and is invited
+    to subscribe instead. get_current_club eager-loads module_subscriptions,
+    so this is safe without a fresh query."""
+    comms_sub = next((s for s in (club.module_subscriptions or []) if s.module_key == MODULE_COMMS), None)
+    if comms_sub is not None and comms_sub.status == STATUS_TRIAL:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                "Production sending limits are only available to subscribers. "
+                "BetterAdmin is currently on trial for this club — subscribe to "
+                "BetterAdmin to request production sending."
+            ),
+        )
+
     tier = comms_limits.normalise_tier(getattr(club, "comms_tier", None))
     if tier == comms_limits.TIER_PRODUCTION:
         raise HTTPException(status_code=409, detail="This club is already on the production tier.")

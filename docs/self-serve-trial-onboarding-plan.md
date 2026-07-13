@@ -190,10 +190,20 @@ attribute_names=["module_subscriptions"])` (the same idiom `club_admin.py`'s
 `patch_club` already uses) is required before touching it — the exact hazard
 `create_club`'s own comment warns about.
 
-**Phase 11 — BetterComms defaults + paywall.** Sandbox defaults configured only when
-BetterAdmin is selected. Intercept `request_limit_increase` for trial-only BetterAdmin
-clubs: return "Production limits are only available to subscribers" + an invitation to
-subscribe to BetterAdmin now, instead of creating the upgrade request.
+**Phase 11 — BetterComms defaults + paywall (done).** Part 1 (sandbox defaults
+"configured only when BetterAdmin is selected") turned out to need zero new code:
+`Organisation.comms_tier` already defaults to `'sandbox'` at the schema level
+(migration 125, `server_default="sandbox"`) for every club regardless of module
+selection, and the cap fields are nullable and inherit the platform-wide defaults
+dynamically — there is no per-club "configure" step to gate. Part 2 (the paywall) is
+a small guard clause added to the top of `request_limit_increase` in `comms.py`: if
+the club's `MODULE_COMMS` subscription is `STATUS_TRIAL`, raise `402` with "Production
+sending limits are only available to subscribers... subscribe to BetterAdmin to
+request production sending" instead of creating the upgrade request. Relies on
+`get_current_club` already eager-loading `module_subscriptions`, so no extra query.
+No frontend change needed — `CommsSettings.jsx`'s `requestLimit` already displays
+`e.message` generically for any thrown error, so the 402's plain-string `detail`
+renders correctly as-is.
 
 **Phase 12 — MarketingClub + Twenty Lead/Opportunity creation.** On successful
 registration: find-or-create the linked `MarketingClub` row (mirroring the existing
