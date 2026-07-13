@@ -876,6 +876,9 @@ export const api = {
   superGetGeneralSettings: () => request('/club-admin/super/general-settings'),
   superUpdateGeneralSettings: (data) =>
     request('/club-admin/super/general-settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Self-serve club trial registration (internal, flag-gated — see
+  // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
+  selfServeTrialStatus: () => request('/self-serve-trial/status'),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

@@ -99,6 +99,7 @@ const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
+const SuperSelfServeTrial = lazy(() => import('./pages/admin/SuperSelfServeTrial'))
 const SuperMetaAds = lazy(() => import('./pages/admin/SuperMetaAds'))
 const SuperLoginAttempts = lazy(() => import('./pages/admin/SuperLoginAttempts'))
 const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests'))
@@ -282,6 +283,7 @@ export default function App() {
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
+          <Route path="/admin/super/self-serve" element={<ProtectedRoute requireRole="super_admin"><SuperSelfServeTrial /></ProtectedRoute>} />
           <Route path="/admin/super/meta-ads" element={<ProtectedRoute requireRole="super_admin"><SuperMetaAds /></ProtectedRoute>} />
           <Route path="/admin/super/login-attempts" element={<ProtectedRoute requireRole="super_admin"><SuperLoginAttempts /></ProtectedRoute>} />
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
