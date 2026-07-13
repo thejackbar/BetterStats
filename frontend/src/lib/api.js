@@ -879,6 +879,7 @@ export const api = {
   // Self-serve club trial registration (internal, flag-gated — see
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),
+  selfServeTrialSearch: (q) => request(`/self-serve-trial/search?q=${encodeURIComponent(q)}`),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

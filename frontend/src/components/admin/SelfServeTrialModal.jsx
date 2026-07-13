@@ -1,9 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { api } from '../../lib/api'
+import { SUPPORT_EMAIL } from '../../data/marketing'
 
 // Step scaffold for the self-serve trial registration flow (see
-// docs/self-serve-trial-onboarding-plan.md). Only the shell exists so far —
-// each step lands in its own later phase. Keeping the list here now so the
-// stepper UI doesn't need reshaping when a step's content arrives.
+// docs/self-serve-trial-onboarding-plan.md). Steps after 'club' aren't built yet —
+// each lands in its own later phase. Keeping the list here now so the stepper UI
+// doesn't need reshaping when a step's content arrives.
 const STEPS = [
   { key: 'club', label: 'Club' },
   { key: 'admin', label: 'Admin details' },
@@ -11,6 +13,8 @@ const STEPS = [
   { key: 'ack', label: 'Acknowledgements' },
   { key: 'submit', label: 'Submit' },
 ]
+
+const orgName = (org) => org.name || org.shortName || org.organisationName || org.id || ''
 
 /**
  * The self-serve club trial registration modal shell. Internal-only for now —
@@ -41,6 +45,60 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
       if (previouslyFocused.current?.focus) previouslyFocused.current.focus()
     }
   }, [onClose])
+
+  // ─── Step 1: club search (Phase 2) ──────────────────────────────────────
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [showResults, setShowResults] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [selectedClub, setSelectedClub] = useState(null)
+  const [duplicateClub, setDuplicateClub] = useState(null)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (selectedClub) return
+    if (!query || query.trim().length < 2) {
+      setResults([])
+      setShowResults(false)
+      return
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true)
+      setSearchError('')
+      try {
+        const data = await api.selfServeTrialSearch(query.trim())
+        setResults(Array.isArray(data) ? data : [])
+        setShowResults(true)
+      } catch (e) {
+        setResults([])
+        setSearchError(e?.message || 'Club search failed.')
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(debounceRef.current)
+  }, [query, selectedClub])
+
+  const selectClub = (org) => {
+    setShowResults(false)
+    if (org.already_registered) {
+      setDuplicateClub(org)
+      setSelectedClub(null)
+      return
+    }
+    setDuplicateClub(null)
+    setSelectedClub(org)
+    setQuery(orgName(org))
+  }
+
+  const clearClub = () => {
+    setSelectedClub(null)
+    setDuplicateClub(null)
+    setQuery('')
+    setResults([])
+  }
 
   return (
     <div
@@ -84,12 +142,93 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
             ))}
           </ol>
 
-          <div className="pb-card p-4 bg-pb-surface2">
-            <p className="font-mono text-[11px] text-pb-faint">
-              Club search isn't built yet — it lands in the next phase of
-              docs/self-serve-trial-onboarding-plan.md.
-            </p>
+          <div className="relative">
+            <label className="font-mono text-[10px] text-pb-faint block mb-1">Search for your club</label>
+            <input
+              type="text"
+              value={query}
+              disabled={!!selectedClub}
+              onChange={(e) => { setQuery(e.target.value); setDuplicateClub(null) }}
+              onFocus={() => { if (results.length > 0) setShowResults(true) }}
+              placeholder="Start typing your club's name…"
+              className="w-full bg-pb-surface2 text-pb-text border pb-hairline rounded px-3 py-2 text-sm outline-none focus:border-pb-accent disabled:opacity-60"
+            />
+
+            {showResults && results.length > 0 && !selectedClub && (
+              <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface max-h-64 overflow-y-auto">
+                {results.map((org) => (
+                  <button
+                    key={org.id}
+                    type="button"
+                    onClick={() => selectClub(org)}
+                    className="w-full text-left px-3 py-2 hover:bg-pb-surface2 border-b pb-hairline last:border-b-0"
+                  >
+                    <div className="text-pb-text text-sm flex items-center justify-between gap-2">
+                      <span>{orgName(org)}</span>
+                      {org.already_registered && (
+                        <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase shrink-0">
+                          Registered
+                        </span>
+                      )}
+                    </div>
+                    {org.shortName && org.shortName !== org.name && (
+                      <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {showResults && !searching && results.length === 0 && query.trim().length >= 2 && !selectedClub && (
+              <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface px-3 py-2">
+                <p className="font-mono text-[11px] text-pb-faintest">No clubs found for "{query.trim()}".</p>
+              </div>
+            )}
+
+            {searching && (
+              <p className="font-mono text-[10px] text-pb-faintest mt-1">Searching…</p>
+            )}
+            {searchError && (
+              <p className="font-mono text-[10px] text-pb-red mt-1">{searchError}</p>
+            )}
           </div>
+
+          {duplicateClub && (
+            <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
+              <p className="font-mono text-[11px] text-pb-text">
+                {orgName(duplicateClub)} has already been registered in BetterCricket.
+                Please contact your club's administrator or email{' '}
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
+                if you think your club has been incorrectly registered.
+              </p>
+            </div>
+          )}
+
+          {selectedClub && (
+            <div className="pb-card p-4 bg-pb-surface2 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Selected club</p>
+                <p className="text-pb-text text-sm">{orgName(selectedClub)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={clearClub}
+                className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline shrink-0"
+              >
+                Change
+              </button>
+            </div>
+          )}
+
+          {!selectedClub && (
+            <div className="pb-card p-4 bg-pb-surface2">
+              <p className="font-mono text-[11px] text-pb-faint">
+                The rest of registration (admin details, email verification,
+                acknowledgements, submission) isn't built yet — it lands in later
+                phases of docs/self-serve-trial-onboarding-plan.md.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t pb-hairline shrink-0 flex items-center justify-end gap-2">
@@ -101,7 +240,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
           </button>
           <button
             disabled
-            title="Not wired up yet — club search and the rest of the registration steps land in later phases."
+            title="Not wired up yet — the remaining registration steps land in later phases."
             className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
             style={{ background: 'var(--pb-accent)' }}
           >
