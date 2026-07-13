@@ -39,7 +39,11 @@ class Settings(BaseSettings):
     # as spam. Set those records up on bettersports.com.au (the From domain), or
     # override the address with EMAIL_FROM_ADDRESS in the server .env.
     # email_provider defaults to console, so nothing sends until a provider is set.
-    email_from_address: str = "cricket@bettersports.com.au"
+    # A dedicated system-notifications identity, deliberately separate from the
+    # human-monitored support inbox (email_reply_to below) — system mail (e.g.
+    # the self-serve trial OTP) sends FROM here, but replies still land in the
+    # real inbox.
+    email_from_address: str = "notifications@bettersports.com.au"
     email_from_name: str = "BetterCricket"
     email_reply_to: str = "cricket@bettersports.com.au"  # global default; per-club reply-to overrides
     # Public origin used to build the (mandatory) one-click unsubscribe link.
