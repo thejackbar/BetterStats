@@ -566,6 +566,20 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             org_id=org.id, user_id=user.id,
         ))
         await db.commit()
+
+        # Best-effort, backgrounded: land the club + registering admin in
+        # Twenty as a Company/Contact/Lead/Opportunity immediately (per the
+        # user's explicit call — a self-serve registration is the strongest
+        # buying signal there is, stronger even than a direct "onboard my
+        # club" enquiry, so it doesn't wait on the nightly refresh or a human
+        # flipping Twenty's own createOpportunity field). Never raises;
+        # a CRM hiccup can't undo the registration that already committed.
+        from app.services import twenty_sync
+        background_tasks.add_task(
+            twenty_sync.push_self_serve_registration,
+            org_id=org.id, org_name=name, contact_name=user.display_name,
+            email=email, phone=user.mobile_number or None, modules=list(requested_modules),
+        )
     except Exception:
         logger.error(
             "self-serve registration: club %s / user %s were created but "

@@ -205,11 +205,32 @@ No frontend change needed — `CommsSettings.jsx`'s `requestLimit` already displ
 `e.message` generically for any thrown error, so the 402's plain-string `detail`
 renders correctly as-is.
 
-**Phase 12 — MarketingClub + Twenty Lead/Opportunity creation.** On successful
-registration: find-or-create the linked `MarketingClub` row (mirroring the existing
-`_resolve_onboarding_club` pattern), then fire the existing
-`create_opportunity_from_company` cascade so the club and the registering admin land
-as a Twenty Lead + Opportunity simultaneously.
+**Phase 12 — MarketingClub + Twenty Lead/Opportunity creation (done).** New
+`twenty_sync._resolve_self_serve_club` finds-or-creates the `MarketingClub` +
+registering-admin `MarketingClubContact` for a completed registration — checked in
+order: a row `_onboard_club_core` already linked to this exact org (it runs first,
+inside the same registration, and may already have matched-and-linked one by
+playhq_id or name), else a row keyed on the org's own id (the same guid the
+directory crawler would itself use for a grassroots-sourced club), else an exact
+name match, else create fresh. Unlike a bare "onboard my club" enquiry
+(`_resolve_onboarding_club`, no real CA identifier, mints a synthetic guid), a
+registration always has a real org to key on, so no synthetic id is ever needed.
+`push_club_and_contacts` gained `create_opportunity`/`opportunity_modules` params
+(off by default, so every existing caller — campaign sends, the enquiry path — is
+unaffected) that, right after the Lead upsert, also call
+`twenty_opportunity._upsert_opportunity` directly. Rather than going through the
+webhook cascade (`create_opportunity_from_company`, which expects a human to flip
+Twenty's own field and round-trips through the Twenty API to re-derive the club),
+calling the same underlying upsert directly is simpler here since the club/company
+id are already in hand from the same request. New `push_self_serve_registration`
+(`twenty_sync.py`) ties it together: resolve club/contact, commit, then
+`push_club_and_contacts(..., engagement_override=<forced Hot 100>,
+create_opportunity=True, opportunity_modules=<the modules the admin selected>)` —
+same forced-Hot treatment `push_onboarding_enquiry` gives a plain enquiry, plus the
+Opportunity a registration (a materially stronger signal) doesn't wait on. Wired
+into `self_serve_trial.py`'s `/submit` as a `background_tasks.add_task` right after
+the transaction commits — best-effort, never blocks or fails the registration
+response.
 
 **Phase 13 — Sync trigger + queue governor + progress + admin-home display.** Reuse
 the Full Rebuild implementation and `sync_runs`. Build the concurrency governor
