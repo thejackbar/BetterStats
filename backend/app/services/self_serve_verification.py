@@ -83,6 +83,24 @@ async def start_verification(db: AsyncSession, email: str) -> None:
     await _send_code_email(email, code)
 
 
+def _from_email() -> str:
+    """Mirrors routers/comms.py's _from_address: on SES, the send must
+    originate from one of the already-verified per-silo domains
+    (ses_marketing_domain / ses_club_domain) — that's the whole point of that
+    scheme, no per-club (or here, per-feature) AWS/DNS setup is ever needed.
+    settings.email_from_address (cricket@bettersports.com.au) is NOT a
+    verified SES sending identity; it's only ever used for display/reply-to
+    (confirmed live: SES 400 "Email address is not verified" when this
+    function used it directly as the From). The marketing domain fits this
+    send best (a pre-club, platform-level growth email, same category as
+    marketing outreach) — there's no club/org yet to pick a club-domain
+    local-part from. Non-SES providers keep the configured platform address,
+    since they don't have this verified-domain requirement."""
+    if (settings.email_provider or "").strip().lower() == "ses" and (settings.ses_marketing_domain or "").strip():
+        return f"verify@{settings.ses_marketing_domain}"
+    return settings.email_from_address
+
+
 async def _send_code_email(email: str, code: str) -> None:
     subject = "Your BetterCricket verification code"
     html = f"""
@@ -109,7 +127,7 @@ async def _send_code_email(email: str, code: str) -> None:
         subject=subject,
         html=html,
         text=text,
-        from_email=settings.email_from_address,
+        from_email=_from_email(),
         from_name=settings.email_from_name,
         reply_to=settings.email_reply_to,
         # Platform-level send with no club yet to tenant against (registration
