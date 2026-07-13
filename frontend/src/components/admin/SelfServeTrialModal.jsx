@@ -281,7 +281,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
       aria-modal="true"
       aria-labelledby="self-serve-trial-modal-title"
     >
-      <div className="pb-card bg-pb-surface w-full max-w-lg mt-10 mb-8 max-h-[86vh] overflow-hidden flex flex-col">
+      <div className="pb-card bg-pb-surface w-full max-w-lg mt-6 mb-6 max-h-[92vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-b pb-hairline shrink-0">
           <h2 id="self-serve-trial-modal-title" className="font-display font-bold text-base text-pb-text">
             Start your club's {defaultTrialDays} Day Free Trial
@@ -332,7 +332,12 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                 />
 
                 {showResults && results.length > 0 && !selectedClub && (
-                  <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface max-h-[440px] overflow-y-auto">
+                  // Normal flow, not absolute — an absolutely positioned box is
+                  // taken out of layout and doesn't expand the scrollable body's
+                  // content height, so it silently gets clipped by the modal
+                  // card's own height limit regardless of its own max-h. Normal
+                  // flow lets the body's scrollbar (below) actually reach it.
+                  <div className="mt-1 w-full pb-card bg-pb-surface max-h-[440px] overflow-y-auto">
                     {results.map((org) => {
                       const location = [org.suburb, org.stateName].filter(Boolean).join(', ')
                       return (
@@ -363,7 +368,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                 )}
 
                 {showResults && !searching && results.length === 0 && query.trim().length >= 2 && !selectedClub && (
-                  <div className="absolute z-10 mt-1 w-full pb-card bg-pb-surface px-3 py-2">
+                  <div className="mt-1 w-full pb-card bg-pb-surface px-3 py-2">
                     <p className="font-mono text-[11px] text-pb-faintest">No clubs found for "{query.trim()}".</p>
                   </div>
                 )}
