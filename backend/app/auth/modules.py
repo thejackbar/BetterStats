@@ -247,13 +247,53 @@ def _module_details(org, now: datetime | None = None) -> list[dict]:
     return sorted(out, key=lambda d: d["module"])
 
 
+_STATUS_PRIORITY = {STATUS_ACTIVE: 0, STATUS_PAST_DUE: 1, STATUS_TRIAL: 2, STATUS_PAUSED: 3, STATUS_CANCELLED: 4}
+
+
+def _billing_module_summary(org, now: datetime | None = None) -> list[dict]:
+    """One row per currently-held BILLABLE module (Core + the BetterAdmin
+    umbrella + the rest) — the shape a "Plan: ..." style display needs.
+    Unlike ``_module_details`` (which lists raw entitlement keys), this rolls
+    BetterAdmin's three entitlement keys (fees/comms/merch) into a single row,
+    since they're sold, trialled and displayed as ONE module everywhere else
+    (the Super Admin module editor, public pricing). Only modules the club
+    currently holds are included (matches ``org_entitled_modules``'s own
+    "entitled now" semantics) — a paused/cancelled module drops out rather
+    than showing a stale row."""
+    subs = _loaded_subscriptions(org)
+    if subs is None:
+        return []
+    now = now or _now()
+    by_key = {s.module_key: s for s in subs}
+    out = []
+    for billing_key in BILLABLE_MODULES:
+        rows = [by_key[m] for m in expand_billing_module(billing_key) if m in by_key]
+        if not rows:
+            continue
+        best = min(rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 99))
+        if best.status not in HELD_STATUSES:
+            continue
+        out.append({
+            "module": billing_key,
+            "name": BILLABLE_MODULE_NAMES.get(billing_key, billing_key),
+            "status": best.status,
+            "live": sub_is_live(best, now) and org_subscription_active(org),
+            "renewal_date": best.renewal_date.isoformat() if best.renewal_date else None,
+            "trial_ends_at": best.trial_ends_at.isoformat() if best.trial_ends_at else None,
+        })
+    return out
+
+
 def entitlement_summary(org, role: str | None = None) -> dict:
     """The entitlement shape surfaced to the frontend (via ``/auth/me``).
 
     ``modules`` is the entitled-now key list the frontend gates on (``hasModule``);
     ``module_details`` carries each held module's own status / renewal / trial end
-    when the rows are loaded. Super admins act cross-club and are never gated out of
-    a module, so they see every module as entitled regardless of their club's plan.
+    when the rows are loaded (raw entitlement keys — fees/comms/merch appear
+    separately). ``billing_modules`` is the same data rolled up to billable
+    modules (BetterAdmin as one row), for a "Plan: ..." style display. Super
+    admins act cross-club and are never gated out of a module, so they see
+    every module as entitled regardless of their club's plan.
     """
     if role == "super_admin":
         mods = set(ALL_MODULES)
@@ -267,6 +307,7 @@ def entitlement_summary(org, role: str | None = None) -> dict:
         "renewal_date": renewal.isoformat() if renewal else None,
         "billing_cycle": getattr(org, "billing_cycle", None) if org is not None else None,
         "module_details": _module_details(org) if org is not None else [],
+        "billing_modules": _billing_module_summary(org) if org is not None else [],
     }
 
 

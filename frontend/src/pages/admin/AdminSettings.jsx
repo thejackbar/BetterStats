@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss, deriveDarkPalette, gradientCss } from '../../lib/theme'
 import { validateImageFile } from '../../lib/validation'
+import { BASE_URL } from '../../data/marketing'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
@@ -157,6 +158,17 @@ export default function AdminSettings() {
     setMsgKind('error')
   }
 
+  const publicUrl = settings?.slug ? `${BASE_URL}/${settings.slug}` : ''
+  const copyPublicUrl = async () => {
+    if (!publicUrl) return
+    try {
+      await navigator.clipboard.writeText(publicUrl)
+      flash('Link copied')
+    } catch {
+      flashError('Could not copy link — select and copy manually')
+    }
+  }
+
   const setColor = (key, val) => setTheme(t => ({ ...t, [key]: val }))
   const setSeries = (i, val) => setTheme(t => ({
     ...t, chart_series: t.chart_series.map((c, idx) => idx === i ? val : c),
@@ -242,6 +254,31 @@ export default function AdminSettings() {
               <input type="text" value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 className={INPUT_CLS} />
+              {publicUrl && (
+                <div className="flex items-center gap-2 mt-1.5">
+                  <a
+                    href={publicUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[11px] hover:underline transition-colors truncate"
+                    style={{ color: 'var(--pb-accent)' }}
+                  >
+                    {publicUrl}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={copyPublicUrl}
+                    title="Copy link"
+                    aria-label="Copy public club link"
+                    className="text-pb-faint hover:text-pb-text transition-colors shrink-0"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                      <rect x="9" y="9" width="11" height="11" rx="2" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 15V5a2 2 0 012-2h10" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
             <div>
               <label className={LABEL}>Contact email</label>
