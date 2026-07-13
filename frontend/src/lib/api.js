@@ -675,6 +675,9 @@ export const api = {
     request(`/club-admin/bookmarks?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
 
   // Club user management
+  getInvite: (token) => request(`/auth/invite/${token}`),
+  acceptInvite: (token, data) =>
+    request(`/auth/invite/${token}/accept`, { method: 'POST', body: JSON.stringify(data) }),
   adminListClubUsers: () => request('/club-admin/users'),
   adminListCapabilities: () => request('/club-admin/users/capabilities'),
   adminCreateClubUser: (data) =>

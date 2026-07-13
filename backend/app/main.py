@@ -360,6 +360,11 @@ async def lifespan(app: FastAPI):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Club-user invite flow — set-your-password-by-email (migration 141).
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT UNIQUE"))
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token_expires_at TIMESTAMPTZ"))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))

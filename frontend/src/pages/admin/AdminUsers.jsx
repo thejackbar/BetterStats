@@ -24,15 +24,16 @@ function fmtDate(iso) {
 function NewUserForm({ onCreated, onCancel }) {
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
+  const [mobileNumber, setMobileNumber] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const submit = async (e) => {
     e.preventDefault()
     setErr(null)
-    if (!username.trim() || password.length < 6) {
-      setErr('Username + 6+ char password required')
+    if (!username.trim() || !email.trim()) {
+      setErr('Username and email are required')
       return
     }
     setBusy(true)
@@ -40,7 +41,8 @@ function NewUserForm({ onCreated, onCancel }) {
       await api.adminCreateClubUser({
         username: username.trim(),
         display_name: displayName.trim() || null,
-        password,
+        email: email.trim(),
+        mobile_number: mobileNumber.trim() || null,
         role: 'club_admin',
         capabilities: [],
       })
@@ -56,7 +58,8 @@ function NewUserForm({ onCreated, onCancel }) {
     <form onSubmit={submit} className="pb-card p-5 space-y-4">
       <h2 className="font-display font-bold text-lg text-pb-text">Invite admin</h2>
       <p className="font-mono text-[10px] text-pb-faintest -mt-2">
-        New users are full club admins with access to every tool.
+        New users are full club admins with access to every tool. They'll get an
+        email with a link to set their own password and activate the account.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="block">
@@ -67,9 +70,13 @@ function NewUserForm({ onCreated, onCancel }) {
           <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Display name</span>
           <input value={displayName} onChange={e => setDisplayName(e.target.value)} className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="off" />
         </label>
-        <label className="block sm:col-span-2">
-          <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Password</span>
-          <input value={password} onChange={e => setPassword(e.target.value)} type="password" className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="new-password" />
+        <label className="block">
+          <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Email</span>
+          <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="off" />
+        </label>
+        <label className="block">
+          <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Mobile number</span>
+          <input value={mobileNumber} onChange={e => setMobileNumber(e.target.value)} type="tel" className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="off" />
         </label>
       </div>
 
@@ -77,7 +84,7 @@ function NewUserForm({ onCreated, onCancel }) {
 
       <div className="flex gap-2 pt-2">
         <button type="submit" disabled={busy} className="font-mono text-[10px] tracking-wide3 uppercase px-4 py-2 rounded bg-pb-accent text-pb-bg disabled:opacity-50">
-          {busy ? 'Creating…' : 'Create user'}
+          {busy ? 'Sending invite…' : 'Send invite'}
         </button>
         <button type="button" onClick={onCancel} className="font-mono text-[10px] tracking-wide3 uppercase px-4 py-2 rounded text-pb-faint hover:text-pb-text border pb-hairline">
           Cancel

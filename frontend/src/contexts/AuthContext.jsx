@@ -43,6 +43,29 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  // Club-user invite accept (routers/auth.py::accept_invite) — sets the
+  // invited admin's own password and logs them in, the same shape login()
+  // itself uses (the backend response is a _build_me payload either way).
+  const acceptInvite = async (token, password, confirmPassword) => {
+    const res = await fetch(`/api/auth/invite/${token}/accept`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, confirm_password: confirmPassword }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Could not set your password' }))
+      const detail = err.detail
+      const message = Array.isArray(detail?.errors) ? detail.errors.join(' ') : (detail || 'Could not set your password')
+      throw new Error(message)
+    }
+    const data = await res.json()
+    setUser(data)
+    setJustLoggedIn(true)
+    clearAttribution()
+    return data
+  }
+
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
     setUser(null)
@@ -100,7 +123,7 @@ export function AuthProvider({ children }) {
   }, [user])
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, switchClub, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
       {children}
     </AuthContext.Provider>
   )

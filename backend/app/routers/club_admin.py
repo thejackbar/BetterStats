@@ -1,6 +1,7 @@
 """Admin API routes — all require authentication."""
 import json as _json
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import secrets as _secrets
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -34,7 +35,7 @@ from app.auth.modules import (
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
-from datetime import date as _date, datetime as _datetime, timezone as _timezone
+from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
 from app.services import playhq_client
 from app.services.name_format import name_sort_key
 
@@ -3466,10 +3467,15 @@ async def reorder_sponsors(
 # ---------------------------------------------------------------------------
 
 
+_INVITE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_INVITE_TOKEN_TTL_DAYS = 7
+
+
 class ClubUserCreate(BaseModel):
     username: str
     display_name: Optional[str] = None
-    password: str
+    email: str
+    mobile_number: Optional[str] = None
     # Retained for backward-compat with older clients; ignored — every club
     # user is created as club_admin (club_member is retired). super_admin
     # invites go through the Super Admin console.
@@ -3529,31 +3535,53 @@ async def list_capabilities(
 @router.post("/users")
 async def create_club_user(
     data: ClubUserCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_cap(MANAGE_USERS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    """Invite a colleague as a full club admin. No password is set here — the
+    account is created with password_hash NULL plus a random invite token, and
+    an email is sent with a link to /login?invite=<token> where the invited
+    admin sets their own password (same strength rule as self-serve
+    registration, see routers/auth.py's accept_invite) before they can log in.
+    Mirrors the self-serve registration's own "don't hand a plaintext password
+    around" reasoning, and closes the earlier gap where the inviting admin
+    picked the new user's password on their behalf."""
     username = (data.username or "").strip().lower()
-    if not username or len(data.password) < 6:
-        raise HTTPException(400, "Username required and password must be 6+ chars")
+    email = (data.email or "").strip().lower()
+    if not username:
+        raise HTTPException(400, "Username is required")
+    if not email or not _INVITE_EMAIL_RE.match(email):
+        raise HTTPException(400, "A valid email address is required to invite the new admin")
 
     # club_member is retired — every invited user is a full club admin
     # (club_admin implies all capabilities).
     role = "club_admin"
     caps: list[str] = []
 
-    # Username uniqueness
+    # Username + email uniqueness
     existing = await db.execute(_text("SELECT id FROM users WHERE username = :u"), {"u": username})
     if existing.first():
         raise HTTPException(409, "Username already in use")
+    existing_email = await db.execute(_text("SELECT id FROM users WHERE lower(email) = :e"), {"e": email})
+    if existing_email.first():
+        raise HTTPException(409, "That email address already belongs to an existing user")
 
     new_user_id = uuid.uuid4()
+    invite_token = _secrets.token_urlsafe(32)
+    invite_expires = _datetime.now(_timezone.utc) + _timedelta(days=_INVITE_TOKEN_TTL_DAYS)
+    mobile_number = (data.mobile_number or "").strip() or None
     await db.execute(
         _text(
-            "INSERT INTO users (id, username, display_name, password_hash) "
-            "VALUES (:id, :u, :d, :h)"
+            "INSERT INTO users (id, username, display_name, email, mobile_number, "
+            "password_hash, invite_token, invite_token_expires_at) "
+            "VALUES (:id, :u, :d, :e, :m, NULL, :tok, :exp)"
         ),
-        {"id": str(new_user_id), "u": username, "d": data.display_name, "h": _hash_password(data.password)},
+        {
+            "id": str(new_user_id), "u": username, "d": data.display_name,
+            "e": email, "m": mobile_number, "tok": invite_token, "exp": invite_expires,
+        },
     )
     await db.execute(
         _text(
@@ -3573,11 +3601,20 @@ async def create_club_user(
     await log_activity(
         db, org_id=club.id, user_id=current_user.id,
         action="create_club_user", target_type="user", target_id=str(new_user_id),
-        details={"username": username, "role": role, "capabilities": caps},
+        details={"username": username, "email": email, "role": role, "capabilities": caps},
     )
 
     await db.commit()
-    return {"id": str(new_user_id), "username": username, "role": role, "capabilities": caps}
+
+    from app.config.settings import settings as _settings
+    from app.services.user_invite import send_invite_email
+    invite_link = f"{_settings.public_base_url}/login?invite={invite_token}"
+    background_tasks.add_task(
+        send_invite_email, email=email, display_name=data.display_name or username,
+        club_name=club.name, link=invite_link,
+    )
+
+    return {"id": str(new_user_id), "username": username, "role": role, "capabilities": caps, "invited": True}
 
 
 @router.patch("/users/{user_id}")
