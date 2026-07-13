@@ -232,11 +232,44 @@ into `self_serve_trial.py`'s `/submit` as a `background_tasks.add_task` right af
 the transaction commits — best-effort, never blocks or fails the registration
 response.
 
-**Phase 13 — Sync trigger + queue governor + progress + admin-home display.** Reuse
-the Full Rebuild implementation and `sync_runs`. Build the concurrency governor
-properly (the source document's neglected "Phase 6.2") — protects the shared,
-rate-sensitive Grassroots proxy from contention if multiple internal test
-registrations run syncs concurrently.
+**Phase 13 — Sync trigger + queue governor + progress + admin-home display
+(done).** The sync trigger itself needed no new code — `_onboard_club_core`
+(Phase 9) already kicks off the org's first full sync via the same
+`start_sync_run`/`_sync_safe` machinery `POST /organisations/{id}/sync` uses.
+Found (and fixed) a small pre-existing gap while reviewing it: that call never
+added the org to `organisations.py`'s `_org_sync_running` in-memory guard, so
+an operator clicking "Sync Now" on a brand-new self-serve club while its own
+first sync was still running could race a second sync of the same org — now
+added right alongside `start_sync_run`.
+
+**Concurrency governor**: `sync.py`'s `sync_organisation` was renamed to
+`_sync_organisation_impl` (body untouched) and re-exported as a thin wrapper
+that acquires a new module-level `_SYNC_GOVERNOR = asyncio.Semaphore(2)`
+before calling it — every caller (weekly cron, manual Sync Now, Full
+Rebuild, per-player deep sync, self-serve registration) goes through the
+same public `sync_organisation` name, so the cap applies uniformly at the
+one place that actually talks to the shared, rate-sensitive Grassroots
+proxy, with zero changes to the sync logic itself. The weekly cron already
+awaits one org at a time (`jobs/scheduler.py`), so it's unaffected in
+practice — this exists for the case several "Sync Now" clicks or self-serve
+registrations land close together. When a sync has to wait for a slot, it
+stamps `progress_phase: "Queued — waiting for another club's sync to
+finish"` onto its `sync_runs` row so it reads as waiting, not stuck.
+
+**Progress**: already fully persisted by the existing `sync_runs.stats`
+`progress_phase`/`progress_pct`/`progress_done`/`progress_total` fields
+(`_progress`/`update_sync_run`, called throughout `sync_organisation`'s
+phases) — no new persistence needed, just the new queued phase above.
+
+**Admin-home display**: since Phase 14 (auto-login) and Phase 15 (onboarding
+wizard) don't exist yet, a self-serve-registered club has no "own admin
+home" to show this on yet — the meaningful place for THIS phase is where the
+Super Admin operator already is. `SelfServeTrialModal.jsx`'s success screen
+now polls `GET /organisations/{id}/sync-logs` (the same endpoint
+`AdminSync.jsx` already polls, 4s cadence) and renders a live `ProgressBar`
+(reusing `components/ProgressBar.jsx`) against the just-started run, stopping
+once it's no longer `running`. Revisit once Phase 14/15 exist — the new
+admin's own dashboard becomes the more natural home for this.
 
 **Phase 14 — Auto-login/redirect.** Reuse existing session mechanism.
 

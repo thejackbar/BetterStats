@@ -99,6 +99,10 @@ async def _onboard_club_core(
     from app.services.sync import start_sync_run
     org = await upsert_organisation(db, org_data)
     run_id = await start_sync_run(org.id, "org_full")
+    # Same in-memory guard trigger_sync uses, so an admin who clicks "Sync
+    # Now" on this club while its own first sync is still running gets
+    # "already_running" instead of a second sync racing the first.
+    _org_sync_running.add(org_id)
     background_tasks.add_task(_sync_safe, org_id, run_id, "org_full")
 
     # Link this now-synced org back to its Marketing Directory row immediately —

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { MODULE_TOGGLES } from '../../lib/modules'
+import { ProgressBar } from '../ProgressBar'
 
 // BetterStats (core) is mandatory, not a selectable trial — same reasoning as
 // the Super Admin per-club module editor this list is shared with.
@@ -293,6 +294,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   const [submitError, setSubmitError] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [submitResult, setSubmitResult] = useState(null)
+  const [syncRun, setSyncRun] = useState(null)
   // Minted once per modal instance and reused across retries — a double
   // click or a retry after a network error replays the same key rather than
   // registering as a second attempt. Lazily initialised so a fresh UUID isn't
@@ -340,6 +342,41 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Live sync progress right here — the operator just triggered this club's
+  // first sync and shouldn't have to leave the modal (or log in as the new
+  // club) to see it land. Same 4s cadence as AdminSync.jsx's own polling;
+  // stops once the run is no longer 'running'.
+  useEffect(() => {
+    if (!submitted || !submitResult?.org_id) return undefined
+    let cancelled = false
+    let intervalId = null
+    const poll = async () => {
+      try {
+        const logs = await api.getSyncLogs(submitResult.org_id)
+        const run = logs.find((r) => r.id === submitResult.run_id) || logs[0] || null
+        if (cancelled) return
+        setSyncRun(run)
+        if (run && run.status !== 'running' && intervalId) {
+          clearInterval(intervalId)
+          intervalId = null
+        }
+      } catch {
+        // best-effort — a polling hiccup shouldn't disrupt the success screen
+      }
+    }
+    poll()
+    intervalId = setInterval(poll, 4000)
+    return () => { cancelled = true; if (intervalId) clearInterval(intervalId) }
+  }, [submitted, submitResult?.org_id, submitResult?.run_id])
+
+  const syncProgressLabel = (s) => {
+    const phase = s?.progress_phase || 'Starting'
+    if (s?.progress_done != null && s?.progress_total != null) {
+      return `${phase} · ${Number(s.progress_done).toLocaleString()} / ${Number(s.progress_total).toLocaleString()}`
+    }
+    return phase
   }
 
   return (
@@ -720,6 +757,19 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                       </dd>
                     </div>
                   </dl>
+
+                  <div className="mt-3 pt-3 border-t pb-hairline">
+                    <ProgressBar
+                      pct={syncRun?.status === 'success' ? 100 : (syncRun?.stats?.progress_pct ?? 0)}
+                      label={
+                        syncRun?.status === 'success' ? 'Sync complete'
+                          : syncRun?.status === 'error' ? `Sync failed — ${syncRun.error || 'unknown error'}`
+                          : syncProgressLabel(syncRun?.stats)
+                      }
+                      color={syncRun?.status === 'error' ? 'var(--pb-red, #ef4444)' : undefined}
+                    />
+                  </div>
+
                   <p className="font-mono text-[11px] text-pb-faint mt-3">
                     Auto-login and onboarding follow in later phases of
                     docs/self-serve-trial-onboarding-plan.md — for now, check the new
