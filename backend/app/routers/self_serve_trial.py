@@ -163,10 +163,19 @@ class ValidateAdminRequest(BaseModel):
 async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
     """Validate-as-you-type for the admin-details step. Reuses the exact
     username rules (lowercase, 3-32 chars, uniqueness) the existing
-    POST /super/users already enforces. Email is format-checked only here —
-    whether an email already belongs to an existing BetterCricket user is
-    handled by the next phase (linking an existing admin to a second club is a
-    valid outcome there, not an error), so this step doesn't block on it."""
+    POST /super/users already enforces.
+
+    Email: format-checked, then checked against existing users and BLOCKED if
+    already taken (Phase 5, see docs/self-serve-trial-onboarding-plan.md Decision
+    14). The source document wanted this to link an existing admin to a second
+    club instead — but club_memberships.uq_membership_one_per_user (a user can
+    have at most one membership, ever) and the global uniqueness of users.email
+    make that a schema change, not a form feature. Building it properly needs a
+    club-switcher for ordinary club admins (mirroring the super-admin-only
+    active_club_id pattern) and a re-audit of every route that assumes one
+    membership per user — explicitly out of scope here. This blocks rather than
+    silently allowing a broken multi-club state, and does not reveal which
+    club(s) the existing account holds (no verification has happened yet)."""
     errors = {}
 
     if not (data.first_name or "").strip():
@@ -187,6 +196,14 @@ async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(
     email = (data.email or "").strip().lower()
     if not email or not _EMAIL_RE.match(email):
         errors["email"] = "Enter a valid email address"
+    else:
+        existing_user = await db.execute(select(User).where(User.email == email))
+        if existing_user.scalar_one_or_none():
+            errors["email"] = (
+                "This email already belongs to a BetterCricket account. Self-serve "
+                "registration doesn't yet support adding an existing admin to a "
+                "second club — email cricket@bettersports.com.au for help."
+            )
 
     mobile = (data.mobile_number or "").strip()
     if not mobile or not _mobile_valid(mobile):

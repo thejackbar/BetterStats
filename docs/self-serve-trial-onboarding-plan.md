@@ -13,6 +13,21 @@ intent rather than a literal script. This doc is the reconciled plan.
 **Scope of this phase**: internal-only. No public exposure. No Stripe. Both explicitly
 deferred — see *Cut from this effort* and *Deferred: "go public" checklist*.
 
+> ⚠️ **KNOWN BLOCKING GAP — this workflow is explicitly NOT complete without it.**
+> The app enforces one club per user account at the database level:
+> `club_memberships.uq_membership_one_per_user` (a user can have at most one
+> membership, ever) and `users.email` (globally unique). Phase 5 therefore
+> **blocks** registration outright when the entered email already belongs to an
+> existing BetterCricket user, rather than linking them to a second club — the
+> source document's "one admin, several clubs" requirement is explicitly
+> deferred, not solved. Per direct instruction: **do not consider this
+> self-serve workflow complete/production-ready until multi-club identity is
+> designed and built** as its own properly-scoped effort (loosening both
+> constraints, a club-switcher for ordinary club admins mirroring the existing
+> super-admin `active_club_id` pattern, and a re-audit of every club-scoped
+> route that currently assumes exactly one membership per user). See Decision
+> 14 and the Phase 5 entry below.
+
 ---
 
 ## Why this shape
@@ -47,6 +62,7 @@ whole `bltbox_docker_app` compose stack with real clubs depending on uptime (see
 | 11 | Onboarding wizard vs. sync | Wizard launches without sync-dependent steps while sync is running; once sync completes successfully, those steps are added and the wizard **reopens automatically** if not already open. |
 | 12 | Yearbook auto-generation scope | Last **3** completed seasons (or fewer if the club has fewer), not just the most recent. |
 | 13 | Yearbook publish state | **Auto-generate AND auto-publish**, no draft/approval gate — explicit user instruction, overriding the reviewer's recommendation to gate behind admin approval. Documented here as a known accepted risk: an AI-written narrative can go out unreviewed under a real club's name off a sync-completion trigger. Revisit if this causes a real incident. |
+| 14 | Existing-user identity (Phase 5) | **Block, don't build multi-club identity now.** Discovered `uq_membership_one_per_user` + globally-unique `users.email` make "one admin, several clubs" a two-constraint schema change, not a form feature — it would need a club-switcher for ordinary club admins and a re-audit of every club-scoped route. Phase 5 detects an email match and stops registration with a clear message; no schema change. **Explicit instruction: this self-serve workflow is NOT complete/production-ready until multi-club identity is designed and built as its own effort.** Don't let later phases' progress read as "done" while this is outstanding. |
 
 ## Reconciliation notes (source document vs. reality)
 
@@ -124,9 +140,13 @@ rules/components. Password entry deferred to immediately before final submission
 (rather than sitting in state through verification/acknowledgements) — smaller
 attack-surface window for no UX cost. [NET-NEW, wraps REUSE validation]
 
-**Phase 5 — Existing-user detection.** Reuse existing email/user lookup; new UX
-around "you already have access to N clubs, confirm you want to register another."
-[PARTIAL REUSE]
+**Phase 5 — Existing-user detection (revised scope, see Decision 14).** Reuses
+existing email lookup (`User.email`) to detect a match, but **blocks** rather than
+linking — `uq_membership_one_per_user` + globally-unique `users.email` make true
+multi-club identity a schema change, not a form feature. Shows a clear
+message and stops; does not reveal which club(s) the existing account holds.
+**Not complete** — multi-club identity is an explicit, tracked follow-up, not
+solved here.
 
 **Phase 6 — Full OTP email verification, built completely now.** Code generation,
 hashed storage, 24h expiry, resend/invalidate-earlier-codes, rate limiting (reusing
