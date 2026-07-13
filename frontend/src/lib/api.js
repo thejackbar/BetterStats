@@ -880,6 +880,8 @@ export const api = {
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),
   selfServeTrialSearch: (q) => request(`/self-serve-trial/search?q=${encodeURIComponent(q)}`),
+  selfServeTrialPrepare: (data) =>
+    request('/self-serve-trial/prepare', { method: 'POST', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

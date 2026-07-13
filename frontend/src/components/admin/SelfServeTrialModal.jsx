@@ -56,6 +56,34 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   const [duplicateClub, setDuplicateClub] = useState(null)
   const debounceRef = useRef(null)
 
+  // ─── Step 1b: club identity preview (Phase 3) ───────────────────────────
+  // Prepared server-side (name, short name, slug) the same way the existing
+  // "New Club" flow derives them — read-only here, the operator can't edit
+  // any of these fields.
+  const [preparing, setPreparing] = useState(false)
+  const [preparedClub, setPreparedClub] = useState(null)
+  const [prepareError, setPrepareError] = useState('')
+
+  useEffect(() => {
+    if (!selectedClub) {
+      setPreparedClub(null)
+      setPrepareError('')
+      return
+    }
+    let alive = true
+    setPreparing(true)
+    setPrepareError('')
+    api.selfServeTrialPrepare({
+      org_id: selectedClub.id,
+      name: orgName(selectedClub),
+      short_name: selectedClub.shortName || '',
+    })
+      .then((prepared) => { if (alive) setPreparedClub(prepared) })
+      .catch((e) => { if (alive) setPrepareError(e?.message || 'Could not prepare this club.') })
+      .finally(() => { if (alive) setPreparing(false) })
+    return () => { alive = false }
+  }, [selectedClub])
+
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (selectedClub) return
@@ -205,18 +233,48 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
           )}
 
           {selectedClub && (
-            <div className="pb-card p-4 bg-pb-surface2 flex items-center justify-between gap-3">
-              <div>
-                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Selected club</p>
-                <p className="text-pb-text text-sm">{orgName(selectedClub)}</p>
+            <div className="pb-card p-4 bg-pb-surface2 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Selected club</p>
+                <button
+                  type="button"
+                  onClick={clearClub}
+                  className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline shrink-0"
+                >
+                  Change
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={clearClub}
-                className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline shrink-0"
-              >
-                Change
-              </button>
+
+              {preparing && (
+                <p className="font-mono text-[11px] text-pb-faintest">Preparing club details…</p>
+              )}
+
+              {!preparing && prepareError && (
+                <p className="font-mono text-[11px] text-pb-red">{prepareError}</p>
+              )}
+
+              {!preparing && !prepareError && preparedClub && (
+                <dl className="space-y-2">
+                  <div>
+                    <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Club name</dt>
+                    <dd className="text-pb-text text-sm">{preparedClub.name}</dd>
+                  </div>
+                  {preparedClub.short_name && (
+                    <div>
+                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Short name</dt>
+                      <dd className="text-pb-text text-sm">{preparedClub.short_name}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">URL</dt>
+                    <dd className="text-pb-text text-sm">betterat.cricket/{preparedClub.slug}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Source club ID</dt>
+                    <dd className="text-pb-faint text-xs font-mono">{preparedClub.org_id}</dd>
+                  </div>
+                </dl>
+              )}
             </div>
           )}
 
