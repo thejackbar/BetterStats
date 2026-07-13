@@ -746,13 +746,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               </label>
 
               {ackError && <p className="font-mono text-[10px] text-pb-red">{ackError}</p>}
-
-              <div className="pb-card p-4 bg-pb-surface2">
-                <p className="font-mono text-[11px] text-pb-faint">
-                  Final submission isn't built yet — it lands in a later phase of
-                  docs/self-serve-trial-onboarding-plan.md.
-                </p>
-              </div>
             </div>
           )}
 
@@ -763,23 +756,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                   <p className="font-mono text-[11px] text-emerald-400">
                     ✓ Club and admin account created — sync started
                   </p>
-                  <dl className="mt-2 space-y-1">
-                    <div>
-                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Club ID</dt>
-                      <dd className="text-pb-faint text-xs font-mono">{submitResult?.org_id}</dd>
-                    </div>
-                    <div>
-                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Sync run ID</dt>
-                      <dd className="text-pb-faint text-xs font-mono">{submitResult?.run_id}</dd>
-                    </div>
-                    <div>
-                      <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Modules on trial</dt>
-                      <dd className="text-pb-faint text-xs font-mono">
-                        {(submitResult?.modules || []).map((k) =>
-                          MODULE_TOGGLES.find((m) => m.key === k)?.label || k).join(', ')}
-                      </dd>
-                    </div>
-                  </dl>
 
                   <div className="mt-3 pt-3 border-t pb-hairline">
                     <ProgressBar
