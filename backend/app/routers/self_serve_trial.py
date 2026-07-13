@@ -6,19 +6,23 @@ See docs/self-serve-trial-onboarding-plan.md. Everything here sits behind the
 authorization boundary. Registration and submission land in later phases.
 """
 import re
+import uuid as _uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, User, get_db
+from app.models.db import Organisation, SelfServeAcknowledgement, User, get_db
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
 from app.services import self_serve_verification as verification
+from app.services.login_audit import client_ip
 from app.services.sync import _parse_uuid, find_matching_organisation
+from app.services.usage_tracker import hash_ip
 
 # Both guards apply to every route in this router, present and future: the flag
 # check alone is not an authorization boundary (see require_self_serve_registration_
@@ -296,3 +300,70 @@ async def verification_status(email: str = "", db: AsyncSession = Depends(get_db
     if not email:
         return {"verified": False}
     return {"verified": await verification.is_verified(db, email)}
+
+
+# ─── Step 4: acknowledgements (Phase 7) ──────────────────────────────────────
+# Versions match the "Last updated" dates on the public Terms/Privacy pages
+# (frontend/src/pages/marketing/Terms.jsx, Privacy.jsx) — there's no shared
+# version source today (those pages just hardcode the date), so this constant
+# has to be kept in sync by hand whenever those pages change. BetterComms-
+# specific marketing terms aren't included: module selection (which modules,
+# including BetterAdmin/comms) doesn't happen until a later phase, so there's
+# nothing to condition a comms-specific acknowledgement on yet.
+TERMS_VERSION = "2026-06-09"
+PRIVACY_VERSION = "2026-06-09"
+
+
+class AcknowledgeRequest(BaseModel):
+    email: str
+    club_name: str
+    accept_terms: bool = False
+    accept_privacy: bool = False
+    confirm_authority: bool = False
+
+
+@router.post("/acknowledge")
+async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Records ToS + Privacy + club-authority acceptance. All three are
+    mandatory — this endpoint only succeeds once every box is ticked, matching
+    the source document's "required acknowledgements" list. IP is stored
+    hashed (services/usage_tracker.hash_ip), same privacy-conscious approach
+    login_attempts already uses — never the raw address."""
+    email = (data.email or "").strip().lower()
+    if not email or not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+
+    club_name = (data.club_name or "").strip()
+    if not club_name:
+        raise HTTPException(status_code=422, detail="Club name is required")
+
+    missing = []
+    if not data.accept_terms:
+        missing.append("Terms of Service")
+    if not data.accept_privacy:
+        missing.append("Privacy Policy")
+    if not data.confirm_authority:
+        missing.append("club authority statement")
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Please accept: {', '.join(missing)}")
+
+    accepted_at = datetime.now(timezone.utc)
+    row = SelfServeAcknowledgement(
+        id=_uuid.uuid4(),
+        email=email,
+        club_name=club_name,
+        terms_version=TERMS_VERSION,
+        privacy_version=PRIVACY_VERSION,
+        accepted_at=accepted_at,
+        ip_hash=hash_ip(client_ip(request)),
+        user_agent=(request.headers.get("user-agent") or "")[:300] or None,
+    )
+    db.add(row)
+    await db.commit()
+
+    return {
+        "accepted": True,
+        "terms_version": TERMS_VERSION,
+        "privacy_version": PRIVACY_VERSION,
+        "accepted_at": accepted_at.isoformat(),
+    }

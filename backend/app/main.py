@@ -317,6 +317,23 @@ async def lifespan(app: FastAPI):
             CREATE INDEX IF NOT EXISTS ix_self_serve_email_verifications_email
             ON self_serve_email_verifications(email)
         """))
+        # Self-serve trial registration legal acknowledgements (migration 137).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS self_serve_acknowledgements (
+                id UUID PRIMARY KEY,
+                email TEXT NOT NULL,
+                club_name TEXT NOT NULL,
+                terms_version TEXT NOT NULL,
+                privacy_version TEXT NOT NULL,
+                accepted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                ip_hash TEXT,
+                user_agent TEXT
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_self_serve_acknowledgements_email
+            ON self_serve_acknowledgements(email)
+        """))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))

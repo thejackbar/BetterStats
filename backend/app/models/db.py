@@ -76,6 +76,25 @@ class SelfServeEmailVerification(Base):
     attempt_count = Column(Integer, default=0, nullable=False, server_default="0")
 
 
+class SelfServeAcknowledgement(Base):
+    """Terms of Service / Privacy Policy / club-authority acceptance for the
+    self-serve trial registration flow (migration 137, Phase 7 — see
+    docs/self-serve-trial-onboarding-plan.md). Keyed by email, same reasoning as
+    SelfServeEmailVerification (no user/org exists yet). ``ip_hash`` mirrors
+    login_attempts' privacy-conscious approach (truncated SHA-256, never the raw
+    IP — see services/usage_tracker.hash_ip)."""
+    __tablename__ = "self_serve_acknowledgements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    club_name = Column(Text, nullable=False)
+    terms_version = Column(Text, nullable=False)
+    privacy_version = Column(Text, nullable=False)
+    accepted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    ip_hash = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+
 class UserBookmark(Base):
     """A page an admin user has starred for quick access in the sidebar.
 
