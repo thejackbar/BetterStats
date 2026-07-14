@@ -32,10 +32,12 @@ router = APIRouter(
 
 # (key, title, route, module) — module=None means always shown (core is
 # always on). Sync-dependent steps (Decision 11) are appended only once the
-# club's first full sync has completed successfully — the exact three named
-# in the plan: Import Historical Stats, Import Honours, Merge Grades. Every
-# route below is an existing admin tool; this wizard is a guided pointer at
-# them, not a new implementation of any of them.
+# club's first full sync has completed successfully — the plan's original
+# three (Import Historical Stats, Import Honours, Merge Grades) plus Merge
+# Players (same reasoning: duplicate players, like duplicate grades, are
+# only discoverable once real synced data exists to compare). Every route
+# below is an existing admin tool; this wizard is a guided pointer at them,
+# not a new implementation of any of them.
 _BASE_STEPS = [
     {"key": "branding", "title": "Set your club colours & logo", "route": "/admin/settings", "module": None},
     {"key": "invite_admin", "title": "Invite another admin", "route": "/admin/users", "module": None},
@@ -51,6 +53,7 @@ _SYNC_STEPS = [
     {"key": "import_honours", "title": "Import historical honours & awards",
      "route": "/admin/awards", "module": None},
     {"key": "merge_grades", "title": "Merge any duplicate grades", "route": "/admin/grades", "module": None},
+    {"key": "merge_players", "title": "Merge any duplicate players", "route": "/admin/merge", "module": None},
 ]
 
 
