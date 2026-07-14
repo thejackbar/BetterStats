@@ -61,20 +61,30 @@ async def list_games(
     finals_only: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    org = await db.get(Organisation, uuid.UUID(org_id))
     manual_games = await _fetch_manual_games_as_list(
         db, uuid.UUID(org_id), season_id, grade_id, finals_only,
     )
 
     # Recent games come from our own synced data (DB-first). We restrict to the
-    # club's OWN games via the org-name-word home/away filter — the same rule
-    # get_org_results uses — since a shared grade can hold other clubs' games.
-    org_word = (org.name or "").split()[0] if org and org.name else ""
-    clauses = ["s.organisation_id = CAST(:org_id AS UUID)"]
+    # club's OWN games via an ID-based check (a manual game is always ours; an
+    # API-synced game is ours if one of our own players has a recorded
+    # appearance in it) — the same rule get_org_results uses — since a shared
+    # grade can hold other clubs' games. Matching the org's name against the
+    # free-text home_team/away_team CA supplies used to silently drop every
+    # game for a club whose CA-recorded team text doesn't literally contain
+    # the org's first name-token.
+    clauses = [
+        "s.organisation_id = CAST(:org_id AS UUID)",
+        """(
+            g.source = 'manual'
+            OR EXISTS (
+                SELECT 1 FROM game_appearances ga
+                JOIN players p ON p.id = ga.player_id
+                WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org_id AS UUID)
+            )
+        )""",
+    ]
     params: dict = {"org_id": org_id, "limit": limit}
-    if org_word:
-        clauses.append("(g.home_team ILIKE :org_pat OR g.away_team ILIKE :org_pat)")
-        params["org_pat"] = f"%{org_word}%"
     if season_id:
         clauses.append("s.id = CAST(:season_id AS UUID)")
         params["season_id"] = season_id

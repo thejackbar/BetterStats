@@ -410,11 +410,14 @@ async def get_org_results(
     db: AsyncSession = Depends(get_db),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
-    # Use org name (first word) to filter to games where our club is one of the teams.
-    # Old syncs stored all games in a grade (including non-org games); this removes those.
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    org_word = (org.name or "").split()[0] if org and org.name else ""
-
+    # A game is 'ours' when one of the org's own players has a recorded
+    # appearance in it (a manual game is always ours). ID-based rather than
+    # matching the org's name against the free-text home_team/away_team CA
+    # supplies — a shared grade holds every club's games, and text matching
+    # silently zeroed every result for a club whose CA-recorded team text
+    # doesn't literally contain the org's first name-token (e.g. a hyphenated
+    # name like "Bayswater-Postels" spelled differently by CA). Mirrors
+    # ``_club_results`` so the headline matches this list.
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
@@ -424,12 +427,17 @@ async def get_org_results(
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org_id
+          AND (
+              g.source = 'manual'
+              OR EXISTS (
+                  SELECT 1 FROM game_appearances ga
+                  JOIN players p ON p.id = ga.player_id
+                  WHERE ga.game_id = g.id AND p.organisation_id = :org_id
+              )
+          )
     """
     params: dict = {"org_id": org_id}
 
-    if org_word:
-        query += " AND (g.home_team ILIKE :org_pat OR g.away_team ILIKE :org_pat)"
-        params["org_pat"] = f"%{org_word}%"
     if season_id:
         query += " AND s.id = :season_id"
         params["season_id"] = season_id

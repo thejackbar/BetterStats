@@ -2455,23 +2455,30 @@ async def _club_results(
 ) -> dict:
     """W/L/D and win-rate over the org's own completed games.
 
-    A game is 'ours' when our club name's first word appears on either side —
-    mirrors ``get_org_results`` so the headline matches the results list. Reads
-    ``v_effective_games`` (so it self-corrects with the cross-club views) and
-    replaces the retired PlayHQ Partner win/loss override.
+    A game is 'ours' when one of the org's own players has a recorded
+    appearance in it (a manual game is always ours — it's entered directly
+    against the org, with the opposition in a separate field) — mirrors
+    ``get_org_results`` so the headline matches the results list. This is
+    ID-based rather than matching the org's name against the free-text
+    home_team/away_team CA supplies, which silently zeroed every game for a
+    club whose CA-recorded team text doesn't literally contain the org's
+    first name-token (e.g. a hyphenated name like "Bayswater-Postels" where
+    CA spells it differently). Reads ``v_effective_games`` (so it
+    self-corrects with the cross-club views) and replaces the retired
+    PlayHQ Partner win/loss override.
     """
-    name_row = await session.execute(
-        text("SELECT name FROM organisations WHERE id = CAST(:id AS UUID)"),
-        {"id": org_id},
-    )
-    org_name = name_row.scalar() or ""
-    org_word = org_name.split()[0] if org_name else ""
-
-    clauses = ["s.organisation_id = CAST(:org_id AS UUID)"]
+    clauses = [
+        "s.organisation_id = CAST(:org_id AS UUID)",
+        """(
+            g.source = 'manual'
+            OR EXISTS (
+                SELECT 1 FROM game_appearances ga
+                JOIN players p ON p.id = ga.player_id
+                WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org_id AS UUID)
+            )
+        )""",
+    ]
     params: dict = {"org_id": org_id}
-    if org_word:
-        clauses.append("(g.home_team ILIKE :pat OR g.away_team ILIKE :pat)")
-        params["pat"] = f"%{org_word}%"
     if grade_id:
         clauses.append("gr.id = CAST(:grade_id AS UUID)")
         params["grade_id"] = grade_id
