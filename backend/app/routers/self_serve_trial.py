@@ -225,7 +225,7 @@ async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -
             errors["email"] = (
                 "This email already belongs to a BetterCricket account. Self-serve "
                 "registration doesn't yet support adding an existing admin to a "
-                "second club — email cricket@bettersports.com.au for help."
+                "second club — email support@bettersports.com.au for help."
             )
 
     mobile = (data.mobile_number or "").strip()

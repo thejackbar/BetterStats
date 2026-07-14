@@ -254,8 +254,8 @@ export default function Login() {
 
             <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
               Forgot your password? Contact{' '}
-              <a href="mailto:cricket@bettersports.com.au" className="text-pb-faint hover:text-pb-text transition-colors">
-                cricket@bettersports.com.au
+              <a href="mailto:support@bettersports.com.au" className="text-pb-faint hover:text-pb-text transition-colors">
+                support@bettersports.com.au
               </a>
             </p>
           </>
