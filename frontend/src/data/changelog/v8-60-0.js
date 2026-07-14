@@ -9,5 +9,6 @@ export default {
     'Editing an existing Club Admin can now update their email and mobile number, not just their display name.',
     'Setting a new password for a Club Admin directly now follows the same password rules (length, uppercase, number, special character, confirm match) as every other password-setting flow in BetterCricket, instead of a much weaker 6-character minimum.',
     'Added a "Email reset link" button on a Club Admin\'s edit panel, so a user can be sent a link to set their own new password instead of an admin typing one in for them.',
+    'Email and mobile number only need to look like a valid email/number now — they no longer have to be unique across accounts.',
   ],
 }

@@ -371,6 +371,27 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token TEXT UNIQUE"))
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMPTZ"))
+        # Club-user email is format-validated only, not required to be unique
+        # (migration 143) — drop whatever the original UNIQUE constraint on
+        # users.email was named, looked up by column rather than a fixed name.
+        await conn.execute(text("""
+            DO $$
+            DECLARE
+                con record;
+            BEGIN
+                FOR con IN
+                    SELECT conname FROM pg_constraint
+                    WHERE conrelid = 'users'::regclass
+                      AND contype = 'u'
+                      AND conkey = (
+                          SELECT array_agg(attnum) FROM pg_attribute
+                          WHERE attrelid = 'users'::regclass AND attname = 'email'
+                      )
+                LOOP
+                    EXECUTE format('ALTER TABLE users DROP CONSTRAINT %I', con.conname);
+                END LOOP;
+            END $$;
+        """))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))

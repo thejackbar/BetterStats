@@ -3584,13 +3584,11 @@ async def create_club_user(
     role = "club_admin"
     caps: list[str] = []
 
-    # Username + email uniqueness
+    # Username uniqueness only — email/mobile are format-checked (above /
+    # _clean_mobile below) but not required to be unique at the moment.
     existing = await db.execute(_text("SELECT id FROM users WHERE username = :u"), {"u": username})
     if existing.first():
         raise HTTPException(409, "Username already in use")
-    existing_email = await db.execute(_text("SELECT id FROM users WHERE lower(email) = :e"), {"e": email})
-    if existing_email.first():
-        raise HTTPException(409, "That email address already belongs to an existing user")
 
     new_user_id = uuid.uuid4()
     invite_token = _secrets.token_urlsafe(32)
@@ -3652,7 +3650,7 @@ async def update_club_user(
     # Confirm target is a member of this club
     row = await db.execute(
         _text(
-            "SELECT cm.id AS membership_id, cm.role AS current_role, u.id AS user_id, u.email AS current_email "
+            "SELECT cm.id AS membership_id, cm.role AS current_role, u.id AS user_id "
             "FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
             "WHERE u.id = :uid AND cm.club_id = :club"
         ),
@@ -3676,13 +3674,6 @@ async def update_club_user(
         email = (data.email or "").strip().lower()
         if not email or not _INVITE_EMAIL_RE.match(email):
             raise HTTPException(400, "A valid email address is required")
-        if email != (target["current_email"] or "").lower():
-            existing_email = await db.execute(
-                _text("SELECT id FROM users WHERE lower(email) = :e AND id != :uid"),
-                {"e": email, "uid": user_id},
-            )
-            if existing_email.first():
-                raise HTTPException(409, "That email address already belongs to an existing user")
         await db.execute(_text("UPDATE users SET email = :e WHERE id = :id"), {"e": email, "id": user_id})
         changes["email"] = True
     if data.mobile_number is not None:

@@ -28,7 +28,9 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(Text, unique=True, nullable=True)
+    # Not unique (migration 143) — format-validated only, deliberately allowed
+    # to repeat across accounts. username remains the unique login credential.
+    email = Column(Text, nullable=True)
     username = Column(Text, unique=True, nullable=True)
     password_hash = Column(Text)
     display_name = Column(Text, nullable=True)
