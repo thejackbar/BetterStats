@@ -533,6 +533,17 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     requested_modules = sorted({m for m in (data.modules or []) if m in _SELECTABLE_MODULES})
 
     try:
+        # upsert_organisation (services/sync.py) — shared with the ordinary
+        # authenticated "onboard" flow — never sets is_active or slug, so a
+        # brand-new org otherwise lands inactive with no public URL. Setting
+        # both HERE, scoped to self-serve only, rather than in the shared
+        # helper: a self-serve trial is meant to go live immediately, but
+        # that's a deliberate call for THIS flow specifically, not something
+        # to silently change for the shared onboard path's existing behaviour.
+        org.is_active = True
+        if not org.slug:
+            org.slug = await _unique_slug(db, _slugify(name))
+
         db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
         await db.flush()
         await ensure_primary_admin(db, org.id)

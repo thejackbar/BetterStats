@@ -200,21 +200,24 @@ export default function AdminLayout({ children }) {
 
   // Auto-open on login if there's anything unseen (sync runs, milestones,
   // pending requests, or a changelog entry newer than last_seen_version).
+  // Super Admin only — the bell itself only renders for that role now.
   useEffect(() => {
     if (!justLoggedIn || !user) return
     let cancelled = false
     ;(async () => {
-      try {
-        const s = await api.getNotificationsSummary()
-        if (cancelled) return
-        const hasNewChangelog = CHANGELOG.some(
-          e => compareVersions(e.version, s.last_seen_version) > 0
-        )
-        if ((s.unseen_count || 0) > 0 || hasNewChangelog) {
-          setBellSummary(s)
-          setBellOpen(true)
-        }
-      } catch {}
+      if (user.role === 'super_admin') {
+        try {
+          const s = await api.getNotificationsSummary()
+          if (cancelled) return
+          const hasNewChangelog = CHANGELOG.some(
+            e => compareVersions(e.version, s.last_seen_version) > 0
+          )
+          if ((s.unseen_count || 0) > 0 || hasNewChangelog) {
+            setBellSummary(s)
+            setBellOpen(true)
+          }
+        } catch {}
+      }
       clearJustLoggedIn()
     })()
     return () => { cancelled = true }
@@ -288,7 +291,9 @@ export default function AdminLayout({ children }) {
                 SETUP GUIDE
               </button>
             )}
-            <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
+            {user?.role === 'super_admin' && (
+              <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
+            )}
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
               {user?.role === 'super_admin' && (
@@ -493,7 +498,9 @@ export default function AdminLayout({ children }) {
         </main>
       </div>
 
-      <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
+      {user?.role === 'super_admin' && (
+        <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
+      )}
       {wizardOpen && <OnboardingWizardModal onClose={() => setWizardOpen(false)} />}
     </div>
   )
