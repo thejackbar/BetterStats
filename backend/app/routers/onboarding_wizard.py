@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.auth.modules import org_entitled_modules
+from app.auth.modules import expand_billing_module, org_entitled_modules
 from app.models.db import OnboardingWizardState, Organisation, SyncRun, get_db
 from app.routers.auth import get_current_club, require_onboarding_wizard_enabled
 
@@ -77,7 +77,11 @@ async def _sync_ready(db: AsyncSession, org_id) -> bool:
 def _build_steps(entitled: set, sync_ready: bool, completed: list) -> list:
     steps = []
     for s in _BASE_STEPS:
-        if s["module"] and s["module"] not in entitled:
+        # s["module"] may be a billing/umbrella key (e.g. "admin", which
+        # covers fees/comms/merch) rather than a real entitlement key — the
+        # entitled set only ever contains the underlying member keys, never
+        # the umbrella one, so this checks for ANY held member.
+        if s["module"] and not entitled.intersection(expand_billing_module(s["module"])):
             continue
         steps.append({**s, "done": s["key"] in completed})
     if sync_ready:
