@@ -3103,6 +3103,20 @@ async def hard_refresh_org(
             else:
                 await finish_sync_run(run_id, stats)
 
+                # Auto-generate + auto-publish yearbooks for the last 3 seasons
+                # with stats. A rebuild is the signal that the club's data is
+                # actually current, so this only runs on the true-success path
+                # above — never on the "wiped but 0 matches came back" branch.
+                # Isolated try/except: a yearbook failure must never look like
+                # a sync failure (finish_sync_run has already recorded success).
+                try:
+                    async with async_session_maker() as s:
+                        from app.routers.yearbooks import auto_generate_and_publish_recent_yearbooks
+                        yb_result = await auto_generate_and_publish_recent_yearbooks(s, org_id_str, count=3)
+                    _logger.info(f"HardRefresh: yearbook auto-generate for {org_id_str}: {yb_result}")
+                except Exception as ye:
+                    _logger.warning(f"HardRefresh: yearbook auto-generate failed for {org_id_str}: {ye}")
+
             # Refresh planner statistics. A hard refresh delete+reinserts the
             # org's whole game-level dataset and rewrites player_season_stats,
             # which leaves Postgres' statistics stale until autovacuum catches
