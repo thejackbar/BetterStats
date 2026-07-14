@@ -57,42 +57,57 @@ def upgrade() -> None:
     # for the club's own reference, never parsed/verified server-side.
     op.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS claim_note TEXT")
 
+    # `CREATE OR REPLACE VIEW` only allows appending new columns at the END of
+    # the SELECT list — inserting one in the middle shifts every later
+    # column's position, which Postgres treats as renaming that column and
+    # rejects ("cannot change name of view column ... to ..."). batter1_name/
+    # batter2_name/player_name are therefore appended after the existing
+    # `source` column, same placement migration 075 used for
+    # v_effective_batting_innings.caught_behind — not inserted next to the
+    # columns they conceptually belong with.
     op.execute("""
         CREATE OR REPLACE VIEW v_effective_partnerships AS
         SELECT
             id, game_id, innings_number, wicket_number,
-            batter1_id, batter2_id, batter1_name, batter2_name,
-            runs, balls, batter1_runs, batter2_runs, is_club_innings,
-            'api'::text AS source
+            batter1_id, batter2_id, runs, balls,
+            batter1_runs, batter2_runs, is_club_innings,
+            'api'::text AS source,
+            batter1_name, batter2_name
         FROM partnerships
         UNION ALL
         SELECT
             id, manual_game_id AS game_id, innings_number, wicket_number,
-            batter1_id, batter2_id, batter1_name, batter2_name,
-            runs, balls, batter1_runs, batter2_runs, is_club_innings,
-            'manual'::text AS source
+            batter1_id, batter2_id, runs, balls,
+            batter1_runs, batter2_runs, is_club_innings,
+            'manual'::text AS source,
+            batter1_name, batter2_name
         FROM manual_partnerships
     """)
 
     op.execute("""
         CREATE OR REPLACE VIEW v_effective_fielding_stats AS
         SELECT
-            id, game_id, player_id, player_name,
+            id, game_id, player_id,
             catches, catches_wk, run_outs, stumpings,
-            'api'::text AS source
+            'api'::text AS source,
+            player_name
         FROM fielding_stats
         UNION ALL
         SELECT
-            id, manual_game_id AS game_id, player_id, player_name,
+            id, manual_game_id AS game_id, player_id,
             catches, catches_wk, run_outs, stumpings,
-            'manual'::text AS source
+            'manual'::text AS source,
+            player_name
         FROM manual_fielding_stats
     """)
 
 
 def downgrade() -> None:
+    # CREATE OR REPLACE VIEW can't drop columns either (even trailing ones) —
+    # DROP + CREATE fresh to actually remove the appended columns.
+    op.execute("DROP VIEW IF EXISTS v_effective_fielding_stats")
     op.execute("""
-        CREATE OR REPLACE VIEW v_effective_fielding_stats AS
+        CREATE VIEW v_effective_fielding_stats AS
         SELECT
             id, game_id, player_id,
             catches, catches_wk, run_outs, stumpings,
@@ -105,8 +120,9 @@ def downgrade() -> None:
             'manual'::text AS source
         FROM manual_fielding_stats
     """)
+    op.execute("DROP VIEW IF EXISTS v_effective_partnerships")
     op.execute("""
-        CREATE OR REPLACE VIEW v_effective_partnerships AS
+        CREATE VIEW v_effective_partnerships AS
         SELECT
             id, game_id, innings_number, wicket_number,
             batter1_id, batter2_id, runs, balls,
