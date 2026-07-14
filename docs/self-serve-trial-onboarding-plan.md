@@ -471,7 +471,28 @@ ended" once past `trial_ends_at`), amber once ≤7 days or expired, linking to
 the public pricing page (Phase 19's dedicated status page doesn't exist yet).
 Hidden for super admins, matching the wizard's own exclusion.
 
-**Phase 19 — Trial/Subscription status page.** UI over data that already exists.
+**Phase 19 — Trial/Subscription status page (done).** New club-admin-facing
+Account page (`/admin/account`, "Plan & Billing" in the sidebar's Account section)
+showing every billable module's status — **Subscribed** (with renewal date),
+**In Trial** (with expiry date), **Trial Expired**, or **Never Trialed** — plus a
+**Start Trial** / **Subscribe** action where eligible. No new billing plumbing:
+both actions just call the existing `POST /club-admin/module-requests` queue
+(migration 119, already built for Phase 16/20's Super Admin side) — there's still
+no Stripe, so nothing changes instantly, a BetterCricket team member actions the
+request from the Super Admin queue exactly as they already do today.
+
+New `auth/modules.py::account_plan_status(org)` computes the four-state display
+status per module (distinct from `_billing_module_summary`, which only lists
+currently-held modules — this one always returns every billable module,
+including ones never touched, since the whole point of the page is to show
+what's available). `trial_eligible` is keyed off whether ANY subscription row
+for that module has ever recorded a `trial_started_at` — true exactly once,
+never re-offered after a trial starts, ends, or converts, and never offered
+once already a paying subscription. `GET /club-admin/account/plan` wraps it
+with the caller's `is_primary_admin` (so Subscribe can be disabled with an
+explanation rather than just failing) and each module's outstanding request
+kinds (so a just-submitted ask reads "Trial Requested" instead of the button
+reappearing).
 
 **Phase 20 — Super Admin controls.** Trial management, Primary Admin/Billing Contact
 transfer, archiving a bad registration.

@@ -936,6 +936,9 @@ export const api = {
   getPrimaryAdmin: () => request('/club-admin/primary-admin'),
   transferPrimaryAdmin: (userId) =>
     request('/club-admin/primary-admin/transfer', { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+  // Account / plan status page (Phase 19) — per-module Subscribed / In Trial /
+  // Trial Expired / Never Trialed status plus trial/subscribe eligibility.
+  accountGetPlan: () => request('/club-admin/account/plan'),
   // Module action requests — the trial/subscription queue (migration 119).
   requestModule: (moduleKey, kind = 'trial', note) =>
     request('/club-admin/module-requests', { method: 'POST', body: JSON.stringify({ module_key: moduleKey, kind, note }) }),
