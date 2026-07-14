@@ -5,6 +5,16 @@ import AdminLayout from '../../components/admin/AdminLayout'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
+// Mirrors backend/app/routers/club_admin.py's _INVITE_EMAIL_RE / _MOBILE_DIGITS_RE.
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+const MOBILE_STRIP_RE = /[\s\-()]/g
+const MOBILE_DIGITS_RE = /^\+?\d{7,15}$/
+// Email/mobile are both optional here (unlike the per-club Users page —
+// this create form doesn't collect an email, so some accounts have none) —
+// blank is fine, but a non-blank value must be well-formed.
+const isValidEmail = (v) => !(v || '').trim() || EMAIL_RE.test((v || '').trim())
+const isValidMobile = (v) => !(v || '').trim() || MOBILE_DIGITS_RE.test((v || '').replace(MOBILE_STRIP_RE, ''))
+
 export default function SuperUsers() {
   const { user: currentUser } = useAuth()
   const [users, setUsers] = useState([])
@@ -17,7 +27,7 @@ export default function SuperUsers() {
   const [saving, setSaving] = useState(false)
 
   const [editId, setEditId] = useState(null)
-  const [editForm, setEditForm] = useState({ username: '', display_name: '', role: 'club_admin', club_id: '' })
+  const [editForm, setEditForm] = useState({ username: '', display_name: '', email: '', mobile_number: '', role: 'club_admin', club_id: '' })
   const [confirmDelete, setConfirmDelete] = useState(null)
 
   const load = () => {
@@ -65,6 +75,8 @@ export default function SuperUsers() {
     setEditForm({
       username: u.username || '',
       display_name: u.display_name || '',
+      email: u.email || '',
+      mobile_number: u.mobile_number || '',
       role: u.role || 'club_admin',
       club_id: u.club_id || '',
     })
@@ -72,8 +84,10 @@ export default function SuperUsers() {
 
   const saveEdit = async (e) => {
     e.preventDefault()
-    setSaving(true)
     setMsg('')
+    if (!isValidEmail(editForm.email)) { setMsg('Enter a valid email address'); return }
+    if (!isValidMobile(editForm.mobile_number)) { setMsg('Enter a valid mobile number'); return }
+    setSaving(true)
     try {
       await api.superUpdateUser(editId, editForm)
       setMsg('User updated')
@@ -265,6 +279,18 @@ export default function SuperUsers() {
                         <label className="font-mono text-[10px] text-pb-faint block mb-1">Display name</label>
                         <input type="text" value={editForm.display_name}
                           onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))}
+                          className={INPUT_CLS} />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] text-pb-faint block mb-1">Email</label>
+                        <input type="email" value={editForm.email}
+                          onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                          className={INPUT_CLS} />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile number</label>
+                        <input type="tel" value={editForm.mobile_number}
+                          onChange={e => setEditForm(f => ({ ...f, mobile_number: e.target.value }))}
                           className={INPUT_CLS} />
                       </div>
                       <div>

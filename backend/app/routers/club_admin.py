@@ -2515,6 +2515,8 @@ async def list_users(
             "id": str(r.User.id),
             "username": r.User.username,
             "display_name": r.User.display_name,
+            "email": r.User.email,
+            "mobile_number": r.User.mobile_number,
             "role": r.ClubMembership.role if r.ClubMembership else None,
             "club_name": r.Organisation.name if r.Organisation else None,
             "club_id": str(r.ClubMembership.club_id) if r.ClubMembership else None,
@@ -2687,6 +2689,8 @@ async def _super_admin_count(db: AsyncSession) -> int:
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     display_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
     role: Optional[str] = None
     club_id: Optional[str] = None
 
@@ -2717,6 +2721,18 @@ async def patch_user(
 
     if "display_name" in fields:
         user.display_name = (fields["display_name"] or "").strip() or None
+
+    if "email" in fields:
+        email = (fields["email"] or "").strip().lower()
+        # Optional here (unlike the per-club Users page) — this router's own
+        # create_user doesn't collect an email, so some accounts have none.
+        if email and not _INVITE_EMAIL_RE.match(email):
+            raise HTTPException(status_code=422, detail="That doesn't look like a valid email address")
+        user.email = email or None
+
+    if "mobile_number" in fields:
+        # Format-only, same as the per-club Users page — not required to be unique.
+        user.mobile_number = _clean_mobile(fields["mobile_number"])
 
     membership_res = await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == user.id)
@@ -2758,6 +2774,8 @@ async def patch_user(
         "id": str(user.id),
         "username": user.username,
         "display_name": user.display_name,
+        "email": user.email,
+        "mobile_number": user.mobile_number,
         "role": membership.role if membership else None,
         "club_id": str(membership.club_id) if membership else None,
     }
