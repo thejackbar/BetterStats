@@ -59,6 +59,13 @@ class User(Base):
     # the inviting admin, same as before — these columns just stay NULL.
     invite_token = Column(Text, unique=True, nullable=True)
     invite_token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Admin-triggered "reset your password" email for an EXISTING club-user
+    # account (migration 142, routers/club_admin.py::send_password_reset_link).
+    # Distinct from invite_token above, which is only for a brand-new
+    # account's first-ever password — that flow 404s once password_hash is
+    # set, so an already-active admin needs its own token pair here.
+    password_reset_token = Column(Text, unique=True, nullable=True)
+    password_reset_token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

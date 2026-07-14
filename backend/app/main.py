@@ -365,6 +365,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT UNIQUE"))
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token_expires_at TIMESTAMPTZ"))
+        # Admin-triggered "reset your password" email for an existing club-user
+        # account (migration 142) — separate token pair from invite_token above.
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token TEXT UNIQUE"))
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMPTZ"))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
