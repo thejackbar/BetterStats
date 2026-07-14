@@ -683,6 +683,7 @@ export const api = {
   getPasswordReset: (token) => request(`/auth/reset-password/${token}`),
   acceptPasswordReset: (token, data) =>
     request(`/auth/reset-password/${token}/accept`, { method: 'POST', body: JSON.stringify(data) }),
+  forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   adminListClubUsers: () => request('/club-admin/users'),
   adminListCapabilities: () => request('/club-admin/users/capabilities'),
   adminCreateClubUser: (data) =>

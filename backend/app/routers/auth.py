@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 import bcrypt as _bcrypt
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
+import secrets
 import uuid
 
 from app.models.db import User, ClubMembership, Organisation, get_db
@@ -24,6 +25,9 @@ def _hash_password(plain: str) -> str:
 COOKIE_NAME = "bs_session"
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
+# Mirrors club_admin.py's _PASSWORD_RESET_TOKEN_TTL_HOURS (the admin-triggered
+# reset) — same token pair, same lifetime, different trigger.
+PASSWORD_RESET_TOKEN_TTL_HOURS = 24
 
 
 def create_session_token(user_id: str) -> str:
@@ -349,6 +353,71 @@ async def accept_invite(token: str, data: InviteAcceptRequest, response: Respons
     token_value = create_session_token(str(user.id))
     set_session_cookie(response, token_value)
     return await _build_me(user, db)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public, self-serve password reset request from the login page's
+    "Forgot your password?" link — the self-serve mirror of
+    routers/club_admin.py::send_password_reset_link (that one's admin-
+    triggered on behalf of a user; this one the user triggers themselves).
+    Reuses the exact same token pair (password_reset_token /
+    password_reset_token_expires_at) and reset-accept flow.
+
+    Always returns the same generic response regardless of whether the
+    email matches an account, so this can't be used to enumerate registered
+    addresses. users.email is not unique (migration 145 — club-user emails
+    are format-validated only), so more than one account can share an
+    email; every match gets its own token and its own email, each naming
+    its own club, rather than guessing which one the caller meant."""
+    from app.services import login_audit, rate_limit
+
+    email = (data.email or "").strip().lower()
+    generic = {"status": "sent"}
+    if not email:
+        return generic
+
+    ip = login_audit.client_ip(request)
+    rate_limit.enforce(f"forgot-password-ip:{ip}", limit=10, window_sec=3600)
+    rate_limit.enforce(
+        f"forgot-password-email:{email}", limit=3, window_sec=3600,
+        detail="Too many reset requests for this address — try again later",
+    )
+
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == email, User.password_hash.isnot(None))
+    )
+    users = result.scalars().all()
+
+    for user in users:
+        membership_res = await db.execute(select(ClubMembership).where(ClubMembership.user_id == user.id))
+        membership = membership_res.scalar_one_or_none()
+        club = await db.get(Organisation, membership.club_id) if membership else None
+
+        user.password_reset_token = secrets.token_urlsafe(32)
+        user.password_reset_token_expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=PASSWORD_RESET_TOKEN_TTL_HOURS)
+        )
+        await db.commit()
+
+        from app.services.user_invite import send_self_password_reset_email
+        reset_link = f"{settings.public_base_url}/login?reset={user.password_reset_token}"
+        background_tasks.add_task(
+            send_self_password_reset_email, email=user.email,
+            display_name=user.display_name or user.username,
+            club_name=club.name if club else "BetterCricket", link=reset_link,
+        )
+
+    return generic
 
 
 class ResetPasswordAcceptRequest(BaseModel):

@@ -179,6 +179,86 @@ function AcceptInvite({ token, mode = 'invite' }) {
   )
 }
 
+// Self-serve "forgot password" request — the counterpart to AcceptInvite's
+// mode="reset" step above (which handles the link once it's clicked; this
+// is what sends it). Always shows the same generic confirmation regardless
+// of whether the email matched an account, matching the backend's own
+// enumeration-safe response.
+function ForgotPassword({ onBack }) {
+  const [email, setEmail] = useState('')
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
+  const [sent, setSent] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSending(true)
+    try {
+      await api.forgotPassword(email.trim())
+      setSent(true)
+    } catch (err) {
+      setError(err.message || 'Could not send a reset link — try again shortly.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (sent) {
+    return (
+      <div className="pb-card p-6 space-y-4">
+        <p className="text-pb-text text-sm">
+          If that email is registered, a reset link is on its way. It's valid for 24 hours.
+        </p>
+        <p className="font-mono text-[10px] text-pb-faintest">
+          Nothing arriving? Check your spam folder, or contact{' '}
+          <a href="mailto:support@bettersports.com.au" className="text-pb-faint hover:text-pb-text transition-colors">
+            support@bettersports.com.au
+          </a>.
+        </p>
+        <button type="button" onClick={onBack}
+          className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
+          &larr; BACK TO SIGN IN
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="pb-card p-6 space-y-4">
+      <p className="text-pb-text text-sm">
+        Enter the email address on your admin account and we'll send you a link to reset your password.
+      </p>
+      <div>
+        <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
+          Email
+        </label>
+        <input
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          required
+          className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+        />
+      </div>
+      {error && <p className="font-mono text-[11px] text-pb-red">{error}</p>}
+      <button
+        type="submit"
+        disabled={sending}
+        className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed text-pb-bg"
+        style={{ background: 'var(--pb-accent)' }}
+      >
+        {sending ? 'SENDING…' : 'SEND RESET LINK'}
+      </button>
+      <button type="button" onClick={onBack}
+        className="w-full font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
+        &larr; BACK TO SIGN IN
+      </button>
+    </form>
+  )
+}
+
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -191,6 +271,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showForgot, setShowForgot] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -213,6 +294,8 @@ export default function Login() {
 
         {inviteToken || resetToken ? (
           <AcceptInvite token={inviteToken || resetToken} mode={resetToken ? 'reset' : 'invite'} />
+        ) : showForgot ? (
+          <ForgotPassword onBack={() => setShowForgot(false)} />
         ) : (
           <>
             <form onSubmit={handleSubmit} className="pb-card p-6 space-y-4">
@@ -253,10 +336,10 @@ export default function Login() {
             </form>
 
             <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
-              Forgot your password? Contact{' '}
-              <a href="mailto:support@bettersports.com.au" className="text-pb-faint hover:text-pb-text transition-colors">
-                support@bettersports.com.au
-              </a>
+              <button type="button" onClick={() => setShowForgot(true)}
+                className="text-pb-faint hover:text-pb-text transition-colors">
+                Forgot your password?
+              </button>
             </p>
           </>
         )}
