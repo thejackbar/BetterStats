@@ -223,30 +223,37 @@ export default function AdminLayout({ children }) {
     return () => { cancelled = true }
   }, [justLoggedIn, user, clearJustLoggedIn])
 
-  // Onboarding wizard: check on every fresh login (not on every navigation —
-  // this only needs to catch "first run" and "sync just finished, reopen
-  // once" moments, both of which happen around a login). 404 (flag off) is
-  // treated the same as "nothing to show" — silently. Club-admin-only (the
-  // mirror of the bell's own super_admin-only gate above): onboarding
-  // guidance belongs to the club's own admin, not a super admin just
-  // visiting/acting-as the club — without this, a super admin's own session
-  // would pop the wizard (and see the SETUP GUIDE button) for whichever
-  // club they're currently acting as.
+  // Onboarding wizard: availability (the SETUP GUIDE button) is checked on
+  // every mount, not gated to justLoggedIn — every admin page wraps itself
+  // in its own <AdminLayout>, so this component remounts on every in-app
+  // navigation, and a check tied to justLoggedIn (a one-shot flag cleared
+  // right after the first effect run following a real login) would only
+  // ever catch the very first page after login, vanishing on the next click.
+  // The auto-open POPUP still only fires on a genuine fresh login (read from
+  // justLoggedIn's value at the moment this runs, not as a dependency) so it
+  // doesn't re-pop on every ordinary navigation — should_auto_open's own
+  // dismissed_at/sync_steps_shown_at gating is what makes that safe to check
+  // this often. 404 (flag off) is treated the same as "nothing to show" —
+  // silently. Club-admin-only (the mirror of the bell's own super_admin-only
+  // gate above): onboarding guidance belongs to the club's own admin, not a
+  // super admin just visiting/acting-as the club.
   useEffect(() => {
-    if (!justLoggedIn || !user || user.role === 'super_admin') return
+    if (!user || user.role === 'super_admin') { setWizardAvailable(false); return }
     let cancelled = false
     ;(async () => {
       try {
         const s = await api.getOnboardingWizardState()
         if (cancelled) return
         setWizardAvailable(true)
-        if (s.should_auto_open) setWizardOpen(true)
+        if (justLoggedIn && s.should_auto_open) setWizardOpen(true)
       } catch {
         // 404 (flag off) or any other failure — just hide the entry point
+        if (!cancelled) setWizardAvailable(false)
       }
     })()
     return () => { cancelled = true }
-  }, [justLoggedIn, user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   const handleLogout = async () => {
     await logout()
