@@ -174,6 +174,26 @@ async def sweep_module_trials():
             logger.error(f"Module trial sweep failed: {e}")
 
 
+async def send_trial_lifecycle_nudges():
+    """Phase 16 (docs/self-serve-trial-onboarding-plan.md) — scan every club's
+    module trials for lifecycle events (started/ending soon/ended/converted)
+    and onboarding nudges (no historical data imported, a trialled module
+    never opened), and email the club's own admin. Off by default —
+    platform_settings.trial_nudges_enabled, checked here since it's a
+    super-admin-managed flag, not an env var."""
+    from app.services import platform_settings as ps
+    from app.services import trial_lifecycle
+    async with async_session_maker() as session:
+        try:
+            if not await ps.get_trial_nudges_enabled(session):
+                return
+            stats = await trial_lifecycle.scan_and_send(session)
+            logger.info(f"Trial lifecycle nudge scan done: {stats}")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Trial lifecycle nudge scan failed: {e}")
+
+
 async def comms_daily_maintenance():
     """BetterComms daily housekeeping, run just after the AWS quota window rolls
     over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
@@ -266,6 +286,18 @@ def start_scheduler():
         id="daily_twenty_leads_tasks",
         replace_existing=True,
     )
+    # Self-serve trial onboarding, Phase 16 — daily scan for trial lifecycle
+    # events and onboarding nudges, emailed straight to the club's own admin.
+    # Right after the Twenty scan since it's conceptually adjacent (both read
+    # org_module_subscriptions). No-op unless a super admin has turned it on.
+    scheduler.add_job(
+        send_trial_lifecycle_nudges,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        id="daily_trial_lifecycle_nudges",
+        replace_existing=True,
+    )
     # Meta Ads HQ dashboard — daily campaign/ad snapshot at 09:00 Perth time (the
     # spec's "refreshed by a daily 9am job"). No-op when the token isn't set.
     scheduler.add_job(
@@ -330,7 +362,8 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
                 "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
-                "Meta Ads snapshot 09:00 Perth, draft tick /15min", marketing_mode)
+                "trial lifecycle nudges 08:00, Meta Ads snapshot 09:00 Perth, "
+                "draft tick /15min", marketing_mode)
 
 
 def stop_scheduler():

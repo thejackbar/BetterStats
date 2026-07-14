@@ -44,6 +44,7 @@ export default function SuperClubs() {
   const [settingsForm, setSettingsForm] = useState({
     default_trial_days: 14, direct_enquiry_hot_days: 30,
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
+    trial_nudges_enabled: false,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -71,6 +72,7 @@ export default function SuperClubs() {
         direct_enquiry_hot_days: s?.direct_enquiry_hot_days ?? 30,
         self_serve_registration_enabled: !!s?.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
+        trial_nudges_enabled: !!s?.trial_nudges_enabled,
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -86,6 +88,7 @@ export default function SuperClubs() {
         direct_enquiry_hot_days: Number(settingsForm.direct_enquiry_hot_days) || 30,
         self_serve_registration_enabled: !!settingsForm.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
+        trial_nudges_enabled: !!settingsForm.trial_nudges_enabled,
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -427,6 +430,16 @@ export default function SuperClubs() {
                     onChange={e => setSettingsForm(f => ({ ...f, onboarding_wizard_enabled: e.target.checked }))} />
                   Onboarding wizard enabled
                 </label>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.trial_nudges_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, trial_nudges_enabled: e.target.checked }))} />
+                  Trial lifecycle nudge emails enabled
+                </label>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Daily scan (08:00 UTC) that emails a trialling club's own admin when a
+                  module trial starts, is about to end, has ended, or converts, plus onboarding
+                  nudges (no historical data imported, a trialled module never opened).
+                </p>
               </div>
 
               <div className="flex gap-2">

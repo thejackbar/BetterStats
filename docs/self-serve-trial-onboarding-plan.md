@@ -368,18 +368,67 @@ manually, e.g. inviting an admin before ever seeing the wizard, can just tick
 it), and each step's title is a link that closes the modal and navigates
 there.
 
-**Phase 16 — Trial lifecycle notifications + onboarding nudges (net new,
-scheduler-based).** Extends the `_scan_trials_and_renewals` pattern into real
-outbound reminders:
-- Trial started / ending soon / ended / converted.
-- "You haven't uploaded your historical data" nudge (with description: if you have
-  stats that aren't in PlayHQ, upload them here).
-- "You haven't opened module X in N days since your trial started" nudge, linking to
-  that module's marketing page.
-- Trial-ending-soon reminder linking to blog/marketing pages.
+**Phase 16 — Trial lifecycle notifications + onboarding nudges (done).**
+`app/services/trial_lifecycle.py` extends the `_scan_trials_and_renewals`
+query/dedup shape into real outbound email, but deliberately CRM-independent
+(runs whether or not Twenty is configured, scoped to every club with a
+module trial — not just the subset exported to Twenty) since a trial club
+has nobody watching a CRM. Six nudge types, one daily scan
+(`send_trial_lifecycle_nudges`, scheduler.py, 08:00 — right after the Twenty
+scan since both read `org_module_subscriptions`):
 
-Needs real marketing copy per nudge type — run through the `humanizer` skill per
-`CLAUDE.md`'s standing rule when that copy is written.
+- `trial_started` / `trial_ending_soon` (`TRIAL_ENDING_SOON_DAYS=3`) /
+  `trial_ended` / `trial_converted` — scanned straight off
+  `org_module_subscriptions.status`/`trial_started_at`/`trial_ends_at`/
+  `updated_at`. The ending-soon email links to the pricing page per the
+  source document's "linking to blog/marketing pages" framing — read as
+  content guidance for the one ending-soon email, not a fifth nudge type.
+- `no_historical_data` — reuses Phase 15's `onboarding_wizard_state`
+  (`'import_stats' NOT IN completed_steps`) rather than inventing a new
+  "has this club imported" flag; fires `NUDGE_HISTORICAL_DATA_DAYS=5` into a
+  Core trial.
+- `module_unopened` — reuses `usage_events` (the existing SPA page-view
+  beacon, `frontend/src/hooks/usePageView.js`, already fires on every admin
+  route including trial-only ones) rather than building new per-module
+  "last opened" tracking: a trialled module counts as opened once anyone at
+  the club has a `page_view` row under that module's admin route
+  (`frontend/src/lib/modules.js` `MODULE_INFO[].to` / `MODULE_GROUPS.admin.to`)
+  since the trial started, joined via `club_memberships.user_id`. Fires
+  `NUDGE_MODULE_UNOPENED_DAYS=5` in.
+
+BetterAdmin's three billing members (fees/comms/merch) collapse to one nudge
+via `billing_key_for` — a club that starts a BetterAdmin trial gets one
+email, not three; whichever of the three rows is processed first wins the
+dedupe check, the other two see it already recorded and no-op.
+
+**Dedup**: new `trial_lifecycle_nudges` table (migration 148), one row per
+`dedupe_key` — check-then-send-then-record (not claim-then-send): the record
+is only written *after* a successful send, so a provider failure or crash
+mid-send gets retried on the next scan instead of being silently marked
+done forever. A deterministic key (`{nudge_type}:{billing_key}:{org_id}` plus
+a date component for the four time-boxed lifecycle events, matching
+`twenty_leads_tasks._scan_trials_and_renewals`'s own `ext_ref` shape) is what
+makes a multi-day matching window (e.g. "ends within 3 days") fire exactly
+once rather than once per day it stays in range.
+
+**Recipient**: the club's own primary admin (`club_memberships.is_primary_admin`,
+falling back to any admin with a usable email) — always present for a
+self-serve-registered club (Phase 9 sets it at registration). A club with no
+resolvable admin is logged and skipped, never raised as an error (one bad
+row must never stop the rest of the scan).
+
+**Email**: plain inline-styled HTML matching `self_serve_verification.py`'s
+existing OTP-email pattern (a system-level transactional send off the
+transactional SES stream — `settings.email_from_address`/`ses_configuration_set_transactional`
+— not a BetterComms campaign, so no club-shell/unsubscribe wrapper). Copy
+was written directly in the plain Australian house voice (no em dashes, no
+promotional language) per `CLAUDE.md`'s standing humanizer rule.
+
+**Safety**: off by default behind a new `platform_settings.trial_nudges_enabled`
+flag (General Settings → the same super-admin-only pattern as
+`self_serve_registration_enabled`/`onboarding_wizard_enabled`) — Phase 0's
+"nothing here touches prod until a super admin flips it on" caution applies
+just as much to unsolicited email as to a new UI surface.
 
 **Phase 17 — Centralised entitlement extensions.** Mostly already covered by
 `org_entitled_modules`; small extensions where the source document's Prompt 20

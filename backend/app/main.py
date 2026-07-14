@@ -2480,6 +2480,22 @@ async def lifespan(app: FastAPI):
                 player_name
             FROM manual_fielding_stats
         """))
+        # Trial lifecycle notifications + onboarding nudges dedupe ledger
+        # (migration 148, Phase 16). See app/services/trial_lifecycle.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS trial_lifecycle_nudges (
+                id UUID PRIMARY KEY,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                module_key TEXT,
+                nudge_type TEXT NOT NULL,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_trial_lifecycle_nudges_org "
+            "ON trial_lifecycle_nudges(organisation_id, sent_at DESC)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

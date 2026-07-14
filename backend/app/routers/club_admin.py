@@ -1557,6 +1557,7 @@ async def get_general_settings(
         "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
+        "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
     }
 
 
@@ -1565,6 +1566,7 @@ class GeneralSettingsUpdate(BaseModel):
     direct_enquiry_hot_days: Optional[int] = None
     self_serve_registration_enabled: Optional[bool] = None
     onboarding_wizard_enabled: Optional[bool] = None
+    trial_nudges_enabled: Optional[bool] = None
 
 
 @router.patch("/super/general-settings")
@@ -1584,6 +1586,7 @@ async def patch_general_settings(
         "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
+        "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
     }
 
 
