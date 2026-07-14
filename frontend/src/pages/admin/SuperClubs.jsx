@@ -47,6 +47,7 @@ export default function SuperClubs() {
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [archiveConfirmText, setArchiveConfirmText] = useState('')
   const [syncing, setSyncing] = useState(null)
   const [showArchived, setShowArchived] = useState(false)
 
@@ -324,6 +325,7 @@ export default function SuperClubs() {
       await api.superArchiveClub(club.id)
       setMsg(`Archived ${club.name} — restore it any time from All Clubs.`)
       setConfirmDelete(null)
+      setArchiveConfirmText('')
       load()
     } catch (err) {
       setMsg(err.message)
@@ -622,7 +624,7 @@ export default function SuperClubs() {
                         {editId === club.id ? 'Close' : 'Edit'}
                       </button>
                       <button
-                        onClick={() => { setConfirmDelete(club.id); setEditId(null) }}
+                        onClick={() => { setConfirmDelete(club.id); setArchiveConfirmText(''); setEditId(null) }}
                         className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
                       >
                         Archive
@@ -841,12 +843,22 @@ export default function SuperClubs() {
                     Archive <strong>{club.name}</strong>? It disappears from this list (unless
                     "Show archived" is on) and its data is left untouched — restore it any time.
                   </p>
+                  <label className="block">
+                    <span className="font-mono text-[10px] text-pb-faint">
+                      Type <strong className="text-pb-red">confirm</strong> to continue
+                    </span>
+                    <input type="text" value={archiveConfirmText}
+                      onChange={e => setArchiveConfirmText(e.target.value)}
+                      autoComplete="off"
+                      className="mt-1 w-full max-w-xs bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-red" />
+                  </label>
                   <div className="flex gap-2">
-                    <button onClick={() => archiveClub(club)} disabled={saving}
+                    <button onClick={() => archiveClub(club)}
+                      disabled={saving || archiveConfirmText.trim().toLowerCase() !== 'confirm'}
                       className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-white bg-pb-red">
                       {saving ? 'Archiving…' : 'ARCHIVE'}
                     </button>
-                    <button onClick={() => setConfirmDelete(null)}
+                    <button onClick={() => { setConfirmDelete(null); setArchiveConfirmText('') }}
                       className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
                       Cancel
                     </button>
