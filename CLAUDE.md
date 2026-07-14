@@ -1005,6 +1005,58 @@ lead or engagement score.
   anything reaches Twenty — `twenty_client.py` drops every underscore-prefixed key),
   surfaced in `diagnose_club_lead.py`.
 
+## Fill-in players on the game scorecard (v8.60.0, Jul 2026)
+
+A club fielding a borrowed player (a fill-in from another club, or a Cricket
+Australia junior whose name is privacy-redacted in the feed) had that
+player's entire batting/bowling contribution disappear from
+`GET /games/{id}/scorecard`, and the displayed innings total silently
+undercounted by exactly their runs. Reported against
+`games/504937fb-dd8d-417e-8a7a-c96c36897c25`: our own second innings showed
+54/3 against Grassroots' real 197/5, the gap being a fill-in's 116.
+
+- **Root cause**: every "is this participant ours?" check in
+  `routers/games.py::get_scorecard`'s live Grassroots-enrichment pass
+  (`known_ids`, `our_batting_fingerprints`, `our_team_roster_pids`) requires
+  the participant to already be a row in `players` — which a genuine one-off
+  fill-in never is (only the season-aggregate feed mints `players` rows, and
+  a borrowed player never appears there). A participant on our own team's GR
+  roster but not in `players` fell through a `continue` that assumed a later
+  DNB-injection step would catch them; that step only resolves players
+  already in the DB by name, so it silently dropped them too. A fill-in
+  *bowler* fell through even further, into `opp_bowling` (misattributed to
+  the opposition). The innings total was summed from the (now-incomplete)
+  displayed rows rather than read from Grassroots' own authoritative
+  innings total, so it inherited the gap.
+- **Fix**: a roster participant not in `players` is now rendered directly on
+  our own batting/bowling card, `player_id: null` + `is_fill_in: true` (the
+  same shape opposition rows already use, so the frontend's existing
+  `player_id`-optional `<Link>`/`<span>` rendering needs no new branch) —
+  covers batted, DNB-with-a-batting-array-entry, and DNB-with-no-entry-at-all
+  cases. `_fill_in_display_name` falls back to "Fill-In" (or "Fill-In (#N)"
+  by batting position) only when Grassroots has no usable name (the
+  redacted-junior case, `playerShortName` literally `"********"`); a normal
+  fill-in's real name is shown as-is. Our own innings `runs`/`wickets` in
+  `innings_totals` now prefer Grassroots' own innings total over the row-sum
+  (mirrors how opposition wickets and both sides' extras were already
+  sourced), so the total is correct even if a future edge case still can't
+  display a row. Frontend: `FillInBadge` in `MatchScorecard.jsx` renders a
+  small amber "FILL-IN" tag next to the name on any row with `is_fill_in`.
+- **Not done this round**: `Partnership` has no free-text-name column (unlike
+  `FallOfWicket.batter_name`), so a fill-in's side of a partnership still
+  reads "Unknown" — would need a migration to fix properly. Fielding has no
+  live-GR merge in this endpoint at all (DB-only), so a fill-in's catches
+  aren't backfilled live. Sync (`sync_grassroots_game_level_data`) still
+  gates `batting_innings`/`bowling_spells`/`fielding_stats`/`game_appearances`
+  inserts on `our_team_pids`, so a fill-in still never lands in the stored
+  per-game tables — this fix is live-view-only (the endpoint already
+  re-fetches Grassroots on every request regardless of sync state, so no
+  re-sync is needed for it to take effect). Also raised but not built: an
+  admin flow to edit a fill-in's name, promote them to a real `players` row,
+  and match them to a PlayHQ profile via a pasted profile URL — the fill-in
+  row now carries a stable `participantId` internally, which is the piece
+  that flow would need, but the UI/endpoint itself wasn't scoped in.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

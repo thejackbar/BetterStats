@@ -176,6 +176,20 @@ def _to_float(v):
         return None
 
 
+def _fill_in_display_name(raw_name: Optional[str], batting_position=None) -> str:
+    """Display name for a fill-in (borrowed) player who has no `players` row.
+
+    GR usually carries a real name for these. The exception is a CA-redacted
+    junior participant, whose `playerShortName` comes through as a literal
+    string of asterisks with no name recoverable anywhere in the feed — fall
+    back to a generic label rather than showing "********".
+    """
+    cleaned = (raw_name or "").strip()
+    if not cleaned or cleaned.lower() == "unknown" or set(cleaned) == {"*"}:
+        return f"Fill-In (#{batting_position})" if batting_position else "Fill-In"
+    return cleaned
+
+
 async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
     """Full both-teams scorecard for a live / not-yet-synced match, built directly
     from Grassroots. Returns None when GR has nothing for this id (truly unknown).
@@ -581,6 +595,12 @@ async def get_scorecard(
             opp_batting_inn_nums: set[int] = set()
             # Track our pids seen batting in GR innings (to avoid re-adding as DNB).
             our_batting_pids_seen_in_gr: set[uuid.UUID] = set()
+            # Roster members on OUR team with no `players` row — fill-ins (borrowed
+            # players) or CA-redacted juniors. Tracked so they're rendered exactly
+            # once (batted/DNB in the innings loop, or as a name-only DNB fallback
+            # in the later roster sweep) instead of being dropped or misattributed
+            # to the opposition.
+            fill_in_seen_pids: set[str] = set()
             # Authoritative innings totals from GR innings objects.
             # Fields confirmed: runsScored, numberOfWicketsFallen, totalExtras,
             #                   byesRuns, legByesRuns, wideBalls, noBalls, penalties
@@ -637,16 +657,36 @@ async def get_scorecard(
                             our_dismissal_text_by_name[nk] = dt_text
                         continue
 
-                    # Player is in our team's GR roster but UUID doesn't match DB —
-                    # the our_team_roster_pids injection below will handle them as DNB.
-                    # Don't add to opp_batting to avoid duplication.
-                    if pid_str in our_team_roster_pids:
-                        continue
-
                     # dismissalText is pre-formatted: "c S Aplin b W Dagg", "b W Dagg", etc.
                     dismissal_str = None if is_dnb else (
                         row.get("dismissalText") or dt_long.lower() or None
                     )
+                    caught_behind = dt_long == "Caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names)
+
+                    # On our team's GR roster but not a known DB player — a fill-in
+                    # (borrowed player) or a CA-redacted junior. Show them on our own
+                    # batting card, flagged, instead of dropping their runs (which
+                    # silently undercounted the innings total) or misattributing them
+                    # to the opposition.
+                    if pid_str in our_team_roster_pids:
+                        fill_in_seen_pids.add(pid_str)
+                        batting_flat.append({
+                            "innings_number": inn_num,
+                            "player_id": None,
+                            "player_name": _fill_in_display_name(name, row.get("batOrder")),
+                            "runs": None if is_dnb else (row.get("runsScored") or 0),
+                            "balls": None if is_dnb else (row.get("ballsFaced") or 0),
+                            "fours": None if is_dnb else (row.get("foursScored") or 0),
+                            "sixes": None if is_dnb else (row.get("sixesScored") or 0),
+                            "strike_rate": _to_float(row.get("strikeRate")),
+                            "dismissal_type": dismissal_str,
+                            "caught_behind": caught_behind,
+                            "not_out": dt_id == 1,
+                            "batting_position": row.get("batOrder"),
+                            "did_not_bat": is_dnb,
+                            "is_fill_in": True,
+                        })
+                        continue
 
                     opp_all_batting_pids.add(pid_str)
                     if not is_dnb:
@@ -660,7 +700,7 @@ async def get_scorecard(
                         "fours": None if is_dnb else (row.get("foursScored") or 0),
                         "sixes": None if is_dnb else (row.get("sixesScored") or 0),
                         "dismissal_type": dismissal_str,
-                        "caught_behind": dt_long == "Caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names),
+                        "caught_behind": caught_behind,
                         "not_out": dt_id == 1,
                         "did_not_bat": is_dnb,
                         "batting_position": row.get("batOrder"),
@@ -685,6 +725,24 @@ async def get_scorecard(
                         econ = float(econ_raw) if econ_raw is not None else None
                     except (TypeError, ValueError):
                         pass
+                    if pid_str in our_team_roster_pids:
+                        # A fill-in bowler for our side — show on our own bowling card
+                        # (flagged) instead of misattributing to the opposition.
+                        fill_in_seen_pids.add(pid_str)
+                        bowling_flat.append({
+                            "innings_number": inn_num,
+                            "player_id": None,
+                            "player_name": _fill_in_display_name(name, None),
+                            "overs": row.get("oversBowled"),
+                            "maidens": row.get("maidensBowled"),
+                            "runs": row.get("runsConceded"),
+                            "wickets": row.get("wicketsTaken"),
+                            "wides": row.get("wideBalls"),
+                            "no_balls": row.get("noBalls"),
+                            "economy": econ,
+                            "is_fill_in": True,
+                        })
+                        continue
                     opp_bowling.append({
                         "innings_number": inn_num,
                         "player_id": None,
@@ -732,6 +790,8 @@ async def get_scorecard(
                 )
                 _unresolved_roster_pids: list[str] = []
                 for ros_pid_str in our_team_roster_pids:
+                    if ros_pid_str in fill_in_seen_pids:
+                        continue
                     try:
                         ros_pid = uuid.UUID(ros_pid_str)
                     except ValueError:
@@ -766,9 +826,23 @@ async def get_scorecard(
                         if _nk in our_batting_fingerprints:
                             continue  # they batted, not a DNB
                         _matched = _nk_to_player.get(_nk)
-                        if not _matched or _matched.id in db_batting_pids or _matched.id in our_missing_dnb:
-                            continue
-                        our_missing_dnb[_matched.id] = (_our_inn, None)
+                        if _matched:
+                            if _matched.id in db_batting_pids or _matched.id in our_missing_dnb:
+                                continue
+                            our_missing_dnb[_matched.id] = (_our_inn, None)
+                        else:
+                            # Genuine fill-in with no `players` row at all — inject a
+                            # name-only DNB row rather than silently dropping them.
+                            fill_in_seen_pids.add(_ros_str)
+                            batting_flat.append({
+                                "innings_number": _our_inn,
+                                "player_id": None,
+                                "player_name": _fill_in_display_name(_ros_name, None),
+                                "runs": None, "balls": None, "fours": None, "sixes": None,
+                                "strike_rate": None, "dismissal_type": None, "not_out": False,
+                                "batting_position": None, "did_not_bat": True,
+                                "is_fill_in": True,
+                            })
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.
             # GR includes nonPlayingMembers in teams[] — covers Oscar Brown / Sachin Dhadli style cases.
@@ -856,6 +930,17 @@ async def get_scorecard(
                     # dismissal strings (which can vary based on dismissal text parsing).
                     if inn_num_t not in our_batting_inns and _gr.get("wickets") is not None:
                         innings_totals[inn_num_t]["wickets"] = _gr["wickets"]
+                    # For OUR OWN innings, prefer GR's own runs/wickets total over the
+                    # row-sum computed earlier from batting_flat. Row-summing only ever
+                    # undercounts (a batter whose row can't be shown for some reason —
+                    # e.g. a CA-redacted junior we truly can't name) — GR's own innings
+                    # total doesn't have that failure mode, so it stays correct even if
+                    # a future edge case still drops a row from display.
+                    if inn_num_t in our_batting_inns:
+                        if _gr.get("runs") is not None:
+                            innings_totals[inn_num_t]["runs"] = _gr["runs"]
+                        if _gr.get("wickets") is not None:
+                            innings_totals[inn_num_t]["wickets"] = _gr["wickets"]
 
     except Exception as e:
         import traceback
