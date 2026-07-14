@@ -224,7 +224,7 @@ class Organisation(Base):
     # name/contribution also shows in the partnerships and fielding cards on
     # that same scorecard is the club's own call — default on for parity with
     # batting/bowling; a club can switch it off if it would rather those two
-    # cards only ever name registered players (migration 146). Never affects
+    # cards only ever name registered players (migration 147). Never affects
     # all-time club records — those are already scoped to a `players` join
     # that a NULL player_id naturally never matches.
     include_fill_ins_in_stats = Column(Boolean, nullable=False, server_default="true", default=True)
@@ -724,7 +724,7 @@ class Player(Base):
     # player whose id is a per-club uuid5, this is the join key back to CA.
     grassroots_id = Column(Text, nullable=True)
     # Free-text note an admin leaves when promoting a scorecard fill-in into a
-    # real player (migration 146) — e.g. a pasted PlayHQ profile URL for their
+    # real player (migration 147) — e.g. a pasted PlayHQ profile URL for their
     # own future reference. Not parsed or verified; see claim-fill-in.
     claim_note = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
@@ -1065,7 +1065,7 @@ class FieldingStat(Base):
     stumpings = Column(Integer, default=0)
     # A fill-in (borrowed player) or CA-redacted junior's GR scorecard name —
     # set only when player_id is NULL, same pattern as FallOfWicket.batter_name
-    # (migration 146).
+    # (migration 147).
     player_name = Column(Text, nullable=True)
 
     game = relationship("Game", back_populates="fielding_stats")
@@ -1141,7 +1141,7 @@ class Partnership(Base):
     is_club_innings = Column(Boolean, nullable=True)
     # A fill-in (borrowed player) or CA-redacted junior's GR scorecard name for
     # whichever side has no batterN_id — same pattern as FallOfWicket.batter_name
-    # (migration 146).
+    # (migration 147).
     batter1_name = Column(Text, nullable=True)
     batter2_name = Column(Text, nullable=True)
 
@@ -1361,7 +1361,7 @@ class ManualFieldingStat(Base):
     stumpings = Column(Integer, server_default="0", nullable=False)
     # Always NULL for a manually-uploaded card (player_id is required here) —
     # present only so v_effective_fielding_stats' column list matches
-    # `fielding_stats` (migration 146).
+    # `fielding_stats` (migration 147).
     player_name = Column(Text, nullable=True)
 
     manual_game = relationship("ManualGame", back_populates="fielding_stats")
@@ -1413,7 +1413,7 @@ class ManualPartnership(Base):
     is_club_innings = Column(Boolean, nullable=True)
     # Always NULL for a manually-uploaded card (an admin types in real
     # identities) — present only so v_effective_partnerships' column list
-    # matches `partnerships` (migration 146).
+    # matches `partnerships` (migration 147).
     batter1_name = Column(Text, nullable=True)
     batter2_name = Column(Text, nullable=True)
 

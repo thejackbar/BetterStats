@@ -2628,7 +2628,7 @@ async def get_club_summary(
 async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dict]:
     # batterN_name falls through display-override → real name → the raw GR
     # name stored for a fill-in/redacted participant (pt.batterN_name, added
-    # migration 146) — same COALESCE chain get_game_fall_of_wickets already
+    # migration 147) — same COALESCE chain get_game_fall_of_wickets already
     # uses. The caller (games.py) decides whether to keep or strip that
     # fallback name based on the club's include_fill_ins_in_stats setting.
     result = await session.execute(

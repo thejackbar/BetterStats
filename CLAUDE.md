@@ -1118,7 +1118,7 @@ undercounted by exactly their runs. Reported against
 
 Follow-up to the fill-in scorecard fix above (v8.60.x), extending it two ways.
 
-- **Club-level toggle for partnerships/fielding** (migration 146): a fill-in's
+- **Club-level toggle for partnerships/fielding** (migration 147): a fill-in's
   runs/wickets always show on the batting/bowling card, no toggle. Whether
   their name also shows in the lower-stakes partnerships and fielding cards
   on that same scorecard is a new org setting, `include_fill_ins_in_stats`

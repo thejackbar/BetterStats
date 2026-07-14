@@ -408,7 +408,7 @@ async def get_scorecard(
     org = await db.get(Organisation, season.organisation_id) if season else None
     # A fill-in's runs/wickets always show on the batting/bowling card (no
     # toggle). Whether their name also shows in the lower-stakes partnerships
-    # and fielding cards is the club's own call (migration 146) — default on.
+    # and fielding cards is the club's own call (migration 147) — default on.
     include_fillins_stats = bool(org.include_fill_ins_in_stats) if org else True
 
     # Manual and synced child models share the same field names, so we just

@@ -12,15 +12,15 @@ path surfaces that name or drops the row. Matching (always-NULL) columns are
 added to `manual_partnerships`/`manual_fielding_stats` purely so the
 `v_effective_*` union views' column lists still line up.
 
-Revision ID: 146
-Revises: 145
+Revision ID: 147
+Revises: 146
 Create Date: 2026-07-14
 """
 from alembic import op
 
 
-revision = '146'
-down_revision = '145'
+revision = '147'
+down_revision = '146'
 branch_labels = None
 depends_on = None
 

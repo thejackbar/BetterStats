@@ -2410,7 +2410,7 @@ async def lifespan(app: FastAPI):
             "ON meta_lead_adjustments(created_at DESC)"
         ))
         # Fill-in names on partnerships/fielding + a per-club toggle to show them
-        # (migration 146) — mirrors FallOfWicket.batter_name for whichever side of
+        # (migration 147) — mirrors FallOfWicket.batter_name for whichever side of
         # a partnership, or which fielder, has no linkable `players` row. Defensive
         # idempotent adds so the API boots even if alembic lags.
         await conn.execute(text(
