@@ -284,6 +284,59 @@ def _billing_module_summary(org, now: datetime | None = None) -> list[dict]:
     return out
 
 
+# Self-serve display status for the club's own Account page — distinct from
+# _billing_module_summary above (which only lists currently-HELD modules, the
+# shape a "Plan: ..." snapshot needs). This one always returns every billable
+# module, including ones the club has never touched, since the Account page's
+# whole job is to show what's available to trial/subscribe as well as what's
+# already held.
+STATUS_NEVER_TRIALED = "never_trialed"
+STATUS_TRIAL_EXPIRED = "trial_expired"
+STATUS_SUBSCRIBED = "subscribed"
+
+
+def account_plan_status(org, now: datetime | None = None) -> list[dict]:
+    """One row per BILLABLE module (Core included) for the club's own Account
+    page: display status (subscribed / trial / trial_expired / never_trialed),
+    renewal/trial dates, and whether starting a new trial is still available
+    (only ever true once — ``trial_eligible`` is False the moment ANY member
+    row has ever recorded a ``trial_started_at``, even if that row was later
+    removed and re-created, so a club can't repeatedly re-trial a module by
+    having a super admin clear it — and also False once already subscribed,
+    so a paid module that skipped a trial doesn't dangle a pointless "start
+    trial" offer). ``can_subscribe`` is simply "not already a real paying
+    subscription" — available during a trial too, so a club can convert
+    early."""
+    subs = _loaded_subscriptions(org)
+    if subs is None:
+        return []
+    now = now or _now()
+    by_key = {s.module_key: s for s in subs}
+    out = []
+    for billing_key in BILLABLE_MODULES:
+        member_rows = [by_key[m] for m in expand_billing_module(billing_key) if m in by_key]
+        best = min(member_rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 99)) if member_rows else None
+        ever_trialled = any(s.trial_started_at is not None for s in member_rows)
+
+        if best is None or best.status in (STATUS_PAUSED, STATUS_CANCELLED):
+            status = STATUS_TRIAL_EXPIRED if ever_trialled else STATUS_NEVER_TRIALED
+        elif best.status in PAID_STATUSES:
+            status = STATUS_SUBSCRIBED
+        else:  # STATUS_TRIAL
+            status = STATUS_TRIAL_EXPIRED if sub_is_trial_expired(best, now) else STATUS_TRIAL
+
+        out.append({
+            "module": billing_key,
+            "name": BILLABLE_MODULE_NAMES.get(billing_key, billing_key),
+            "status": status,
+            "renewal_date": best.renewal_date.isoformat() if best and best.renewal_date else None,
+            "trial_ends_at": best.trial_ends_at.isoformat() if best and best.trial_ends_at else None,
+            "trial_eligible": not ever_trialled and status != STATUS_SUBSCRIBED,
+            "can_subscribe": status != STATUS_SUBSCRIBED,
+        })
+    return out
+
+
 def entitlement_summary(org, role: str | None = None) -> dict:
     """The entitlement shape surfaced to the frontend (via ``/auth/me``).
 

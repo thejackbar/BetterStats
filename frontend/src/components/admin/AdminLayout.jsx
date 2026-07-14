@@ -71,6 +71,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
+      { to: '/admin/account', label: 'Plan & Billing', cap: null },
     ],
   },
 ]

@@ -2122,6 +2122,45 @@ async def transfer_primary_admin(
     return {"ok": True}
 
 
+# ─── Account / plan status (Phase 19) ──────────────────────────────────────────
+
+@router.get("/account/plan")
+async def get_account_plan(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's own Account page: per-module status (Subscribed / In Trial /
+    Trial Expired / Never Trialed) plus whether starting a trial or requesting
+    a subscription is currently a valid action — the self-serve mirror of the
+    Super Admin module editor, over the same org_module_subscriptions data.
+    ``is_primary_admin`` lets the frontend explain why Subscribe is disabled
+    for a non-primary admin (create_module_request enforces the same rule
+    server-side regardless — this is purely so the button doesn't look broken)."""
+    from app.auth.modules import account_plan_status
+
+    m = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_primary_admin = bool(m and (m.role == "super_admin" or m.is_primary_admin))
+
+    outstanding = (await db.execute(
+        select(ModuleActionRequest).where(
+            ModuleActionRequest.organisation_id == club.id,
+            ModuleActionRequest.status == "outstanding",
+        )
+    )).scalars().all()
+    pending_by_module: dict[str, list[str]] = {}
+    for r in outstanding:
+        pending_by_module.setdefault(r.module_key, []).append(r.kind)
+
+    modules = account_plan_status(club)
+    for row in modules:
+        row["pending_requests"] = sorted(pending_by_module.get(row["module"], []))
+
+    return {"modules": modules, "is_primary_admin": is_primary_admin}
+
+
 # ─── Module action requests — the trial/subscription queue ────────────────────
 
 _REQUEST_KINDS = ("trial", "subscribe", "cancel")

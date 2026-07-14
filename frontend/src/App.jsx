@@ -61,6 +61,7 @@ const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
 const AdminSeasons = lazy(() => import('./pages/admin/AdminSeasons'))
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'))
+const AdminAccount = lazy(() => import('./pages/admin/AdminAccount'))
 const AdminAwards = lazy(() => import('./pages/admin/AdminAwards'))
 const AdminAwardDefinitions = lazy(() => import('./pages/admin/AdminAwardDefinitions'))
 const AdminMerge = lazy(() => import('./pages/admin/AdminMerge'))
@@ -273,6 +274,7 @@ export default function App() {
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
