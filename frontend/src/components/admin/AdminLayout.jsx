@@ -226,9 +226,14 @@ export default function AdminLayout({ children }) {
   // Onboarding wizard: check on every fresh login (not on every navigation —
   // this only needs to catch "first run" and "sync just finished, reopen
   // once" moments, both of which happen around a login). 404 (flag off) is
-  // treated the same as "nothing to show" — silently.
+  // treated the same as "nothing to show" — silently. Club-admin-only (the
+  // mirror of the bell's own super_admin-only gate above): onboarding
+  // guidance belongs to the club's own admin, not a super admin just
+  // visiting/acting-as the club — without this, a super admin's own session
+  // would pop the wizard (and see the SETUP GUIDE button) for whichever
+  // club they're currently acting as.
   useEffect(() => {
-    if (!justLoggedIn || !user) return
+    if (!justLoggedIn || !user || user.role === 'super_admin') return
     let cancelled = false
     ;(async () => {
       try {
