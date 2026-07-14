@@ -1370,6 +1370,8 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
             "wicket_number": wkt,
             "batter1_id": b1.get("participantId") if b1 else None,
             "batter2_id": b2.get("participantId") if b2 else None,
+            "batter1_name": b1.get("playerShortName") if b1 else None,
+            "batter2_name": b2.get("playerShortName") if b2 else None,
             "batter1_runs": b1.get("runsScored") if b1 else None,
             "batter2_runs": b2.get("runsScored") if b2 else None,
             "runs": (score - prev_score) if score is not None else None,
@@ -1644,12 +1646,20 @@ async def sync_grassroots_game_level_data(
         )
         our_team_name = ""
         our_team_pids: set[uuid.UUID] = set()
+        # Raw participantId strings for our roster, resolved or not — lets the
+        # partnership/fielding fill-in handling below tell "one of ours, just
+        # unregistered" apart from "genuinely the opposition's", since a plain
+        # None from _team_pid can't distinguish the two on its own.
+        our_team_roster_guids: set[str] = set()
         if our_team:
             our_team_name = our_team.get("displayName") or our_team.get("name") or ""
             for roster_p in (our_team.get("players") or []):
-                rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
+                raw_guid = roster_p.get("participantId") or ""
+                rpid = _team_pid(_parse_uuid(raw_guid))
                 if rpid is not None:
                     our_team_pids.add(rpid)
+                if raw_guid:
+                    our_team_roster_guids.add(raw_guid)
 
         # Open a fresh per-game session.
         try:
@@ -1929,15 +1939,27 @@ async def sync_grassroots_game_level_data(
                         bowl_count += 1
 
                     for row in fielding_rows:
-                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        raw_pid = row.get("participantId") or ""
+                        pid = _team_pid(_parse_uuid(raw_pid))
+                        field_name = None
                         if pid is None or pid not in our_team_pids:
-                            continue
+                            if pid is None and raw_pid in our_team_roster_guids:
+                                # On our roster but not a known `players` row — a
+                                # fill-in or a CA-redacted junior. Capture the
+                                # catch/run-out/stumping under their GR name
+                                # instead of dropping it (a genuine opposition
+                                # fielder, not on our roster, still hits the
+                                # `continue` below exactly as before).
+                                field_name = row.get("playerShortName")
+                            else:
+                                continue
                         catches_wk = row.get("wicketKeeperCatches") or 0
                         catches_total = row.get("totalCatches")
                         if catches_total is None:
                             catches_total = (row.get("catches") or 0) + catches_wk
                         session.add(FieldingStat(
                             game_id=match_uuid, player_id=pid,
+                            player_name=field_name,
                             catches=catches_total or 0,
                             catches_wk=catches_wk,
                             run_outs=row.get("runOuts") or 0,
@@ -2000,21 +2022,40 @@ async def sync_grassroots_game_level_data(
 
                     for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
                         b1_id = b2_id = None
-                        for src_key, dst in (("batter1_id", "b1"), ("batter2_id", "b2")):
+                        b1_name = b2_name = None
+                        for src_key, name_key, dst in (
+                            ("batter1_id", "batter1_name", "b1"),
+                            ("batter2_id", "batter2_name", "b2"),
+                        ):
                             v = p.get(src_key)
-                            if v:
-                                cand = _team_pid(_parse_uuid(v))
-                                if cand is not None and cand in our_team_pids:
-                                    if dst == "b1":
-                                        b1_id = cand
-                                    else:
-                                        b2_id = cand
-                        if not b1_id and not b2_id:
+                            if not v:
+                                continue
+                            cand = _team_pid(_parse_uuid(v))
+                            if cand is not None and cand in our_team_pids:
+                                if dst == "b1":
+                                    b1_id = cand
+                                else:
+                                    b2_id = cand
+                            elif v in our_team_roster_guids:
+                                # On our roster but not a known `players` row — a
+                                # fill-in (borrowed player) or a CA-redacted junior.
+                                # Capture their GR name instead of losing that half
+                                # of the partnership entirely; never done for a
+                                # genuine opposition batter (not on our roster), so
+                                # an opponent-only innings still drops out below
+                                # exactly as before.
+                                raw_name = p.get(name_key)
+                                if dst == "b1":
+                                    b1_name = raw_name
+                                else:
+                                    b2_name = raw_name
+                        if not b1_id and not b2_id and not b1_name and not b2_name:
                             continue
                         session.add(Partnership(
                             game_id=match_uuid, innings_number=inn_num,
                             wicket_number=p["wicket_number"],
                             batter1_id=b1_id, batter2_id=b2_id,
+                            batter1_name=b1_name, batter2_name=b2_name,
                             runs=p.get("runs") or 0,
                             batter1_runs=p.get("batter1_runs"),
                             batter2_runs=p.get("batter2_runs"),

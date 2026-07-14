@@ -132,6 +132,7 @@ export default function AdminSettings() {
         public_show_bowling: !!s.public_show_bowling,
         public_show_opening: !!s.public_show_opening,
         public_show_gender: !!s.public_show_gender,
+        include_fill_ins_in_stats: !!s.include_fill_ins_in_stats,
       })
     }).catch(() => {})
   }, [])
@@ -522,6 +523,26 @@ export default function AdminSettings() {
                 </label>
               ))}
             </div>
+          </div>
+
+          {/* --- Fill-in players on the scorecard --- */}
+          <div className="pt-5 pb-hairline-t">
+            <label className={LABEL}>Fill-in players</label>
+            <p className="font-mono text-[10px] text-pb-faintest mb-3">
+              A borrowed player's runs and wickets always show on a game's batting/bowling
+              card. This decides whether they also show by name in the partnerships and
+              fielding cards on that same scorecard, or are left out of those two. Never
+              affects club records — a fill-in never counts toward an all-time record either way.
+            </p>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={!!form.include_fill_ins_in_stats}
+                onChange={e => setForm(f => ({ ...f, include_fill_ins_in_stats: e.target.checked }))}
+                className="accent-pb-accent mt-0.5 shrink-0" />
+              <span className="leading-tight">
+                <span className="text-pb-text text-sm">Show fill-ins in partnerships &amp; fielding</span>
+                <span className="font-mono text-[10px] text-pb-faintest block">Off shows those two cards with registered players only</span>
+              </span>
+            </label>
           </div>
 
           <div className="pt-2 flex items-center gap-4">

@@ -1,9 +1,11 @@
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers } from '../lib/cricketFormat'
+import { useAuth } from '../contexts/AuthContext'
+import { CAP } from '../lib/capabilities'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -196,7 +198,23 @@ function FillInBadge() {
   )
 }
 
-function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n }) {
+// Admin-only affordance next to a genuine fill-in (never a redacted row —
+// there's no identity to claim there). Opens the claim modal in the parent.
+function ClaimButton({ row, onClaim }) {
+  if (!row.is_fill_in || !row.grassroots_participant_id) return null
+  return (
+    <button
+      type="button"
+      onClick={() => onClaim(row)}
+      className="ml-1.5 align-middle font-mono text-[9px] tracking-wide2 px-1.5 py-0.5 rounded border border-pb-hairline2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/30 transition-colors whitespace-nowrap"
+      title="Promote this fill-in to a real player"
+    >
+      CLAIM
+    </button>
+  )
+}
+
+function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
   const batted = batting
     .filter(r => !r.did_not_bat)
     .sort((a, b) => (a.batting_position ?? 999) - (b.batting_position ?? 999))
@@ -251,6 +269,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
                   {row.is_fill_in && <FillInBadge />}
+                  {canManage && <ClaimButton row={row} onClaim={onClaim} />}
                 </td>
                 <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
                   {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type, row.caught_behind)}
@@ -277,6 +296,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
                   {row.is_fill_in && <FillInBadge />}
+                  {canManage && <ClaimButton row={row} onClaim={onClaim} />}
                 </td>
                 <td className="py-2 pr-5 font-mono text-[12px] italic max-sm:hidden" style={{ color: 'var(--pb-faintest)' }}>did not bat</td>
                 <td className="py-2 px-3 font-mono text-[12px] text-pb-faintest text-right">—</td>
@@ -306,7 +326,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
   )
 }
 
-function BowlingCard({ label, teamName, bowling = [], fmtName = n => n }) {
+function BowlingCard({ label, teamName, bowling = [], fmtName = n => n, canManage = false, onClaim }) {
   if (!bowling.length) return null
 
   return (
@@ -342,6 +362,7 @@ function BowlingCard({ label, teamName, bowling = [], fmtName = n => n }) {
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
                   {row.is_fill_in && <FillInBadge />}
+                  {canManage && <ClaimButton row={row} onClaim={onClaim} />}
                 </td>
                 <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{fmtOvers(row.overs)}</td>
                 <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>{row.maidens ?? 0}</td>
@@ -437,17 +458,23 @@ function PartnershipsSection({ partnerships = [], fmtName = n => n }) {
                       <span className="flex flex-wrap gap-3">
                         {(p.batter1_name || p.batter1_id) && (
                           <span>
-                            {p.batter1_name
+                            {p.batter1_id
                               ? <Link to={`/players/${p.batter1_id}`} className="hover:text-pb-accent transition-colors">{fmtName(p.batter1_name)}</Link>
-                              : <span className="text-pb-faintest italic">Unknown</span>}
+                              : p.batter1_name
+                                ? <span>{fmtName(p.batter1_name)}</span>
+                                : <span className="text-pb-faintest italic">Unknown</span>}
+                            {p.batter1_is_fill_in && <FillInBadge />}
                             {p.batter1_runs != null && <span className="text-pb-faint ml-1">({p.batter1_runs})</span>}
                           </span>
                         )}
                         {(p.batter2_name || p.batter2_id) && (
                           <span>
-                            {p.batter2_name
+                            {p.batter2_id
                               ? <Link to={`/players/${p.batter2_id}`} className="hover:text-pb-accent transition-colors">{fmtName(p.batter2_name)}</Link>
-                              : <span className="text-pb-faintest italic">Unknown</span>}
+                              : p.batter2_name
+                                ? <span>{fmtName(p.batter2_name)}</span>
+                                : <span className="text-pb-faintest italic">Unknown</span>}
+                            {p.batter2_is_fill_in && <FillInBadge />}
                             {p.batter2_runs != null && <span className="text-pb-faint ml-1">({p.batter2_runs})</span>}
                           </span>
                         )}
@@ -465,6 +492,124 @@ function PartnershipsSection({ partnerships = [], fmtName = n => n }) {
   )
 }
 
+// Promote a scorecard fill-in into a real player: edit the name, optionally
+// match it to an existing player (merges into them instead of creating a
+// new row), and an optional free-text reference note — e.g. a pasted PlayHQ
+// profile URL kept purely for the club's own record-keeping. That URL is NOT
+// parsed or verified: PlayHQ's player pages are a client-rendered app with no
+// documented public lookup API, so there's no reliable way to resolve it to
+// a real identity automatically.
+function ClaimFillInModal({ row, existingPlayers, onClose, onSaved }) {
+  const [name, setName] = useState(row.player_name || '')
+  const [query, setQuery] = useState('')
+  const [matchedId, setMatchedId] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    return (existingPlayers || [])
+      .filter(p => (p.display_name || p.name || '').toLowerCase().includes(q))
+      .slice(0, 8)
+  }, [query, existingPlayers])
+
+  const matchedPlayer = (existingPlayers || []).find(p => p.id === matchedId)
+
+  async function save() {
+    if (!name.trim()) { setErr('Name is required'); return }
+    setSaving(true)
+    setErr(null)
+    try {
+      await api.claimFillIn({
+        grassroots_participant_id: row.grassroots_participant_id,
+        name: name.trim(),
+        existing_player_id: matchedId || null,
+        reference_note: note.trim() || null,
+      })
+      onSaved()
+    } catch (e) {
+      setErr(e.message || 'Failed to claim this fill-in')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
+      <div className="pb-card w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3">CLAIM FILL-IN</p>
+
+        <label className="block font-mono text-[10px] text-pb-faintest mb-1">Name</label>
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          className="w-full mb-3 px-3 py-2 rounded bg-pb-surface2 border border-pb-hairline text-sm text-pb-text"
+        />
+
+        <label className="block font-mono text-[10px] text-pb-faintest mb-1">
+          Is this actually an existing player? (optional)
+        </label>
+        {matchedPlayer ? (
+          <div className="flex items-center justify-between mb-3 px-3 py-2 rounded bg-pb-surface2 border border-pb-hairline text-sm">
+            <span>{matchedPlayer.display_name || matchedPlayer.name}</span>
+            <button type="button" onClick={() => { setMatchedId(''); setQuery('') }}
+              className="font-mono text-[10px] text-pb-faint hover:text-pb-text">CLEAR</button>
+          </div>
+        ) : (
+          <div className="relative mb-3">
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search players…"
+              className="w-full px-3 py-2 rounded bg-pb-surface2 border border-pb-hairline text-sm text-pb-text"
+            />
+            {matches.length > 0 && (
+              <div className="absolute z-10 top-full left-0 right-0 mt-1 pb-card overflow-hidden max-h-48 overflow-y-auto">
+                {matches.map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => { setMatchedId(p.id); setQuery('') }}
+                    className="block w-full text-left px-3 py-2 text-sm hover:bg-pb-surface2"
+                  >
+                    {p.display_name || p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <label className="block font-mono text-[10px] text-pb-faintest mb-1">
+          Reference note (optional — e.g. a pasted PlayHQ profile link, for your own records only)
+        </label>
+        <textarea
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          rows={2}
+          className="w-full mb-3 px-3 py-2 rounded bg-pb-surface2 border border-pb-hairline text-sm text-pb-text"
+        />
+
+        {err && <p className="text-pb-red text-xs mb-3">{err}</p>}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">
+            CANCEL
+          </button>
+          <button type="button" onClick={save} disabled={saving}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50 text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}>
+            {saving ? 'SAVING…' : matchedId ? 'MERGE INTO PLAYER' : 'CREATE PLAYER'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function MatchScorecard() {
   const { gameId } = useParams()
   const [searchParams] = useSearchParams()
@@ -475,6 +620,10 @@ export default function MatchScorecard() {
   const [error, setError] = useState(null)
   const [orgData, setOrgData] = useState(null)
   const fmtName = useNameFormat(orgData)
+  const { hasCapability } = useAuth()
+  const canManage = hasCapability(CAP.MANAGE_PLAYERS)
+  const [claimTarget, setClaimTarget] = useState(null)
+  const [existingPlayers, setExistingPlayers] = useState([])
 
   useEffect(() => {
     // Always DB-first → Grassroots fallback for live/unsynced (api.getScorecard);
@@ -489,6 +638,12 @@ export default function MatchScorecard() {
   useEffect(() => {
     if (orgId) api.getOrg(orgId).then(setOrgData).catch(() => {})
   }, [orgId])
+
+  useEffect(() => {
+    // Only a club admin can even open the claim modal, and the roster list is
+    // only needed once they do — skip the fetch entirely otherwise.
+    if (canManage) api.adminListPlayers().then(setExistingPlayers).catch(() => {})
+  }, [canManage])
 
   if (loading) return <PbSpinner message="Loading scorecard…" />
   if (error) return (
@@ -553,6 +708,8 @@ export default function MatchScorecard() {
                 batting={inn1.batting}
                 inningsTotal={t1}
                 fmtName={fmtName}
+                canManage={canManage}
+                onClaim={setClaimTarget}
               />
               {hasInn2 && (
                 <BattingCard
@@ -561,6 +718,8 @@ export default function MatchScorecard() {
                   batting={inn2.batting}
                   inningsTotal={t2}
                   fmtName={fmtName}
+                  canManage={canManage}
+                  onClaim={setClaimTarget}
                 />
               )}
             </div>
@@ -569,10 +728,10 @@ export default function MatchScorecard() {
             {(inn1.bowling.length > 0 || inn2.bowling.length > 0) && (
               <div className={`grid gap-4 ${hasInn2 && inn2.bowling.length > 0 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
                 {inn1.bowling.length > 0 && (
-                  <BowlingCard label="INNINGS 1" teamName={inn2Team} bowling={inn1.bowling} fmtName={fmtName} />
+                  <BowlingCard label="INNINGS 1" teamName={inn2Team} bowling={inn1.bowling} fmtName={fmtName} canManage={canManage} onClaim={setClaimTarget} />
                 )}
                 {hasInn2 && inn2.bowling.length > 0 && (
-                  <BowlingCard label="INNINGS 2" teamName={inn1Team} bowling={inn2.bowling} fmtName={fmtName} />
+                  <BowlingCard label="INNINGS 2" teamName={inn1Team} bowling={inn2.bowling} fmtName={fmtName} canManage={canManage} onClaim={setClaimTarget} />
                 )}
               </div>
             )}
@@ -582,6 +741,18 @@ export default function MatchScorecard() {
         <FallOfWicketsSection fow={game.fall_of_wickets ?? []} fmtName={fmtName} />
         <PartnershipsSection partnerships={game.partnerships ?? []} fmtName={fmtName} />
       </main>
+
+      {claimTarget && (
+        <ClaimFillInModal
+          row={claimTarget}
+          existingPlayers={existingPlayers}
+          onClose={() => setClaimTarget(null)}
+          onSaved={() => {
+            setClaimTarget(null)
+            api.getScorecard(gameId).then(setGame).catch(() => {})
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -651,6 +651,7 @@ class SettingsPatch(BaseModel):
     public_show_bowling: Optional[bool] = None
     public_show_opening: Optional[bool] = None
     public_show_gender: Optional[bool] = None
+    include_fill_ins_in_stats: Optional[bool] = None
 
 
 # Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
@@ -721,6 +722,7 @@ async def get_settings(
         "public_show_bowling": bool(club.public_show_bowling),
         "public_show_opening": bool(club.public_show_opening),
         "public_show_gender": bool(club.public_show_gender),
+        "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
     }
 
 
@@ -766,6 +768,8 @@ async def patch_settings(
         club.public_show_opening = bool(data.public_show_opening)
     if data.public_show_gender is not None:
         club.public_show_gender = bool(data.public_show_gender)
+    if data.include_fill_ins_in_stats is not None:
+        club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
 
     # Record which fields the admin touched. Don't dump full new values into
     # the audit row — colour codes / names will already be visible in the
