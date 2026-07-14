@@ -405,6 +405,11 @@ async def get_scorecard(
 
     grade = await db.get(Grade, game.grade_id) if game.grade_id else None
     season = await db.get(Season, grade.season_id) if grade else None
+    org = await db.get(Organisation, season.organisation_id) if season else None
+    # A fill-in's runs/wickets always show on the batting/bowling card (no
+    # toggle). Whether their name also shows in the lower-stakes partnerships
+    # and fielding cards is the club's own call (migration 147) — default on.
+    include_fillins_stats = bool(org.include_fill_ins_in_stats) if org else True
 
     # Manual and synced child models share the same field names, so we just
     # pick which model to query against based on the game's provenance.
@@ -478,17 +483,31 @@ async def get_scorecard(
         for bs, p in bowling_rows
     ]
 
-    fielding_flat = [
-        {
-            "player_id": str(fs.player_id) if fs.player_id else None,
-            "player_name": p.display_name if p else None,
-            "catches": fs.catches,
-            "run_outs": fs.run_outs,
-            "stumpings": fs.stumpings,
-        }
-        for fs, p in fielding_rows
-        if (fs.catches or 0) + (fs.run_outs or 0) + (fs.stumpings or 0) > 0
-    ]
+    fielding_flat = []
+    for fs, p in fielding_rows:
+        if (fs.catches or 0) + (fs.run_outs or 0) + (fs.stumpings or 0) <= 0:
+            continue
+        if fs.player_id:
+            fielding_flat.append({
+                "player_id": str(fs.player_id),
+                "player_name": p.display_name if p else None,
+                "catches": fs.catches,
+                "run_outs": fs.run_outs,
+                "stumpings": fs.stumpings,
+            })
+        elif include_fillins_stats and fs.player_name:
+            _disp_name, _is_fi, _is_red = _classify_unlinked_name(fs.player_name, None)
+            fielding_flat.append({
+                "player_id": None,
+                "player_name": _disp_name,
+                "catches": fs.catches,
+                "run_outs": fs.run_outs,
+                "stumpings": fs.stumpings,
+                "is_fill_in": _is_fi,
+                "is_redacted": _is_red,
+            })
+        # else: toggle off, or no name captured at sync time — the row is
+        # silently omitted, matching pre-migration-146 behaviour.
 
     # Derive innings totals from batting data for the summary strip
     innings_totals: dict[int, dict] = {}
@@ -515,6 +534,24 @@ async def get_scorecard(
     # too. Manual opposition batting/bowling still comes from extracted_payload below.
     fow = await get_game_fall_of_wickets(db, game.id)
     partnerships = await get_game_partnerships(db, game.id)
+    # batterN_name already falls back to the raw fill-in/redacted GR name (see
+    # get_game_partnerships) whenever batterN_id is NULL — strip it back out
+    # if the club has the toggle off, else classify it the same way a
+    # batting/bowling fill-in row is (real name + badge vs literal "********").
+    for pt in partnerships:
+        for _id_key, _name_key_, _fi_key, _red_key in (
+            ("batter1_id", "batter1_name", "batter1_is_fill_in", "batter1_is_redacted"),
+            ("batter2_id", "batter2_name", "batter2_is_fill_in", "batter2_is_redacted"),
+        ):
+            if pt.get(_id_key):
+                continue
+            if not include_fillins_stats or not pt.get(_name_key_):
+                pt[_name_key_] = None
+                continue
+            _disp_name, _is_fi, _is_red = _classify_unlinked_name(pt[_name_key_], None)
+            pt[_name_key_] = _disp_name
+            pt[_fi_key] = _is_fi
+            pt[_red_key] = _is_red
 
     # Live-fetch opposition data from GR API (not stored in DB).
     # game.id IS the GR match UUID, so we can call directly. Skip for
@@ -570,7 +607,7 @@ async def get_scorecard(
             }
 
             # Org name first word — identifies which GR team is ours vs opposition.
-            org_obj = await db.get(Organisation, season.organisation_id) if season else None
+            org_obj = org
             org_word = (org_obj.name or "").lower().split()[0] if org_obj and org_obj.name else ""
 
             # GR confirmed fields (via /scorecard/gr-debug):
@@ -729,6 +766,7 @@ async def get_scorecard(
                             "did_not_bat": is_dnb,
                             "is_fill_in": _is_fi,
                             "is_redacted": _is_red,
+                            "grassroots_participant_id": pid_str if _is_fi else None,
                         })
                         continue
 
@@ -787,6 +825,7 @@ async def get_scorecard(
                             "economy": econ,
                             "is_fill_in": _is_fi,
                             "is_redacted": _is_red,
+                            "grassroots_participant_id": pid_str if _is_fi else None,
                         })
                         continue
                     opp_bowling.append({
@@ -904,6 +943,7 @@ async def get_scorecard(
                                 "batting_position": None, "did_not_bat": True,
                                 "is_fill_in": _is_fi,
                                 "is_redacted": _is_red,
+                                "grassroots_participant_id": _ros_str if _is_fi else None,
                             })
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.

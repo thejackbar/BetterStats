@@ -1116,6 +1116,95 @@ undercounted by exactly their runs. Reported against
   row now carries a stable `participantId` internally, which is the piece
   that flow would need, but the UI/endpoint itself wasn't scoped in.
 
+## Fill-in players: partnerships/fielding toggle + claim-a-fill-in (v8.61.0, Jul 2026)
+
+Follow-up to the fill-in scorecard fix above (v8.60.x), extending it two ways.
+
+- **Club-level toggle for partnerships/fielding** (migration 147): a fill-in's
+  runs/wickets always show on the batting/bowling card, no toggle. Whether
+  their name also shows in the lower-stakes partnerships and fielding cards
+  on that same scorecard is a new org setting, `include_fill_ins_in_stats`
+  (default **on**), edited via the existing `/club-admin/settings` GET/PATCH
+  (`SettingsPatch`) and a new checkbox in `AdminSettings.jsx` ("Fill-in
+  players" section). Schema mirrors `FallOfWicket.batter_name`:
+  `partnerships.batter1_name`/`batter2_name` and `fielding_stats.player_name`
+  (nullable, set only when the linked id is NULL), with matching always-NULL
+  columns on `manual_partnerships`/`manual_fielding_stats` purely so the
+  `v_effective_*` union views' column lists still line up.
+  `fielding_stats.player_id`'s FK was also changed `ON DELETE CASCADE` →
+  `SET NULL`, matching every other player-linked per-game table (it was never
+  actually nullable in practice before this, just inconsistent).
+- **Sync-side capture** (`sync.py`): a new `our_team_roster_guids` set (raw
+  GR participantId strings, not just resolved player ids) lets the
+  partnership/fielding insert loops tell "one of ours, just unregistered"
+  apart from "genuinely the opposition's" — a plain `None` from `_team_pid`
+  can't distinguish the two on its own. `_derive_partnerships_grassroots` now
+  also returns `batter1_name`/`batter2_name` (sourced from the same raw
+  batting-row `playerShortName` already in scope). A partnership is only
+  dropped now when **neither** side resolves to an id **or** a name (was:
+  dropped whenever either side had no id) — so two fill-ins batting together
+  no longer vanish entirely. Fielding for a fill-in is captured the same way
+  instead of being unconditionally skipped.
+- **Read-side gating** (`games.py`/`aggregations.py`): `get_game_partnerships`
+  extends its existing name COALESCE chain
+  (`display_name_override → name → batterN_name`) one more step, matching
+  `get_game_fall_of_wickets`'s pattern. `get_scorecard` loads the org once
+  (`include_fillins_stats`) and applies it after the fact: fielding rows with
+  no `player_id` are only emitted when the toggle is on (and their name run
+  through the same `_classify_unlinked_name` used for batting/bowling, so a
+  CA-redacted fielder still reads as `********`, never "Fill-In"); partnership
+  rows have their fallback name stripped back to NULL when the toggle is off,
+  or classified the same way when it's on. **Records are unaffected either
+  way** — `records.py`'s partnership/fielding leaderboards already inner-join
+  through `players` scoped to the org, so a NULL `player_id` row was always
+  invisible there regardless of this feature; confirmed via the research
+  pass, no extra guard needed.
+- **Claim-a-fill-in** (`players.py`, `POST /players/claim-fill-in`, cap
+  `MANAGE_PLAYERS`): promotes a fill-in scorecard row into a real `players`
+  row, reusing sync's `_resolve_org_player` identity scheme standalone (id =
+  the raw GR participant GUID, or `uuid5(org, guid)` only on a genuine
+  cross-club collision; `grassroots_id` = the raw GUID) so a later sync
+  recognises the row by `(org, grassroots_id)` and attaches to it instead of
+  minting a duplicate. Re-claiming the same participant is idempotent (finds
+  the existing row by `grassroots_id`, updates the name). An
+  `existing_player_id` in the request means the fill-in turned out to already
+  be a registered player under a mismatched GR uuid — delegates straight to
+  the existing `admin.merge_players` (called as a plain function with
+  explicit `db`/`current_user`, bypassing its `Depends()` — merge_players
+  already handles the reassignment/de-dup across every per-game table,
+  including the exact cross-club-shared-GUID case, no reason to reimplement
+  it). `players.claim_note` (new nullable column, same migration) holds an
+  optional free-text reference the admin leaves when claiming — e.g. a pasted
+  PlayHQ profile link — **stored verbatim, not parsed or verified**.
+  `games.py`'s three fill-in row-construction sites now also emit
+  `grassroots_participant_id` (previously computed internally but never
+  serialised) so the frontend has something to submit back.
+- **Why no PlayHQ-URL auto-resolution**: investigated and shelved. PlayHQ's
+  player-profile pages are a client-rendered SPA behind CloudFront bot
+  protection — both plain curl and headless Chromium (proxied through this
+  environment) got blocked, consistent with the existing "UK Expansion" note
+  elsewhere in this file about Play-Cricket needing a real browser network
+  capture to find API shapes. Worse, the example URL used to investigate this
+  (`.../game-centre/c226ff54`) carries a short obfuscated code, not the real
+  GUID — the same short-code-vs-real-GUID gap already known for game ids — so
+  even a successful fetch likely wouldn't yield something resolvable to the
+  actual Grassroots participant id without an authenticated API this project
+  doesn't have. Building a parser that looks automatic but silently can't
+  verify anything would be worse than not building it — hence `claim_note`
+  being a plain stored string instead.
+- **Frontend**: `MatchScorecard.jsx` gains a `CLAIM` button next to any
+  `is_fill_in` row (never `is_redacted` — nothing to claim on an unknown
+  identity), gated on `hasCapability(CAP.MANAGE_PLAYERS)` via the same
+  inline-on-a-public-page pattern `PlayerProfile.jsx` already uses (the page
+  has no other auth surface — `get_scorecard` itself stays fully
+  unauthenticated). `ClaimFillInModal` — name field, an existing-player
+  search (client-side filter over `adminListPlayers()`, fetched once only
+  when `canManage`), and the reference-note field. Also fixed while touching
+  this: `PartnershipsSection` used to assume "has a name ⇒ has an id" and
+  linked to `/players/${batterN_id}` unconditionally whenever a name was
+  present — broke (linked to `undefined`) the moment a fill-in could have a
+  name with no id, which this feature introduces; now checks the id first.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

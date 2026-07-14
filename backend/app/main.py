@@ -2409,6 +2409,68 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_meta_lead_adjustments_created_at "
             "ON meta_lead_adjustments(created_at DESC)"
         ))
+        # Fill-in names on partnerships/fielding + a per-club toggle to show them
+        # (migration 147) — mirrors FallOfWicket.batter_name for whichever side of
+        # a partnership, or which fielder, has no linkable `players` row. Defensive
+        # idempotent adds so the API boots even if alembic lags.
+        await conn.execute(text(
+            "ALTER TABLE partnerships ADD COLUMN IF NOT EXISTS batter1_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE partnerships ADD COLUMN IF NOT EXISTS batter2_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE manual_partnerships ADD COLUMN IF NOT EXISTS batter1_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE manual_partnerships ADD COLUMN IF NOT EXISTS batter2_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fielding_stats ADD COLUMN IF NOT EXISTS player_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE manual_fielding_stats ADD COLUMN IF NOT EXISTS player_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fielding_stats ALTER COLUMN player_id DROP NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "include_fill_ins_in_stats BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS claim_note TEXT"
+        ))
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_partnerships AS
+            SELECT
+                id, game_id, innings_number, wicket_number,
+                batter1_id, batter2_id, batter1_name, batter2_name,
+                runs, balls, batter1_runs, batter2_runs, is_club_innings,
+                'api'::text AS source
+            FROM partnerships
+            UNION ALL
+            SELECT
+                id, manual_game_id AS game_id, innings_number, wicket_number,
+                batter1_id, batter2_id, batter1_name, batter2_name,
+                runs, balls, batter1_runs, batter2_runs, is_club_innings,
+                'manual'::text AS source
+            FROM manual_partnerships
+        """))
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_fielding_stats AS
+            SELECT
+                id, game_id, player_id, player_name,
+                catches, catches_wk, run_outs, stumpings,
+                'api'::text AS source
+            FROM fielding_stats
+            UNION ALL
+            SELECT
+                id, manual_game_id AS game_id, player_id, player_name,
+                catches, catches_wk, run_outs, stumpings,
+                'manual'::text AS source
+            FROM manual_fielding_stats
+        """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

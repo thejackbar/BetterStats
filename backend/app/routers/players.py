@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, func
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -10,7 +11,7 @@ from app.models.db import (
     BattingInnings, BowlingSpell, FieldingStat, Game, Grade, Season,
     Fixture, FixtureLineup, PlayerAvailability, get_db,
 )
-from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private
+from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import sync_squad_membership
 from app.services.name_format import name_sort_key
@@ -878,3 +879,108 @@ async def claim_player_profile(
     player.user_id = current_user.id
     await db.commit()
     return {"status": "claimed", "player_id": player_id}
+
+
+class ClaimFillInRequest(BaseModel):
+    grassroots_participant_id: str
+    name: str
+    existing_player_id: Optional[str] = None
+    reference_note: Optional[str] = None
+
+
+@router.post("/claim-fill-in")
+async def claim_fill_in(
+    body: ClaimFillInRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Promote a scorecard fill-in (a borrowed player, never a redacted one —
+    there's no identity to claim there) into a real `players` row for this
+    club, so future syncs and this game's own stats attach to a real player
+    instead of a name-only row.
+
+    Uses the same identity scheme sync.py's `_resolve_org_player` mints from a
+    CA participant GUID (id = the raw GUID, or uuid5(org, guid) only on a
+    genuine cross-club collision; grassroots_id = the raw GUID) — a later sync
+    recognises the row by (org, grassroots_id) and attaches to it rather than
+    minting a duplicate. Re-claiming the same participant is idempotent (finds
+    the existing row by grassroots_id and updates it instead of duplicating).
+
+    `existing_player_id`, if given, means the fill-in turned out to already be
+    one of our registered players under a different scorecard identity (a
+    GR-uuid mismatch) rather than a genuinely new person — delegates to the
+    existing merge-players flow rather than reimplementing it.
+
+    `reference_note` (e.g. a pasted PlayHQ profile URL) is stored verbatim for
+    the club's own record-keeping. It is NOT parsed or verified — PlayHQ's
+    player-profile pages are a client-rendered app behind bot protection with
+    no documented public lookup API, so there is no reliable way to resolve a
+    pasted URL back to a real participant id server-side.
+    """
+    guid = (body.grassroots_participant_id or "").strip()
+    name = (body.name or "").strip()
+    if not guid or not name:
+        raise HTTPException(status_code=400, detail="grassroots_participant_id and name are required")
+    try:
+        guid_uuid = uuid.UUID(guid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="grassroots_participant_id is not a valid id")
+
+    existing_res = await db.execute(
+        select(Player).where(
+            Player.organisation_id == club.id,
+            Player.grassroots_id == guid,
+        )
+    )
+    player = existing_res.scalar_one_or_none()
+
+    if player is None:
+        # Only mint a per-club uuid5 id when the raw GUID is already a player
+        # id elsewhere (a genuine shared-participant collision) — same rule
+        # sync.py's _resolve_org_player uses, so this row and a future sync
+        # agree on the same id.
+        clash = await db.get(Player, guid_uuid)
+        new_id = uuid.uuid5(club.id, guid) if clash is not None else guid_uuid
+        player = Player(id=new_id, name=name, organisation_id=club.id, grassroots_id=guid)
+        db.add(player)
+        try:
+            await db.flush()
+        except IntegrityError:
+            # Two admins claiming the same fill-in at once — re-fetch rather
+            # than 500.
+            await db.rollback()
+            existing_res = await db.execute(
+                select(Player).where(
+                    Player.organisation_id == club.id,
+                    Player.grassroots_id == guid,
+                )
+            )
+            player = existing_res.scalar_one_or_none()
+            if player is None:
+                raise HTTPException(status_code=409, detail="Could not claim this fill-in — try again")
+            player.name = name
+    else:
+        player.name = name
+
+    if body.reference_note is not None:
+        player.claim_note = body.reference_note.strip() or None
+    await db.commit()
+    await db.refresh(player)
+
+    if body.existing_player_id:
+        keep_id = uuid.UUID(body.existing_player_id)
+        if keep_id != player.id:
+            from app.routers.admin import merge_players, MergeRequest
+            await merge_players(
+                MergeRequest(
+                    keep_player_id=str(keep_id),
+                    remove_player_id=str(player.id),
+                    org_id=str(club.id),
+                ),
+                db=db,
+                current_user=current_user,
+            )
+            return {"status": "merged", "player_id": str(keep_id)}
+
+    return {"status": "created", "player_id": str(player.id)}

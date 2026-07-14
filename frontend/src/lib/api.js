@@ -556,6 +556,8 @@ export const api = {
     request('/club-admin/players', { method: 'POST', body: JSON.stringify(data) }),
   adminPatchPlayer: (playerId, data) =>
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  claimFillIn: (data) =>
+    request('/players/claim-fill-in', { method: 'POST', body: JSON.stringify(data) }),
   adminListSeasons: () => request('/club-admin/seasons'),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),

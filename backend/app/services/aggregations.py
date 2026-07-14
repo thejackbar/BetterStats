@@ -2626,6 +2626,11 @@ async def get_club_summary(
 
 
 async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dict]:
+    # batterN_name falls through display-override → real name → the raw GR
+    # name stored for a fill-in/redacted participant (pt.batterN_name, added
+    # migration 147) — same COALESCE chain get_game_fall_of_wickets already
+    # uses. The caller (games.py) decides whether to keep or strip that
+    # fallback name based on the club's include_fill_ins_in_stats setting.
     result = await session.execute(
         text("""
             SELECT
@@ -2637,8 +2642,8 @@ async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dic
                 pt.batter2_runs,
                 pt.batter1_id::text,
                 pt.batter2_id::text,
-                COALESCE(p1.display_name_override, p1.name) AS batter1_name,
-                COALESCE(p2.display_name_override, p2.name) AS batter2_name
+                COALESCE(p1.display_name_override, p1.name, pt.batter1_name) AS batter1_name,
+                COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name
             FROM v_effective_partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
