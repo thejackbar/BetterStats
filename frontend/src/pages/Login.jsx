@@ -117,6 +117,11 @@ function AcceptInvite({ token }) {
         Welcome{invite.display_name ? `, ${invite.display_name}` : ''} — set a password to
         activate your admin account{invite.club_name ? ` for ${invite.club_name}` : ''}.
       </p>
+      {invite.username && (
+        <p className="font-mono text-[11px] text-pb-faint">
+          Your username is <strong className="text-pb-text">{invite.username}</strong> — use it to log in from now on.
+        </p>
+      )}
 
       <div>
         <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">Password</label>
