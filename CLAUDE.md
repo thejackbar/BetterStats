@@ -1005,7 +1005,7 @@ lead or engagement score.
   anything reaches Twenty — `twenty_client.py` drops every underscore-prefixed key),
   surfaced in `diagnose_club_lead.py`.
 
-## Fill-in players on the game scorecard (v8.60.0–v8.60.2, Jul 2026)
+## Fill-in players on the game scorecard (v8.60.0–v8.60.3, Jul 2026)
 
 A club fielding a borrowed player (a fill-in from another club, or a Cricket
 Australia junior whose name is privacy-redacted in the feed) had that
@@ -1075,7 +1075,7 @@ undercounted by exactly their runs. Reported against
   by replaying the real GR payload for this game through the exact loop
   logic under both possible `known_ids` states — both converge on the
   correct 192 bat runs + 5 extras = 197, 5 wickets.
-- **v8.60.2 follow-up — redacted juniors were mislabelled "Fill-In"**: user
+- **v8.60.3 follow-up — redacted juniors were mislabelled "Fill-In"**: user
   feedback caught that a genuinely redacted junior (no name recoverable
   anywhere in the feed) was showing as "Fill-In #1"/"Fill-In (#N)" — the
   same treatment as a real borrowed player with a known name, which
