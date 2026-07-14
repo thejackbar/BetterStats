@@ -218,7 +218,7 @@ async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -
     if not email or not _EMAIL_RE.match(email):
         errors["email"] = "Enter a valid email address"
     else:
-        # users.email is no longer DB-unique (migration 143 — club-user emails
+        # users.email is no longer DB-unique (migration 145 — club-user emails
         # are format-validated only), so this can't assume at most one match.
         existing_user = await db.execute(select(User).where(User.email == email))
         if existing_user.scalars().first():

@@ -12,15 +12,15 @@ table predates Alembic and its default UNIQUE constraint name was never
 pinned down in a migration), so this works regardless of how it was named
 when the table was first created.
 
-Revision ID: 143
-Revises: 142
+Revision ID: 145
+Revises: 144
 Create Date: 2026-07-14
 """
 from alembic import op
 
 
-revision = '143'
-down_revision = '142'
+revision = '145'
+down_revision = '144'
 branch_labels = None
 depends_on = None
 

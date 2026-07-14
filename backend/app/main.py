@@ -365,14 +365,69 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT UNIQUE"))
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token_expires_at TIMESTAMPTZ"))
+        # Fix FK cascade drift on legacy per-game/per-player stat tables
+        # (migration 142) — see that migration file for the full rationale.
+        # Cheap no-op on a repeat run: only touches a constraint whose
+        # confdeltype doesn't already match.
+        await conn.execute(text(r"""
+            DO $$
+            DECLARE
+              spec RECORD;
+              cname TEXT;
+            BEGIN
+              FOR spec IN SELECT * FROM (VALUES
+                ('batting_innings',  'game_id',    'games',   'c'),
+                ('batting_innings',  'player_id',  'players', 'c'),
+                ('bowling_spells',   'game_id',    'games',   'c'),
+                ('bowling_spells',   'player_id',  'players', 'c'),
+                ('fielding_stats',   'game_id',    'games',   'c'),
+                ('fielding_stats',   'player_id',  'players', 'c'),
+                ('bowler_wickets',   'game_id',    'games',   'c'),
+                ('bowler_wickets',   'bowler_id',  'players', 'c'),
+                ('bowler_wickets',   'fielder_id', 'players', 'n'),
+                ('game_appearances', 'game_id',    'games',   'c'),
+                ('game_appearances', 'player_id',  'players', 'c'),
+                ('fall_of_wickets',  'game_id',    'games',   'c'),
+                ('fall_of_wickets',  'player_id',  'players', 'n'),
+                ('partnerships',     'game_id',    'games',   'c'),
+                ('partnerships',     'batter1_id', 'players', 'n'),
+                ('partnerships',     'batter2_id', 'players', 'n'),
+                ('milestones',       'player_id',  'players', 'c'),
+                ('milestones',       'game_id',    'games',   'n'),
+                ('fee_match_days',   'game_id',    'games',   'c')
+              ) AS t(tbl, col, target, mode)
+              LOOP
+                IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = spec.tbl AND relkind = 'r') THEN
+                  CONTINUE;
+                END IF;
+                cname := spec.tbl || '_' || spec.col || '_fkey';
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint c
+                  JOIN pg_class t ON t.oid = c.conrelid
+                  WHERE t.relname = spec.tbl AND c.conname = cname AND c.confdeltype = spec.mode
+                ) THEN
+                  EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I', spec.tbl, cname);
+                  EXECUTE format(
+                    'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE %s NOT VALID',
+                    spec.tbl, cname, spec.col, spec.target,
+                    CASE spec.mode WHEN 'c' THEN 'CASCADE' ELSE 'SET NULL' END
+                  );
+                  EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', spec.tbl, cname);
+                END IF;
+              END LOOP;
+            END $$;
+        """))
+        # Club soft-delete / archive (migration 143).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ"))
         # Admin-triggered "reset your password" email for an existing club-user
-        # account (migration 142) — separate token pair from invite_token above.
+        # account (migration 144) — separate token pair from invite_token above.
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token TEXT UNIQUE"))
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMPTZ"))
         # Club-user email is format-validated only, not required to be unique
-        # (migration 143) — drop whatever the original UNIQUE constraint on
+        # (migration 145) — drop whatever the original UNIQUE constraint on
         # users.email was named, looked up by column rather than a fixed name.
         await conn.execute(text("""
             DO $$

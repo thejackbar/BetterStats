@@ -28,7 +28,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Not unique (migration 143) — format-validated only, deliberately allowed
+    # Not unique (migration 145) — format-validated only, deliberately allowed
     # to repeat across accounts. username remains the unique login credential.
     email = Column(Text, nullable=True)
     username = Column(Text, unique=True, nullable=True)
@@ -62,7 +62,7 @@ class User(Base):
     invite_token = Column(Text, unique=True, nullable=True)
     invite_token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # Admin-triggered "reset your password" email for an EXISTING club-user
-    # account (migration 142, routers/club_admin.py::send_password_reset_link).
+    # account (migration 144, routers/club_admin.py::send_password_reset_link).
     # Distinct from invite_token above, which is only for a brand-new
     # account's first-ever password — that flow 404s once password_hash is
     # set, so an already-active admin needs its own token pair here.
@@ -189,6 +189,12 @@ class Organisation(Base):
     playhq_id = Column(Text, nullable=True)
     slug = Column(Text, unique=True, nullable=True)
     is_active = Column(Boolean, default=False, nullable=False)
+    # Soft-delete (migration 143): a Super Admin "deleting" a club archives it
+    # instead of destroying its data — reversible via POST .../restore. NULL =
+    # not archived. Separate from is_active (an archived club's public site
+    # should also be considered offline, but is_active itself is left alone so
+    # restoring doesn't silently flip a state the admin didn't touch).
+    archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
     primary_color = Column(Text, default="#16c784", nullable=True)
     accent_color = Column(Text, default="#243352", nullable=True)
     logo_url = Column(Text, nullable=True)

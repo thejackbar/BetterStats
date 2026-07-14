@@ -6,15 +6,15 @@ the invite_token/invite_token_expires_at pair added in migration 141, which
 is only for a brand-new account's first-ever password (that flow 404s once
 password_hash is already set). See app/models/db.py::User.
 
-Revision ID: 142
-Revises: 141
+Revision ID: 144
+Revises: 143
 Create Date: 2026-07-14
 """
 from alembic import op
 
 
-revision = '142'
-down_revision = '141'
+revision = '144'
+down_revision = '143'
 branch_labels = None
 depends_on = None
 

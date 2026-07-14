@@ -1508,6 +1508,7 @@ def _club_payload(org) -> dict:
         "name": org.name,
         "short_name": org.short_name,
         "is_active": org.is_active,
+        "archived_at": org.archived_at.isoformat() if org.archived_at else None,
         "contact_email": org.contact_email,
         "module_overrides": list(org.module_overrides or []),
         "modules": sorted(org_entitled_modules(org)),
@@ -1526,14 +1527,14 @@ def _club_payload(org) -> dict:
 
 @router.get("/super/clubs")
 async def list_all_clubs(
+    include_archived: bool = False,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Organisation)
-        .options(selectinload(Organisation.module_subscriptions))
-        .order_by(Organisation.name)
-    )
+    q = select(Organisation).options(selectinload(Organisation.module_subscriptions))
+    if not include_archived:
+        q = q.where(Organisation.archived_at.is_(None))
+    result = await db.execute(q.order_by(Organisation.name))
     return [_club_payload(o) for o in result.scalars().all()]
 
 
@@ -2383,15 +2384,80 @@ async def dismiss_module_request(
     return {"ok": True}
 
 
+@router.post("/super/clubs/{club_id}/archive")
+async def archive_club(
+    club_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete: what the Super Admin "Delete" button actually calls now.
+    Sets archived_at only — no row anywhere is touched or removed, so this is
+    fully reversible via /restore. Deliberately doesn't touch is_active (an
+    archived club's public site is expected to already read as offline via
+    archived_at wherever that matters; restoring shouldn't silently flip a
+    state the admin didn't touch themselves)."""
+    org = await db.get(Organisation, uuid.UUID(club_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if org.archived_at is not None:
+        return {"status": "already_archived", "id": club_id}
+    org.archived_at = _datetime.now(_timezone.utc)
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=org.id, user_id=current_user.id,
+        action="archive_club", target_type="organisation", target_id=club_id,
+        details={"name": org.name},
+    )
+    await db.commit()
+    return {"status": "archived", "id": club_id}
+
+
+@router.post("/super/clubs/{club_id}/restore")
+async def restore_club(
+    club_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    org = await db.get(Organisation, uuid.UUID(club_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if org.archived_at is None:
+        return {"status": "not_archived", "id": club_id}
+    org.archived_at = None
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=org.id, user_id=current_user.id,
+        action="restore_club", target_type="organisation", target_id=club_id,
+        details={"name": org.name},
+    )
+    await db.commit()
+    return {"status": "restored", "id": club_id}
+
+
 @router.delete("/super/clubs/{club_id}")
 async def delete_club(
     club_id: str,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    """Permanent hard delete — kept as a lower-level capability (e.g. for
+    purging a long-archived club later) but no longer what the "Delete"
+    button in SuperClubs.jsx calls; that now archives (see archive_club
+    above). Requires the club to already be archived, as a speed bump against
+    ever hitting this by accident on a live club.
+
+    Fixed FK cascade drift on legacy per-game/per-player stat tables
+    (migration 142 — partnerships_game_id_fkey and siblings weren't actually
+    ON DELETE CASCADE in the live schema despite the ORM model saying so,
+    which made this 500 on any club with real synced data)."""
     org = await db.get(Organisation, uuid.UUID(club_id))
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
+    if org.archived_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Archive the club first (this permanently destroys its data and is not reversible).",
+        )
 
     # These tables key on org_id but have no FK constraint, so the
     # organisations cascade won't reach them — clean them up explicitly.
