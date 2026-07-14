@@ -1508,6 +1508,7 @@ def _club_payload(org) -> dict:
         "name": org.name,
         "short_name": org.short_name,
         "is_active": org.is_active,
+        "archived_at": org.archived_at.isoformat() if org.archived_at else None,
         "contact_email": org.contact_email,
         "module_overrides": list(org.module_overrides or []),
         "modules": sorted(org_entitled_modules(org)),
@@ -1526,14 +1527,14 @@ def _club_payload(org) -> dict:
 
 @router.get("/super/clubs")
 async def list_all_clubs(
+    include_archived: bool = False,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Organisation)
-        .options(selectinload(Organisation.module_subscriptions))
-        .order_by(Organisation.name)
-    )
+    q = select(Organisation).options(selectinload(Organisation.module_subscriptions))
+    if not include_archived:
+        q = q.where(Organisation.archived_at.is_(None))
+    result = await db.execute(q.order_by(Organisation.name))
     return [_club_payload(o) for o in result.scalars().all()]
 
 
@@ -2383,15 +2384,80 @@ async def dismiss_module_request(
     return {"ok": True}
 
 
+@router.post("/super/clubs/{club_id}/archive")
+async def archive_club(
+    club_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete: what the Super Admin "Delete" button actually calls now.
+    Sets archived_at only — no row anywhere is touched or removed, so this is
+    fully reversible via /restore. Deliberately doesn't touch is_active (an
+    archived club's public site is expected to already read as offline via
+    archived_at wherever that matters; restoring shouldn't silently flip a
+    state the admin didn't touch themselves)."""
+    org = await db.get(Organisation, uuid.UUID(club_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if org.archived_at is not None:
+        return {"status": "already_archived", "id": club_id}
+    org.archived_at = _datetime.now(_timezone.utc)
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=org.id, user_id=current_user.id,
+        action="archive_club", target_type="organisation", target_id=club_id,
+        details={"name": org.name},
+    )
+    await db.commit()
+    return {"status": "archived", "id": club_id}
+
+
+@router.post("/super/clubs/{club_id}/restore")
+async def restore_club(
+    club_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    org = await db.get(Organisation, uuid.UUID(club_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if org.archived_at is None:
+        return {"status": "not_archived", "id": club_id}
+    org.archived_at = None
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=org.id, user_id=current_user.id,
+        action="restore_club", target_type="organisation", target_id=club_id,
+        details={"name": org.name},
+    )
+    await db.commit()
+    return {"status": "restored", "id": club_id}
+
+
 @router.delete("/super/clubs/{club_id}")
 async def delete_club(
     club_id: str,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    """Permanent hard delete — kept as a lower-level capability (e.g. for
+    purging a long-archived club later) but no longer what the "Delete"
+    button in SuperClubs.jsx calls; that now archives (see archive_club
+    above). Requires the club to already be archived, as a speed bump against
+    ever hitting this by accident on a live club.
+
+    Fixed FK cascade drift on legacy per-game/per-player stat tables
+    (migration 142 — partnerships_game_id_fkey and siblings weren't actually
+    ON DELETE CASCADE in the live schema despite the ORM model saying so,
+    which made this 500 on any club with real synced data)."""
     org = await db.get(Organisation, uuid.UUID(club_id))
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
+    if org.archived_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Archive the club first (this permanently destroys its data and is not reversible).",
+        )
 
     # These tables key on org_id but have no FK constraint, so the
     # organisations cascade won't reach them — clean them up explicitly.
@@ -3468,7 +3534,26 @@ async def reorder_sponsors(
 
 
 _INVITE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Digits plus common separators (+, spaces, hyphens, parens); once those are
+# stripped out there must be between 7 and 15 digits left — loose enough to
+# take AU mobiles/landlines and international numbers, tight enough to catch
+# obvious typos (E.164's own max length is 15 digits).
+_MOBILE_STRIP_RE = re.compile(r"[\s\-()]")
+_MOBILE_DIGITS_RE = re.compile(r"^\+?\d{7,15}$")
 _INVITE_TOKEN_TTL_DAYS = 7
+_PASSWORD_RESET_TOKEN_TTL_HOURS = 24
+
+
+def _clean_mobile(raw: Optional[str]) -> Optional[str]:
+    """Returns the trimmed mobile number, or raises 400 if it doesn't look
+    like a phone number. None/blank passes through as None (the field stays
+    optional)."""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if not _MOBILE_DIGITS_RE.match(_MOBILE_STRIP_RE.sub("", value)):
+        raise HTTPException(400, "That doesn't look like a valid mobile number")
+    return value
 
 
 class ClubUserCreate(BaseModel):
@@ -3485,9 +3570,12 @@ class ClubUserCreate(BaseModel):
 
 class ClubUserUpdate(BaseModel):
     display_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
     role: Optional[str] = None
     capabilities: Optional[list[str]] = None
     password: Optional[str] = None
+    confirm_password: Optional[str] = None
 
 
 @router.get("/users")
@@ -3500,7 +3588,7 @@ async def list_club_users(
     rows = await db.execute(
         _text(
             """
-            SELECT u.id, u.username, u.display_name, u.last_login_at,
+            SELECT u.id, u.username, u.display_name, u.email, u.mobile_number, u.last_login_at,
                    cm.role, cm.capabilities
             FROM club_memberships cm
             JOIN users u ON u.id = cm.user_id
@@ -3516,6 +3604,8 @@ async def list_club_users(
             "id": str(r["id"]),
             "username": r["username"],
             "display_name": r["display_name"],
+            "email": r["email"],
+            "mobile_number": r["mobile_number"],
             "last_login_at": r["last_login_at"].isoformat() if r["last_login_at"] else None,
             "role": r["role"],
             "capabilities": r["capabilities"] or [],
@@ -3560,18 +3650,16 @@ async def create_club_user(
     role = "club_admin"
     caps: list[str] = []
 
-    # Username + email uniqueness
+    # Username uniqueness only — email/mobile are format-checked (above /
+    # _clean_mobile below) but not required to be unique at the moment.
     existing = await db.execute(_text("SELECT id FROM users WHERE username = :u"), {"u": username})
     if existing.first():
         raise HTTPException(409, "Username already in use")
-    existing_email = await db.execute(_text("SELECT id FROM users WHERE lower(email) = :e"), {"e": email})
-    if existing_email.first():
-        raise HTTPException(409, "That email address already belongs to an existing user")
 
     new_user_id = uuid.uuid4()
     invite_token = _secrets.token_urlsafe(32)
     invite_expires = _datetime.now(_timezone.utc) + _timedelta(days=_INVITE_TOKEN_TTL_DAYS)
-    mobile_number = (data.mobile_number or "").strip() or None
+    mobile_number = _clean_mobile(data.mobile_number)
     await db.execute(
         _text(
             "INSERT INTO users (id, username, display_name, email, mobile_number, "
@@ -3639,14 +3727,29 @@ async def update_club_user(
         raise HTTPException(404, "User not found in this club")
 
     # Role + capabilities are no longer editable here — club_member is retired,
-    # so every club user is a full club admin. Only display name + password.
+    # so every club user is a full club admin. Display name, email, mobile
+    # number and password (via the shared password_policy rule, same as the
+    # user's own invite-accept/self-serve-registration flows) are.
+    from app.services import password_policy
+
     changes = {}
     if data.display_name is not None:
         await db.execute(_text("UPDATE users SET display_name = :d WHERE id = :id"), {"d": data.display_name, "id": user_id})
         changes["display_name"] = True
+    if data.email is not None:
+        email = (data.email or "").strip().lower()
+        if not email or not _INVITE_EMAIL_RE.match(email):
+            raise HTTPException(400, "A valid email address is required")
+        await db.execute(_text("UPDATE users SET email = :e WHERE id = :id"), {"e": email, "id": user_id})
+        changes["email"] = True
+    if data.mobile_number is not None:
+        mobile_number = _clean_mobile(data.mobile_number)
+        await db.execute(_text("UPDATE users SET mobile_number = :m WHERE id = :id"), {"m": mobile_number, "id": user_id})
+        changes["mobile_number"] = True
     if data.password is not None:
-        if len(data.password) < 6:
-            raise HTTPException(400, "Password must be 6+ chars")
+        errors = password_policy.password_errors(data.password, data.confirm_password or "")
+        if errors:
+            raise HTTPException(status_code=422, detail={"errors": errors})
         await db.execute(_text("UPDATE users SET password_hash = :h WHERE id = :id"), {"h": _hash_password(data.password), "id": user_id})
         changes["password"] = True
 
@@ -3659,6 +3762,60 @@ async def update_club_user(
 
     await db.commit()
     return {"status": "ok", **changes}
+
+
+@router.post("/users/{user_id}/send-password-reset")
+async def send_password_reset_link(
+    user_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Email an existing club-user account a "reset your password" link,
+    admin-triggered from the Club Users edit panel. Unlike the "Invite admin"
+    flow (create_club_user), this account already has a working password —
+    the reset uses its own token pair (password_reset_token) so the
+    invite-accept endpoints (which 404 once password_hash is set) are left
+    untouched, and the reset link is short-lived given it can replace a
+    password already in active use."""
+    row = await db.execute(
+        _text(
+            "SELECT u.id, u.email, u.display_name, u.username "
+            "FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
+            "WHERE u.id = :uid AND cm.club_id = :club"
+        ),
+        {"uid": user_id, "club": str(club.id)},
+    )
+    target = row.mappings().first()
+    if not target:
+        raise HTTPException(404, "User not found in this club")
+    if not target["email"]:
+        raise HTTPException(400, "This user has no email address on file to send a reset link to")
+
+    reset_token = _secrets.token_urlsafe(32)
+    reset_expires = _datetime.now(_timezone.utc) + _timedelta(hours=_PASSWORD_RESET_TOKEN_TTL_HOURS)
+    await db.execute(
+        _text("UPDATE users SET password_reset_token = :tok, password_reset_token_expires_at = :exp WHERE id = :id"),
+        {"tok": reset_token, "exp": reset_expires, "id": user_id},
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="send_password_reset_link", target_type="user", target_id=user_id,
+    )
+    await db.commit()
+
+    from app.config.settings import settings as _settings
+    from app.services.user_invite import send_password_reset_email
+    reset_link = f"{_settings.public_base_url}/login?reset={reset_token}"
+    background_tasks.add_task(
+        send_password_reset_email, email=target["email"],
+        display_name=target["display_name"] or target["username"],
+        club_name=club.name, link=reset_link,
+    )
+    return {"status": "sent"}
 
 
 @router.delete("/users/{user_id}")

@@ -30,6 +30,10 @@ export default function SuperClubs() {
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
+  // In-progress "Renews" date edits per module key, before blur — keeps the native
+  // date input's own mid-typing state from being clobbered by an autosave+reload
+  // on every keystroke (see setModuleRenewal).
+  const [renewalEdit, setRenewalEdit] = useState({})
   const [clubAdmins, setClubAdmins] = useState([])
   // Default trial length (global General Settings) — prefills new trial end dates.
   const [defaultTrialDays, setDefaultTrialDays] = useState(14)
@@ -44,6 +48,7 @@ export default function SuperClubs() {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
+  const [showArchived, setShowArchived] = useState(false)
 
   // Club search (same source as the public onboarding flow)
   const [query, setQuery] = useState('')
@@ -53,7 +58,8 @@ export default function SuperClubs() {
   const debounceRef = useRef(null)
   const searchWrapRef = useRef(null)
 
-  const load = () => api.superListClubs().then(setClubs).catch(() => {})
+  const load = (includeArchived = showArchived) =>
+    api.superListClubs(includeArchived).then(setClubs).catch(() => {})
 
   const openSettings = async () => {
     setMsg('')
@@ -89,9 +95,13 @@ export default function SuperClubs() {
     }
   }
   useEffect(() => {
-    load()
     api.superGetGeneralSettings().then(s => setDefaultTrialDays(s?.default_trial_days || 14)).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    load(showArchived)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArchived])
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -231,6 +241,13 @@ export default function SuperClubs() {
     }
   }
   const clearTrialEdit = (key) => setTrialEdit(t => { const n = { ...t }; delete n[key]; return n })
+  // The renewal date shown for a module: the in-progress (not yet blurred) edit if
+  // any, else the saved value.
+  const renewalDraft = (sub) => {
+    const key = sub?.module
+    if (key && renewalEdit[key] !== undefined) return renewalEdit[key]
+    return sub?.renewal_date || ''
+  }
 
   const grantModule = (clubId, key) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { status: 'active' }))
@@ -300,13 +317,27 @@ export default function SuperClubs() {
     }
   }
 
-  const deleteClub = async (club) => {
+  const archiveClub = async (club) => {
     setSaving(true)
     setMsg('')
     try {
-      await api.superDeleteClub(club.id)
-      setMsg(`Deleted ${club.name}`)
+      await api.superArchiveClub(club.id)
+      setMsg(`Archived ${club.name} — restore it any time from All Clubs.`)
       setConfirmDelete(null)
+      load()
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const restoreClub = async (club) => {
+    setSaving(true)
+    setMsg('')
+    try {
+      await api.superRestoreClub(club.id)
+      setMsg(`Restored ${club.name}`)
       load()
     } catch (err) {
       setMsg(err.message)
@@ -322,6 +353,10 @@ export default function SuperClubs() {
           <h1 className="font-display font-bold text-2xl text-pb-text">All Clubs</h1>
           <div className="flex items-center gap-3">
             {msg && <span className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</span>}
+            <label className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
+              <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+              Show archived
+            </label>
             <button
               onClick={openSettings}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-faint bg-pb-surface2"
@@ -530,6 +565,14 @@ export default function SuperClubs() {
                     >
                       {club.modules?.length ? `Core +${club.modules.length}` : 'Core'}
                     </span>
+                    {club.archived_at && (
+                      <span
+                        className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border border-pb-red/30 text-pb-red"
+                        title={`Archived ${new Date(club.archived_at).toLocaleDateString('en-AU')}`}
+                      >
+                        Archived
+                      </span>
+                    )}
                   </div>
                   <div className={`font-mono text-[10px] mt-0.5 ${statusIsLive(club.subscription_status) ? 'text-pb-faintest' : 'text-pb-red'}`}>
                     {[
@@ -554,26 +597,38 @@ export default function SuperClubs() {
                   {club.created_at ? new Date(club.created_at).toLocaleDateString('en-AU') : '—'}
                 </span>
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => syncClub(club)}
-                    disabled={syncing === club.id}
-                    className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
-                    title="Pull latest games & stats"
-                  >
-                    {syncing === club.id ? 'Syncing…' : 'Sync'}
-                  </button>
-                  <button
-                    onClick={() => (editId === club.id ? setEditId(null) : startEdit(club))}
-                    className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
-                  >
-                    {editId === club.id ? 'Close' : 'Edit'}
-                  </button>
-                  <button
-                    onClick={() => { setConfirmDelete(club.id); setEditId(null) }}
-                    className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
-                  >
-                    Delete
-                  </button>
+                  {club.archived_at ? (
+                    <button
+                      onClick={() => restoreClub(club)}
+                      disabled={saving}
+                      className="font-mono text-[10px] text-pb-accent hover:underline transition-colors disabled:opacity-50"
+                    >
+                      Restore
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => syncClub(club)}
+                        disabled={syncing === club.id}
+                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+                        title="Pull latest games & stats"
+                      >
+                        {syncing === club.id ? 'Syncing…' : 'Sync'}
+                      </button>
+                      <button
+                        onClick={() => (editId === club.id ? setEditId(null) : startEdit(club))}
+                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
+                      >
+                        {editId === club.id ? 'Close' : 'Edit'}
+                      </button>
+                      <button
+                        onClick={() => { setConfirmDelete(club.id); setEditId(null) }}
+                        className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
+                      >
+                        Archive
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -668,8 +723,13 @@ export default function SuperClubs() {
                                     </div>
                                   ) : (
                                     <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">Renews
-                                      <input type="date" value={sub.renewal_date || ''} disabled={busy}
-                                        onChange={e => setModuleRenewal(club.id, key, e.target.value)}
+                                      <input type="date" value={renewalDraft(sub)} disabled={busy}
+                                        onChange={e => setRenewalEdit(r => ({ ...r, [key]: e.target.value }))}
+                                        onBlur={e => {
+                                          const val = e.target.value
+                                          setRenewalEdit(r => { const n = { ...r }; delete n[key]; return n })
+                                          if (val !== (sub.renewal_date || '')) setModuleRenewal(club.id, key, val)
+                                        }}
                                         className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50" />
                                     </label>
                                   )}
@@ -778,13 +838,13 @@ export default function SuperClubs() {
               {confirmDelete === club.id && (
                 <div className="px-5 py-4 bg-pb-red/5 border-t border-pb-red/30 space-y-2">
                   <p className="font-mono text-[11px] text-pb-red">
-                    Delete <strong>{club.name}</strong>? This permanently removes every season,
-                    grade, game, player and user for this club. This cannot be undone.
+                    Archive <strong>{club.name}</strong>? It disappears from this list (unless
+                    "Show archived" is on) and its data is left untouched — restore it any time.
                   </p>
                   <div className="flex gap-2">
-                    <button onClick={() => deleteClub(club)} disabled={saving}
+                    <button onClick={() => archiveClub(club)} disabled={saving}
                       className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-white bg-pb-red">
-                      {saving ? 'Deleting…' : 'DELETE PERMANENTLY'}
+                      {saving ? 'Archiving…' : 'ARCHIVE'}
                     </button>
                     <button onClick={() => setConfirmDelete(null)}
                       className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">

@@ -179,16 +179,29 @@ real**, not just theoretical: real `Organisation`/`User` rows now exist per
 submission.
 
 **Phase 10 — Module trials (done)**, including BetterFantasyCricket. Reused
-`mod_subs.ensure_core_subscription` (BetterStats, mandatory, active not
-trialled) + `mod_subs.start_trial_billing` (everything else, at the platform's
-configured default trial length) wholesale — no new trial logic. Modal
-defaults all five optional modules to selected (deselect rather than opt in,
-per the source document's framing). Surfaced a real MissingGreenlet trap:
+`mod_subs.start_trial_billing` (at the platform's configured default trial
+length) for every module wholesale — no new trial logic. Modal defaults all
+five optional modules to selected (deselect rather than opt in, per the
+source document's framing). Surfaced a real MissingGreenlet trap:
 `_onboard_club_core`'s internal commit leaves `module_subscriptions` unloaded
 on the now-persistent org, so an explicit `db.refresh(org,
 attribute_names=["module_subscriptions"])` (the same idiom `club_admin.py`'s
 `patch_club` already uses) is required before touching it — the exact hazard
 `create_club`'s own comment warns about.
+
+**Revised (Jul 2026)**: BetterStats (Core) originally used
+`mod_subs.ensure_core_subscription` (mandatory, immediately `active`, never
+trialled) — mirroring the ordinary Super Admin "New Club" flow, on the
+reasoning that Core is always-on and isn't a choice. Live testing surfaced
+that this reads wrong for THIS flow specifically: the whole point is a "14 Day
+Free Trial", so Core showing `Active` (no trial dates) while every other
+module correctly showed `Trial` looked inconsistent on the club's own Plan
+line and the Super Admin module editor alike. Switched to
+`mod_subs.start_trial_billing(org, MODULE_CORE, days=default_days)` — same
+function, same trial window, as every other module — so Core now reads
+`Trial` with matching start/end dates too. The ordinary authenticated onboard
+flow (a real customer onboarding directly, not a trial) still uses
+`ensure_core_subscription` — deliberately unchanged there.
 
 **Phase 11 — BetterComms defaults + paywall (done).** Part 1 (sandbox defaults
 "configured only when BetterAdmin is selected") turned out to need zero new code:

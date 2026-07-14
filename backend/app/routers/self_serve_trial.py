@@ -218,8 +218,10 @@ async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -
     if not email or not _EMAIL_RE.match(email):
         errors["email"] = "Enter a valid email address"
     else:
+        # users.email is no longer DB-unique (migration 145 — club-user emails
+        # are format-validated only), so this can't assume at most one match.
         existing_user = await db.execute(select(User).where(User.email == email))
-        if existing_user.scalar_one_or_none():
+        if existing_user.scalars().first():
             errors["email"] = (
                 "This email already belongs to a BetterCricket account. Self-serve "
                 "registration doesn't yet support adding an existing admin to a "
@@ -548,11 +550,15 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         await db.flush()
         await ensure_primary_admin(db, org.id)
 
-        # BetterStats is mandatory, not a trial choice — active from day one,
-        # same as the ordinary Super Admin "New Club" flow. Everything else
-        # the operator selected starts a trial at the configured length.
-        mod_subs.ensure_core_subscription(org)
+        # BetterStats is mandatory (always on, never a choice), but on THIS
+        # flow it's still part of the "14 Day Free Trial" the club is
+        # signing up for — it starts trialling on the same schedule as every
+        # other module, not immediately Active, so the whole plan reads as
+        # one consistent trial (matches the ordinary Super Admin "New Club"
+        # flow's ensure_core_subscription for a club onboarded directly as a
+        # real, paying customer — deliberately different here).
         default_days = await ps.get_default_trial_days(db)
+        mod_subs.start_trial_billing(org, MODULE_CORE, days=default_days)
         for module_key in requested_modules:
             mod_subs.start_trial_billing(org, module_key, days=default_days)
 

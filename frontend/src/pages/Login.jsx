@@ -47,11 +47,14 @@ function ShowHideInput({ value, onChange, show, onToggleShow, autoComplete }) {
 }
 
 // A club-user invite (routers/club_admin.py's "Invite admin") lands here via
-// betterat.cricket/login?invite=<token> — no separate accept-invite page, per
-// the explicit ask. Same password rule as self-serve trial registration
-// (services/password_policy.py on the backend).
-function AcceptInvite({ token }) {
-  const { acceptInvite } = useAuth()
+// betterat.cricket/login?invite=<token>, and an admin-triggered password
+// reset (routers/club_admin.py's "Send password reset email" — an existing
+// account, not a new one) lands here via ?reset=<token> — no separate pages,
+// per the explicit ask for the invite flow; the reset flow mirrors it.
+// Same password rule as self-serve trial registration
+// (services/password_policy.py on the backend) for both.
+function AcceptInvite({ token, mode = 'invite' }) {
+  const { acceptInvite, resetPassword } = useAuth()
   const navigate = useNavigate()
   const [invite, setInvite] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -63,14 +66,21 @@ function AcceptInvite({ token }) {
   const [submitError, setSubmitError] = useState('')
   const [accepting, setAccepting] = useState(false)
 
+  const isReset = mode === 'reset'
+  const fallbackError = isReset
+    ? 'This reset link is invalid or has expired.'
+    : 'This invite link is invalid or has expired.'
+
   useEffect(() => {
     let cancelled = false
-    api.getInvite(token)
+    const fetchIdentity = isReset ? api.getPasswordReset : api.getInvite
+    fetchIdentity(token)
       .then((d) => { if (!cancelled) setInvite(d) })
-      .catch((e) => { if (!cancelled) setLoadError(e?.message || 'This invite link is invalid or has expired.') })
+      .catch((e) => { if (!cancelled) setLoadError(e?.message || fallbackError) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [token])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, isReset])
 
   const checks = {
     length: password.length >= PASSWORD_MIN_LEN,
@@ -86,10 +96,10 @@ function AcceptInvite({ token }) {
     setSubmitError('')
     setAccepting(true)
     try {
-      await acceptInvite(token, password, confirmPassword)
+      await (isReset ? resetPassword : acceptInvite)(token, password, confirmPassword)
       navigate('/admin')
     } catch (err) {
-      setSubmitError(err.message || 'Could not set your password')
+      setSubmitError(err.message || `Could not ${isReset ? 'reset' : 'set'} your password`)
     } finally {
       setAccepting(false)
     }
@@ -98,7 +108,9 @@ function AcceptInvite({ token }) {
   if (loading) {
     return (
       <div className="pb-card p-6">
-        <p className="font-mono text-[11px] text-pb-faint">Loading your invite…</p>
+        <p className="font-mono text-[11px] text-pb-faint">
+          Loading your {isReset ? 'reset link' : 'invite'}…
+        </p>
       </div>
     )
   }
@@ -114,9 +126,23 @@ function AcceptInvite({ token }) {
   return (
     <form onSubmit={submit} className="pb-card p-6 space-y-4">
       <p className="text-pb-text text-sm">
-        Welcome{invite.display_name ? `, ${invite.display_name}` : ''} — set a password to
-        activate your admin account{invite.club_name ? ` for ${invite.club_name}` : ''}.
+        {isReset ? (
+          <>
+            Hi{invite.display_name ? ` ${invite.display_name}` : ''} — choose a new password
+            for your admin account{invite.club_name ? ` at ${invite.club_name}` : ''}.
+          </>
+        ) : (
+          <>
+            Welcome{invite.display_name ? `, ${invite.display_name}` : ''} — set a password to
+            activate your admin account{invite.club_name ? ` for ${invite.club_name}` : ''}.
+          </>
+        )}
       </p>
+      {invite.username && (
+        <p className="font-mono text-[11px] text-pb-faint">
+          Your username is <strong className="text-pb-text">{invite.username}</strong> — use it to log in from now on.
+        </p>
+      )}
 
       <div>
         <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">Password</label>
@@ -145,7 +171,9 @@ function AcceptInvite({ token }) {
         className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed text-pb-bg"
         style={{ background: 'var(--pb-accent)' }}
       >
-        {accepting ? 'ACTIVATING…' : 'SET PASSWORD & SIGN IN'}
+        {accepting
+          ? (isReset ? 'RESETTING…' : 'ACTIVATING…')
+          : (isReset ? 'RESET PASSWORD & SIGN IN' : 'SET PASSWORD & SIGN IN')}
       </button>
     </form>
   )
@@ -156,6 +184,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const inviteToken = searchParams.get('invite')
+  const resetToken = searchParams.get('reset')
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -182,8 +211,8 @@ export default function Login() {
       <div className="w-full max-w-sm">
         <Brand />
 
-        {inviteToken ? (
-          <AcceptInvite token={inviteToken} />
+        {inviteToken || resetToken ? (
+          <AcceptInvite token={inviteToken || resetToken} mode={resetToken ? 'reset' : 'invite'} />
         ) : (
           <>
             <form onSubmit={handleSubmit} className="pb-card p-6 space-y-4">
