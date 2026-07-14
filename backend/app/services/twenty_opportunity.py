@@ -99,7 +99,8 @@ async def _force_upsert_lead(session: AsyncSession, http: httpx.AsyncClient, clu
 
 async def _upsert_opportunity(session: AsyncSession, http: httpx.AsyncClient, club: MarketingClub,
                               company_tid: str, modules: list,
-                              point_of_contact_id: Optional[str] = None) -> tuple:
+                              point_of_contact_id: Optional[str] = None,
+                              stage: Optional[str] = None) -> tuple:
     values: dict = {"name": f"{club.name} — Better Cricket"}
     if modules:
         values["modulesInScope"] = modules
@@ -109,7 +110,7 @@ async def _upsert_opportunity(session: AsyncSession, http: httpx.AsyncClient, cl
         # "this person is now the contact" action, not a set-once default.
         values["pointOfContactId"] = point_of_contact_id
     create_extra = {"bcOpportunityKey": club.grassroots_guid, "companyId": company_tid,
-                    "stage": _DEFAULT_STAGE}
+                    "stage": stage or _DEFAULT_STAGE}
     return await _upsert(
         session, http, "opportunity", club.grassroots_guid, "opportunities",
         "bcOpportunityKey", values, create_extra=create_extra)

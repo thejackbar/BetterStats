@@ -145,9 +145,10 @@ Twenty is at **Target**, the moment of export.
 2. **Contacted** — outreach sent (exported to BetterComms / emailed), no reply
 3. **Engaged** — replied / showed interest / active on site
 4. **Trial** — demo or trial started
-5. **Proposal** — quote / negotiation
-6. **Won** — converted to paying customer
-7. **Lost / Dormant** — declined or went cold
+5. **Self-Serve Trial** — self-serve registration started the trial directly, no human touched it first (§20)
+6. **Proposal** — quote / negotiation
+7. **Won** — converted to paying customer
+8. **Lost / Dormant** — declined or went cold
 
 Opportunity custom fields: `modulesInScope` (MULTI_SELECT), `oppSource` (SELECT:
 inbound_form, outbound_campaign, referral, directory), `lostReason` (SELECT).
@@ -1145,3 +1146,48 @@ names follow Twenty's documented `<fieldName>Id` convention
 relations (Company, Point of Contact) — confirm both resolve as expected
 against the real workspace before relying on the `person` cascade in
 production, and adjust `twenty_opportunity.py` if the live field names differ.
+
+## 20. July 2026 — "Self-Serve Trial" Lead lifecycle stage + Opportunity stage
+
+A self-serve trial registration (`docs/self-serve-trial-onboarding-plan.md`
+Phase 12, `services/twenty_sync.py::push_self_serve_registration`) now opens
+its Lead and Opportunity distinctly from an enquiry- or outbound-originated
+one, per explicit request — both read "Self-Serve Trial" the moment they're
+created, not the generic Target/Trial/Contacted a normal signal would give.
+
+- **`Lead.lifecycleStage`** gained an 8th option, **"Self-Serve Trial"**
+  (`SELF_SERVE_TRIAL`) — Lead-only, NOT added to `Company.lifecycleStage` or
+  `Person.clubLifecycleStage`, which stay the general 7-value engagement model
+  (§3.2). Set via `twenty_leads_tasks.upsert_lead_for_club`'s new
+  `lifecycle_override` param, merged into `create_extra` so it wins at
+  creation only (`_upsert`'s create-vs-update merge rule, §2b). **This is a
+  creation-moment marker, not permanent — it can be overwritten same-day, not
+  just at the next 07:00 refresh**: `_seed_and_refresh_leads` recomputes
+  `lifecycleStage` from the ordinary engagement model for every Lead daily
+  regardless of how it was created, AND — since `Company.lifecycleStage` has
+  no "Self-Serve Trial" value at all — the very next ordinary Company push for
+  this club (a BetterComms campaign send, a manual "Refresh Twenty scores")
+  runs `_sync_lead_from_company` (§15's Lead-mirrors-Company mechanism), which
+  mirrors the Company's own (non-"Self-Serve Trial") lifecycle straight onto
+  the Lead. Either path overwrites it the same as any other value on this
+  field.
+- **Opportunity `stage`** gained an 8th pipeline value, **"Self-Serve Trial"**
+  (`SELF_SERVE_TRIAL`), inserted after "Trial" in `bootstrap_twenty.py`'s
+  `PIPELINE` list (§3.4's numbered list is now 8 items, not 7 — re-run
+  `bootstrap_twenty.py` to push the option; it's a full-replace PATCH on this
+  built-in field, not the merge-PATCH other SELECT fields get, so re-running
+  after any further edit to `PIPELINE` always needs a check that existing
+  labels are unchanged, not just appended-to). Set via
+  `twenty_opportunity._upsert_opportunity`'s new `stage` param, `create_extra`
+  as always — **this one IS effectively permanent**, since Opportunity stage
+  is never recomputed by any scheduled job, only by a human moving the deal in
+  Twenty (confirmed §19's own cascade never touches `stage` after creation
+  either).
+- Both flow through `push_club_and_contacts`'s new `lead_lifecycle_override`/
+  `opportunity_stage` params — off by default (`None`), so every other caller
+  (a campaign send, `push_onboarding_enquiry`, an ordinary trial-start/
+  subscription push) is unaffected and keeps the normally-computed values.
+
+**Requires re-running `bootstrap_twenty.py`** against the live workspace
+before this takes effect — the new option strings don't exist in Twenty's
+field metadata until the script pushes them (§4, §11).
