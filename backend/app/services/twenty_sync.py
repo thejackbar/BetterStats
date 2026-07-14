@@ -1195,7 +1195,9 @@ async def handle_contact_opt_out(session, email: str) -> None:
 async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" = None,
                                  engagement_override: "Optional[dict]" = None,
                                  create_opportunity: bool = False,
-                                 opportunity_modules: "Optional[list]" = None) -> dict:
+                                 opportunity_modules: "Optional[list]" = None,
+                                 lead_lifecycle_override: "Optional[str]" = None,
+                                 opportunity_stage: "Optional[str]" = None) -> dict:
     """Best-effort: upsert ONE prospect club's Company + the given
     MarketingClubContact ids (People) into Twenty. This is the "every email sent
     should upsert a record" hook: sending a BetterComms campaign to a club's
@@ -1221,6 +1223,13 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
     own ``createOpportunity`` cascade field). ``opportunity_modules`` scopes it;
     falls back to ``twenty_opportunity._default_modules(club)`` when omitted.
     Every other caller leaves this off and is unaffected.
+
+    ``lead_lifecycle_override``/``opportunity_stage`` force the Lead's
+    ``lifecycleStage`` and the Opportunity's ``stage`` at creation (via
+    ``create_extra`` — see both functions' own docstrings for exactly how long
+    each sticks). Used by ``push_self_serve_registration`` to open both at
+    "Self-Serve Trial" instead of the normally-computed lifecycle / the default
+    "Contacted" stage.
 
     Opens its own session + http client; never raises — a CRM hiccup must never
     break a send."""
@@ -1255,14 +1264,17 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
                                             "companies", "bcClubId", company)
                 if engagement_override:
                     from app.services import twenty_leads_tasks
-                    await twenty_leads_tasks.upsert_lead_for_club(session, http, club, org, ctid, engagement)
+                    await twenty_leads_tasks.upsert_lead_for_club(
+                        session, http, club, org, ctid, engagement,
+                        lifecycle_override=lead_lifecycle_override)
                 else:
                     await _sync_lead_from_company(session, http, club.grassroots_guid, company)
                 if create_opportunity:
                     from app.services import twenty_opportunity
                     modules = (opportunity_modules if opportunity_modules is not None
                                else twenty_opportunity._default_modules(club))
-                    await twenty_opportunity._upsert_opportunity(session, http, club, ctid, modules)
+                    await twenty_opportunity._upsert_opportunity(
+                        session, http, club, ctid, modules, stage=opportunity_stage)
                 for ct in contacts:
                     try:
                         person_vals = {**_person_values(ct, club.country),
@@ -1467,7 +1479,13 @@ async def push_self_serve_registration(*, org_id, org_name: str, contact_name: s
     scoped to the modules the admin actually selected a trial for. Unlike a
     bare enquiry, a registration doesn't wait on a human to flip Twenty's own
     ``createOpportunity`` field — the deal is real from the moment the club
-    exists. Best-effort and backgrounded by the caller; never raises."""
+    exists. The Lead opens at ``lifecycleStage`` "Self-Serve Trial" (until the
+    next daily Lead refresh recomputes it, same as any other Lead) and the
+    Opportunity opens at ``stage`` "Self-Serve Trial" (permanent — Opportunity
+    stage is never recomputed by anything, only a human moving the deal in
+    Twenty changes it), so both read distinctly from an enquiry- or
+    outbound-originated deal the moment they land. Best-effort and
+    backgrounded by the caller; never raises."""
     if not client.configured:
         return {"skipped": "not configured"}
     try:
@@ -1484,7 +1502,8 @@ async def push_self_serve_registration(*, org_id, org_name: str, contact_name: s
     return await push_club_and_contacts(
         club_id, contact_ids=[contact_id],
         engagement_override={"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True},
-        create_opportunity=True, opportunity_modules=_twenty_modules(modules or []))
+        create_opportunity=True, opportunity_modules=_twenty_modules(modules or []),
+        lead_lifecycle_override="SELF_SERVE_TRIAL", opportunity_stage="SELF_SERVE_TRIAL")
 
 
 async def push_org_company(org_id, engagement_override: "Optional[dict]" = None) -> dict:

@@ -232,6 +232,18 @@ into `self_serve_trial.py`'s `/submit` as a `background_tasks.add_task` right af
 the transaction commits — best-effort, never blocks or fails the registration
 response.
 
+**Addendum (Jul 2026)**: the Lead and Opportunity now open at a distinguishing
+"Self-Serve Trial" value instead of the generic computed lifecycle/default
+stage — `Lead.lifecycleStage = SELF_SERVE_TRIAL` (a new Lead-only option) and
+`Opportunity.stage = SELF_SERVE_TRIAL` (a new pipeline stage, after "Trial").
+Full detail in `docs/twenty-crm-integration.md` §20, including the caveat that
+the Lead's value is a creation-moment marker only (the next daily refresh, or
+even the next ordinary campaign send to this club, recomputes it from the
+normal engagement model) whereas the Opportunity's is effectively permanent
+(stage is never recomputed by anything else). **Requires re-running
+`bootstrap_twenty.py`** against the live workspace before the new option
+values exist in Twenty.
+
 **Phase 13 — Sync trigger + queue governor + progress + admin-home display
 (done).** The sync trigger itself needed no new code — `_onboard_club_core`
 (Phase 9) already kicks off the org's first full sync via the same

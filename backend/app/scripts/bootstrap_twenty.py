@@ -194,8 +194,16 @@ FIELDS = [
     # twenty_sync (every Company push that changes either patches the Lead too, if
     # one exists), not just refreshed on the daily Lead scan.
     ("lead", "engagementScore", "Engagement score", "NUMBER", None),
+    # "Self-Serve Trial" (Jul 2026) is a Lead-only value — set once at creation
+    # for a self-serve trial registration (services/twenty_sync.py::
+    # push_self_serve_registration), NOT added to Company/Person's own
+    # lifecycleStage lists, which stay the general engagement-derived model.
+    # It's overwritten by the next daily Lead refresh's normal lifecycle
+    # computation, same as every other value here — this just controls what
+    # shows immediately at creation, before that first refresh runs.
     ("lead", "lifecycleStage", "Lifecycle stage", "SELECT",
-     _options(["Target", "Prospect", "Engaged", "Trial", "Customer", "Churned", "Suppressed"])),
+     _options(["Target", "Prospect", "Engaged", "Trial", "Self-Serve Trial",
+               "Customer", "Churned", "Suppressed"])),
     ("lead", "engagementTier", "Engagement tier", "SELECT",
      _options(["Cold", "Warm", "Hot", "Not interested"])),
     ("lead", "modulesOfInterest", "Modules of interest", "MULTI_SELECT", MODULE_OPTS),
@@ -251,7 +259,12 @@ RELABEL = [
 ]
 
 # Opportunity pipeline stages (rewrite the built-in 'stage' SELECT options).
-PIPELINE = ["Target", "Contacted", "Engaged", "Trial", "Proposal", "Won", "Lost / Dormant"]
+# "Self-Serve Trial" (Jul 2026) is the stage a self-serve trial registration's
+# Opportunity opens at (services/twenty_opportunity.py's _upsert_opportunity,
+# set only at creation via create_extra — like every other stage here, it's
+# never overwritten by a later re-trigger, so it sticks until a human moves
+# the deal in Twenty).
+PIPELINE = ["Target", "Contacted", "Engaged", "Trial", "Self-Serve Trial", "Proposal", "Won", "Lost / Dormant"]
 
 # Relations created in a second pass: (from_object, field_name, label, to_object,
 # relation_type, inverse_label). Twenty's relation payload is version-sensitive.

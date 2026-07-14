@@ -119,7 +119,8 @@ def _lead_values(sig: dict, lifecycle_stage: str) -> dict:
 
 
 async def upsert_lead_for_club(session, http, club: MarketingClub, org: "Optional[Organisation]",
-                               company_tid: str, eng: dict) -> "Optional[str]":
+                               company_tid: str, eng: dict,
+                               lifecycle_override: "Optional[str]" = None) -> "Optional[str]":
     """Create or refresh the Lead for ONE club, given an already-computed engagement
     rollup and the Company's Twenty id. The single-club counterpart to
     ``_seed_and_refresh_leads``'s daily batch sweep (which only ever looks at clubs
@@ -128,7 +129,16 @@ async def upsert_lead_for_club(session, http, club: MarketingClub, org: "Optiona
     07:00 refresh to notice the signal (see ``twenty_sync.push_onboarding_enquiry``,
     for a direct "onboard my club" enquiry). Returns the Lead's Twenty id, or None
     if it doesn't currently qualify (see ``_lead_signal``) or every contact has
-    opted out."""
+    opted out.
+
+    ``lifecycle_override`` (used by ``push_self_serve_registration``) forces the
+    Lead's ``lifecycleStage`` — e.g. "SELF_SERVE_TRIAL" — via ``create_extra``, so
+    it wins over the normally-computed value ONLY at creation (``_upsert`` merges
+    ``create_extra`` over ``values`` on create, never on update — see its
+    docstring). Note this is a creation-moment marker, not a permanent one: the
+    next daily Lead refresh (``_seed_and_refresh_leads``) recomputes
+    ``lifecycleStage`` from the ordinary engagement model like any other Lead and
+    will overwrite it, the same way every other field here behaves."""
     paid, _trial, _renewals = _module_split(org) if org is not None else ([], [], [])
     is_paying = bool(paid) or (club.demo_status or "") == "customer"
     all_unsub = await _all_contacts_unsubscribed(session, club.id)
@@ -140,10 +150,13 @@ async def upsert_lead_for_club(session, http, club: MarketingClub, org: "Optiona
         return None
     values = _lead_values(sig, _lifecycle(club, is_paying, all_unsub))
     values["name"] = club.name
+    create_extra = {"bcLeadKey": club.grassroots_guid, "leadStatus": sig["status"],
+                    "companyId": company_tid}
+    if lifecycle_override:
+        create_extra["lifecycleStage"] = lifecycle_override
     lid, _act = await _upsert(
         session, http, "lead", club.grassroots_guid, "leads", "bcLeadKey", values,
-        create_extra={"bcLeadKey": club.grassroots_guid, "leadStatus": sig["status"],
-                      "companyId": company_tid})
+        create_extra=create_extra)
     return lid
 
 
