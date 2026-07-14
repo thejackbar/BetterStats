@@ -2402,6 +2402,15 @@ async def archive_club(
     if org.archived_at is not None:
         return {"status": "already_archived", "id": club_id}
     org.archived_at = _datetime.now(_timezone.utc)
+    # Any super admin currently "acting as" this club stops the moment it's
+    # archived, rather than leaving active_club_id dangling on an archived
+    # row — get_current_club/_build_me now also guard against this, but
+    # clearing it here means a later /restore doesn't silently resume acting
+    # as it without the admin explicitly switching back.
+    await db.execute(
+        _text("UPDATE users SET active_club_id = NULL WHERE active_club_id = :cid"),
+        {"cid": club_id},
+    )
     from app.services.audit_log import log_activity
     await log_activity(
         db, org_id=org.id, user_id=current_user.id,

@@ -167,13 +167,20 @@ async def get_current_club(
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
     eff_id = _effective_club_id(membership, current_user)
+    acting_as_override = eff_id != membership.club_id
     # Eager-load per-module subscriptions so the entitlement gate enforces
     # read-time trial expiry exactly (see app/auth/modules.py).
     _opts = [selectinload(Organisation.module_subscriptions)]
     club = await db.get(Organisation, eff_id, options=_opts) if eff_id else None
-    # A dangling active_club_id (e.g. the acted-as club was deleted) falls back
-    # to the staff member's home membership club rather than 403-ing them out.
-    if club is None and eff_id != membership.club_id:
+    # A super admin acting as an archived club reads the same as a dangling
+    # active_club_id below — archiving never removes the row, so the club-is-
+    # None check alone can't catch it.
+    if club is not None and acting_as_override and club.archived_at is not None:
+        club = None
+    # A dangling active_club_id (e.g. the acted-as club was deleted, or has
+    # since been archived) falls back to the staff member's home membership
+    # club rather than 403-ing them out or silently acting as an archived club.
+    if club is None and acting_as_override:
         club = await db.get(Organisation, membership.club_id, options=_opts)
     if not club:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club not found")
@@ -438,13 +445,20 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
 
     home_club = await db.get(Organisation, membership.club_id) if membership else None
     eff_id = _effective_club_id(membership, current_user)
+    acting_as_override = bool(membership) and eff_id != membership.club_id
     # Eager-load per-module subscriptions so entitlement_summary can return each
     # module's status / renewal / trial end (and apply read-time trial expiry).
     club = await db.get(
         Organisation, eff_id,
         options=[selectinload(Organisation.module_subscriptions)],
     ) if eff_id else None
-    # active_club_id may dangle (acted-as club deleted) — fall back to home.
+    # A super admin acting as an archived club reads the same as a dangling
+    # active_club_id below — the row still exists (archiving never deletes
+    # it), so this can't be caught by the club-is-None check alone.
+    if club is not None and acting_as_override and club.archived_at is not None:
+        club = None
+    # active_club_id may dangle (acted-as club deleted, or since archived) —
+    # fall back to home.
     if club is None and membership is not None:
         club = home_club
         eff_id = membership.club_id
