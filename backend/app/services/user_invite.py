@@ -12,7 +12,13 @@ from app.services import email_service
 
 
 def _greeting(display_name: str) -> str:
-    return f"Hi {display_name}," if display_name else "Hi there,"
+    # Callers pass whatever name they have on file (often a full "First
+    # Last" display name, e.g. the Invite admin form only collects one
+    # combined field) — the greeting itself should only ever use the first
+    # word of it.
+    parts = (display_name or "").split()
+    first = parts[0] if parts else ""
+    return f"Hi {first}," if first else "Hi there,"
 
 
 async def send_invite_email(*, email: str, display_name: str, club_name: str, link: str) -> None:
