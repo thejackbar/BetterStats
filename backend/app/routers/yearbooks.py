@@ -1569,6 +1569,91 @@ async def trigger_stub_generation(org_id: str, db: AsyncSession = Depends(get_db
     return {"created": created}
 
 
+# ─── Auto-generate + auto-publish after a Full Rebuild ────────────────────────
+
+async def _last_n_seasons_with_stats(db: AsyncSession, org_id: str, n: int) -> list[str]:
+    """The org's `n` most recent seasons that actually have synced stats —
+    same recency ordering as `_season_sort_key` (organisations.py), just
+    restricted to seasons worth building a yearbook for."""
+    rows = await db.execute(
+        text("""
+            SELECT DISTINCT s.id, s.display_order, s.year, s.name
+            FROM seasons s
+            WHERE s.organisation_id = :o
+              AND EXISTS (SELECT 1 FROM player_season_stats pss WHERE pss.season_id = s.id)
+            ORDER BY s.display_order ASC NULLS LAST, s.year DESC NULLS LAST, s.name DESC
+            LIMIT :n
+        """),
+        {"o": org_id, "n": n},
+    )
+    return [str(r["id"]) for r in rows.mappings().all()]
+
+
+async def auto_generate_and_publish_recent_yearbooks(db: AsyncSession, org_id: str, count: int = 3) -> dict:
+    """Auto-generate the AI narrative and auto-publish the last `count` seasons'
+    yearbooks. Called after a successful Full Rebuild — a rebuild is the
+    signal that a club's data (and so any narrative built from it) is
+    actually current.
+
+    Never overwrites a season that already has narrative content (an admin
+    may have hand-edited it since); never un-publishes anything. A season
+    whose narrative call fails (no Anthropic key configured, rate-limited,
+    transient API error) is still published with whatever content exists —
+    per the accepted "auto-publish, no draft gate" decision — rather than
+    blocking the rest of the batch.
+    """
+    await generate_stubs_for_org(db, org_id)
+    season_ids = await _last_n_seasons_with_stats(db, org_id, count)
+
+    narrated, published, skipped, errors = [], [], [], []
+    for season_id in season_ids:
+        try:
+            yb = await _ensure_stub(db, org_id, season_id)
+
+            existing = await db.execute(
+                text("SELECT content_markdown FROM yearbook_sections WHERE yearbook_id = :yid AND section_type = 'narrative'"),
+                {"yid": str(yb["id"])},
+            )
+            has_content = bool((existing.mappings().first() or {}).get("content_markdown"))
+
+            if not has_content:
+                try:
+                    result = await _generate_narrative_core(db, org_id, season_id)
+                    await db.execute(
+                        text("""
+                            UPDATE yearbook_sections
+                            SET content_markdown = ai_draft, updated_at = NOW()
+                            WHERE id = :id
+                        """),
+                        {"id": result["section_id"]},
+                    )
+                    await db.commit()
+                    narrated.append(season_id)
+                except Exception as ne:
+                    logger.warning(f"Yearbook auto-narrative skipped for org={org_id} season={season_id}: {ne}")
+            else:
+                skipped.append(season_id)
+
+            if yb["status"] != "published":
+                await db.execute(
+                    text("UPDATE yearbooks SET status = 'published', published_at = NOW(), updated_at = NOW() WHERE id = :id"),
+                    {"id": str(yb["id"])},
+                )
+                await db.commit()
+                published.append(season_id)
+        except Exception as e:
+            errors.append(str(e))
+            logger.warning(f"Yearbook auto-publish failed for org={org_id} season={season_id}: {e}")
+
+    return {
+        "seasons_considered": len(season_ids),
+        "narrated": narrated,
+        "published": published,
+        "skipped_existing": skipped,
+        "errors": errors,
+    }
+
+
 # ─── AI narrative generation ──────────────────────────────────────────────────
 
 def _fmt(n, dec=2):
@@ -1644,8 +1729,7 @@ Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
 - Aim for 450–500 words — enough to fill a full page of the yearbook"""
 
 
-@router.post("/{org_id}/{season_id}/generate-narrative")
-async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
+async def _generate_narrative_core(db: AsyncSession, org_id: str, season_id: str) -> dict:
     from app.services.rate_limit import enforce
 
     # Narrative gen calls Anthropic per request — both server CPU and $$ cost
@@ -1825,3 +1909,8 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
 
     await db.commit()
     return {"section_id": section_id, "narrative": narrative_text}
+
+
+@router.post("/{org_id}/{season_id}/generate-narrative")
+async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
+    return await _generate_narrative_core(db, org_id, season_id)

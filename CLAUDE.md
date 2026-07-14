@@ -1205,6 +1205,44 @@ Follow-up to the fill-in scorecard fix above (v8.60.x), extending it two ways.
   present — broke (linked to `undefined`) the moment a fill-in could have a
   name with no id, which this feature introduces; now checks the id first.
 
+## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
+
+Yearbook generation was previously **100% manual** — two separate admin
+buttons (Generate stubs, Generate narrative) plus a Publish button, with the
+only automatic step being an at-startup stub-only sweep (`generate_all_stubs`,
+called once from `main.py`'s lifespan). A user expected a Full Rebuild to
+auto-generate yearbooks for the last 3 seasons; it never had, since nothing in
+`sync_organisation`/`hard_refresh_org` ever called into `routers/yearbooks.py`.
+This was a documented-but-unbuilt idea (`docs/self-serve-trial-onboarding-plan.md`
+Decisions 12/13, Phase 22 — scoped there to the not-yet-built self-serve
+onboarding wizard, not the existing per-club rebuild button), not a regression.
+
+- **`routers/yearbooks.py`**: `generate_narrative` was split into a thin route
+  plus a reusable `_generate_narrative_core(db, org_id, season_id)` (same
+  rate-limit/API-key/import checks, same body) so it can be called directly
+  from a background task, not just over HTTP. New
+  `auto_generate_and_publish_recent_yearbooks(db, org_id, count=3)`: ensures
+  stubs exist, finds the org's last `count` seasons that actually have
+  `player_season_stats` rows (`_last_n_seasons_with_stats`, same recency
+  ordering as `_season_sort_key`), and per season generates the narrative
+  (promoting `ai_draft` → `content_markdown`, since only `content_markdown` is
+  what actually renders) and publishes — **unless that season already has
+  narrative content**, so a later rebuild never clobbers an admin's hand
+  edits. A season is still published even if narrative generation fails (no
+  `anthropic_api_key` configured, rate-limited, transient error) — errors are
+  caught per-season and logged, never raised, matching the onboarding-plan's
+  accepted "auto-publish, no draft gate" call.
+- **`routers/club_admin.py::hard_refresh_org`**: the new call sits inside the
+  `_run()` background task's **true-success branch only** (right after
+  `await finish_sync_run(run_id, stats)`, not the "wiped but 0 matches came
+  back" error branch), in its own `try/except` with a fresh
+  `async_session_maker()` session — mirrors the existing post-sync `ANALYZE`
+  block's isolation pattern, since a yearbook failure must never look like a
+  sync failure (the sync's success has already been recorded).
+- **Scope, per direct instruction**: Full Rebuild only — plain "Sync Now" does
+  not trigger this (rebuild is the "real completion signal" the shelved plan
+  called for; a routine weekly sync isn't).
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.
