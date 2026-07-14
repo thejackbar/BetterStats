@@ -594,20 +594,16 @@ async def lifespan(app: FastAPI):
                    'manual'::text AS source
             FROM manual_fall_of_wickets
         """))
-        await conn.execute(text("""
-            CREATE OR REPLACE VIEW v_effective_partnerships AS
-            SELECT id, game_id, innings_number, wicket_number,
-                   batter1_id, batter2_id, runs, balls,
-                   batter1_runs, batter2_runs, is_club_innings,
-                   'api'::text AS source
-            FROM partnerships
-            UNION ALL
-            SELECT id, manual_game_id AS game_id, innings_number, wicket_number,
-                   batter1_id, batter2_id, runs, balls,
-                   batter1_runs, batter2_runs, is_club_innings,
-                   'manual'::text AS source
-            FROM manual_partnerships
-        """))
+        # v_effective_partnerships is (re)created further down (migration 147's
+        # mirror), which now also carries batter1_name/batter2_name — this
+        # earlier, narrower CREATE OR REPLACE VIEW used to be a harmless re-
+        # assertion of the same 12-column shape, but once migration 147 grows
+        # the live view to 14 columns, running this one again on every startup
+        # tries to shrink it back down, and Postgres rejects that outright
+        # ("cannot drop columns from view") — the exact incident this comment
+        # replaces. Removed rather than kept in sync: the later block already
+        # is the complete, current definition, so having two never earns its
+        # keep.
         # Manual bowler wickets (migration 093): per-dismissal bowler/fielder credit for
         # an uploaded card, mirrored into a v_effective union view like the others.
         await conn.execute(text("""
