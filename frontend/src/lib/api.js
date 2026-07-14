@@ -939,6 +939,9 @@ export const api = {
   // Account / plan status page (Phase 19) — per-module Subscribed / In Trial /
   // Trial Expired / Never Trialed status plus trial/subscribe eligibility.
   accountGetPlan: () => request('/club-admin/account/plan'),
+  // Real Stripe Checkout (Stripe Phase 1) — returns { url } to redirect to.
+  accountCreateCheckout: (moduleKeys) =>
+    request('/club-admin/account/checkout', { method: 'POST', body: JSON.stringify({ module_keys: moduleKeys }) }),
   // Module action requests — the trial/subscription queue (migration 119).
   requestModule: (moduleKey, kind = 'trial', note) =>
     request('/club-admin/module-requests', { method: 'POST', body: JSON.stringify({ module_key: moduleKey, kind, note }) }),

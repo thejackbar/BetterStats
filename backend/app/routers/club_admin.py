@@ -2138,6 +2138,7 @@ async def get_account_plan(
     for a non-primary admin (create_module_request enforces the same rule
     server-side regardless — this is purely so the button doesn't look broken)."""
     from app.auth.modules import account_plan_status
+    from app.config.settings import settings
 
     m = (await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
@@ -2154,11 +2155,64 @@ async def get_account_plan(
     for r in outstanding:
         pending_by_module.setdefault(r.module_key, []).append(r.kind)
 
+    from app.services.stripe_billing import priced_modules
+    priced = priced_modules()
+
     modules = account_plan_status(club)
     for row in modules:
         row["pending_requests"] = sorted(pending_by_module.get(row["module"], []))
+        row["stripe_priced"] = row["module"] in priced
 
-    return {"modules": modules, "is_primary_admin": is_primary_admin}
+    return {"modules": modules, "is_primary_admin": is_primary_admin, "stripe_configured": settings.stripe_configured}
+
+
+class CheckoutRequest(BaseModel):
+    module_keys: list[str]
+
+
+@router.post("/account/checkout")
+async def create_checkout(
+    body: CheckoutRequest,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start a real Stripe Checkout for one or more modules at once — one
+    Subscription, one line item per module, so the bundle renews together.
+    Same financial-authority gate as create_module_request's 'subscribe'
+    kind: only the club's primary admin (or a super admin) can start this."""
+    from app.config.settings import settings
+    from app.services import stripe_billing
+
+    if not settings.stripe_configured:
+        raise HTTPException(status_code=503, detail="Online subscribing isn't configured yet")
+    if not body.module_keys:
+        raise HTTPException(status_code=422, detail="Select at least one module")
+    unknown = [m for m in body.module_keys if m not in BILLABLE_MODULES]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown module: {unknown[0]}")
+
+    m = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_super = bool(m and m.role == "super_admin")
+    if not is_super:
+        if not (m and m.club_id == club.id and m.role == "club_admin"):
+            raise HTTPException(status_code=403, detail="Only a club admin can manage the club's subscription")
+        if not m.is_primary_admin:
+            raise HTTPException(status_code=403, detail="Only the club's primary admin can start a subscription")
+
+    base = settings.public_base_url.rstrip("/")
+    try:
+        session = await stripe_billing.create_checkout_session(
+            club, body.module_keys,
+            success_url=f"{base}/admin/account?checkout=success",
+            cancel_url=f"{base}/admin/account?checkout=cancelled",
+        )
+    except stripe_billing.ModuleNotPriced as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()  # persists stripe_customer_id if this minted a new Stripe Customer
+    return {"url": session.url}
 
 
 # ─── Module action requests — the trial/subscription queue ────────────────────

@@ -69,6 +69,23 @@ class Settings(BaseSettings):
     square_environment: str = "production"  # 'sandbox' | 'production'
     square_api_version: str = ""
 
+    # ─── Stripe billing (self-serve subscribe, Phase 1) ────────────────────────
+    # Blank secret/publishable key = "not configured" — the Account page's
+    # Subscribe action 503s with a plain message instead of erroring. Price IDs
+    # are per billing key (core/select/socials/admin/iq/fantasy, matching
+    # auth/modules.py's BILLABLE_MODULES) — annual only for now, matching the
+    # one licence term pricing.js currently sells. A blank Price ID for a given
+    # module just means that module isn't offered through Checkout yet.
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_core: str = ""
+    stripe_price_select: str = ""
+    stripe_price_socials: str = ""
+    stripe_price_admin: str = ""
+    stripe_price_iq: str = ""
+    stripe_price_fantasy: str = ""
+
     # ─── Marketing club directory crawl (BetterCricket outreach, super-admin) ──
     # Walks the CA/grassroots org graph to build the national club list for our
     # own outreach. Politeness is deliberate: low concurrency + a jittered delay
@@ -278,6 +295,14 @@ class Settings(BaseSettings):
     @property
     def square_configured(self) -> bool:
         return bool(self.square_app_id and self.square_app_secret)
+
+    @property
+    def stripe_configured(self) -> bool:
+        return bool(self.stripe_secret_key and self.stripe_publishable_key)
+
+    @property
+    def stripe_webhook_configured(self) -> bool:
+        return bool(self.stripe_webhook_secret)
 
     @property
     def cors_origins_list(self) -> List[str]:

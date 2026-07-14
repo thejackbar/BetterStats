@@ -251,6 +251,9 @@ class Organisation(Base):
     # past_due keep modules live; paused/cancelled fall back to Core only.
     subscription_status = Column(Text, nullable=False, server_default="active", default="active")
     renewal_date = Column(Date, nullable=True)
+    # One Stripe Customer per club (migration 149) — reused across every
+    # Checkout session, set on first checkout, never on trial/module rows.
+    stripe_customer_id = Column(Text, nullable=True, unique=True)
     billing_cycle = Column(Text, nullable=True)  # 'monthly' | 'annual' | None
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
@@ -569,6 +572,12 @@ class OrgModuleSubscription(Base):
     started_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # Stripe billing (migration 149) — a club's modules bought together share
+    # ONE Stripe Subscription (stripe_subscription_id), one line item each
+    # (stripe_subscription_item_id) so a webhook can resolve exactly which
+    # module row a given line item event belongs to.
+    stripe_subscription_id = Column(Text, nullable=True)
+    stripe_subscription_item_id = Column(Text, nullable=True, unique=True)
 
     organisation = relationship("Organisation", back_populates="module_subscriptions")
 

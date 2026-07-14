@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, public_stripe
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2496,6 +2496,32 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_trial_lifecycle_nudges_org "
             "ON trial_lifecycle_nudges(organisation_id, sent_at DESC)"
         ))
+        # Stripe billing (migration 149, Phase 19 Stripe Phase 1). See
+        # app/services/stripe_billing.py + routers/public_stripe.py.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_organisations_stripe_customer_id "
+            "ON organisations(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE org_module_subscriptions ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE org_module_subscriptions ADD COLUMN IF NOT EXISTS stripe_subscription_item_id TEXT"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_org_module_subscriptions_stripe_item "
+            "ON org_module_subscriptions(stripe_subscription_item_id) WHERE stripe_subscription_item_id IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+                event_id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -2694,6 +2720,7 @@ app.include_router(public_ses.router)                                           
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
+app.include_router(public_stripe.router)                                                  # Stripe webhook, signature-verified (Phase 19 Stripe Phase 1)
 app.include_router(pipeline_gauge.router)                                                 # Twenty CRM dashboard gauge (own HTTP Basic Auth, not require_module)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ

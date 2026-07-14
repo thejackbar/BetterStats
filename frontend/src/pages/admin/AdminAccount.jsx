@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { api } from '../../lib/api'
 import { moduleBrand } from '../../lib/moduleBrand'
@@ -7,9 +8,11 @@ import { moduleBrand } from '../../lib/moduleBrand'
 // self-serve plan status page. Trial and cancel actions still queue into the
 // existing module_action_requests table (migration 119) — the same queue the
 // Super Admin's Module requests page already actions, unchanged. Subscribe
-// is NOT that queue (per direct instruction — a subscription is a real
-// payment, not a request for a human to action) and is a placeholder until
-// the Stripe checkout integration lands in its own phase.
+// is real Stripe Checkout (Stripe Phase 1, routers/public_stripe.py +
+// services/stripe_billing.py) — one Checkout Session, one Subscription, one
+// line item per selected module, so a bundle renews together. A module with
+// no Stripe Price configured yet (stripe_priced: false) can't be subscribed
+// online — that's a per-module rollout state, not a hard blocker on the page.
 const STATUS_LABEL = {
   subscribed: 'Subscribed',
   trial: 'In Trial',
@@ -21,6 +24,7 @@ const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : null
 
 export default function AdminAccount() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [plan, setPlan] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -28,12 +32,26 @@ export default function AdminAccount() {
   const [selected, setSelected] = useState(new Set())
   const [confirmUnsubscribe, setConfirmUnsubscribe] = useState(false)
   const [confirmText, setConfirmText] = useState('')
-  const [stripeNotice, setStripeNotice] = useState(false)
 
   const load = () =>
     api.accountGetPlan().then(setPlan).catch((e) => setError(e.message || 'Could not load your plan'))
 
   useEffect(() => { load() }, [])
+
+  // Land back here from Stripe with ?checkout=success|cancelled.
+  useEffect(() => {
+    const checkout = searchParams.get('checkout')
+    if (!checkout) return
+    if (checkout === 'success') {
+      setMsg("Payment received — your subscription is now active.")
+      load()
+    } else if (checkout === 'cancelled') {
+      setMsg('Checkout was cancelled — nothing was charged.')
+    }
+    searchParams.delete('checkout')
+    setSearchParams(searchParams, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const rows = plan?.modules || []
   const selectedRows = rows.filter((r) => selected.has(r.module))
@@ -46,11 +64,11 @@ export default function AdminAccount() {
     })
     setConfirmUnsubscribe(false)
     setConfirmText('')
-    setStripeNotice(false)
   }
 
   const anyTrialEligible = selectedRows.some((r) => r.trial_eligible && r.pending_requests.length === 0)
-  const anySubscribable = selectedRows.some((r) => r.can_subscribe)
+  const checkoutTargets = selectedRows.filter((r) => r.can_subscribe && r.stripe_priced)
+  const unpricedTargets = selectedRows.filter((r) => r.can_subscribe && !r.stripe_priced)
   const anySubscribed = selectedRows.some((r) => r.status === 'subscribed' && r.pending_requests.length === 0)
 
   const finishAction = async (msgText) => {
@@ -58,7 +76,6 @@ export default function AdminAccount() {
     setSelected(new Set())
     setConfirmUnsubscribe(false)
     setConfirmText('')
-    setStripeNotice(false)
     await load()
     setBusy(false)
   }
@@ -77,6 +94,19 @@ export default function AdminAccount() {
       )
     } catch (e) {
       setError(e.message || 'Could not request a trial')
+      setBusy(false)
+    }
+  }
+
+  const subscribe = async () => {
+    setBusy(true)
+    setError('')
+    setMsg('')
+    try {
+      const { url } = await api.accountCreateCheckout(checkoutTargets.map((r) => r.module))
+      window.location.assign(url)
+    } catch (e) {
+      setError(e.message || 'Could not start checkout')
       setBusy(false)
     }
   }
@@ -141,6 +171,9 @@ export default function AdminAccount() {
                             {' · '}{row.pending_requests.includes('cancel') ? 'cancellation' : row.pending_requests[0]} requested
                           </span>
                         )}
+                        {!pending && row.can_subscribe && !row.stripe_priced && (
+                          <span className="text-pb-faintest"> · not available to subscribe online yet</span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -154,10 +187,11 @@ export default function AdminAccount() {
                   {selected.size} module{selected.size === 1 ? '' : 's'} selected
                 </p>
 
-                {stripeNotice && (
+                {unpricedTargets.length > 0 && (
                   <p className="font-mono text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2 mb-3">
-                    Online subscribing isn't connected yet — this is coming in a follow-up build.
-                    In the meantime, contact the BetterCricket team directly to subscribe.
+                    {unpricedTargets.map((r) => r.name).join(', ')} {unpricedTargets.length === 1 ? "isn't" : "aren't"}{' '}
+                    available to subscribe online yet — contact the BetterCricket team directly for
+                    {unpricedTargets.length === 1 ? ' that one' : ' those'}.
                   </p>
                 )}
 
@@ -201,14 +235,14 @@ export default function AdminAccount() {
                         {busy ? 'SENDING…' : 'START TRIAL'}
                       </button>
                     )}
-                    {anySubscribable && (
+                    {checkoutTargets.length > 0 && (
                       <button
-                        onClick={() => setStripeNotice(true)}
+                        onClick={subscribe}
                         disabled={busy}
                         className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold disabled:opacity-50 text-pb-bg"
                         style={{ background: 'var(--pb-accent)' }}
                       >
-                        SUBSCRIBE
+                        {busy ? 'REDIRECTING…' : 'SUBSCRIBE'}
                       </button>
                     )}
                     {anySubscribed && (

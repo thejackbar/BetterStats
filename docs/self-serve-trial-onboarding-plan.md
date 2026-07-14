@@ -560,6 +560,86 @@ Captured now so nothing is forgotten later, not actioned here:
   `services/playhq_directory_client.discover_associations`). Deliberately
   skipped for now (extra latency/dependency on a live per-keystroke search).
 
+## Stripe billing (Jul 2026 — supersedes "No Stripe" above for the Subscribe action)
+
+Cut from the original effort (see *Scope of this phase* and *Cut from this effort*
+above), revisited by direct request once the Account page (Phase 19) made "Subscribe"
+a real button rather than a request. **Decision: no bi-directional sync.** Stripe is
+the source of truth for Products/Prices/Coupons (Checkout has to reference real Stripe
+objects — there's no such thing as charging against a "shadow" price that only exists
+in this app's DB); this app is the source of truth for entitlement
+(`org_module_subscriptions`), kept in sync **one-way** via webhook. `pricing.js` (the
+public marketing page) stays a separately-maintained, hand-edited display figure — a
+real drift risk if a Stripe price changes without a matching edit there, but a far
+smaller and safer problem than the update loops/conflict-resolution a two-way sync
+would need for no real benefit.
+
+**Stripe Phase 1 (done) — setup + Checkout, single or multi-module.** Products/Prices
+already existed in the club's own Stripe account (not created by this app — this app
+only ever reads Price IDs, never writes Product/Price/Coupon objects). Confirmed
+Stripe account exists (test-mode keys promised, not yet supplied); Checkout style is
+**hosted Stripe Checkout** (not embedded Elements — simplest, Stripe carries the PCI
+burden, works on mobile); bundle billing is **one Subscription per club with one line
+item per module** (so the existing bundle-discount pricing in `pricing.js` applies
+naturally and everything renews on the same date); tax is **Stripe Tax, automatic** —
+whether the already-configured Prices are GST-inclusive or exclusive is the club's own
+existing Stripe `tax_behavior` setting per Price, not a decision this app's code makes.
+
+- **Migration 149**: `organisations.stripe_customer_id` (one Stripe Customer per
+  club, reused across every Checkout session — set on first checkout, not before);
+  `org_module_subscriptions.stripe_subscription_id` / `.stripe_subscription_item_id`
+  (a club's modules bought together share ONE Subscription id, one line item id each,
+  so the webhook can resolve exactly which module row a given line item belongs to);
+  `stripe_webhook_events` (dedupe ledger keyed on Stripe's own event id, mirroring
+  `trial_lifecycle_nudges`'s shape).
+- **`app/services/stripe_billing.py`** — `create_checkout_session(org, module_keys,
+  ...)` (mints/reuses the org's Stripe Customer, one line item per module,
+  `automatic_tax.enabled=True`, `billing_address_collection=required` since Stripe Tax
+  needs a location to compute GST), `priced_modules()` (which billing keys have a
+  configured Price ID — what the Account page actually offers), `module_key_for_price`
+  (reverse lookup for the webhook). All Stripe SDK calls run through
+  `asyncio.to_thread` since `stripe-python` is synchronous.
+- **`POST /club-admin/account/checkout`** (`club_admin.py`) — same financial-authority
+  gate `create_module_request`'s `subscribe` kind already enforced (only the primary
+  admin, or a super admin, may start one), returns `{"url": session.url}` for the
+  frontend to redirect to. `GET /club-admin/account/plan` now also returns
+  `stripe_priced` per module and a top-level `stripe_configured` flag, so the Account
+  page can tell "not eligible" apart from "eligible but not wired up yet."
+- **`POST /public/stripe/webhook`** (`routers/public_stripe.py`, unauthenticated,
+  `stripe.Webhook.construct_event` signature-verified) — check-then-process-then-record
+  (not claim-first), matching `trial_lifecycle.py`'s own reasoning: a crash mid-handler
+  must be retried by Stripe's redelivery, not silently marked done. Handles
+  `checkout.session.completed` (writes real `active` rows via
+  `module_subscriptions.set_status`, which deliberately leaves `trial_started_at`
+  intact — so a trial-to-paid conversion here also correctly fires Phase 16's
+  `trial_converted` nudge, for free), `customer.subscription.updated` (renewal date /
+  past_due), `customer.subscription.deleted` (cancelled). Always 200s once the
+  signature checks out (even on an internal processing bug, logged for follow-up) so
+  Stripe doesn't retry-storm; 400 only on a genuine bad/unsigned payload.
+- **Account page** (`AdminAccount.jsx`) — Subscribe now calls the real endpoint and
+  redirects to Stripe; lands back on `?checkout=success|cancelled`. A selected module
+  with no Price configured yet shows "not available to subscribe online yet" instead
+  of a dead button, so rollout can happen module-by-module as Prices are set up.
+
+**Still needed before this is live** (not yet supplied): the six env vars
+`STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` /
+`STRIPE_PRICE_{CORE,SELECT,SOCIALS,ADMIN,IQ,FANTASY}` (the last six are the club's
+existing Stripe Price IDs, not secrets — safe to hand over directly; the first three
+should go straight into the server's own `.env`, never pasted into a chat). Until
+`stripe_configured` is true, `/account/checkout` cleanly 503s with "Online subscribing
+isn't configured yet" — the rest of the Account page works regardless.
+
+**Stripe Phase 2 — trial-to-paid conversion edge cases.** Phase 1's webhook already
+handles the happy path (via `set_status` preserving trial dates); still needs real
+testing against an actual mid-trial conversion once keys exist.
+
+**Stripe Phase 3 — Customer Portal.** Stripe's own hosted portal for a club to update
+its payment method / view invoices, linked from the Account page.
+
+**Stripe Phase 4 — dunning.** `past_due` is already stored by the Phase 1 webhook;
+nothing yet nudges the club about it (a trial-lifecycle-style email, or a banner
+alongside the existing `TrialBanner`).
+
 ## Related docs
 
 - `docs/per-module-subscriptions.md` — the trial data model this plan builds on.
