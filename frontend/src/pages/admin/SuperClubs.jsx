@@ -51,6 +51,8 @@ export default function SuperClubs() {
   const [archiveConfirmText, setArchiveConfirmText] = useState('')
   const [syncing, setSyncing] = useState(null)
   const [showArchived, setShowArchived] = useState(false)
+  // Phase 21 — trial view filter: all / trialing / ending soon (<=7d) / expired.
+  const [trialFilter, setTrialFilter] = useState('all')
 
   // Club search (same source as the public onboarding flow)
   const [query, setQuery] = useState('')
@@ -351,6 +353,39 @@ export default function SuperClubs() {
     }
   }
 
+  // Phase 21 (docs/self-serve-trial-onboarding-plan.md) — trial-only reporting,
+  // computed client-side off module_subscriptions the club list already returns
+  // (no new endpoint). "Ending soon" mirrors the trial-lifecycle nudge's own
+  // TRIAL_ENDING_SOON_DAYS window so the two surfaces read consistently.
+  const TRIAL_ENDING_SOON_DAYS = 3
+  const clubTrialInfo = (club) => {
+    const subs = club.module_subscriptions || []
+    const live = subs.filter((s) => s.status === 'trial' && !s.is_trial_expired)
+    const expired = subs.filter((s) => s.status === 'trial' && s.is_trial_expired)
+    if (live.length) {
+      const soonest = live.reduce((a, b) => (new Date(a.trial_ends_at) < new Date(b.trial_ends_at) ? a : b))
+      const days = Math.ceil((new Date(soonest.trial_ends_at).getTime() - Date.now()) / 86400000)
+      return { kind: days <= TRIAL_ENDING_SOON_DAYS ? 'ending_soon' : 'trialing', days, count: live.length }
+    }
+    if (expired.length) return { kind: 'expired', count: expired.length }
+    return null
+  }
+
+  const trialStats = clubs.reduce((acc, c) => {
+    const info = clubTrialInfo(c)
+    if (info?.kind === 'trialing') acc.trialing++
+    if (info?.kind === 'ending_soon') acc.endingSoon++
+    if (info?.kind === 'expired') acc.expired++
+    return acc
+  }, { trialing: 0, endingSoon: 0, expired: 0 })
+
+  const visibleClubs = clubs.filter((c) => {
+    if (trialFilter === 'all') return true
+    const info = clubTrialInfo(c)
+    if (trialFilter === 'trialing') return info?.kind === 'trialing' || info?.kind === 'ending_soon'
+    return info?.kind === trialFilter
+  })
+
   return (
     <AdminLayout>
       <div className="max-w-5xl">
@@ -557,6 +592,27 @@ export default function SuperClubs() {
           </form>
         )}
 
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[
+            { key: 'all', label: `All (${clubs.length})` },
+            { key: 'trialing', label: `Trialing (${trialStats.trialing + trialStats.endingSoon})` },
+            { key: 'ending_soon', label: `Ending soon (${trialStats.endingSoon})` },
+            { key: 'expired', label: `Trial expired (${trialStats.expired})` },
+          ].map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setTrialFilter(f.key)}
+              className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border transition-colors ${
+                trialFilter === f.key
+                  ? 'border-pb-accent text-pb-text'
+                  : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         <div className="pb-card overflow-hidden">
           <div className="grid grid-cols-[1fr_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
             <span>CLUB</span>
@@ -564,10 +620,12 @@ export default function SuperClubs() {
             <span className="mr-8">CREATED</span>
             <span>ACTIONS</span>
           </div>
-          {clubs.length === 0 && (
-            <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">No clubs yet</div>
+          {visibleClubs.length === 0 && (
+            <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">
+              {clubs.length === 0 ? 'No clubs yet' : 'No clubs match this filter'}
+            </div>
           )}
-          {clubs.map((club, i) => (
+          {visibleClubs.map((club, i) => (
             <div key={club.id} className={i > 0 ? 'pb-hairline-t' : ''}>
               <div className="grid grid-cols-[1fr_auto_auto_auto] items-center px-5 py-3 hover:bg-pb-surface2">
                 <div>
@@ -588,6 +646,22 @@ export default function SuperClubs() {
                         Archived
                       </span>
                     )}
+                    {(() => {
+                      const info = clubTrialInfo(club)
+                      if (!info) return null
+                      const urgent = info.kind === 'ending_soon' || info.kind === 'expired'
+                      return (
+                        <span
+                          className={`font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border ${
+                            urgent ? 'border-amber-500/40 text-amber-300' : 'border-pb-hairline text-pb-faint'
+                          }`}
+                        >
+                          {info.kind === 'expired'
+                            ? `Trial expired × ${info.count}`
+                            : `Trial ${info.days}d × ${info.count}`}
+                        </span>
+                      )
+                    })()}
                   </div>
                   <div className={`font-mono text-[10px] mt-0.5 ${statusIsLive(club.subscription_status) ? 'text-pb-faintest' : 'text-pb-red'}`}>
                     {[

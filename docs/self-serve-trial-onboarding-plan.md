@@ -494,11 +494,33 @@ explanation rather than just failing) and each module's outstanding request
 kinds (so a just-submitted ask reads "Trial Requested" instead of the button
 reappearing).
 
-**Phase 20 — Super Admin controls.** Trial management, Primary Admin/Billing Contact
-transfer, archiving a bad registration.
+**Phase 20 — Super Admin controls (reviewed, no gap — all three already
+existed).** All built in earlier sessions, independent of this plan's own
+phase order: **trial management** is `SuperModuleRequests.jsx` ("Module
+requests") — approve/dismiss the `module_action_requests` queue Phase 19's
+new Account page (and the CRM) both feed into, with per-request trial
+day/start/end and subscribe renewal-date overrides before approving; **Primary
+Admin transfer** is the "Primary admin" card in `AdminSettings.jsx` calling
+`POST /club-admin/primary-admin/transfer` — there's no separate "Billing
+Contact" concept in this codebase, the primary admin already IS the financial-
+authority contact (`create_module_request` only lets them request a paid
+subscription); **archiving a bad registration** is the soft-delete/restore
+flow on the All Clubs page (migration 143, `POST .../clubs/{id}/archive` +
+`.../restore`, "Show archived" toggle). Nothing to build.
 
-**Phase 21 — Super Admin reporting.** All Clubs / Trials view extensions, scoped to
-trial-only state (no ARR/revenue columns — no billing yet).
+**Phase 21 — Super Admin reporting (done).** Extended the existing All Clubs
+page rather than building a separate report — `superListClubs` already
+returns each club's `module_subscriptions` (status, `trial_ends_at`,
+`is_trial_expired`) for the per-club module editor, so this needed no new
+endpoint, just reading data already on the wire. New filter tabs (All /
+Trialing / Ending soon / Trial expired, each with a live count) above the
+club list, and a compact per-row badge ("Trial 3d × 2" / "Trial expired ×
+1") next to the existing "Core +N" module-count badge so a trial's urgency
+is visible without opening that club's editor. "Ending soon" is ≤3 days,
+matching `trial_lifecycle.py`'s own `TRIAL_ENDING_SOON_DAYS` so the two
+surfaces (this report and the automated nudge email) agree on what counts
+as urgent. No ARR/revenue columns, per this phase's own scope note — there's
+still no Stripe.
 
 **Phase 22 — Yearbook auto-generate + auto-publish (done, v8.61.3).** Shipped out of
 sequence in a separate session — see `CLAUDE.md` "Yearbook auto-generate + auto-publish
