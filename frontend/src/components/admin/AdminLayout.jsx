@@ -69,7 +69,6 @@ const NAV_SECTIONS = [
   {
     heading: 'Account',
     items: [
-      { to: '/admin/changelog', label: 'Changelog', cap: null },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
     ],
@@ -90,6 +89,7 @@ const SUPER_LINKS = [
   { to: '/admin/usage', label: 'Usage' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
   { to: '/admin/super/marketing', label: 'Club Directory' },
+  { to: '/admin/changelog', label: 'Changelog' },
 ]
 
 export default function AdminLayout({ children }) {
