@@ -3887,6 +3887,28 @@ async def remove_club_user(
     if not row.first():
         raise HTTPException(404, "User not found in this club")
 
+    # club_memberships.uq_membership_one_per_user means the row just deleted
+    # above was this user's ONLY membership, ever — nothing in the app ever
+    # attaches a new membership to an existing user row (every invite/
+    # self-serve flow mints a brand new one), so this account can never log
+    # in again. Free its globally-unique username (and invalidate any
+    # outstanding tokens) so the same username can be reused for a genuinely
+    # new invite, without hard-deleting the row — every "who did this"
+    # reference elsewhere (audit log, created_by/recorded_by columns) is an
+    # ON DELETE SET NULL FK, so deleting the row would only orphan those
+    # values, while this UPDATE keeps them resolvable. Was previously left
+    # as a dangling row that squatted the username forever ("Username
+    # already in use" on re-inviting the same person after removing them).
+    await db.execute(
+        _text(
+            "UPDATE users SET username = NULL, password_hash = NULL, "
+            "invite_token = NULL, invite_token_expires_at = NULL, "
+            "password_reset_token = NULL, password_reset_token_expires_at = NULL "
+            "WHERE id = :uid"
+        ),
+        {"uid": user_id},
+    )
+
     from app.services.audit_log import log_activity
     await log_activity(
         db, org_id=club.id, user_id=current_user.id,
