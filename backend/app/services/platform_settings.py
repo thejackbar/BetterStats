@@ -26,7 +26,7 @@ _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
 # docs/self-serve-trial-onboarding-plan.md) is built behind one of these so it stays
 # inert in production until explicitly enabled — there is no staging environment, so
 # this is the only safety net between "merged" and "live".
-_BOOL_KEYS = {"self_serve_registration_enabled", "onboarding_wizard_enabled"}
+_BOOL_KEYS = {"self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled"}
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
 # CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
@@ -218,6 +218,12 @@ async def get_self_serve_registration_enabled(db: AsyncSession) -> bool:
 async def get_onboarding_wizard_enabled(db: AsyncSession) -> bool:
     """Whether the club onboarding wizard is switched on. Off by default."""
     return await get_feature_flag(db, "onboarding_wizard_enabled")
+
+
+async def get_trial_nudges_enabled(db: AsyncSession) -> bool:
+    """Whether the daily trial-lifecycle nudge scan (Phase 16) sends real
+    outbound email. Off by default — see app/services/trial_lifecycle.py."""
+    return await get_feature_flag(db, "trial_nudges_enabled")
 
 
 # ─── SES send rates ──────────────────────────────────────────────────────────
