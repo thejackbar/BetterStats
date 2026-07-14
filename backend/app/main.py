@@ -447,6 +447,26 @@ async def lifespan(app: FastAPI):
                 END LOOP;
             END $$;
         """))
+        # Fix FK cascade drift on players.user_id -> users(id) (migration
+        # 146) — was NO ACTION in the live DB (a retained-but-unused legacy
+        # column, not even ORM-declared), so deleting a user with a linked
+        # players row silently rolled back the whole delete. See that
+        # migration file for the full rationale.
+        await conn.execute(text(r"""
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint c
+                JOIN pg_class t ON t.oid = c.conrelid
+                WHERE t.relname = 'players' AND c.conname = 'players_user_id_fkey' AND c.confdeltype = 'n'
+              ) THEN
+                ALTER TABLE players DROP CONSTRAINT IF EXISTS players_user_id_fkey;
+                ALTER TABLE players ADD CONSTRAINT players_user_id_fkey
+                  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL NOT VALID;
+                ALTER TABLE players VALIDATE CONSTRAINT players_user_id_fkey;
+              END IF;
+            END $$;
+        """))
         await conn.execute(text(r"""
             UPDATE marketing_clubs
             SET utm_code = lower(regexp_replace(split_part(name, ' ', 1), '[^a-zA-Z0-9]', '', 'g'))
