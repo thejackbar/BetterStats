@@ -180,6 +180,12 @@ class Organisation(Base):
     playhq_id = Column(Text, nullable=True)
     slug = Column(Text, unique=True, nullable=True)
     is_active = Column(Boolean, default=False, nullable=False)
+    # Soft-delete (migration 143): a Super Admin "deleting" a club archives it
+    # instead of destroying its data — reversible via POST .../restore. NULL =
+    # not archived. Separate from is_active (an archived club's public site
+    # should also be considered offline, but is_active itself is left alone so
+    # restoring doesn't silently flip a state the admin didn't touch).
+    archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
     primary_color = Column(Text, default="#16c784", nullable=True)
     accent_color = Column(Text, default="#243352", nullable=True)
     logo_url = Column(Text, nullable=True)

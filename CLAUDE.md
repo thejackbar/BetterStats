@@ -333,6 +333,16 @@ are unchanged.)
 - Game-level stats (`batting_innings`, `bowling_spells`, `fielding_stats`): Grassroots `/scores/*` → all seasons including 25/26 ✓ (204 gap is minimal)
 - Live scorecard view for Partner-only games: PlayHQ Partner API via games router (rarely hit)
 
+## Super Admin Club Delete — soft-delete + FK cascade fix (Jul 2026)
+
+**Symptom**: clicking "DELETE PERMANENTLY" on a club (Super Admin → All Clubs) looked like it succeeded (no error surfaced), but the club was still there afterwards.
+
+**Root cause**: `DELETE /club-admin/super/clubs/{id}` deletes `organisations`, relying on `ON DELETE CASCADE` FKs to remove everything downstream (seasons → grades → games → per-game stat rows). Live logs showed the real error: `ForeignKeyViolationError: ... "partnerships_game_id_fkey" ... Key (game_id)=(...) is not present in table "games"` — `partnerships.game_id` was **not actually `ON DELETE CASCADE` in the live database**, even though `app/models/db.py`'s ORM column has always declared `ondelete="CASCADE"`. The model's intent was never applied to the schema — these are pre-Alembic tables (no migration has ever touched these constraints by name), so the drift went unnoticed until a club with real synced data (partnerships rows) was actually deleted. The whole `DELETE` transaction rolled back, which is why it looked like nothing happened.
+
+**Fix (migration 142)**: reconciled the FK on every sibling legacy per-game/per-player stat table sharing the same origin (`batting_innings`, `bowling_spells`, `fielding_stats`, `bowler_wickets`, `game_appearances`, `fall_of_wickets`, `partnerships`, `milestones`, `fee_match_days`) — not just the one that happened to be hit first. Safe on a live, populated table: builds each corrected constraint `NOT VALID` (near-instant) then `VALIDATE CONSTRAINT` separately (a background scan, doesn't block reads/writes), and checks `pg_constraint.confdeltype` first so an already-correct constraint is left alone (cheap no-op on every app-restart re-run via `main.py`'s idempotent mirror).
+
+**Also shipped (migration 143), per direct request**: club "delete" is now a **soft-delete (archive)**, reversible. `organisations.archived_at` (nullable timestamp) — `POST /club-admin/super/clubs/{id}/archive` sets it (no row anywhere is touched), `POST .../restore` clears it. The old hard-delete (`DELETE /club-admin/super/clubs/{id}`) still exists for a genuine permanent purge later, but now requires the club to already be archived first (a speed bump), and is no longer what the UI's "Delete"/now "Archive" button calls. `GET /club-admin/super/clubs` hides archived clubs by default (`?include_archived=true` to show them); `SuperClubs.jsx` has a "Show archived" toggle and a "Restore" action per archived row. Archiving deliberately does **not** touch `is_active` — restoring shouldn't silently flip a state the admin didn't touch themselves.
+
 ## Key Notes
 
 - PlayHQ public game summary API is "not applicable to Cricket" — no scorecards without a partner JWT
