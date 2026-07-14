@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import TrialBanner from './admin/TrialBanner'
 
 export default function ProtectedRoute({ children, requireRole, requireModule }) {
   const { user, hasModule } = useAuth()
@@ -24,5 +25,10 @@ export default function ProtectedRoute({ children, requireRole, requireModule })
     return <Navigate to="/admin" replace />
   }
 
-  return children
+  return (
+    <>
+      <TrialBanner />
+      {children}
+    </>
+  )
 }

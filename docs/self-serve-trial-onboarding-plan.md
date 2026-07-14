@@ -430,12 +430,46 @@ flag (General Settings → the same super-admin-only pattern as
 "nothing here touches prod until a super admin flips it on" caution applies
 just as much to unsolicited email as to a new UI surface.
 
-**Phase 17 — Centralised entitlement extensions.** Mostly already covered by
-`org_entitled_modules`; small extensions where the source document's Prompt 20
-capability matrix isn't already answered.
+**Phase 17 — Centralised entitlement extensions (reviewed, no gap found).**
+Audited end to end rather than guessing at the source document's unpreserved
+Prompt 20 capability matrix: (1) every module's **backend** router is gated
+centrally at `app/main.py`'s `include_router(..., dependencies=[Depends(require_module(...))])`
+call, one line per module, with the one deliberate exception (BetterSocials
+shares `admin.py`'s router, so it's gated per-route instead — confirmed all
+three `/social/*` routes carry the dependency, none missing it); (2) every
+**public**, unauthenticated module surface (`public_availability.py`,
+`public_fantasy.py`) self-checks `org_has_module` rather than relying on
+`require_module`, since there's no session to hang a dependency off; (3)
+`require_module`'s super-admin bypass returns early before touching the
+resolved club, so it stays correct even though its own club lookup (unlike
+`get_current_club`) doesn't honour the acting-as override — harmless, since
+the entitlement check itself never runs for that role; (4) on the
+**frontend**, every module route in `App.jsx` carries a matching
+`<ProtectedRoute requireModule="...">`, and the sidebar's Modules section
+(`dashboardTiles()` in `AdminLayout.jsx`) computes `entitled` off the same
+`hasModule()` the routes use, so the nav and the route guard can't drift
+apart. No extension needed — the single source of truth (`org_entitled_modules`
+backend-side, `hasModule()` frontend-side) already reaches every surface.
 
-**Phase 18 — Trial banner + BetterStats expiry enforcement.** Extends existing
-entitlement checks; consistent with the already-shipped per-module model.
+**Phase 18 — Trial banner + BetterStats expiry enforcement (done).** Expiry
+enforcement already existed: `org_core_live` gates both public routers
+(`clubs.py`, `website.py`) so a club whose Core trial has lapsed drops off
+the public site, fail-open by design (an unloaded/pre-backfill club is never
+accidentally taken down). Admin access itself is deliberately NOT gated on
+it — Core isn't in `ALL_MODULES` (never a gateable module), so a club can
+always still log in and subscribe even mid-lockout.
+
+The missing piece was purely the **trial banner** UI — new
+`frontend/src/components/admin/TrialBanner.jsx`, mounted once in
+`ProtectedRoute.jsx` (the one wrapper every `/admin/*` route passes through,
+core AND module-specific layouts alike — `AdminLayout` itself isn't shared
+across module pages, so mounting it there would have missed BetterSelect/
+BetterIQ/etc.). Reads `user.entitlements.billing_modules`, already returned
+by `/auth/me`/`/auth/login` (`entitlement_summary`, Phase 10-13) — no new
+endpoint. Shows the soonest-ending trial's days remaining (or "trial has
+ended" once past `trial_ends_at`), amber once ≤7 days or expired, linking to
+the public pricing page (Phase 19's dedicated status page doesn't exist yet).
+Hidden for super admins, matching the wizard's own exclusion.
 
 **Phase 19 — Trial/Subscription status page.** UI over data that already exists.
 
@@ -445,9 +479,12 @@ transfer, archiving a bad registration.
 **Phase 21 — Super Admin reporting.** All Clubs / Trials view extensions, scoped to
 trial-only state (no ARR/revenue columns — no billing yet).
 
-**Phase 22 — Yearbook auto-generate + auto-publish.** Last 3 completed seasons (or
-fewer if unavailable), triggered on sync completion — real completion signal, not a
-fixed sleep. Auto-publish per Decision 13 above (accepted risk, no draft gate).
+**Phase 22 — Yearbook auto-generate + auto-publish (done, v8.61.3).** Shipped out of
+sequence in a separate session — see `CLAUDE.md` "Yearbook auto-generate + auto-publish
+on Full Rebuild". Scoped to Full Rebuild specifically (not every routine sync) as the
+"real completion signal" this phase called for. Last 3 completed seasons with stats (or
+fewer if unavailable); auto-publish per Decision 13 above (accepted risk, no draft
+gate) — never overwrites a season that already has narrative content.
 
 **Phase 23 — Security review**, scoped correctly to an internal/Super-Admin-gated
 surface. CAPTCHA and public-endpoint rate limiting explicitly deferred to the "go
