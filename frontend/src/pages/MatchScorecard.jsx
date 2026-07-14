@@ -182,6 +182,20 @@ function MatchHeader({ game, innings }) {
   )
 }
 
+// A fill-in (borrowed player, or a CA-redacted junior) has no linked player_id.
+// Flagged by the backend as `is_fill_in` so it can't be confused with an
+// ordinary missing-name row.
+function FillInBadge() {
+  return (
+    <span
+      className="ml-1.5 align-middle font-mono text-[9px] tracking-wide2 px-1.5 py-0.5 rounded border border-pb-amber/30 text-pb-amber whitespace-nowrap"
+      title="Not a registered club player — filled in for this game"
+    >
+      FILL-IN
+    </span>
+  )
+}
+
 function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n }) {
   const batted = batting
     .filter(r => !r.did_not_bat)
@@ -236,6 +250,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
                     ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
+                  {row.is_fill_in && <FillInBadge />}
                 </td>
                 <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
                   {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type, row.caught_behind)}
@@ -261,6 +276,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
                     ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
+                  {row.is_fill_in && <FillInBadge />}
                 </td>
                 <td className="py-2 pr-5 font-mono text-[12px] italic max-sm:hidden" style={{ color: 'var(--pb-faintest)' }}>did not bat</td>
                 <td className="py-2 px-3 font-mono text-[12px] text-pb-faintest text-right">—</td>
@@ -325,6 +341,7 @@ function BowlingCard({ label, teamName, bowling = [], fmtName = n => n }) {
                     ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
+                  {row.is_fill_in && <FillInBadge />}
                 </td>
                 <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{fmtOvers(row.overs)}</td>
                 <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>{row.maidens ?? 0}</td>
