@@ -2441,34 +2441,47 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS claim_note TEXT"
         ))
+        # CREATE OR REPLACE VIEW only allows appending new columns at the END
+        # of the SELECT list — inserting one in the middle shifts every later
+        # column's position, which Postgres treats as renaming that column
+        # and rejects. batter1_name/batter2_name/player_name are appended
+        # after `source`, same placement migration 075 used for
+        # v_effective_batting_innings.caught_behind. (This shape shipped
+        # broken once — an in-the-middle CREATE OR REPLACE VIEW crash-looped
+        # the backend in production; this is the corrected version, matching
+        # migration 147.)
         await conn.execute(text("""
             CREATE OR REPLACE VIEW v_effective_partnerships AS
             SELECT
                 id, game_id, innings_number, wicket_number,
-                batter1_id, batter2_id, batter1_name, batter2_name,
-                runs, balls, batter1_runs, batter2_runs, is_club_innings,
-                'api'::text AS source
+                batter1_id, batter2_id, runs, balls,
+                batter1_runs, batter2_runs, is_club_innings,
+                'api'::text AS source,
+                batter1_name, batter2_name
             FROM partnerships
             UNION ALL
             SELECT
                 id, manual_game_id AS game_id, innings_number, wicket_number,
-                batter1_id, batter2_id, batter1_name, batter2_name,
-                runs, balls, batter1_runs, batter2_runs, is_club_innings,
-                'manual'::text AS source
+                batter1_id, batter2_id, runs, balls,
+                batter1_runs, batter2_runs, is_club_innings,
+                'manual'::text AS source,
+                batter1_name, batter2_name
             FROM manual_partnerships
         """))
         await conn.execute(text("""
             CREATE OR REPLACE VIEW v_effective_fielding_stats AS
             SELECT
-                id, game_id, player_id, player_name,
+                id, game_id, player_id,
                 catches, catches_wk, run_outs, stumpings,
-                'api'::text AS source
+                'api'::text AS source,
+                player_name
             FROM fielding_stats
             UNION ALL
             SELECT
-                id, manual_game_id AS game_id, player_id, player_name,
+                id, manual_game_id AS game_id, player_id,
                 catches, catches_wk, run_outs, stumpings,
-                'manual'::text AS source
+                'manual'::text AS source,
+                player_name
             FROM manual_fielding_stats
         """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
