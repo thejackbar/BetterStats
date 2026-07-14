@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # setup, unlike bettersports.com.au which isn't verified in SES.
     email_from_address: str = "notifications@betteratcricket-comms.work"
     email_from_name: str = "BetterCricket"
-    email_reply_to: str = "cricket@bettersports.com.au"  # global default; per-club reply-to overrides
+    email_reply_to: str = "support@bettersports.com.au"  # global default; per-club reply-to overrides
     # Public origin used to build the (mandatory) one-click unsubscribe link.
     # nginx strips the /api prefix, so the public route resolves at
     # {public_base_url}/api/public/comms/unsubscribe/{token}.

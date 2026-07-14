@@ -78,7 +78,7 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     out = []
     for org in results:
         org_id = _parse_uuid(str(org.get("id") or ""))
-        existing = await find_matching_organisation(db, org_id, org.get("name") or "")
+        existing = await find_matching_organisation(db, org_id, org.get("name") or "", include_archived=False)
         out.append({**org, "already_registered": existing is not None})
     return out
 
@@ -133,7 +133,7 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
 
     name = (data.name or "").strip()
-    existing = await find_matching_organisation(db, org_id, name)
+    existing = await find_matching_organisation(db, org_id, name, include_archived=False)
     if existing:
         raise HTTPException(status_code=409, detail="This club has already been registered in BetterCricket.")
 
@@ -467,7 +467,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     org_id = _parse_uuid(data.org_id)
     if not org_id:
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
-    if await find_matching_organisation(db, org_id, data.name):
+    if await find_matching_organisation(db, org_id, data.name, include_archived=False):
         raise HTTPException(status_code=409, detail="This club has already been registered in BetterCricket.")
     if not await playhq_client.get_organisation(str(org_id)):
         raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
@@ -543,6 +543,11 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         org.is_active = True
         if not org.slug:
             org.slug = await _unique_slug(db, _slugify(name))
+        # Registering a previously-archived club (the duplicate-check above
+        # deliberately ignores archived matches, see find_matching_organisation)
+        # brings it back — un-archiving is what "available to register again"
+        # actually means once submit reaches this point and reuses the row.
+        org.archived_at = None
 
         db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
         await db.flush()

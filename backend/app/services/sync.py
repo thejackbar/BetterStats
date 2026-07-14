@@ -173,6 +173,7 @@ async def _resolve_org_grade(
 
 async def find_matching_organisation(
     session: AsyncSession, org_id: Optional[uuid.UUID], name: str = "",
+    *, include_archived: bool = True,
 ) -> Optional[Organisation]:
     """Read-only lookup for "is this external club already an Organisation row",
     used both to guard upsert_organisation against duplicates and, at search time
@@ -185,23 +186,34 @@ async def find_matching_organisation(
       3. name match (case-insensitive) — fuzzy fallback for cases where the
          cross-ID-space link was never recorded (e.g. legacy data, or sync came in
          via PHQ before the GR-side playhq_id lookup ran).
+
+    ``include_archived`` — set False for the self-serve "is this club already
+    registered" duplicate-check (an archived club should read as available to
+    register again, since archiving is meant to make room for exactly that).
+    Keep the default True for ``upsert_organisation``'s own dedup guard, which
+    must still find and reuse an archived row rather than creating a second one
+    for the same CA org — self_serve_trial.py separately un-archives it as part
+    of finishing the registration.
     """
+    def _ok(o) -> bool:
+        return o is not None and (include_archived or o.archived_at is None)
+
     org = await session.get(Organisation, org_id) if org_id else None
+    if not _ok(org):
+        org = None
 
     if not org and org_id:
-        result = await session.execute(
-            select(Organisation).where(Organisation.playhq_id == str(org_id))
-        )
-        org = result.scalar_one_or_none()
+        q = select(Organisation).where(Organisation.playhq_id == str(org_id))
+        if not include_archived:
+            q = q.where(Organisation.archived_at.is_(None))
+        org = (await session.execute(q)).scalar_one_or_none()
 
     incoming_name = (name or "").strip()
     if not org and incoming_name:
-        result = await session.execute(
-            select(Organisation).where(
-                func.lower(Organisation.name) == incoming_name.lower()
-            )
-        )
-        org = result.scalar_one_or_none()
+        q = select(Organisation).where(func.lower(Organisation.name) == incoming_name.lower())
+        if not include_archived:
+            q = q.where(Organisation.archived_at.is_(None))
+        org = (await session.execute(q)).scalar_one_or_none()
 
     return org
 
