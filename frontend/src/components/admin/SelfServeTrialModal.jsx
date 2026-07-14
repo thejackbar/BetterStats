@@ -384,6 +384,13 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     setLoginAsError('')
     try {
       await api.selfServeTrialLoginAs(submitResult.user_id)
+      // Unlike switchClub's hard reload, this one IS a genuine fresh login
+      // for the new admin (not a super admin acting-as) — the bell and
+      // onboarding wizard auto-open checks should fire for it. They key off
+      // AuthContext's justLoggedIn, which only login()/acceptInvite() set;
+      // this flow mints the session itself and never calls those, so this
+      // marker is what makes the post-reload fetchMe() count as one too.
+      try { sessionStorage.setItem('bs_pending_fresh_login', '1') } catch { /* skip */ }
       // Hard reload (not a client-side route change) — matches switchClub's
       // own pattern, so every already-mounted admin page refetches under the
       // new session rather than showing stale super-admin-scoped data.
@@ -783,8 +790,10 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                   </div>
 
                   <p className="font-mono text-[11px] text-pb-faint mt-3">
-                    Onboarding follow-through (the wizard, yearbook generation, etc.)
-                    lands in later phases of docs/self-serve-trial-onboarding-plan.md.
+                    The onboarding wizard (Phase 15) and lifecycle nudge emails (Phase 16)
+                    are both live now, gated behind their own General Settings flags. Yearbook
+                    auto-generation (Phase 22) is still a later phase — see
+                    docs/self-serve-trial-onboarding-plan.md.
                   </p>
                 </div>
               ) : (
