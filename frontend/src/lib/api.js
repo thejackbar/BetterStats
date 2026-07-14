@@ -678,6 +678,9 @@ export const api = {
   getInvite: (token) => request(`/auth/invite/${token}`),
   acceptInvite: (token, data) =>
     request(`/auth/invite/${token}/accept`, { method: 'POST', body: JSON.stringify(data) }),
+  getPasswordReset: (token) => request(`/auth/reset-password/${token}`),
+  acceptPasswordReset: (token, data) =>
+    request(`/auth/reset-password/${token}/accept`, { method: 'POST', body: JSON.stringify(data) }),
   adminListClubUsers: () => request('/club-admin/users'),
   adminListCapabilities: () => request('/club-admin/users/capabilities'),
   adminCreateClubUser: (data) =>
@@ -686,6 +689,8 @@ export const api = {
     request(`/club-admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteClubUser: (userId) =>
     request(`/club-admin/users/${userId}`, { method: 'DELETE' }),
+  adminSendPasswordReset: (userId) =>
+    request(`/club-admin/users/${userId}/send-password-reset`, { method: 'POST' }),
   adminListGames: (seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

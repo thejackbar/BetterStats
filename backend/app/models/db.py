@@ -28,7 +28,9 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(Text, unique=True, nullable=True)
+    # Not unique (migration 145) — format-validated only, deliberately allowed
+    # to repeat across accounts. username remains the unique login credential.
+    email = Column(Text, nullable=True)
     username = Column(Text, unique=True, nullable=True)
     password_hash = Column(Text)
     display_name = Column(Text, nullable=True)
@@ -59,10 +61,26 @@ class User(Base):
     # the inviting admin, same as before — these columns just stay NULL.
     invite_token = Column(Text, unique=True, nullable=True)
     invite_token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Admin-triggered "reset your password" email for an EXISTING club-user
+    # account (migration 144, routers/club_admin.py::send_password_reset_link).
+    # Distinct from invite_token above, which is only for a brand-new
+    # account's first-ever password — that flow 404s once password_hash is
+    # set, so an already-active admin needs its own token pair here.
+    password_reset_token = Column(Text, unique=True, nullable=True)
+    password_reset_token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    memberships = relationship("ClubMembership", back_populates="user")
+    # passive_deletes=True: club_memberships.user_id is ON DELETE CASCADE at the
+    # DB level (confirmed live) and NOT NULL. Without this flag, deleting a User
+    # via the ORM (routers/club_admin.py::delete_user's `await db.delete(user)`)
+    # makes SQLAlchemy's unit-of-work try to manage the relationship itself —
+    # load the membership row, then null out its user_id to disassociate it —
+    # which Postgres rejects with a NOT NULL violation before the DELETE ever
+    # gets a chance to rely on the DB's own CASCADE. This is why deleting a
+    # club-admin user 500'd even after the club_memberships FK was confirmed
+    # to cascade correctly: the ORM never let the database's rule apply.
+    memberships = relationship("ClubMembership", back_populates="user", passive_deletes=True)
 
 
 class SelfServeEmailVerification(Base):
@@ -315,7 +333,12 @@ class Organisation(Base):
 
     seasons = relationship("Season", back_populates="organisation")
     players = relationship("Player", back_populates="organisation")
-    memberships = relationship("ClubMembership", back_populates="club")
+    # passive_deletes=True: club_memberships.club_id is ON DELETE CASCADE at the
+    # DB level and NOT NULL — without this, SQLAlchemy's unit-of-work tries to
+    # manage the relationship itself on an ORM delete (load the children, then
+    # null out their FK), which fails against a NOT NULL column. See the
+    # matching note on User.memberships below for where this actually bit.
+    memberships = relationship("ClubMembership", back_populates="club", passive_deletes=True)
     # ─── Per-module subscription state (migration 118) ───────────────────────
     # The source of truth for which modules a club holds and each module's own
     # status / renewal / trial window. module_overrides is kept in sync as a

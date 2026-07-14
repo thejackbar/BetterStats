@@ -66,6 +66,29 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  // Admin-triggered password reset accept (routers/auth.py::accept_password_reset)
+  // — same shape as acceptInvite, but for an EXISTING account (a club admin
+  // clicked "Send password reset email" on this user from Club Users).
+  const resetPassword = async (token, password, confirmPassword) => {
+    const res = await fetch(`/api/auth/reset-password/${token}/accept`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, confirm_password: confirmPassword }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Could not reset your password' }))
+      const detail = err.detail
+      const message = Array.isArray(detail?.errors) ? detail.errors.join(' ') : (detail || 'Could not reset your password')
+      throw new Error(message)
+    }
+    const data = await res.json()
+    setUser(data)
+    setJustLoggedIn(true)
+    clearAttribution()
+    return data
+  }
+
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
     setUser(null)
@@ -123,7 +146,7 @@ export function AuthProvider({ children }) {
   }, [user])
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
       {children}
     </AuthContext.Provider>
   )

@@ -37,6 +37,14 @@ async def _safe(db: AsyncSession, factory, default, *, what: str):
         return default
 
 
+async def _get_user_role(db: AsyncSession, user_id) -> Optional[str]:
+    """role lives on ClubMembership, not User — a user has exactly one
+    membership row (uq_membership_one_per_user), so this is the whole-account
+    role regardless of which club a super admin is currently acting as."""
+    row = await db.execute(select(ClubMembership.role).where(ClubMembership.user_id == user_id))
+    return row.scalar_one_or_none()
+
+
 async def _user_can_manage_reports(db: AsyncSession, user_id, user_role: Optional[str], org_id) -> bool:
     # Takes plain ids, not ORM instances: a prior _safe() rollback may have
     # expired the User/Organisation rows, and re-reading them here would emit
@@ -123,7 +131,7 @@ async def _build_notifications_count(
     # immune, so a single bad section now only zeroes itself out.
     org_id = club.id
     user_id = current_user.id
-    user_role = current_user.role
+    user_role = await _get_user_role(db, user_id)
     last_seen = current_user.last_notification_seen_at
     last_seen_version = current_user.last_seen_app_version
     entitled_modules = org_entitled_modules(club)
@@ -230,7 +238,7 @@ async def _build_notifications_summary(
     # into the response assembly.
     org_id = club.id
     user_id = current_user.id
-    user_role = current_user.role
+    user_role = await _get_user_role(db, user_id)
     last_seen = current_user.last_notification_seen_at
     last_seen_version = current_user.last_seen_app_version
     entitled_modules = org_entitled_modules(club)

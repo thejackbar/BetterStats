@@ -183,18 +183,26 @@ def _looks_redacted(name: Optional[str]) -> bool:
     return not cleaned or set(cleaned) == {"*"}
 
 
-def _fill_in_display_name(raw_name: Optional[str], batting_position=None) -> str:
-    """Display name for a fill-in (borrowed) player who has no `players` row.
+def _classify_unlinked_name(raw_name: Optional[str], batting_position=None) -> tuple[str, bool, bool]:
+    """Classify a player row with no resolvable `players` id.
 
-    GR usually carries a real name for these. The exception is a CA-redacted
-    junior participant, whose `playerShortName` comes through as a literal
-    string of asterisks with no name recoverable anywhere in the feed — fall
-    back to a generic label rather than showing "********".
+    Two situations look identical at the code level (no linkable player) but
+    read very differently to a club: a genuine fill-in (a borrowed player —
+    GR gives their real name, just not one of ours) keeps that name and gets
+    a FILL-IN badge; a CA-redacted participant (junior privacy protection —
+    GR's `playerShortName` comes back as a literal string of asterisks, no
+    real name recoverable anywhere in the feed) shows as "********" as-is —
+    the convention clubs already recognise — with no badge, since "Fill-In"
+    would misrepresent an unknown identity as a known-but-unregistered one.
+
+    Returns (display_name, is_fill_in, is_redacted).
     """
     cleaned = (raw_name or "").strip()
-    if not cleaned or cleaned.lower() == "unknown" or set(cleaned) == {"*"}:
-        return f"Fill-In (#{batting_position})" if batting_position else "Fill-In"
-    return cleaned
+    if not cleaned or set(cleaned) == {"*"}:
+        return "********", False, True
+    if cleaned.lower() == "unknown":
+        return (f"Fill-In (#{batting_position})" if batting_position else "Fill-In"), True, False
+    return cleaned, True, False
 
 
 async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
@@ -704,10 +712,11 @@ async def get_scorecard(
                     # to the opposition.
                     if pid_str in our_team_roster_pids:
                         fill_in_seen_pids.add(pid_str)
+                        _disp_name, _is_fi, _is_red = _classify_unlinked_name(name, row.get("batOrder"))
                         batting_flat.append({
                             "innings_number": inn_num,
                             "player_id": None,
-                            "player_name": _fill_in_display_name(name, row.get("batOrder")),
+                            "player_name": _disp_name,
                             "runs": None if is_dnb else (row.get("runsScored") or 0),
                             "balls": None if is_dnb else (row.get("ballsFaced") or 0),
                             "fours": None if is_dnb else (row.get("foursScored") or 0),
@@ -718,7 +727,8 @@ async def get_scorecard(
                             "not_out": dt_id == 1,
                             "batting_position": row.get("batOrder"),
                             "did_not_bat": is_dnb,
-                            "is_fill_in": True,
+                            "is_fill_in": _is_fi,
+                            "is_redacted": _is_red,
                         })
                         continue
 
@@ -763,10 +773,11 @@ async def get_scorecard(
                         # A fill-in bowler for our side — show on our own bowling card
                         # (flagged) instead of misattributing to the opposition.
                         fill_in_seen_pids.add(pid_str)
+                        _disp_name, _is_fi, _is_red = _classify_unlinked_name(name, None)
                         bowling_flat.append({
                             "innings_number": inn_num,
                             "player_id": None,
-                            "player_name": _fill_in_display_name(name, None),
+                            "player_name": _disp_name,
                             "overs": row.get("oversBowled"),
                             "maidens": row.get("maidensBowled"),
                             "runs": row.get("runsConceded"),
@@ -774,7 +785,8 @@ async def get_scorecard(
                             "wides": row.get("wideBalls"),
                             "no_balls": row.get("noBalls"),
                             "economy": econ,
-                            "is_fill_in": True,
+                            "is_fill_in": _is_fi,
+                            "is_redacted": _is_red,
                         })
                         continue
                     opp_bowling.append({
@@ -882,14 +894,16 @@ async def get_scorecard(
                             # Genuine fill-in with no `players` row at all — inject a
                             # name-only DNB row rather than silently dropping them.
                             fill_in_seen_pids.add(_ros_str)
+                            _disp_name, _is_fi, _is_red = _classify_unlinked_name(_ros_name, None)
                             batting_flat.append({
                                 "innings_number": _our_inn,
                                 "player_id": None,
-                                "player_name": _fill_in_display_name(_ros_name, None),
+                                "player_name": _disp_name,
                                 "runs": None, "balls": None, "fours": None, "sixes": None,
                                 "strike_rate": None, "dismissal_type": None, "not_out": False,
                                 "batting_position": None, "did_not_bat": True,
-                                "is_fill_in": True,
+                                "is_fill_in": _is_fi,
+                                "is_redacted": _is_red,
                             })
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.
@@ -1026,20 +1040,22 @@ async def get_scorecard(
         opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
 
     # A `players` row can exist with an unusable name — a stale placeholder row
-    # for a CA-redacted participant (see `_fill_in_display_name`), created by an
-    # earlier sync bug rather than by a real registration. Whatever created the
-    # row, showing a linked "********" profile is never right, so normalise any
-    # such row to the same unlinked fill-in shape used elsewhere on this card.
+    # for a CA-redacted participant (see `_classify_unlinked_name`), created by
+    # an earlier sync bug rather than by a real registration. Whatever created
+    # the row, showing a linked "********" profile is never right, so
+    # normalise any such row to the same unlinked, unbadged redacted shape
+    # used elsewhere on this card (never `is_fill_in` — a stale garbage row is
+    # not a "fill-in" in the borrowed-player sense, it's an unknown identity).
     for _row in batting_flat:
         if _row.get("player_id") and _looks_redacted(_row.get("player_name")):
             _row["player_id"] = None
-            _row["player_name"] = _fill_in_display_name(_row.get("player_name"), _row.get("batting_position"))
-            _row["is_fill_in"] = True
+            _row["player_name"] = "********"
+            _row["is_redacted"] = True
     for _row in bowling_flat:
         if _row.get("player_id") and _looks_redacted(_row.get("player_name")):
             _row["player_id"] = None
-            _row["player_name"] = _fill_in_display_name(_row.get("player_name"), None)
-            _row["is_fill_in"] = True
+            _row["player_name"] = "********"
+            _row["is_redacted"] = True
 
     return {
         "id": str(game.id),

@@ -1017,7 +1017,7 @@ lead or engagement score.
   anything reaches Twenty — `twenty_client.py` drops every underscore-prefixed key),
   surfaced in `diagnose_club_lead.py`.
 
-## Fill-in players on the game scorecard (v8.60.0–v8.60.1, Jul 2026)
+## Fill-in players on the game scorecard (v8.60.0–v8.60.3, Jul 2026)
 
 A club fielding a borrowed player (a fill-in from another club, or a Cricket
 Australia junior whose name is privacy-redacted in the feed) had that
@@ -1087,6 +1087,20 @@ undercounted by exactly their runs. Reported against
   by replaying the real GR payload for this game through the exact loop
   logic under both possible `known_ids` states — both converge on the
   correct 192 bat runs + 5 extras = 197, 5 wickets.
+- **v8.60.3 follow-up — redacted juniors were mislabelled "Fill-In"**: user
+  feedback caught that a genuinely redacted junior (no name recoverable
+  anywhere in the feed) was showing as "Fill-In #1"/"Fill-In (#N)" — the
+  same treatment as a real borrowed player with a known name, which
+  misrepresents an unknown identity as a known-but-unregistered one and
+  breaks the `********` convention clubs already recognise. Split the old
+  `_fill_in_display_name` into `_classify_unlinked_name`, returning
+  `(display_name, is_fill_in, is_redacted)`: a redacted participant (blank
+  or all-asterisks GR name) always renders literally as `"********"` with
+  `is_redacted: true` and no badge; only a genuine fill-in with a real GR
+  name gets `is_fill_in: true` + the FILL-IN badge. The final
+  redacted-DB-row normalisation pass (see the v8.60.1 note above) was
+  simplified to always set `is_redacted` (it only ever fires on a name that
+  already failed `_looks_redacted`, so there's nothing to classify).
 - **Not done this round**: `Partnership` has no free-text-name column (unlike
   `FallOfWicket.batter_name`), so a fill-in's side of a partnership still
   reads "Unknown" — would need a migration to fix properly. Fielding has no

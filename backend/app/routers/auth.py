@@ -167,13 +167,20 @@ async def get_current_club(
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
     eff_id = _effective_club_id(membership, current_user)
+    acting_as_override = eff_id != membership.club_id
     # Eager-load per-module subscriptions so the entitlement gate enforces
     # read-time trial expiry exactly (see app/auth/modules.py).
     _opts = [selectinload(Organisation.module_subscriptions)]
     club = await db.get(Organisation, eff_id, options=_opts) if eff_id else None
-    # A dangling active_club_id (e.g. the acted-as club was deleted) falls back
-    # to the staff member's home membership club rather than 403-ing them out.
-    if club is None and eff_id != membership.club_id:
+    # A super admin acting as an archived club reads the same as a dangling
+    # active_club_id below — archiving never removes the row, so the club-is-
+    # None check alone can't catch it.
+    if club is not None and acting_as_override and club.archived_at is not None:
+        club = None
+    # A dangling active_club_id (e.g. the acted-as club was deleted, or has
+    # since been archived) falls back to the staff member's home membership
+    # club rather than 403-ing them out or silently acting as an archived club.
+    if club is None and acting_as_override:
         club = await db.get(Organisation, membership.club_id, options=_opts)
     if not club:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club not found")
@@ -344,6 +351,80 @@ async def accept_invite(token: str, data: InviteAcceptRequest, response: Respons
     return await _build_me(user, db)
 
 
+class ResetPasswordAcceptRequest(BaseModel):
+    password: str
+    confirm_password: str
+
+
+@router.get("/reset-password/{token}")
+async def get_password_reset(token: str, db: AsyncSession = Depends(get_db)):
+    """Public: resolve a club-admin "reset your password" token
+    (routers/club_admin.py::send_password_reset_link) to the account's basic
+    identity, so the reset step on the login page can greet them by name.
+    Generic "invalid or expired" on any failure — doesn't leak whether a
+    token ever existed. Unlike get_invite, doesn't care about password_hash —
+    this is for an account that already has one."""
+    result = await db.execute(select(User).where(User.password_reset_token == token))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="This reset link is invalid or has already been used")
+    expires = user.password_reset_token_expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(
+                status_code=410,
+                detail="This reset link has expired — ask an admin at your club to send a new one",
+            )
+
+    membership_res = await db.execute(select(ClubMembership).where(ClubMembership.user_id == user.id))
+    membership = membership_res.scalar_one_or_none()
+    club = await db.get(Organisation, membership.club_id) if membership else None
+    return {
+        "username": user.username,
+        "display_name": user.display_name,
+        "club_name": club.name if club else None,
+    }
+
+
+@router.post("/reset-password/{token}/accept")
+async def accept_password_reset(token: str, data: ResetPasswordAcceptRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    """Set an existing club-admin's password from an admin-triggered reset
+    link and log them in — same session-minting primitive login() and
+    accept_invite() use. Same shared password rule as every other
+    self-set-password flow (services/password_policy.py)."""
+    from app.services import password_policy
+
+    result = await db.execute(select(User).where(User.password_reset_token == token))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="This reset link is invalid or has already been used")
+    expires = user.password_reset_token_expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(
+                status_code=410,
+                detail="This reset link has expired — ask an admin at your club to send a new one",
+            )
+
+    errors = password_policy.password_errors(data.password, data.confirm_password)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    user.password_hash = _hash_password(data.password)
+    user.password_reset_token = None
+    user.password_reset_token_expires_at = None
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    token_value = create_session_token(str(user.id))
+    set_session_cookie(response, token_value)
+    return await _build_me(user, db)
+
+
 async def _build_me(current_user: User, db: AsyncSession) -> dict:
     """The shared identity payload returned by /login, /me and /switch-club.
 
@@ -364,13 +445,20 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
 
     home_club = await db.get(Organisation, membership.club_id) if membership else None
     eff_id = _effective_club_id(membership, current_user)
+    acting_as_override = bool(membership) and eff_id != membership.club_id
     # Eager-load per-module subscriptions so entitlement_summary can return each
     # module's status / renewal / trial end (and apply read-time trial expiry).
     club = await db.get(
         Organisation, eff_id,
         options=[selectinload(Organisation.module_subscriptions)],
     ) if eff_id else None
-    # active_club_id may dangle (acted-as club deleted) — fall back to home.
+    # A super admin acting as an archived club reads the same as a dangling
+    # active_club_id below — the row still exists (archiving never deletes
+    # it), so this can't be caught by the club-is-None check alone.
+    if club is not None and acting_as_override and club.archived_at is not None:
+        club = None
+    # active_club_id may dangle (acted-as club deleted, or since archived) —
+    # fall back to home.
     if club is None and membership is not None:
         club = home_club
         eff_id = membership.club_id

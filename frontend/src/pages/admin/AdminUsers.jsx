@@ -11,6 +11,35 @@ const ROLE_LABELS = {
   club_member: 'Admin', // legacy rows (pre-migration) — display as Admin
 }
 
+// Mirrors backend/app/routers/club_admin.py's _INVITE_EMAIL_RE / _MOBILE_DIGITS_RE
+// so a bad format is caught before the round trip, not just after.
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+const MOBILE_STRIP_RE = /[\s\-()]/g
+const MOBILE_DIGITS_RE = /^\+?\d{7,15}$/
+const isValidEmail = (v) => EMAIL_RE.test((v || '').trim())
+const isValidMobile = (v) => !v.trim() || MOBILE_DIGITS_RE.test(v.replace(MOBILE_STRIP_RE, ''))
+// Mirrors backend/app/services/password_policy.py (MIN_LEN=10, upper/digit/special/match).
+const PASSWORD_MIN_LEN = 10
+const passwordChecks = (password, confirm) => ({
+  length: password.length >= PASSWORD_MIN_LEN,
+  upper: /[A-Z]/.test(password),
+  digit: /\d/.test(password),
+  special: /[^A-Za-z0-9]/.test(password),
+  match: !!password && password === confirm,
+})
+
+function PasswordChecklist({ checks }) {
+  return (
+    <ul className="font-mono text-[10px] space-y-0.5 mt-1.5">
+      <li className={checks.length ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.length ? '✓' : '·'} At least 10 characters</li>
+      <li className={checks.upper ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.upper ? '✓' : '·'} One uppercase letter</li>
+      <li className={checks.digit ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.digit ? '✓' : '·'} One number</li>
+      <li className={checks.special ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.special ? '✓' : '·'} One special character</li>
+      <li className={checks.match ? 'text-emerald-400' : 'text-pb-faintest'}>{checks.match ? '✓' : '·'} Passwords match</li>
+    </ul>
+  )
+}
+
 function fmtDate(iso) {
   if (!iso) return 'never'
   const d = new Date(iso)
@@ -34,6 +63,14 @@ function NewUserForm({ onCreated, onCancel }) {
     setErr(null)
     if (!username.trim() || !email.trim()) {
       setErr('Username and email are required')
+      return
+    }
+    if (!isValidEmail(email)) {
+      setErr('Enter a valid email address')
+      return
+    }
+    if (!isValidMobile(mobileNumber)) {
+      setErr('Enter a valid mobile number')
       return
     }
     setBusy(true)
@@ -98,25 +135,52 @@ function UserEditor({ user, currentUserId, onSaved, onClose }) {
   const isSelf = user.id === currentUserId
   const isSuperAdmin = user.role === 'super_admin'
   const [displayName, setDisplayName] = useState(user.display_name || '')
+  const [email, setEmail] = useState(user.email || '')
+  const [mobileNumber, setMobileNumber] = useState(user.mobile_number || '')
   const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sendingReset, setSendingReset] = useState(false)
   const [err, setErr] = useState(null)
   const [msg, setMsg] = useState(null)
 
+  const checks = passwordChecks(newPassword, confirmPassword)
+  const passwordValid = !newPassword || Object.values(checks).every(Boolean)
+
   const save = async () => {
     setErr(null); setMsg(null)
+    if (!isValidEmail(email)) { setErr('Enter a valid email address'); return }
+    if (!isValidMobile(mobileNumber)) { setErr('Enter a valid mobile number'); return }
+    if (newPassword && !passwordValid) { setErr('New password does not meet the requirements below'); return }
     setBusy(true)
     try {
-      const payload = { display_name: displayName }
-      if (newPassword) payload.password = newPassword
+      const payload = { display_name: displayName, email, mobile_number: mobileNumber }
+      if (newPassword) {
+        payload.password = newPassword
+        payload.confirm_password = confirmPassword
+      }
       await api.adminUpdateClubUser(user.id, payload)
       setMsg('Saved')
       setNewPassword('')
+      setConfirmPassword('')
       onSaved()
     } catch (e) {
       setErr(e.message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const sendResetEmail = async () => {
+    setErr(null); setMsg(null)
+    setSendingReset(true)
+    try {
+      await api.adminSendPasswordReset(user.id)
+      setMsg(`Password reset email sent to ${user.email || 'the user'}`)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSendingReset(false)
     }
   }
 
@@ -159,15 +223,42 @@ function UserEditor({ user, currentUserId, onSaved, onClose }) {
       </label>
 
       <label className="block">
-        <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Reset password</span>
-        <input value={newPassword} onChange={e => setNewPassword(e.target.value)} type="password" placeholder="(leave blank to keep current)" className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="new-password" />
+        <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Email</span>
+        <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="off" />
       </label>
+
+      <label className="block">
+        <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Mobile number</span>
+        <input value={mobileNumber} onChange={e => setMobileNumber(e.target.value)} type="tel" className="mt-1 w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="off" />
+      </label>
+
+      <div className="pb-hairline-t pt-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-pb-faint text-xs font-mono tracking-wide2 uppercase">Reset password</span>
+          <button type="button" onClick={sendResetEmail} disabled={sendingReset || busy || !user.email}
+            title={user.email ? 'Email this user a link to reset their password' : 'This user has no email address on file'}
+            className="font-mono text-[10px] tracking-wide2 uppercase px-2.5 py-1.5 rounded text-pb-accent hover:bg-pb-accent/10 border pb-hairline disabled:opacity-50 whitespace-nowrap">
+            {sendingReset ? 'Sending…' : 'Email reset link'}
+          </button>
+        </div>
+        <label className="block">
+          <input value={newPassword} onChange={e => setNewPassword(e.target.value)} type="password" placeholder="Set new password directly (leave blank to keep current)" className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="new-password" />
+        </label>
+        {newPassword && (
+          <>
+            <label className="block">
+              <input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} type="password" placeholder="Confirm new password" className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm" autoComplete="new-password" />
+            </label>
+            <PasswordChecklist checks={checks} />
+          </>
+        )}
+      </div>
 
       {err && <div className="font-mono text-[11px]" style={{ color: 'var(--pb-negative)' }}>{err}</div>}
       {msg && <div className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</div>}
 
       <div className="flex gap-2 pt-2">
-        <button onClick={save} disabled={busy} className="font-mono text-[10px] tracking-wide3 uppercase px-4 py-2 rounded bg-pb-accent text-pb-bg disabled:opacity-50">
+        <button onClick={save} disabled={busy || !passwordValid} className="font-mono text-[10px] tracking-wide3 uppercase px-4 py-2 rounded bg-pb-accent text-pb-bg disabled:opacity-50">
           {busy ? 'Saving…' : 'Save'}
         </button>
         {!isSelf && !isSuperAdmin && (
