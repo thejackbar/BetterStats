@@ -559,10 +559,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                         <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">URL</dt>
                         <dd className="text-pb-text text-sm">betterat.cricket/{preparedClub.slug}</dd>
                       </div>
-                      <div>
-                        <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Source club ID</dt>
-                        <dd className="text-pb-faint text-xs font-mono">{preparedClub.org_id}</dd>
-                      </div>
                     </dl>
                   )}
                 </div>
