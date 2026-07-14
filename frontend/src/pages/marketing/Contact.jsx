@@ -495,7 +495,7 @@ function ContactPanel() {
 export default function Contact() {
   usePageMeta({
     title: 'Contact — Request Access for Your Cricket Club | BetterCricket',
-    description: 'Request access for your Australian cricket club, ask a question, or email the BetterCricket team directly at cricket@bettersports.com.au.',
+    description: 'Request access for your Australian cricket club, ask a question, or email the BetterCricket team directly at support@bettersports.com.au.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/contact',
   })

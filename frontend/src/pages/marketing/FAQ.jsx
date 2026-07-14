@@ -165,7 +165,7 @@ const CATEGORIES = [
       },
       {
         q: 'How do I request access for my club?',
-        a: "Fill in the request-access form (tap the button on the homepage) or email cricket@bettersports.com.au. The BetterCricket team handles the technical setup.",
+        a: "Fill in the request-access form (tap the button on the homepage) or email support@bettersports.com.au. The BetterCricket team handles the technical setup.",
       },
     ],
   },

@@ -571,7 +571,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               {!selectedClub && (
                 <div className="pb-card p-4 bg-pb-surface2">
                   <p className="font-mono text-[11px] text-pb-faint">
-                    Search for and select an unregistered club to continue.
+                    Search for and select a club to continue.
                   </p>
                 </div>
               )}
