@@ -176,6 +176,13 @@ def _to_float(v):
         return None
 
 
+def _looks_redacted(name: Optional[str]) -> bool:
+    """True for a name that carries no real information — blank, or CA's
+    literal asterisk-redaction placeholder for a privacy-protected participant."""
+    cleaned = (name or "").strip()
+    return not cleaned or set(cleaned) == {"*"}
+
+
 def _fill_in_display_name(raw_name: Optional[str], batting_position=None) -> str:
     """Display name for a fill-in (borrowed) player who has no `players` row.
 
@@ -545,8 +552,13 @@ async def get_scorecard(
                     return ("", "")
                 return (words[-1].lower(), words[0][0].lower() if words[0] else "")
 
+            # Excludes redacted-name rows ("********") — a name-key built from a
+            # placeholder is not a real fingerprint and would falsely "match" every
+            # other redacted participant in the game (their own real name, or lack
+            # of one, is irrelevant — they'd all collide on the same asterisks).
             our_batting_fingerprints: set[tuple[str, str]] = {
-                _name_key(r["player_name"]) for r in batting_flat if r.get("player_name")
+                _name_key(r["player_name"]) for r in batting_flat
+                if r.get("player_name") and not _looks_redacted(r["player_name"])
             }
 
             # Org name first word — identifies which GR team is ours vs opposition.
@@ -581,8 +593,12 @@ async def get_scorecard(
                     elif not _is_our_team and _pid:
                         opp_roster_pids.add(_pid)
 
-            # Accumulate our own DNB players missing from DB (pre-migration games).
-            our_missing_dnb: dict[uuid.UUID, tuple[int, int | None]] = {}
+            # Accumulate our own known players (already a `players` row) whose
+            # batting_innings row for THIS game is missing — covers both DNB and a
+            # genuinely scored innings that never made it into the DB (e.g. a
+            # placeholder player row for a CA-redacted participant that has a
+            # `players` row but no per-game stats attached to it).
+            our_missing_rows: dict[uuid.UUID, dict] = {}
             # GR-sourced dismissal text for our players (enriches batting_flat after loop).
             # Keyed by GR UUID (for players whose DB uuid matches GR).
             our_dismissal_text: dict[uuid.UUID, str] = {}
@@ -636,8 +652,26 @@ async def get_scorecard(
                         if pid not in db_batting_pids:
                             dt_id_o = row.get("dismissalTypeId") or 0
                             dt_long_o = (row.get("dismissalType") or "").lower()
-                            if dt_id_o != 0 and dt_long_o in _DNB:
-                                our_missing_dnb[pid] = (inn_num, row.get("batOrder"))
+                            is_dnb_o = dt_long_o in _DNB
+                            # A real dismissal/innings (dt_id_o != 0) or a flagged DNB —
+                            # either way this known player has no batting_innings row
+                            # for this game, so inject one from GR's own stats rather
+                            # than silently dropping a scored innings.
+                            if dt_id_o != 0 or is_dnb_o:
+                                our_missing_rows[pid] = {
+                                    "innings_number": inn_num,
+                                    "runs": None if is_dnb_o else (row.get("runsScored") or 0),
+                                    "balls": None if is_dnb_o else (row.get("ballsFaced") or 0),
+                                    "fours": None if is_dnb_o else (row.get("foursScored") or 0),
+                                    "sixes": None if is_dnb_o else (row.get("sixesScored") or 0),
+                                    "strike_rate": _to_float(row.get("strikeRate")),
+                                    "dismissal_type": None if is_dnb_o else (dt_text or dt_long_o or None),
+                                    "caught_behind": dt_long_o == "caught" and _caught_by_keeper(dt_text or "", keeper_names),
+                                    "not_out": dt_id_o == 1,
+                                    "batting_position": row.get("batOrder"),
+                                    "did_not_bat": is_dnb_o,
+                                    "fallback_name": row.get("playerShortName"),
+                                }
                         continue
 
                     dt_id = row.get("dismissalTypeId") or 0
@@ -800,12 +834,18 @@ async def get_scorecard(
                         continue
                     if ros_pid in our_batting_pids_seen_in_gr:
                         continue
-                    if ros_pid in our_missing_dnb:
+                    if ros_pid in our_missing_rows:
                         continue
                     if not pid_to_name.get(ros_pid_str):
                         continue
                     if ros_pid in known_ids:
-                        our_missing_dnb[ros_pid] = (_our_inn, None)
+                        our_missing_rows[ros_pid] = {
+                            "innings_number": _our_inn, "runs": None, "balls": None,
+                            "fours": None, "sixes": None, "strike_rate": None,
+                            "dismissal_type": None, "caught_behind": False,
+                            "not_out": False, "batting_position": None,
+                            "did_not_bat": True, "fallback_name": pid_to_name.get(ros_pid_str),
+                        }
                     else:
                         # UUID mismatch (PlayHQ ID in DB vs GR UUID) — resolve by name
                         _unresolved_roster_pids.append(ros_pid_str)
@@ -817,6 +857,8 @@ async def get_scorecard(
                     )
                     _nk_to_player: dict[tuple, Player] = {}
                     for _pl in _all_res.scalars().all():
+                        if _looks_redacted(_pl.display_name):
+                            continue
                         _nk_to_player[_name_key(_pl.display_name)] = _pl
                     for _ros_str in _unresolved_roster_pids:
                         _ros_name = pid_to_name.get(_ros_str, "")
@@ -827,9 +869,15 @@ async def get_scorecard(
                             continue  # they batted, not a DNB
                         _matched = _nk_to_player.get(_nk)
                         if _matched:
-                            if _matched.id in db_batting_pids or _matched.id in our_missing_dnb:
+                            if _matched.id in db_batting_pids or _matched.id in our_missing_rows:
                                 continue
-                            our_missing_dnb[_matched.id] = (_our_inn, None)
+                            our_missing_rows[_matched.id] = {
+                                "innings_number": _our_inn, "runs": None, "balls": None,
+                                "fours": None, "sixes": None, "strike_rate": None,
+                                "dismissal_type": None, "caught_behind": False,
+                                "not_out": False, "batting_position": None,
+                                "did_not_bat": True, "fallback_name": _ros_name,
+                            }
                         else:
                             # Genuine fill-in with no `players` row at all — inject a
                             # name-only DNB row rather than silently dropping them.
@@ -869,21 +917,35 @@ async def get_scorecard(
                         "batting_position": None, "did_not_bat": True,
                     })
 
-            # Append our own DNB players missing from DB (pre-migration games).
-            if our_missing_dnb:
-                dnb_player_res = await db.execute(
-                    select(Player).where(Player.id.in_(our_missing_dnb.keys()))
+            # Append our own known players (a `players` row exists) whose
+            # batting_innings row for this game is missing — DNB (pre-migration
+            # games) or a genuinely scored innings we never persisted (e.g. a
+            # placeholder row for a CA-redacted participant with no per-game
+            # stats attached). `player_name` prefers the DB display name and
+            # falls back to GR's own name — the redacted-name normalisation
+            # pass below turns an unusable one of either into a Fill-In row.
+            if our_missing_rows:
+                miss_player_res = await db.execute(
+                    select(Player).where(Player.id.in_(our_missing_rows.keys()))
                 )
-                dnb_player_map = {p.id: p for p in dnb_player_res.scalars().all()}
-                for dnb_pid, (dnb_inn, dnb_order) in our_missing_dnb.items():
-                    dnb_player = dnb_player_map.get(dnb_pid)
+                miss_player_map = {p.id: p for p in miss_player_res.scalars().all()}
+                for miss_pid, miss_row in our_missing_rows.items():
+                    miss_player = miss_player_map.get(miss_pid)
+                    miss_name = (miss_player.display_name if miss_player else None) or miss_row.get("fallback_name")
                     batting_flat.append({
-                        "innings_number": dnb_inn,
-                        "player_id": str(dnb_pid),
-                        "player_name": dnb_player.display_name if dnb_player else None,
-                        "runs": None, "balls": None, "fours": None, "sixes": None,
-                        "strike_rate": None, "dismissal_type": None, "not_out": False,
-                        "batting_position": dnb_order, "did_not_bat": True,
+                        "innings_number": miss_row["innings_number"],
+                        "player_id": str(miss_pid),
+                        "player_name": miss_name,
+                        "runs": miss_row["runs"],
+                        "balls": miss_row["balls"],
+                        "fours": miss_row["fours"],
+                        "sixes": miss_row["sixes"],
+                        "strike_rate": miss_row["strike_rate"],
+                        "dismissal_type": miss_row["dismissal_type"],
+                        "caught_behind": miss_row["caught_behind"],
+                        "not_out": miss_row["not_out"],
+                        "batting_position": miss_row["batting_position"],
+                        "did_not_bat": miss_row["did_not_bat"],
                     })
 
             # Compute opp batting totals per innings (runs+wickets) so the frontend
@@ -908,6 +970,26 @@ async def get_scorecard(
             opp_display_name = away_name if we_are_home else home_name
 
             our_batting_inns = {r["innings_number"] for r in batting_flat if not r["did_not_bat"]}
+
+            # Recompute OUR OWN batting innings totals from the now-fully-populated
+            # batting_flat (DB rows + fill-in rows + previously-missing known-player
+            # rows injected above). The very first pass (near the top of this
+            # function) ran before any of those GR-sourced rows existed, so it
+            # would otherwise leave stale, undercounted totals. NOTE: `runs`/`wickets`
+            # here are bat-only (extras are tracked and added separately below and
+            # again by the frontend) — do not substitute GR's own `runsScored`, which
+            # is the full team total including extras and would double-count them.
+            our_recomputed: dict[int, dict] = {}
+            for row in batting_flat:
+                n = row["innings_number"]
+                if n not in our_recomputed:
+                    our_recomputed[n] = {"runs": 0, "wickets": 0}
+                if row["did_not_bat"]:
+                    continue
+                our_recomputed[n]["runs"] += row["runs"] or 0
+                if not row["not_out"] and row["dismissal_type"]:
+                    our_recomputed[n]["wickets"] += 1
+
             for inn_num_t in set(list(innings_totals.keys()) + [r["innings_number"] for r in opp_batting]):
                 if inn_num_t not in innings_totals:
                     innings_totals[inn_num_t] = {"runs": 0, "wickets": 0, "extras": 0}
@@ -917,6 +999,9 @@ async def get_scorecard(
                     innings_totals[inn_num_t]["wickets"] = opp_inn_totals[inn_num_t]["wickets"]
                 if inn_num_t in our_batting_inns:
                     innings_totals[inn_num_t]["batting_team"] = our_display_name or game.home_team or ""
+                    if inn_num_t in our_recomputed:
+                        innings_totals[inn_num_t]["runs"] = our_recomputed[inn_num_t]["runs"]
+                        innings_totals[inn_num_t]["wickets"] = our_recomputed[inn_num_t]["wickets"]
                 else:
                     innings_totals[inn_num_t]["batting_team"] = opp_display_name or game.away_team or ""
                 # Use GR innings-level totalExtras as authoritative source.
@@ -930,17 +1015,6 @@ async def get_scorecard(
                     # dismissal strings (which can vary based on dismissal text parsing).
                     if inn_num_t not in our_batting_inns and _gr.get("wickets") is not None:
                         innings_totals[inn_num_t]["wickets"] = _gr["wickets"]
-                    # For OUR OWN innings, prefer GR's own runs/wickets total over the
-                    # row-sum computed earlier from batting_flat. Row-summing only ever
-                    # undercounts (a batter whose row can't be shown for some reason —
-                    # e.g. a CA-redacted junior we truly can't name) — GR's own innings
-                    # total doesn't have that failure mode, so it stays correct even if
-                    # a future edge case still drops a row from display.
-                    if inn_num_t in our_batting_inns:
-                        if _gr.get("runs") is not None:
-                            innings_totals[inn_num_t]["runs"] = _gr["runs"]
-                        if _gr.get("wickets") is not None:
-                            innings_totals[inn_num_t]["wickets"] = _gr["wickets"]
 
     except Exception as e:
         import traceback
@@ -950,6 +1024,22 @@ async def get_scorecard(
     # tool it carries the opposition half in its stored payload, so render both sides.
     if is_manual and getattr(game, "extracted_payload", None):
         opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
+
+    # A `players` row can exist with an unusable name — a stale placeholder row
+    # for a CA-redacted participant (see `_fill_in_display_name`), created by an
+    # earlier sync bug rather than by a real registration. Whatever created the
+    # row, showing a linked "********" profile is never right, so normalise any
+    # such row to the same unlinked fill-in shape used elsewhere on this card.
+    for _row in batting_flat:
+        if _row.get("player_id") and _looks_redacted(_row.get("player_name")):
+            _row["player_id"] = None
+            _row["player_name"] = _fill_in_display_name(_row.get("player_name"), _row.get("batting_position"))
+            _row["is_fill_in"] = True
+    for _row in bowling_flat:
+        if _row.get("player_id") and _looks_redacted(_row.get("player_name")):
+            _row["player_id"] = None
+            _row["player_name"] = _fill_in_display_name(_row.get("player_name"), None)
+            _row["is_fill_in"] = True
 
     return {
         "id": str(game.id),

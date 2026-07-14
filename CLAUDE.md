@@ -1005,7 +1005,7 @@ lead or engagement score.
   anything reaches Twenty — `twenty_client.py` drops every underscore-prefixed key),
   surfaced in `diagnose_club_lead.py`.
 
-## Fill-in players on the game scorecard (v8.60.0, Jul 2026)
+## Fill-in players on the game scorecard (v8.60.0–v8.60.1, Jul 2026)
 
 A club fielding a borrowed player (a fill-in from another club, or a Cricket
 Australia junior whose name is privacy-redacted in the feed) had that
@@ -1042,6 +1042,39 @@ undercounted by exactly their runs. Reported against
   sourced), so the total is correct even if a future edge case still can't
   display a row. Frontend: `FillInBadge` in `MatchScorecard.jsx` renders a
   small amber "FILL-IN" tag next to the name on any row with `is_fill_in`.
+- **v8.60.1 follow-up — the v8.60.0 fix regressed on redeploy**: the same
+  reported game still showed a wrong total (202 instead of 197) and two
+  fill-ins (22 and 116 runs) were still missing after v8.60.0 shipped. Two
+  distinct bugs, found by pulling the live GR JSON directly
+  (`grassrootsapiproxy.cricket.com.au/scores/matches/{id}?responseModifier=includeScorecard`)
+  and comparing it to `/api/games/{id}/scorecard`: (1) **double-counted
+  extras** — GR's `innings.runsScored` is the FULL team total (batters +
+  extras), but v8.60.0 stuffed it straight into `innings_totals.runs`, a
+  field that has always meant bat-only runs (the frontend adds extras on
+  top separately) — fixed by dropping that substitution and instead
+  recomputing `innings_totals` for our own side from the fully-populated
+  `batting_flat` once every row (including newly-injected ones) is in place.
+  (2) **a stale junk `players` row can already exist for a redacted
+  participant** — this game had *three* CA-redacted batters, not two; one of
+  them (`9cc9ec36…`) already had a `players` row and a synced
+  `batting_innings` row with `display_name` literally `"********"`, which
+  hits the `known_ids` branch and returns *before* reaching any of the new
+  fill-in logic. Worse, once one redacted participant's DB name is
+  `"********"`, every *other* redacted participant's GR name-key
+  (`_name_key("********")`) collides with it in `our_batting_fingerprints` /
+  `_nk_to_player`, silently swallowing them regardless of whether they're
+  `known_ids` too. Fixed three ways: `_looks_redacted()` now excludes
+  placeholder names from both fingerprint sets so they can't false-match;
+  the `known_ids` branch now injects a **scored** row (not just a DNB one)
+  when a known player has no `batting_innings` row for this game, sourced
+  from GR's own stats (`our_missing_rows`, generalised from the old
+  DNB-only `our_missing_dnb`); and a final pass over `batting_flat`/
+  `bowling_flat` normalises ANY row whose name is unusable (blank or
+  `"********"`, however it got there — a genuine fill-in or a stale DB row)
+  to the same unlinked `player_id: null` + `is_fill_in: true` shape. Verified
+  by replaying the real GR payload for this game through the exact loop
+  logic under both possible `known_ids` states — both converge on the
+  correct 192 bat runs + 5 extras = 197, 5 wickets.
 - **Not done this round**: `Partnership` has no free-text-name column (unlike
   `FallOfWicket.batter_name`), so a fill-in's side of a partnership still
   reads "Unknown" — would need a migration to fix properly. Fielding has no
