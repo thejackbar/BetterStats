@@ -12,6 +12,17 @@ export function AuthProvider({ children }) {
       const res = await fetch('/api/auth/me', { credentials: 'include' })
       if (res.ok) {
         setUser(await res.json())
+        // A flow that mints a session server-side and then hard-reloads
+        // (rather than calling login() itself — e.g. the self-serve trial
+        // modal's "Log in as new admin") leaves a marker here so this first
+        // post-reload fetch still counts as a fresh login for the bell /
+        // onboarding wizard auto-open checks, which only run on justLoggedIn.
+        try {
+          if (sessionStorage.getItem('bs_pending_fresh_login')) {
+            sessionStorage.removeItem('bs_pending_fresh_login')
+            setJustLoggedIn(true)
+          }
+        } catch { /* sessionStorage unavailable — skip */ }
       } else {
         setUser(null)
       }
