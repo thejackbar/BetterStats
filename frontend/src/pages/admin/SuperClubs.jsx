@@ -30,6 +30,10 @@ export default function SuperClubs() {
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
+  // In-progress "Renews" date edits per module key, before blur — keeps the native
+  // date input's own mid-typing state from being clobbered by an autosave+reload
+  // on every keystroke (see setModuleRenewal).
+  const [renewalEdit, setRenewalEdit] = useState({})
   const [clubAdmins, setClubAdmins] = useState([])
   // Default trial length (global General Settings) — prefills new trial end dates.
   const [defaultTrialDays, setDefaultTrialDays] = useState(14)
@@ -231,6 +235,13 @@ export default function SuperClubs() {
     }
   }
   const clearTrialEdit = (key) => setTrialEdit(t => { const n = { ...t }; delete n[key]; return n })
+  // The renewal date shown for a module: the in-progress (not yet blurred) edit if
+  // any, else the saved value.
+  const renewalDraft = (sub) => {
+    const key = sub?.module
+    if (key && renewalEdit[key] !== undefined) return renewalEdit[key]
+    return sub?.renewal_date || ''
+  }
 
   const grantModule = (clubId, key) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { status: 'active' }))
@@ -668,8 +679,13 @@ export default function SuperClubs() {
                                     </div>
                                   ) : (
                                     <label className="font-mono text-[10px] text-pb-faint flex items-center gap-1">Renews
-                                      <input type="date" value={sub.renewal_date || ''} disabled={busy}
-                                        onChange={e => setModuleRenewal(club.id, key, e.target.value)}
+                                      <input type="date" value={renewalDraft(sub)} disabled={busy}
+                                        onChange={e => setRenewalEdit(r => ({ ...r, [key]: e.target.value }))}
+                                        onBlur={e => {
+                                          const val = e.target.value
+                                          setRenewalEdit(r => { const n = { ...r }; delete n[key]; return n })
+                                          if (val !== (sub.renewal_date || '')) setModuleRenewal(club.id, key, val)
+                                        }}
                                         className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50" />
                                     </label>
                                   )}
