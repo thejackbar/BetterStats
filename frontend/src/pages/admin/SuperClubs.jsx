@@ -262,10 +262,20 @@ export default function SuperClubs() {
   const setModuleRenewal = (clubId, key, date) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { renewal_date: date || null }))
   // Status select: 'trial' opens the inline date editor (persisted on Apply) seeded
-  // from the row's draft; any other status applies immediately.
+  // from the row's draft; 'reset' isn't a real persisted status — it wipes the
+  // module's subscription row(s) entirely (same as un-granting via the chip
+  // button), which is what actually clears trial_started_at and makes the
+  // module trial_eligible again for the club's own self-service Start Trial /
+  // Subscribe (account_plan_status reads "never held a row" as never_trialed).
+  // Any other status applies immediately.
   const onModuleStatus = (clubId, key, status, seedDraft) => {
     if (status === 'trial') {
       setTrialEdit(t => ({ ...t, [key]: seedDraft }))
+      return
+    }
+    if (status === 'reset') {
+      clearTrialEdit(key)
+      removeModule(clubId, key)
       return
     }
     clearTrialEdit(key)
@@ -802,8 +812,10 @@ export default function SuperClubs() {
                                 <>
                                   <select value={editingTrial ? 'trial' : sub.status} disabled={busy}
                                     onChange={e => onModuleStatus(club.id, key, e.target.value, draft)}
+                                    title="Reset wipes the module's trial/subscription history so the club can start a fresh trial or subscribe again"
                                     className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50">
                                     {SUBSCRIPTION_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                                    <option value="reset">Reset (make eligible again)</option>
                                   </select>
                                   {trialView ? (
                                     // Keep Start / End / Apply together on one line: they're one
