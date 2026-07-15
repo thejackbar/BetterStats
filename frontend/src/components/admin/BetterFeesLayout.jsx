@@ -8,6 +8,7 @@ const NAV = [
   { to: '/admin/fees/payments', label: 'Payments', icon: 'money', cap: CAP.MANAGE_FEES },
   { to: '/admin/fees/schedule', label: 'Fee Schedule', icon: 'list', cap: CAP.MANAGE_FEES },
   { to: '/admin/fees/reports', label: 'Reports', icon: 'ladders', cap: CAP.MANAGE_FEES },
+  { to: '/admin/fees/square', label: 'Square', icon: 'share', cap: CAP.MANAGE_FEES },
 ]
 
 export default function BetterFeesLayout({ children, title, actions }) {

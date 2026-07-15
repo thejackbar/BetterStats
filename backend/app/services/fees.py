@@ -12,8 +12,10 @@ contributes (two-day = 2) and which report bucket it falls in.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from decimal import Decimal
+from difflib import SequenceMatcher
 
 from sqlalchemy import select
 
@@ -24,6 +26,52 @@ from app.models.db import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Free-text → member matching ─────────────────────────────────────────────
+# Shared by the bank-statement CSV import and the Square sale import — both
+# hand this a loose description (a bank ref, a Square buyer name/note) and get
+# back a 0..1 confidence against a member's name.
+
+_NOISE_RE = re.compile(r"\b(membership|match\s*fees?|fees?|payment|transfer|trf|eft|cba|nab|anz|st\s*george|deposit|to|from|ref|reference|account|acct)\b", re.I)
+
+
+def clean_description(s: str) -> str:
+    s = (s or "").lower()
+    s = _NOISE_RE.sub(" ", s)
+    s = re.sub(r"[^a-z\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def match_score(cleaned_desc: str, member_name: str) -> float:
+    """0..1 confidence the description belongs to this member.
+
+    Combines:
+      - SequenceMatcher ratio between cleaned description and member name
+        (forward + 'Surname, First' → 'First Surname' flipped — bank refs and
+        Square buyer names usually go first-last even though the sheet stores
+        names as 'Surname, First').
+      - Token overlap bonus: every surname/firstname token from the member
+        name that appears verbatim in the description adds 0.15, capped at 1.
+    """
+    if not cleaned_desc or not member_name:
+        return 0.0
+    name_lc = member_name.lower()
+    if "," in name_lc:
+        parts = [p.strip() for p in name_lc.split(",", 1)]
+        flipped = (parts[1] + " " + parts[0]).strip()
+    else:
+        flipped = name_lc
+    name_clean = re.sub(r"[^a-z\s]", " ", flipped)
+    name_clean = re.sub(r"\s+", " ", name_clean).strip()
+    base = max(
+        SequenceMatcher(None, cleaned_desc, name_clean).ratio(),
+        SequenceMatcher(None, cleaned_desc, name_lc).ratio(),
+    )
+    tokens = [t for t in name_clean.split() if len(t) >= 3]
+    overlap = sum(1 for t in tokens if t in cleaned_desc)
+    return min(1.0, base + 0.15 * overlap)
 
 
 # How many days each format contributes by default. Two-day defaults to 2

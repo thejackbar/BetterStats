@@ -13,8 +13,8 @@ import csv
 import io
 import re
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from difflib import SequenceMatcher
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -22,14 +22,18 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
+from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Season, Grade, Game, Player,
     FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay, FeePayment,
+    FeeSquareImportLog, MerchSquareConnection,
     FEE_PAYMENT_TYPES, FEE_FORMATS, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_FEES
 from app.services import fees as fee_service
+from app.services import fees_square as fee_square_service
+from app.services import square_client, square_sync
 
 router = APIRouter(prefix="/club-admin/fees", tags=["club-admin-fees"])
 
@@ -924,6 +928,7 @@ def _payment_out(p: FeePayment, member: Optional[FeeMember] = None) -> dict:
         "method": p.method,
         "bank_ref": p.bank_ref,
         "notes": p.notes,
+        "source": p.source,
     }
     if member is not None:
         out["member_id"] = str(member.id)
@@ -1428,45 +1433,8 @@ def _detect_col(headers, candidates):
     return None
 
 
-_NOISE_RE = re.compile(r"\b(membership|match\s*fees?|fees?|payment|transfer|trf|eft|cba|nab|anz|st\s*george|deposit|to|from|ref|reference|account|acct)\b", re.I)
-
-
-def _clean_description(s: str) -> str:
-    s = (s or "").lower()
-    s = _NOISE_RE.sub(" ", s)
-    s = re.sub(r"[^a-z\s]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def _match_score(cleaned_desc: str, member_name: str) -> float:
-    """0..1 confidence the description belongs to this member.
-
-    Combines:
-      - SequenceMatcher ratio between cleaned description and member name
-        (forward + 'Surname, First' → 'First Surname' flipped — the sheet
-        stores names as 'Surname, First' but bank refs usually go first-last).
-      - Token overlap bonus: every surname/firstname token from the member
-        name that appears verbatim in the description adds 0.15, capped at 1.
-    """
-    if not cleaned_desc or not member_name:
-        return 0.0
-    name_lc = member_name.lower()
-    # Flip "smith, john" → "john smith" for the second pass.
-    if "," in name_lc:
-        parts = [p.strip() for p in name_lc.split(",", 1)]
-        flipped = (parts[1] + " " + parts[0]).strip()
-    else:
-        flipped = name_lc
-    name_clean = re.sub(r"[^a-z\s]", " ", flipped)
-    name_clean = re.sub(r"\s+", " ", name_clean).strip()
-    base = max(
-        SequenceMatcher(None, cleaned_desc, name_clean).ratio(),
-        SequenceMatcher(None, cleaned_desc, name_lc).ratio(),
-    )
-    tokens = [t for t in name_clean.split() if len(t) >= 3]
-    overlap = sum(1 for t in tokens if t in cleaned_desc)
-    return min(1.0, base + 0.15 * overlap)
+_clean_description = fee_service.clean_description
+_match_score = fee_service.match_score
 
 
 @router.post("/payments/import/preview")
@@ -1771,3 +1739,206 @@ async def create_bulk_payment(
                     md_paid += 1
     await db.commit()
     return {"created": created, "match_days_marked_paid": md_paid, "total": round(total, 2)}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Square import — completed Square sales reviewed and matched to a member
+# ───────────────────────────────────────────────────────────────────────────
+# Reuses BetterMerch's existing per-club Square connection (`services.square_sync`
+# / `MerchSquareConnection`) — there is no separate OAuth flow here. A club
+# without a connection yet is pointed at BetterMerch's Square page to connect
+# (Square OAuth is MANAGE_MERCH-capped there; nothing below writes to Square).
+
+def _fee_square_status(conn: Optional[MerchSquareConnection]) -> dict:
+    return {
+        "configured": settings.square_configured,
+        "connected": bool(conn and conn.access_token and conn.location_id),
+        "location_name": conn.location_name if conn else None,
+        "sync_fees": conn.sync_fees if conn else False,
+        "fee_item_keywords": (conn.fee_item_keywords if conn and conn.fee_item_keywords else fee_square_service.DEFAULT_KEYWORDS),
+        "last_sync_at": conn.fees_last_sync_at.isoformat() if conn and conn.fees_last_sync_at else None,
+        "last_sync_status": conn.fees_last_sync_status if conn else None,
+        "last_sync_error": conn.fees_last_sync_error if conn else None,
+    }
+
+
+@router.get("/square/status")
+async def fee_square_status(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    return _fee_square_status(conn)
+
+
+class FeeSquareSettings(BaseModel):
+    sync_fees: Optional[bool] = None
+    fee_item_keywords: Optional[str] = None
+
+
+@router.post("/square/settings")
+async def fee_square_settings(
+    data: FeeSquareSettings,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Square from BetterMerch first")
+    if data.sync_fees is not None:
+        conn.sync_fees = data.sync_fees
+    if data.fee_item_keywords is not None:
+        conn.fee_item_keywords = data.fee_item_keywords.strip() or None
+    await db.commit()
+    return _fee_square_status(conn)
+
+
+@router.post("/square/preview")
+async def fee_square_preview(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Completed Square sales matching the club's fee-item keywords, each with
+    a suggested member match — nothing is written until /square/commit."""
+    season = await _season_or_404(db, club, season_id)
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Square from BetterMerch first")
+    if not conn.location_id:
+        raise HTTPException(status_code=400, detail="Pick a Square location from BetterMerch first")
+    if not conn.sync_fees:
+        raise HTTPException(status_code=400, detail="Turn on Square fee import below first")
+    try:
+        rows = await fee_square_service.fetch_candidates(db, club, season.id, conn)
+        conn.fees_last_sync_at = datetime.now(timezone.utc)
+        conn.fees_last_sync_status = "ok"
+        conn.fees_last_sync_error = None
+        await db.commit()
+    except square_client.SquareError as e:
+        conn.fees_last_sync_at = datetime.now(timezone.utc)
+        conn.fees_last_sync_status = "error"
+        conn.fees_last_sync_error = str(e)[:500]
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"rows": rows}
+
+
+class FeeSquareCommitItem(BaseModel):
+    external_ref: str
+    item_name: str
+    amount: float
+    occurred_at: Optional[str] = None
+    note: Optional[str] = None
+    member_season_id: str
+    kind: str = "match_day"
+
+
+class FeeSquareCommit(BaseModel):
+    items: List[FeeSquareCommitItem]
+
+
+@router.post("/square/commit")
+async def fee_square_commit(
+    data: FeeSquareCommit,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply reviewed Square sales as fee payments. Every item must already
+    carry the member the admin picked in the review UI — nothing here guesses.
+    Any row already resolved since preview was fetched (another tab, a double
+    click) is silently skipped rather than double-applied."""
+    if not data.items:
+        return {"created": 0, "skipped": 0}
+
+    ms_cache: dict = {}
+    for i, item in enumerate(data.items):
+        try:
+            ms_id = uuid.UUID(item.member_season_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail=f"Row {i}: invalid member_season_id")
+        if ms_id not in ms_cache:
+            ms = await db.get(FeeMemberSeason, ms_id)
+            if not ms or ms.organisation_id != club.id:
+                raise HTTPException(status_code=422, detail=f"Row {i}: member season not found")
+            ms_cache[ms_id] = ms
+        if item.kind not in PAYMENT_KINDS:
+            raise HTTPException(status_code=422, detail=f"Row {i}: kind must be one of {PAYMENT_KINDS}")
+        if item.amount <= 0:
+            raise HTTPException(status_code=422, detail=f"Row {i}: amount must be > 0")
+
+    created = 0
+    skipped = 0
+    for item in data.items:
+        existing = (await db.execute(
+            select(FeeSquareImportLog).where(
+                FeeSquareImportLog.organisation_id == club.id,
+                FeeSquareImportLog.external_ref == item.external_ref,
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            skipped += 1
+            continue
+        payment = FeePayment(
+            id=uuid.uuid4(),
+            member_season_id=uuid.UUID(item.member_season_id),
+            organisation_id=club.id,
+            amount=_money(item.amount),
+            paid_at=_parse_date(item.occurred_at),
+            kind=item.kind,
+            method="Square",
+            notes=item.note or item.item_name,
+            source="square",
+            external_ref=item.external_ref,
+            created_by_user_id=user.id,
+        )
+        db.add(payment)
+        await db.flush()
+        db.add(FeeSquareImportLog(
+            id=uuid.uuid4(), organisation_id=club.id, external_ref=item.external_ref,
+            status="applied", fee_payment_id=payment.id, item_name=item.item_name,
+            note=item.note, amount=_money(item.amount), occurred_at=_parse_date(item.occurred_at),
+            created_by_user_id=user.id,
+        ))
+        created += 1
+    await db.commit()
+    return {"created": created, "skipped": skipped}
+
+
+class FeeSquareDismiss(BaseModel):
+    external_ref: str
+    item_name: Optional[str] = None
+    note: Optional[str] = None
+    amount: Optional[float] = None
+    occurred_at: Optional[str] = None
+
+
+@router.post("/square/dismiss")
+async def fee_square_dismiss(
+    data: FeeSquareDismiss,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a Square sale as not a fee payment (e.g. a canteen item that
+    happened to match a keyword) so it stops showing up in the review queue."""
+    existing = (await db.execute(
+        select(FeeSquareImportLog).where(
+            FeeSquareImportLog.organisation_id == club.id,
+            FeeSquareImportLog.external_ref == data.external_ref,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        return {"ok": True, "already_resolved": True}
+    db.add(FeeSquareImportLog(
+        id=uuid.uuid4(), organisation_id=club.id, external_ref=data.external_ref,
+        status="dismissed", item_name=data.item_name, note=data.note,
+        amount=_money(data.amount) if data.amount is not None else None,
+        occurred_at=_parse_date(data.occurred_at), created_by_user_id=user.id,
+    ))
+    await db.commit()
+    return {"ok": True}

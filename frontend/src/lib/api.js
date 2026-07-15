@@ -340,6 +340,16 @@ export const api = {
     request('/club-admin/fees/payments/import/commit', {
       method: 'POST', body: JSON.stringify({ items }),
     }),
+  // Square import (reuses BetterMerch's Square connection)
+  feeSquareStatus: () => request('/club-admin/fees/square/status'),
+  feeSquareSettings: (data) =>
+    request('/club-admin/fees/square/settings', { method: 'POST', body: JSON.stringify(data) }),
+  feeSquarePreview: (seasonId) =>
+    request(`/club-admin/fees/square/preview?season_id=${seasonId}`, { method: 'POST' }),
+  feeSquareCommit: (items) =>
+    request('/club-admin/fees/square/commit', { method: 'POST', body: JSON.stringify({ items }) }),
+  feeSquareDismiss: (data) =>
+    request('/club-admin/fees/square/dismiss', { method: 'POST', body: JSON.stringify(data) }),
   // ─── BetterMerch (BetterAdmin module) — club stock register ─────────────────
   merchOverview: () => request('/club-admin/merch/overview'),
   merchAlerts: () => request('/club-admin/merch/alerts'),
