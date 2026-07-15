@@ -50,10 +50,10 @@ _BASE_STEPS = [
 _SYNC_STEPS = [
     {"key": "import_stats", "title": "Import historical stats (not covered by PlayHQ/Grassroots)",
      "route": "/admin/import", "module": None},
+    {"key": "merge_players", "title": "Merge any duplicate players", "route": "/admin/merge", "module": None},
+    {"key": "merge_grades", "title": "Merge any duplicate grades", "route": "/admin/grades", "module": None},
     {"key": "import_honours", "title": "Import historical honours & awards",
      "route": "/admin/awards", "module": None},
-    {"key": "merge_grades", "title": "Merge any duplicate grades", "route": "/admin/grades", "module": None},
-    {"key": "merge_players", "title": "Merge any duplicate players", "route": "/admin/merge", "module": None},
 ]
 
 
