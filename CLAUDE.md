@@ -1473,6 +1473,43 @@ hand-rolling day-count math.
   around $25,000 — a non-issue at these price points, just worth knowing if
   pricing ever changes materially.
 
+### Bundle discount is now config, not code (Jul 2026)
+
+`billing_pricing.BUNDLE_DISCOUNT` (module-count → whole-dollar discount) was
+a hardcoded constant; per direct instruction it's now editable from General
+Settings without a deploy, same pattern as every other super-admin-tunable
+number in this app.
+
+- **`platform_settings.get_bundle_discount_schedule(db)` /
+  `update_bundle_discount_schedule(db, schedule)`** — reads/writes a
+  `bundle_discount_schedule` key in the existing JSONB singleton (no
+  migration). Falls back to `billing_pricing.BUNDLE_DISCOUNT` (now just the
+  SEED DEFAULT) when unset. `update_...` **replaces the whole table** (not a
+  merge — the UI always sends every row) and validates every key/value is a
+  non-negative integer.
+- **`billing_pricing.py` stays a pure, DB-free module** — `bundle_discount()`
+  and `price_for()` both take an optional `schedule` override param instead
+  of reaching into the DB themselves, so they're still trivially unit-
+  testable with no session. Callers that have `db` (`routers/billing.py`'s
+  `/quote` and `/checkout-session`, which thread it through to
+  `stripe_client.create_checkout_session`) fetch the live schedule and pass
+  it down; `price_for_addon` is untouched (never discounted, so there's
+  nothing to override).
+- **Overflow beyond the highest configured row** falls back to that row's
+  discount (generalises the old hardcoded "cap at 4 modules" rule to
+  whatever's actually configured — so a future 5th/6th priced module needs
+  no code change here, just a new row filled in).
+- **Discount is clamped to the subtotal** in `price_for()` — a super-admin
+  typo in the (now-editable) schedule can't produce a negative checkout
+  total.
+- **UI**: `SuperClubs.jsx`'s General Settings modal, a "Bundle discount
+  schedule" section under Billing — 6 number inputs (module-count → $),
+  rows 5-6 pre-wired but inert today (only 4 priced bolt-on modules exist),
+  saved via the existing `PATCH /club-admin/super/general-settings`
+  (`GeneralSettingsUpdate.bundle_discount_schedule`, popped out and routed to
+  the dedicated setter rather than the generic `_INT_KEYS`/`_BOOL_KEYS`
+  `update_settings` path, since it's a nested object).
+
 ### Per-club override for testing (migration 151)
 
 `platform_settings.billing_checkout_enabled` is all-or-nothing across the

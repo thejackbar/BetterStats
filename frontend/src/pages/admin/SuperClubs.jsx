@@ -16,6 +16,17 @@ const isoToLocalInput = (iso) => (iso ? toLocalInput(new Date(iso)) : '')
 
 const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
 
+// Rows shown in the General Settings bundle-discount editor. Only 1-4 have a
+// live effect today (there are 4 priced bolt-on modules); 5/6 are pre-wired
+// so a future 5th/6th priced module needs no code change here, just a value
+// typed into an already-existing row.
+const BUNDLE_DISCOUNT_ROWS = [1, 2, 3, 4, 5, 6]
+const normalizeBundleSchedule = (raw) => {
+  const out = {}
+  for (const n of BUNDLE_DISCOUNT_ROWS) out[n] = Number(raw?.[n] ?? raw?.[String(n)] ?? 0)
+  return out
+}
+
 export default function SuperClubs() {
   const [clubs, setClubs] = useState([])
   const [showCreate, setShowCreate] = useState(false)
@@ -46,6 +57,7 @@ export default function SuperClubs() {
     default_trial_days: 14, direct_enquiry_hot_days: 30,
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
     trial_nudges_enabled: false, billing_checkout_enabled: false,
+    bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -77,6 +89,7 @@ export default function SuperClubs() {
         onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
         billing_checkout_enabled: !!s?.billing_checkout_enabled,
+        bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -94,6 +107,9 @@ export default function SuperClubs() {
         onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
         trial_nudges_enabled: !!settingsForm.trial_nudges_enabled,
         billing_checkout_enabled: !!settingsForm.billing_checkout_enabled,
+        bundle_discount_schedule: Object.fromEntries(
+          BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
+        ),
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -533,6 +549,36 @@ export default function SuperClubs() {
                     onChange={e => setSettingsForm(f => ({ ...f, billing_checkout_enabled: e.target.checked }))} />
                   Online billing checkout enabled
                 </label>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Bundle discount schedule
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Whole-dollar discount off the annual total, by how many priced modules a club
+                  selects in ONE initial subscribe (BetterSelect/BetterSocials/BetterAdmin/BetterIQ —
+                  BetterFantasyCricket is priced separately and never discounted). Never applies to a
+                  module added later to an already-live subscription. Rows 5-6 are here for a future
+                  5th/6th priced module — harmless to leave at $0 until then.
+                </p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  {BUNDLE_DISCOUNT_ROWS.map((n) => (
+                    <label key={n} className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                      <span className="w-20 shrink-0">{n} module{n === 1 ? '' : 's'}</span>
+                      <span className="text-pb-faintest">$</span>
+                      <input
+                        type="number" min="0"
+                        value={settingsForm.bundle_discount_schedule[n] ?? 0}
+                        onChange={e => setSettingsForm(f => ({
+                          ...f,
+                          bundle_discount_schedule: { ...f.bundle_discount_schedule, [n]: e.target.value },
+                        }))}
+                        className={INPUT_CLS}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
               </div>
 

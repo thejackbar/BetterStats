@@ -1562,6 +1562,7 @@ async def get_general_settings(
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
         "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
+        "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
     }
 
 
@@ -1572,6 +1573,10 @@ class GeneralSettingsUpdate(BaseModel):
     onboarding_wizard_enabled: Optional[bool] = None
     trial_nudges_enabled: Optional[bool] = None
     billing_checkout_enabled: Optional[bool] = None
+    # module-count (str or int, JSON-friendly either way) -> whole-dollar
+    # discount. See platform_settings.update_bundle_discount_schedule — this
+    # REPLACES the whole table, it's not a merge.
+    bundle_discount_schedule: Optional[dict] = None
 
 
 @router.patch("/super/general-settings")
@@ -1582,8 +1587,11 @@ async def patch_general_settings(
 ):
     from app.services import platform_settings as ps
     patch = body.model_dump(exclude_unset=True)
+    schedule = patch.pop("bundle_discount_schedule", None)
     try:
         await ps.update_settings(db, patch)
+        if schedule is not None:
+            await ps.update_bundle_discount_schedule(db, schedule)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return {
@@ -1593,6 +1601,7 @@ async def patch_general_settings(
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
         "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
+        "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
     }
 
 

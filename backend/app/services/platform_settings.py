@@ -280,6 +280,57 @@ async def require_billing_checkout_enabled(
         )
 
 
+# ─── Bundle discount schedule (module-count -> whole-dollar discount) ─────────
+# Was a hardcoded constant (billing_pricing.BUNDLE_DISCOUNT); moved here per
+# direct instruction so a super admin can change or extend it without a code
+# deploy. That constant is now only the SEED DEFAULT, used until a super admin
+# saves their own schedule from General Settings.
+
+async def get_bundle_discount_schedule(db: AsyncSession) -> dict[int, int]:
+    """The live bundle-discount table, module-count -> whole-dollar discount.
+    Falls back to billing_pricing.BUNDLE_DISCOUNT (the seed default) when
+    unset or malformed — imported lazily to dodge a services-importing-
+    services cycle at module load time."""
+    from app.services.billing_pricing import BUNDLE_DISCOUNT
+
+    settings = await get_settings(db)
+    raw = settings.get("bundle_discount_schedule")
+    if not isinstance(raw, dict) or not raw:
+        return dict(BUNDLE_DISCOUNT)
+    try:
+        return {int(k): int(v) for k, v in raw.items()}
+    except (TypeError, ValueError):
+        logger.warning("platform_settings: malformed bundle_discount_schedule, using seed default")
+        return dict(BUNDLE_DISCOUNT)
+
+
+async def update_bundle_discount_schedule(db: AsyncSession, schedule: dict) -> dict[int, int]:
+    """Replaces the whole schedule (not a merge — the UI always sends the full
+    table). Each key is a module count (>= 0), each value a non-negative
+    whole-dollar discount. Commits. Raises ValueError on a bad request."""
+    out: dict[str, int] = {}
+    for k, v in (schedule or {}).items():
+        try:
+            count = int(k)
+            amount = int(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid bundle discount entry: {k!r}={v!r}")
+        if count < 0:
+            raise ValueError(f"Module count must be >= 0, got {count}")
+        if amount < 0:
+            raise ValueError(f"Discount for {count} modules must be >= 0, got {amount}")
+        out[str(count)] = amount
+    s = await get_settings(db)
+    merged = dict(s)
+    merged["bundle_discount_schedule"] = out
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(merged)},
+    )
+    await db.commit()
+    return await get_bundle_discount_schedule(db)
+
+
 # ─── SES send rates ──────────────────────────────────────────────────────────
 
 def _as_int(value, fallback: int) -> int:

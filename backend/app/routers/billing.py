@@ -42,7 +42,7 @@ from stripe import error as stripe_error
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
 from app.routers.auth import get_current_user, get_current_club
-from app.services import billing_pricing, module_subscriptions, stripe_client
+from app.services import billing_pricing, module_subscriptions, platform_settings, stripe_client
 from app.services.platform_settings import require_billing_checkout_enabled
 
 router = APIRouter(prefix="/club-admin/billing", tags=["club-admin-billing"])
@@ -86,7 +86,8 @@ async def get_quote(
         except stripe_error.StripeError as e:
             raise HTTPException(status_code=502, detail=str(e) or "Could not price this change")
         return {"mode": "add_to_existing", **preview}
-    return {"mode": "new_subscription", **billing_pricing.price_for(keys)}
+    schedule = await platform_settings.get_bundle_discount_schedule(db)
+    return {"mode": "new_subscription", **billing_pricing.price_for(keys, schedule=schedule)}
 
 
 @router.post("/checkout-session", dependencies=[Depends(require_billing_checkout_enabled)])
@@ -143,12 +144,14 @@ async def create_checkout_session(
         await db.commit()
         return {"added": True, "modules": addon_keys}
 
+    schedule = await platform_settings.get_bundle_discount_schedule(db)
     try:
         session = await stripe_client.create_checkout_session(
             org_id=club.id,
             billing_keys=keys,
             customer_id=club.stripe_customer_id,
             customer_email=current_user.email,
+            discount_schedule=schedule,
         )
     except stripe_client.StripeNotConfigured:
         raise HTTPException(status_code=503, detail="Online billing isn't configured yet. Contact the BetterCricket team to subscribe.")

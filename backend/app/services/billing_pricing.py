@@ -29,8 +29,15 @@ PRICED_MODULE_KEYS = {m["key"] for m in PRICED_MODULES}
 # discount maths (mirrors FANTASY in pricing.js).
 FANTASY = {"key": "fantasy", "name": "BetterFantasyCricket", "price": 49}
 
-# Bundle discount in whole dollars, keyed on how many of the four PRICED_MODULES
+# Bundle discount in whole dollars, keyed on how many of the priced modules
 # are selected (not a percentage) — mirrors BUNDLE_DISCOUNT in pricing.js.
+# This is the SEED DEFAULT only — the live, super-admin-editable schedule
+# lives in platform_settings (see get_bundle_discount_schedule /
+# update_bundle_discount_schedule), so a discount change is a General
+# Settings save, never a code deploy. Every function below takes an optional
+# `schedule` override; callers with DB access (routers/billing.py,
+# stripe_client.py) fetch the live one and pass it through — this module
+# itself stays a pure, DB-free computation, easy to test in isolation.
 BUNDLE_DISCOUNT = {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}
 
 # Every module key the checkout-session endpoint accepts. Core is always
@@ -45,22 +52,39 @@ CHECKOUT_MODULE_NAMES = (
 )
 
 
-def bundle_discount(module_count: int) -> int:
-    return BUNDLE_DISCOUNT.get(module_count, BUNDLE_DISCOUNT[4] if module_count > 4 else 0)
+def bundle_discount(module_count: int, schedule: dict | None = None) -> int:
+    """`schedule` maps module-count -> whole-dollar discount (string or int
+    keys both accepted, since it round-trips through JSONB where object keys
+    are always strings). A count past the highest configured key gets that
+    highest key's discount (matches the old fixed "cap at 4 modules"
+    behaviour, generalised to however many rows are actually configured —
+    so adding a 5th/6th priced module later needs no code change here, just
+    a new row in General Settings)."""
+    table = {int(k): v for k, v in (schedule or BUNDLE_DISCOUNT).items()}
+    if module_count in table:
+        return table[module_count]
+    if not table:
+        return 0
+    return table[max(table)] if module_count > max(table) else 0
 
 
-def price_for(selected_keys) -> dict:
+def price_for(selected_keys, schedule: dict | None = None) -> dict:
     """Price a selection of billable module keys (besides Core, which is always
     included). Returns whole-AUD subtotal/discount/total plus a per-line-item
     breakdown, in the same shape the frontend's priceFor() returns — Fantasy, if
-    selected, is priced as its own line item outside the bundle discount."""
+    selected, is priced as its own line item outside the bundle discount.
+    `schedule` overrides the seed-default BUNDLE_DISCOUNT table (pass the live,
+    super-admin-configured one — see platform_settings.get_bundle_discount_schedule)."""
     keys = set(selected_keys or [])
     bundle_mods = [m for m in PRICED_MODULES if m["key"] in keys]
-    discount = bundle_discount(len(bundle_mods))
     line_items = [dict(CORE)] + [dict(m) for m in bundle_mods]
     if FANTASY["key"] in keys:
         line_items.append(dict(FANTASY))
     subtotal = sum(item["price"] for item in line_items)
+    # Clamped to the subtotal — a super-admin typo in the (now editable)
+    # discount schedule (an extra zero, say) must never produce a negative
+    # checkout total.
+    discount = min(bundle_discount(len(bundle_mods), schedule), subtotal)
     total = subtotal - discount
     return {
         "line_items": line_items,

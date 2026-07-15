@@ -51,13 +51,18 @@ def epoch_to_datetime(ts):
 
 
 async def create_checkout_session(*, org_id: str, billing_keys: list[str],
-                                   customer_id: str | None, customer_email: str | None):
+                                   customer_id: str | None, customer_email: str | None,
+                                   discount_schedule: dict | None = None):
     """A Stripe Checkout Session in subscription mode, priced from
     billing_pricing.price_for (dynamic price_data line items, so no Stripe
     Price objects need pre-creating in the dashboard for every module
     combination). The bundle discount, if any, is applied as a forever coupon
     created alongside the session so it recurs on every renewal, not just the
-    first invoice.
+    first invoice. ``discount_schedule`` is the LIVE, super-admin-configured
+    bundle-discount table (platform_settings.get_bundle_discount_schedule) —
+    the caller fetches it (this module has no DB access of its own) and
+    passes it straight through; omitted, price_for falls back to its
+    hardcoded seed default.
 
     org_id + the selected billing_keys are round-tripped through BOTH the
     session's own metadata/client_reference_id AND the subscription's metadata
@@ -65,7 +70,7 @@ async def create_checkout_session(*, org_id: str, billing_keys: list[str],
     event fired, never a second lookup against our own DB to know what was
     bought."""
     _require_configured()
-    quote = billing_pricing.price_for(billing_keys)
+    quote = billing_pricing.price_for(billing_keys, schedule=discount_schedule)
 
     line_items = [
         {
