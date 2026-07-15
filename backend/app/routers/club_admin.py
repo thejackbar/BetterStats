@@ -2161,6 +2161,99 @@ async def get_account_plan(
     return {"modules": modules, "is_primary_admin": is_primary_admin}
 
 
+@router.post("/modules/{module_key}/start-trial")
+async def start_own_module_trial(
+    module_key: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Self-service instant trial start from the club's own Dashboard/Account
+    page — same effect as a super admin approving a trial request
+    (start_module_trial below), but skips the queue entirely. Any club_admin
+    may start a trial for their own club, same authorization
+    create_module_request already grants a trial request (no primary-admin
+    gate — that only applies to a paid subscribe)."""
+    _validate_module(module_key)
+    m = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_super = bool(m and m.role == "super_admin")
+    if not is_super and not (m and m.club_id == club.id and m.role == "club_admin"):
+        raise HTTPException(status_code=403, detail="Only a club admin can start a trial")
+
+    from app.auth.modules import account_plan_status
+    row = next((r for r in account_plan_status(club) if r["module"] == module_key), None)
+    if row is None or not row["trial_eligible"]:
+        raise HTTPException(status_code=409, detail="This module isn't eligible for a trial")
+
+    from app.services import platform_settings as ps
+    days = await ps.get_default_trial_days(db)
+    mod_subs.start_trial_billing(club, module_key, days=days)
+    await db.commit()
+    await db.refresh(club, attribute_names=["module_subscriptions"])
+    # Same signal-strength reasoning as start_module_trial / create_module_request's
+    # trial branch — a trial actually starting always forces Hot(100)+Lead.
+    _push_club_to_twenty(club.id, force_hot=True)
+    return {"ok": True}
+
+
+class ModuleCancelIn(BaseModel):
+    confirm: str = ""
+
+
+@router.post("/modules/{module_key}/cancel")
+async def cancel_own_module(
+    module_key: str,
+    body: ModuleCancelIn,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Self-service instant cancellation from the club's own Account page.
+    Unlike starting a trial, only the club's primary admin may cancel a paid
+    subscription (mirrors the primary-admin gate on requesting one). Cancelling
+    Core (BetterStats) cancels every currently-subscribed module for the club,
+    not just Core, since Core is the base every other module depends on — the
+    UI's own confirmation copy says as much. Requires the literal string
+    "confirm" (case-insensitive), checked server-side too since this is an
+    instant, not-reversible-from-the-club-side action."""
+    _validate_module(module_key)
+    if body.confirm.strip().lower() != "confirm":
+        raise HTTPException(status_code=422, detail='Type "confirm" to cancel')
+
+    m = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_super = bool(m and m.role == "super_admin")
+    if not is_super:
+        if not (m and m.club_id == club.id and m.role == "club_admin" and m.is_primary_admin):
+            raise HTTPException(status_code=403, detail="Only the club's primary admin can cancel a subscription")
+
+    from app.auth.modules import account_plan_status, MODULE_CORE
+    row = next((r for r in account_plan_status(club) if r["module"] == module_key), None)
+    if row is None or row["status"] != "subscribed":
+        raise HTTPException(status_code=409, detail="This module isn't currently subscribed")
+
+    now = _datetime.now(_timezone.utc)
+    targets = [module_key]
+    if module_key == MODULE_CORE:
+        targets = [r["module"] for r in account_plan_status(club) if r["status"] == "subscribed"]
+    for key in targets:
+        mod_subs.remove_billing(club, key, now=now)
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="self_service_cancel_module", target_type="organisation", target_id=str(club.id),
+        details={"module_key": module_key, "cancelled": targets},
+    )
+    await db.commit()
+    await db.refresh(club, attribute_names=["module_subscriptions"])
+    _push_club_to_twenty(club.id)
+    return {"ok": True, "cancelled": targets}
+
+
 # ─── Module action requests — the trial/subscription queue ────────────────────
 
 _REQUEST_KINDS = ("trial", "subscribe", "cancel")

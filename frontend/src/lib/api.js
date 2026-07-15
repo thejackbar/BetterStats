@@ -949,6 +949,12 @@ export const api = {
   // Account / plan status page (Phase 19) — per-module Subscribed / In Trial /
   // Trial Expired / Never Trialed status plus trial/subscribe eligibility.
   accountGetPlan: () => request('/club-admin/account/plan'),
+  // Self-service instant trial start / cancel (Dashboard "START TRIAL" and the
+  // Account page's per-row actions) — bypass the module-requests queue entirely.
+  startModuleTrial: (moduleKey) =>
+    request(`/club-admin/modules/${moduleKey}/start-trial`, { method: 'POST' }),
+  cancelModule: (moduleKey, confirmText) =>
+    request(`/club-admin/modules/${moduleKey}/cancel`, { method: 'POST', body: JSON.stringify({ confirm: confirmText }) }),
   // Module action requests — the trial/subscription queue (migration 119).
   requestModule: (moduleKey, kind = 'trial', note) =>
     request('/club-admin/module-requests', { method: 'POST', body: JSON.stringify({ module_key: moduleKey, kind, note }) }),
