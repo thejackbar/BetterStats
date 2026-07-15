@@ -285,20 +285,25 @@ export default function AdminDashboard() {
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
           {dashboardTiles().map(tile => {
-            // tile.key is the billable module key (BetterAdmin = 'admin'), so a
-            // request for the group is one request, not one per member.
-            const pending = myRequests.find(r => r.status === 'outstanding' && r.module_key === tile.key)
+            // The billable module key (BetterAdmin = 'admin', BetterSocials =
+            // 'socials') doesn't always equal the tile's own key — the
+            // BetterSocials group tile is keyed 'bettersocials' (its umbrella
+            // route/UI identity) but bills as 'socials'. Fall back to tile.key
+            // for ungrouped tiles, which are keyed as their billing key already.
+            const billingKey = tile.billingKey || tile.key
+            // A request for the group is one request, not one per member.
+            const pending = myRequests.find(r => r.status === 'outstanding' && r.module_key === billingKey)
             return (
               <ModuleTile
                 key={tile.key}
                 mod={tile}
                 entitled={tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key))}
-                planRow={planByModule[tile.key]}
+                planRow={planByModule[billingKey]}
                 pendingKind={pending?.kind}
                 canSubscribe={!!user?.is_primary_admin}
-                requesting={requesting === tile.key}
-                error={tileErrors[tile.key]}
-                onStartTrial={() => startTrial(tile.key)}
+                requesting={requesting === billingKey}
+                error={tileErrors[billingKey]}
+                onStartTrial={() => startTrial(billingKey)}
               />
             )
           })}
