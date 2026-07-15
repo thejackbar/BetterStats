@@ -1558,6 +1558,7 @@ async def get_general_settings(
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
+        "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
     }
 
 
@@ -1567,6 +1568,7 @@ class GeneralSettingsUpdate(BaseModel):
     self_serve_registration_enabled: Optional[bool] = None
     onboarding_wizard_enabled: Optional[bool] = None
     trial_nudges_enabled: Optional[bool] = None
+    billing_checkout_enabled: Optional[bool] = None
 
 
 @router.patch("/super/general-settings")
@@ -1587,6 +1589,7 @@ async def patch_general_settings(
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
+        "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
     }
 
 
@@ -2136,8 +2139,12 @@ async def get_account_plan(
     Super Admin module editor, over the same org_module_subscriptions data.
     ``is_primary_admin`` lets the frontend explain why Subscribe is disabled
     for a non-primary admin (create_module_request enforces the same rule
-    server-side regardless — this is purely so the button doesn't look broken)."""
+    server-side regardless — this is purely so the button doesn't look broken).
+    ``billing_checkout_enabled`` gates the in-progress invoicing / Stripe
+    checkout build — see platform_settings.get_billing_checkout_enabled and
+    the comment on submitSubscribe in AdminAccount.jsx."""
     from app.auth.modules import account_plan_status
+    from app.services import platform_settings as ps
 
     m = (await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
@@ -2158,7 +2165,11 @@ async def get_account_plan(
     for row in modules:
         row["pending_requests"] = sorted(pending_by_module.get(row["module"], []))
 
-    return {"modules": modules, "is_primary_admin": is_primary_admin}
+    return {
+        "modules": modules,
+        "is_primary_admin": is_primary_admin,
+        "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
+    }
 
 
 @router.post("/modules/{module_key}/start-trial")

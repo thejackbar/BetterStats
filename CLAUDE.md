@@ -1243,6 +1243,40 @@ onboarding wizard, not the existing per-club rebuild button), not a regression.
   not trigger this (rebuild is the "real completion signal" the shelved plan
   called for; a routine weekly sync isn't).
 
+## Billing checkout — feature-flagged while it's built (v8.65.0, Jul 2026)
+
+The Account page's SUBSCRIBE button (`AdminAccount.jsx`, Phase 19) has always
+been a deliberate stub ("Online subscribing isn't connected yet…"). Work is
+now starting on the real thing — preparing bills/invoices, then a Stripe
+checkout link — and per direct instruction a Primary Admin must **not** be
+able to click through any of it until the team is satisfied it works, even as
+pieces of the real flow land on `main`.
+
+- **`platform_settings.billing_checkout_enabled`** (new boolean key in the
+  existing `_BOOL_KEYS` allowlist, same JSONB singleton as
+  `self_serve_registration_enabled`/`onboarding_wizard_enabled`/
+  `trial_nudges_enabled` — no migration needed). Off by default.
+  `get_billing_checkout_enabled(db)` reads it; **`require_billing_checkout_enabled`**
+  is a ready-to-use FastAPI dependency (`Depends(require_billing_checkout_enabled)`)
+  that 403s a route while the flag is off — **every new invoicing/Stripe-checkout
+  endpoint must depend on it as it's built**, since the frontend gate is UX
+  only and can't be trusted as the real block.
+- **Super admin control**: `GET`/`PATCH /club-admin/super/general-settings`
+  carries `billing_checkout_enabled` alongside the other flags; a "Billing (in
+  progress)" toggle in `SuperClubs.jsx`'s General Settings modal.
+- **Frontend**: `GET /club-admin/account/plan` now returns
+  `billing_checkout_enabled` alongside `modules`/`is_primary_admin`.
+  `AdminAccount.jsx`'s `submitSubscribe` is where the real checkout call will
+  eventually go — for now it always shows the stub notice, but the flag and
+  its comment are already in place so the real implementation branches on
+  `plan.billing_checkout_enabled` from the start instead of needing a
+  follow-up safety retrofit.
+- **Turning it on**: only once the invoicing/checkout build is tested and
+  ready to go live — flip `billing_checkout_enabled` on from General
+  Settings. There is no staging environment, so (same as the other
+  self-serve-onboarding flags) this switch is the only thing standing between
+  "merged" and "a real club paying through it".
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

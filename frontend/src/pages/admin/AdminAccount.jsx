@@ -12,6 +12,14 @@ import { moduleBrand } from '../../lib/moduleBrand'
 // online subscribing is landing in its own phase (Stripe checkout), so this
 // button shouldn't quietly go through the human-actioned request queue in
 // the meantime.
+//
+// The invoicing / Stripe checkout flow is being built behind
+// plan.billing_checkout_enabled (super admin General Settings, off by
+// default — see platform_settings.get_billing_checkout_enabled). While it's
+// off, submitSubscribe always shows the stub notice below, regardless of how
+// much of the real flow has landed here. Any real checkout call this grows
+// into must also depend on require_billing_checkout_enabled server-side —
+// this frontend check is UX only, not the actual gate.
 const STATUS_LABEL = {
   subscribed: 'Subscribed',
   trial: 'In Trial',
@@ -119,7 +127,9 @@ export default function AdminAccount() {
     }
   }
 
-  // Stripe checkout isn't wired up yet — this is a deliberate stub, not a
+  // Stripe checkout isn't wired up yet — and even once it is, it stays behind
+  // plan.billing_checkout_enabled until a super admin switches it on (General
+  // Settings), so this shows the stub notice either way for now. Not a
   // queued request (per direct instruction: online subscribing is landing in
   // its own phase, so this button shouldn't quietly go through the human-
   // actioned module_action_requests queue in the meantime).

@@ -9,11 +9,13 @@ from __future__ import annotations
 import json
 import logging
 
+from fastapi import Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import DEFAULT_TRIAL_DAYS
 from app.config.settings import settings as app_settings
+from app.models.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,16 @@ _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
 # docs/self-serve-trial-onboarding-plan.md) is built behind one of these so it stays
 # inert in production until explicitly enabled — there is no staging environment, so
 # this is the only safety net between "merged" and "live".
-_BOOL_KEYS = {"self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled"}
+#
+# billing_checkout_enabled gates the in-progress invoicing / Stripe checkout build
+# (Account page SUBSCRIBE flow): off keeps a Primary Admin on the existing "not
+# connected yet" stub notice no matter how much of the real flow has been merged,
+# so half-built billing code can land on main without ever being reachable by a
+# real club until a super admin deliberately switches it on for testing/launch.
+_BOOL_KEYS = {
+    "self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled",
+    "billing_checkout_enabled",
+}
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
 # CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
@@ -224,6 +235,29 @@ async def get_trial_nudges_enabled(db: AsyncSession) -> bool:
     """Whether the daily trial-lifecycle nudge scan (Phase 16) sends real
     outbound email. Off by default — see app/services/trial_lifecycle.py."""
     return await get_feature_flag(db, "trial_nudges_enabled")
+
+
+async def get_billing_checkout_enabled(db: AsyncSession) -> bool:
+    """Whether a Primary Admin can proceed past the Account page's SUBSCRIBE
+    button into the real invoicing / Stripe checkout flow. Off by default —
+    every new piece of that flow (backend and frontend) must check this before
+    doing anything a real club could reach, so it stays inert until a super
+    admin explicitly switches it on from General Settings."""
+    return await get_feature_flag(db, "billing_checkout_enabled")
+
+
+async def require_billing_checkout_enabled(db: AsyncSession = Depends(get_db)) -> None:
+    """FastAPI dependency: 403s a route while the billing/checkout build is
+    flagged off. Add ``Depends(require_billing_checkout_enabled)`` to every
+    invoicing / Stripe-checkout route as it's built — the frontend gate on
+    the Account page is UX only, this is the real block, so a direct API call
+    (or a half-wired frontend) can't reach real payment processing before a
+    super admin has switched the flag on."""
+    if not await get_billing_checkout_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Online billing isn't switched on for your club yet. Contact the BetterCricket team to subscribe.",
+        )
 
 
 # ─── SES send rates ──────────────────────────────────────────────────────────

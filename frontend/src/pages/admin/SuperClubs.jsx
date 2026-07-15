@@ -44,7 +44,7 @@ export default function SuperClubs() {
   const [settingsForm, setSettingsForm] = useState({
     default_trial_days: 14, direct_enquiry_hot_days: 30,
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
-    trial_nudges_enabled: false,
+    trial_nudges_enabled: false, billing_checkout_enabled: false,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -75,6 +75,7 @@ export default function SuperClubs() {
         self_serve_registration_enabled: !!s?.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
+        billing_checkout_enabled: !!s?.billing_checkout_enabled,
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -91,6 +92,7 @@ export default function SuperClubs() {
         self_serve_registration_enabled: !!settingsForm.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
         trial_nudges_enabled: !!settingsForm.trial_nudges_enabled,
+        billing_checkout_enabled: !!settingsForm.billing_checkout_enabled,
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -504,6 +506,23 @@ export default function SuperClubs() {
                   module trial starts, is about to end, has ended, or converts, plus onboarding
                   nudges (no historical data imported, a trialled module never opened).
                 </p>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Billing (in progress)
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Off keeps every club's Account page SUBSCRIBE button on the "not
+                  connected yet" stub, no matter how much of the invoicing / Stripe
+                  checkout build has landed. Only switch this on once that flow has
+                  been tested and is ready for a real Primary Admin to pay through it.
+                </p>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.billing_checkout_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, billing_checkout_enabled: e.target.checked }))} />
+                  Online billing checkout enabled
+                </label>
               </div>
 
               <div className="flex gap-2">
