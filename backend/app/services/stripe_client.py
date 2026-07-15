@@ -99,6 +99,14 @@ async def create_checkout_session(*, org_id: str, billing_keys: list[str],
             name=f"Bundle discount ({quote['module_count']} modules)",
         )
         params["discounts"] = [{"coupon": coupon["id"]}]
+    else:
+        # Stripe rejects a session that sets BOTH discounts and
+        # allow_promotion_codes, so only offer the customer-enterable
+        # promotion-code field when our own bundle discount isn't already
+        # applying — real promotional codes are created/managed directly in
+        # the Stripe Dashboard (Product catalogue → Coupons), no admin UI of
+        # our own needed for that.
+        params["allow_promotion_codes"] = True
 
     if customer_id:
         params["customer"] = customer_id

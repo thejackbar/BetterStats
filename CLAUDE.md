@@ -1443,6 +1443,36 @@ hand-rolling day-count math.
   on this invoice" from the full held-module set would have shown a partial
   invoice as if it were a full one.
 
+### Promotion codes + other payment methods (Jul 2026)
+
+- **Promotion codes** — `create_checkout_session` sets `allow_promotion_codes:
+  true` (shows a customer-facing "Add promotion code" field on Stripe's own
+  checkout page) whenever the bundle discount ISN'T already applying.
+  **Never set both** — Stripe rejects a session with `discounts` AND
+  `allow_promotion_codes` set together (`amount_off/percent_off Coupons` and
+  customer-enterable **Promotion Codes** are created/managed entirely in the
+  Stripe Dashboard, Product catalogue → Coupons — no admin UI of ours
+  needed).
+- **Apple Pay / Google Pay already work with zero setup** — confirmed live
+  (a real Apple Pay button appeared on a test checkout without any
+  `payment_method_types` configuration). Neither `create_checkout_session`
+  nor anything else in this codebase sets `payment_method_types` explicitly,
+  so every session already uses Stripe's **dynamic payment methods**: it
+  shows whatever's enabled in Dashboard → Settings → Payment methods,
+  automatically, no code change ever needed to add a new one.
+- **AU BECS Direct Debit and PayTo are both Stripe-supported for AU
+  accounts** — same story, a Dashboard toggle away, no code change. Two
+  things worth knowing before switching either on: BECS/PayTo both take
+  days (BECS) or up to ~60 seconds after bank-app mandate authorization
+  (PayTo) to confirm, vs a card's instant response — our webhook-driven
+  entitlement grant already handles that fine (a club just sees a shorter
+  "processing" window before Subscribed lands). PayTo specifically performs
+  best under $1,000 AUD (BetterCricket's most expensive bundle is $998, a
+  good fit) but has "relatively low" business-bank-account coverage
+  (consumer accounts are its stronger suit) and bank-side mandate caps
+  around $25,000 — a non-issue at these price points, just worth knowing if
+  pricing ever changes materially.
+
 ### Per-club override for testing (migration 151)
 
 `platform_settings.billing_checkout_enabled` is all-or-nothing across the
