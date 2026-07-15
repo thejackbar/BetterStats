@@ -260,6 +260,13 @@ class Organisation(Base):
     # one Stripe subscription per module.
     stripe_customer_id = Column(Text, nullable=True)
     stripe_subscription_id = Column(Text, nullable=True)
+    # Per-club override of platform_settings.billing_checkout_enabled (migration
+    # 151) — lets a super admin let ONE club's Primary Admin through the real
+    # Stripe Checkout flow (for testing) while the platform default stays off
+    # for everyone else. NULL = follow the platform default; True/False force
+    # it either way for this club regardless of the platform default. See
+    # services/platform_settings.billing_checkout_enabled_for_org.
+    billing_checkout_override = Column(Boolean, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only

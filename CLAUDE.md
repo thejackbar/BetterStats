@@ -1364,6 +1364,33 @@ Stripe keys are configured.
   handling — both natural follow-ups once the base flow is verified end to
   end with real keys.
 
+### Per-club override for testing (migration 151)
+
+`platform_settings.billing_checkout_enabled` is all-or-nothing across the
+whole platform — no way to let one club's Primary Admin through the real
+Stripe flow while everyone else stays on the stub. `organisations.
+billing_checkout_override` (nullable boolean) sits on top of it: **NULL**
+follows the platform default (the normal case), **true** force-enables
+checkout for that one club regardless of the platform default, **false**
+force-disables it even once the platform default is switched on. Resolved by
+`platform_settings.billing_checkout_enabled_for_org(db, org)` — the function
+`require_billing_checkout_enabled` and `GET /club-admin/account/plan` both now
+call, in place of the old platform-default-only `get_billing_checkout_enabled`
+(that raw getter still exists, for the General Settings page itself and as
+the fallback `billing_checkout_enabled_for_org` reads). `require_billing_
+checkout_enabled` now depends on `get_current_club` as well as `get_db` so it
+can resolve the caller's own club's override.
+
+Super admin control lives on the **club**, not General Settings — a "Stripe
+checkout (this club)" select (Platform default / Force ON / Force OFF) in
+each club's edit panel in `SuperClubs.jsx`, saved via the existing `PATCH
+/club-admin/super/clubs/{id}` (`ClubUpdate.billing_checkout_override`, a
+plain column so the generic `setattr` loop in `patch_club` handles it with no
+special-casing). Typical use: flip one real or test club to Force ON, run a
+live checkout end to end, then flip the platform default on for everyone once
+satisfied (the per-club overrides can stay — they only matter when the
+platform default is off, or when someone still needs a specific club blocked).
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

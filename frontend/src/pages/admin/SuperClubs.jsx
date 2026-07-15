@@ -27,6 +27,7 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    billing_checkout_override: '',
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
@@ -203,6 +204,10 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
+      billing_checkout_override:
+        club.billing_checkout_override === true ? 'true'
+        : club.billing_checkout_override === false ? 'false'
+        : '',
       comms_tier: club.comms_tier || 'sandbox',
       comms_sandbox_cap: club.comms_sandbox_cap ?? '',
       comms_production_cap: club.comms_production_cap ?? '',
@@ -320,6 +325,10 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
+        billing_checkout_override:
+          editForm.billing_checkout_override === 'true' ? true
+          : editForm.billing_checkout_override === 'false' ? false
+          : null,
         comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
         comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
         comms_monthly_cap: editForm.comms_monthly_cap === '' ? null : Number(editForm.comms_monthly_cap),
@@ -905,6 +914,20 @@ export default function SuperClubs() {
                       <input type="date" value={editForm.renewal_date}
                         onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
                         className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Stripe checkout (this club)</label>
+                      <select value={editForm.billing_checkout_override}
+                        onChange={e => setEditForm(f => ({ ...f, billing_checkout_override: e.target.value }))}
+                        className={INPUT_CLS}>
+                        <option value="">Platform default</option>
+                        <option value="true">Force ON — let this club through (testing)</option>
+                        <option value="false">Force OFF — block even if the platform default is on</option>
+                      </select>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                        Overrides General Settings → Billing for this one club — lets you test the
+                        real Stripe flow on a single club before switching it on for everyone.
+                      </p>
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">BetterComms sending tier</label>

@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import DEFAULT_TRIAL_DAYS
 from app.config.settings import settings as app_settings
-from app.models.db import get_db
+from app.models.db import Organisation, get_db
+from app.routers.auth import get_current_club
 
 logger = logging.getLogger(__name__)
 
@@ -238,22 +239,41 @@ async def get_trial_nudges_enabled(db: AsyncSession) -> bool:
 
 
 async def get_billing_checkout_enabled(db: AsyncSession) -> bool:
-    """Whether a Primary Admin can proceed past the Account page's SUBSCRIBE
-    button into the real invoicing / Stripe checkout flow. Off by default —
-    every new piece of that flow (backend and frontend) must check this before
-    doing anything a real club could reach, so it stays inert until a super
-    admin explicitly switches it on from General Settings."""
+    """The PLATFORM DEFAULT for whether a Primary Admin can proceed past the
+    Account page's SUBSCRIBE button into the real invoicing / Stripe checkout
+    flow. Off by default. A club can override this individually — see
+    billing_checkout_enabled_for_org, which is what routes should actually
+    check; this raw platform default is mainly for the General Settings page
+    itself and as the fallback that function reads."""
     return await get_feature_flag(db, "billing_checkout_enabled")
 
 
-async def require_billing_checkout_enabled(db: AsyncSession = Depends(get_db)) -> None:
-    """FastAPI dependency: 403s a route while the billing/checkout build is
-    flagged off. Add ``Depends(require_billing_checkout_enabled)`` to every
-    invoicing / Stripe-checkout route as it's built — the frontend gate on
-    the Account page is UX only, this is the real block, so a direct API call
-    (or a half-wired frontend) can't reach real payment processing before a
-    super admin has switched the flag on."""
-    if not await get_billing_checkout_enabled(db):
+async def billing_checkout_enabled_for_org(db: AsyncSession, org: Organisation) -> bool:
+    """The EFFECTIVE billing-checkout switch for one club: its own
+    ``organisations.billing_checkout_override`` wins when set (True forces it
+    on for this club even while the platform default is off — e.g. a super
+    admin testing the real Stripe flow against one club before going live;
+    False forces it off even once the platform default is on), else falls
+    back to the platform default (get_billing_checkout_enabled)."""
+    override = getattr(org, "billing_checkout_override", None)
+    if override is not None:
+        return bool(override)
+    return await get_billing_checkout_enabled(db)
+
+
+async def require_billing_checkout_enabled(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+) -> None:
+    """FastAPI dependency: 403s a route while billing/checkout is switched off
+    for the CALLER'S CLUB specifically (platform default, unless that club has
+    its own override — see billing_checkout_enabled_for_org). Add
+    ``Depends(require_billing_checkout_enabled)`` to every invoicing /
+    Stripe-checkout route as it's built — the frontend gate on the Account
+    page is UX only, this is the real block, so a direct API call (or a
+    half-wired frontend) can't reach real payment processing before it's
+    switched on for that club."""
+    if not await billing_checkout_enabled_for_org(db, club):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Online billing isn't switched on for your club yet. Contact the BetterCricket team to subscribe.",

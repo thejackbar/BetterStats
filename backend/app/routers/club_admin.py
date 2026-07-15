@@ -1520,6 +1520,9 @@ def _club_payload(org) -> dict:
         "subscription_status": org.subscription_status,
         "renewal_date": org.renewal_date.isoformat() if org.renewal_date else None,
         "billing_cycle": org.billing_cycle,
+        # Per-club override of platform_settings.billing_checkout_enabled
+        # (migration 151) — NULL = follow the platform default.
+        "billing_checkout_override": org.billing_checkout_override,
         "default_trial_days": org_default_trial_days(org),
         "comms_tier": getattr(org, "comms_tier", None) or "sandbox",
         "comms_sandbox_cap": getattr(org, "comms_sandbox_cap", None),
@@ -1656,6 +1659,12 @@ class ClubUpdate(BaseModel):
     subscription_status: Optional[str] = None
     renewal_date: Optional[_date] = None
     billing_cycle: Optional[str] = None
+    # Per-club override of platform_settings.billing_checkout_enabled
+    # (migration 151). None/omitted = leave as-is; explicit null in the
+    # request body clears it back to "follow the platform default" (see
+    # patch_club below — Pydantic's exclude_unset distinguishes "not sent"
+    # from "sent as null").
+    billing_checkout_override: Optional[bool] = None
     # Club General Settings — the configurable default trial length (days).
     default_trial_days: Optional[int] = None
     # BetterComms sending tier + optional per-club daily-cap overrides per tier.
@@ -2141,8 +2150,9 @@ async def get_account_plan(
     for a non-primary admin (create_module_request enforces the same rule
     server-side regardless — this is purely so the button doesn't look broken).
     ``billing_checkout_enabled`` gates the in-progress invoicing / Stripe
-    checkout build — see platform_settings.get_billing_checkout_enabled and
-    the comment on submitSubscribe in AdminAccount.jsx."""
+    checkout build — see platform_settings.billing_checkout_enabled_for_org
+    (the platform default, unless this specific club has its own override)
+    and the comment on submitSubscribe in AdminAccount.jsx."""
     from app.auth.modules import account_plan_status
     from app.services import platform_settings as ps
 
@@ -2168,7 +2178,7 @@ async def get_account_plan(
     return {
         "modules": modules,
         "is_primary_admin": is_primary_admin,
-        "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
+        "billing_checkout_enabled": await ps.billing_checkout_enabled_for_org(db, club),
     }
 
 

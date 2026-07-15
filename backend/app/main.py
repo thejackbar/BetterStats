@@ -2497,6 +2497,11 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_billing_invoices_org "
             "ON billing_invoices(organisation_id, created_at DESC)"
         ))
+        # Per-club override of billing_checkout_enabled (migration 151) — see
+        # services/platform_settings.billing_checkout_enabled_for_org.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS billing_checkout_override BOOLEAN"
+        ))
         # CREATE OR REPLACE VIEW only allows appending new columns at the END
         # of the SELECT list — inserting one in the middle shifts every later
         # column's position, which Postgres treats as renaming that column
