@@ -51,13 +51,15 @@ export default function AdminAccount() {
   const rows = plan?.modules || []
   const selectedRows = rows.filter((r) => selected.has(r.module))
 
-  // Only a Trial-status row can be selected (for the bulk Subscribe request
-  // below) — starting a trial and cancelling are both instant per-row buttons
-  // now, no bulk selection needed for those. A non-primary admin can't select
-  // a trial row at all (only the primary may request a paid subscription,
-  // same rule the backend enforces regardless) — they get pointed at who can.
+  // A Trial-status row, or a Never Trialed row, can be selected for the bulk
+  // Subscribe request below — Never Trialed is included so a club can go
+  // straight to subscribing without running a trial first. Starting a trial
+  // and cancelling are both instant per-row buttons now, no bulk selection
+  // needed for those. A non-primary admin can't select a row at all (only the
+  // primary may request a paid subscription, same rule the backend enforces
+  // regardless) — they get pointed at who can.
   const toggle = (row) => {
-    if (row.status !== 'trial') return
+    if (row.status !== 'trial' && row.status !== 'never_trialed') return
     if (!plan?.is_primary_admin) {
       setBlockedMsg(
         `Only your club's Primary Admin User can subscribe to modules. Please contact ${primaryAdminName || "your club's primary admin"}.`
@@ -151,7 +153,7 @@ export default function AdminAccount() {
               {rows.map((row) => {
                 const brand = moduleBrand(row.module)
                 const pending = row.pending_requests.length > 0
-                const isTrialRow = row.status === 'trial'
+                const showCheckbox = row.status === 'trial' || row.status === 'never_trialed'
                 const showCancel = row.status === 'subscribed' && plan.is_primary_admin
                 const showStartTrial = row.status === 'never_trialed' && row.trial_eligible
                 const cancelling = cancelConfirm?.module === row.module
@@ -159,7 +161,7 @@ export default function AdminAccount() {
                 return (
                   <div key={row.module} className="pb-card p-4">
                     <div className="flex items-center gap-4">
-                      {isTrialRow ? (
+                      {showCheckbox ? (
                         <input
                           type="checkbox"
                           checked={selected.has(row.module)}
