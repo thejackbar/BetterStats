@@ -40,7 +40,7 @@ router = APIRouter(
 # not a new implementation of any of them.
 _BASE_STEPS = [
     {"key": "branding", "title": "Set your club colours & logo", "route": "/admin/settings", "module": None},
-    {"key": "invite_admin", "title": "Invite another admin", "route": "/admin/users", "module": None},
+    {"key": "invite_admin", "title": "Invite other Club Admin users", "route": "/admin/users", "module": None},
     {"key": "explore_select", "title": "Explore BetterSelect", "route": "/admin/betterselect", "module": "select"},
     {"key": "explore_socials", "title": "Explore BetterSocials", "route": "/admin/bettersocials", "module": "socials"},
     {"key": "explore_admin", "title": "Explore BetterAdmin", "route": "/admin/betteradmin", "module": "admin"},
