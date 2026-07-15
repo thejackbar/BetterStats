@@ -240,11 +240,25 @@ async def preview_add_modules(db: AsyncSession, subscription_id: str, billing_ke
     subscription — the EXACT prorated amount Stripe would charge today, not
     an approximation we compute from day-counts ourselves. No bundle discount
     (see billing_pricing.price_for_addon — that only applies to the initial
-    all-at-once subscribe)."""
+    all-at-once subscribe): `discounts=""` explicitly excludes ANY discount
+    inherited from the subscription, because a `duration=once` bundle coupon
+    can still be sitting on the subscription (not yet consumed by a regular
+    invoice) and would otherwise silently apply here too — the SDK's own
+    param typing requires the literal empty string; an empty list is a no-op
+    and still inherits it. add_modules_to_subscription mirrors this by
+    deleting the discount outright before the real charge.
+
+    Each returned line item carries the module's full annual price alongside
+    the prorated amount (so the frontend can show full price → prorata
+    deduction → charged-today, per module) — matched to billing_keys by
+    position, since price_for_addon/_addon_price_data_items build both the
+    Stripe items and this quote's line_items from the same PRICED_MODULES/
+    FANTASY order."""
     _require_configured()
-    items = await _addon_price_data_items(db, billing_keys)
-    if not items:
+    quote = billing_pricing.price_for_addon(billing_keys)
+    if not quote["line_items"]:
         return {"line_items": [], "total": 0, "currency": settings.stripe_currency}
+    items = await _addon_price_data_items(db, billing_keys)
     preview = await stripe.Invoice.create_preview_async(
         subscription=subscription_id,
         subscription_details={"items": items, "proration_behavior": "always_invoice"},
@@ -253,13 +267,22 @@ async def preview_add_modules(db: AsyncSession, subscription_id: str, billing_ke
         # automatic tax was wired up — add_modules_to_subscription below
         # re-asserts it on the subscription itself for the same reason.
         automatic_tax={"enabled": True},
+        discounts="",
     )
-    lines = [
-        {"name": ln.get("description") or "", "amount": (ln.get("amount") or 0) / 100}
-        for ln in (preview.get("lines") or {}).get("data", [])
-    ]
+    raw_lines = (preview.get("lines") or {}).get("data", [])
+    line_items = []
+    for i, mod in enumerate(quote["line_items"]):
+        prorated = (raw_lines[i].get("amount") or 0) / 100 if i < len(raw_lines) else 0.0
+        full_price = mod["price"]
+        line_items.append({
+            "key": mod["key"],
+            "name": mod["name"],
+            "full_price": full_price,
+            "deduction": round(full_price - prorated, 2),
+            "amount": prorated,
+        })
     return {
-        "line_items": lines,
+        "line_items": line_items,
         "total": (preview.get("total") or 0) / 100,
         "currency": preview.get("currency") or settings.stripe_currency,
     }
@@ -276,6 +299,19 @@ async def add_modules_to_subscription(db: AsyncSession, subscription_id: str,
     including the newly added module. Returns the updated Subscription
     (current_period_end drives the renewal_date the caller grants with)."""
     _require_configured()
+    try:
+        # Mirrors preview_add_modules's discounts="" — a duration=once bundle
+        # coupon can still be attached to the subscription if it hasn't yet
+        # been consumed by a regular invoice. Per direct instruction, a
+        # module added after the initial subscribe never gets the bundle
+        # discount, so it's stripped outright before the proration invoice
+        # below is generated (proration_behavior=always_invoice would
+        # otherwise apply any discount still on the subscription to it).
+        # No-op (raises) when there's nothing to remove — that's the
+        # desired end state either way, so the error is swallowed.
+        await stripe.Subscription.delete_discount_async(subscription_id)
+    except stripe.error.StripeError:
+        pass
     items = await _addon_price_data_items(db, new_billing_keys)
     for item in items:
         await stripe.SubscriptionItem.create_async(

@@ -1559,6 +1559,37 @@ created at checkout.
   `once` behaviour above) is also not built — flagged as an open question,
   not assumed wanted.
 
+### Add-on pricing was still applying the bundle discount (Jul 2026)
+
+Caught in live testing: adding modules to an already-subscribed club's
+existing subscription (`preview_add_modules`/`add_modules_to_subscription`)
+still discounted the prorated charge by the original bundle-discount amount,
+contradicting the "no bundle discount on an add-on" rule documented above.
+Root cause: the `duration=once` bundle coupon is only consumed by a
+*regular* invoice — if it hadn't yet been applied to one (e.g. modules added
+the same day as the initial subscribe, before the first renewal invoice),
+it was still attached to the subscription and Stripe's proration engine
+applied it to the add-on invoice too.
+
+- **`stripe_client.preview_add_modules`** now passes `discounts=""` (the
+  SDK's literal-empty-string form — an empty *list* is a no-op and still
+  inherits the subscription's discount, confirmed against the SDK's own
+  param typing) to `Invoice.create_preview`, so the preview never includes
+  an inherited discount.
+- **`stripe_client.add_modules_to_subscription`** calls
+  `Subscription.delete_discount_async` before creating the new
+  `SubscriptionItem`s, stripping any lingering coupon so the real
+  `proration_behavior=always_invoice` charge matches the preview. Errors
+  (nothing to remove) are swallowed — that's already the desired end state.
+- **Per-module price breakdown**: `preview_add_modules` now returns each
+  line item with `full_price` (the module's plain annual rate, from
+  `billing_pricing.price_for_addon`) and `deduction` (`full_price` minus the
+  prorated amount) alongside the existing `amount`, matched to
+  `billing_keys` by position (both derive from the same
+  `PRICED_MODULES`/`FANTASY` order). `AdminAccount.jsx`'s add-on summary
+  shows, per module: full annual price → prorata deduction → charged today,
+  instead of a single opaque prorated figure.
+
 ### GST via Stripe Tax (Jul 2026)
 
 Caught in live testing: checkout never charged GST, because nothing in

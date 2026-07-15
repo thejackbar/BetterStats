@@ -394,21 +394,32 @@ export default function AdminAccount() {
                   </div>
                 )}
                 {plan.billing_checkout_enabled && quote && quote.mode === 'add_to_existing' && (
-                  <div className="mb-3 space-y-1">
+                  <div className="mb-3 space-y-2">
                     {quote.line_items.map((li, i) => (
-                      <div key={i} className="flex items-center justify-between font-mono text-[11px] text-pb-faint">
-                        <span>{li.name}</span>
-                        <span>${li.amount.toFixed(2)}</span>
+                      <div key={i} className="space-y-0.5 pb-2 border-b pb-hairline last:border-0 last:pb-0">
+                        <p className="font-mono text-[11px] text-pb-text font-semibold">{li.name}</p>
+                        <div className="flex items-center justify-between font-mono text-[11px] text-pb-faint pl-2">
+                          <span>Full annual price</span>
+                          <span>${li.full_price.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono text-[11px] text-pb-faint pl-2">
+                          <span>Prorata deduction</span>
+                          <span>-${li.deduction.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono text-[11px] text-pb-text pl-2">
+                          <span>Charged today (prorated)</span>
+                          <span>${li.amount.toFixed(2)}</span>
+                        </div>
                       </div>
                     ))}
                     <div className="flex items-center justify-between font-mono text-[12px] text-pb-text font-semibold pt-2 mt-1 border-t pb-hairline">
-                      <span>Charged today (prorated)</span>
+                      <span>Total charged today (prorated)</span>
                       <span>${quote.total.toFixed(2)}</span>
                     </div>
                     <p className="font-mono text-[10px] text-pb-faintest pt-1">
-                      No bundle discount on modules added after your initial subscription. Prorated
-                      to your account's current renewal date — each added module then renews at its
-                      full annual price from there, in step with everything else.
+                      The price due is prorated to your account's current renewal date. Each added
+                      module then renews at its full annual price from there, in step with your
+                      account renewal date.
                     </p>
                   </div>
                 )}
