@@ -349,6 +349,10 @@ export default function AdminAccount() {
                       <span>Total, billed annually</span>
                       <span>${quote.total}/yr</span>
                     </div>
+                    <p className="font-mono text-[10px] text-pb-faintest pt-1">
+                      Plus GST, calculated on Stripe's secure checkout page (this preview can't show
+                      the exact figure until then).
+                    </p>
                   </div>
                 )}
                 {plan.billing_checkout_enabled && quote && quote.mode === 'add_to_existing' && (

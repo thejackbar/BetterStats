@@ -1559,6 +1559,46 @@ created at checkout.
   `once` behaviour above) is also not built — flagged as an open question,
   not assumed wanted.
 
+### GST via Stripe Tax (Jul 2026)
+
+Caught in live testing: checkout never charged GST, because nothing in
+`create_checkout_session` ever asked Stripe to calculate tax — a Dashboard
+tax configuration alone does nothing without the API request opting in.
+
+- **GST-exclusive per direct instruction**: the advertised prices (Core
+  $399/yr etc.) are what BetterCricket keeps; GST is added ON TOP at
+  checkout, not carved out of the advertised figure. Every `price_data` now
+  sets `tax_behavior: "exclusive"` (both the Checkout Session line items in
+  `create_checkout_session` and the add-on `SubscriptionItem`/preview items
+  in `_addon_price_data_items`).
+- **`automatic_tax: {"enabled": True}`** is set at Checkout Session creation
+  (top-level, NOT nested under `subscription_data` — that param doesn't
+  exist there, verified against the SDK while building this). It carries
+  onto the resulting Subscription automatically, so renewals keep
+  calculating tax with no further code. `SubscriptionItem.create` has no
+  `automatic_tax` field of its own — `add_modules_to_subscription`
+  re-asserts it via `Subscription.modify` on every add-on call (so a
+  subscription created before this shipped still picks it up), and
+  `preview_add_modules` passes it explicitly to `Invoice.create_preview` too
+  (so the prorated preview is accurate even before that modify call runs).
+- **No explicit `tax_code` set on our Products** — deliberately left to the
+  account's own **Preset product category** fallback (Dashboard → Settings →
+  Tax → Business information → "Digital products › Business and web
+  services", already configured) rather than guessing a specific Stripe tax
+  code in code. Revisit only if a specific module ever needs different tax
+  treatment from the rest.
+- **Still required on the Stripe side, not something code can do**: an
+  active AU GST registration under Settings → Tax → Registrations — without
+  one, `automatic_tax` calculates $0 tax regardless of `tax_behavior`.
+- **The Account page's OWN quote preview for a brand-new subscription can't
+  show the exact GST figure** — `billing_pricing.price_for()` is pure local
+  math with no Stripe call (deliberately, so `/quote` stays fast with no API
+  round trip for the common case), so it shows a "Plus GST, calculated on
+  Stripe's secure checkout page" note instead of a number. The **add-on**
+  preview (`preview_add_modules`) is different — it's already a live
+  `Invoice.create_preview` call, so once tax is enabled its `total` already
+  includes the real GST automatically, no separate note needed there.
+
 ### Per-club override for testing (migration 151)
 
 `platform_settings.billing_checkout_enabled` is all-or-nothing across the

@@ -81,6 +81,12 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
                 "unit_amount": item["price"] * 100,
                 "recurring": {"interval": "year"},
                 "product_data": {"name": f"BetterCricket — {item['name']}"},
+                # GST-exclusive per direct instruction: the advertised price
+                # (e.g. $399) is what the club keeps; GST is added on top, not
+                # carved out of it. Stripe Tax only actually charges anything
+                # once automatic_tax is enabled below AND the account has an
+                # active AU GST registration (Dashboard → Settings → Tax).
+                "tax_behavior": "exclusive",
             },
             "quantity": 1,
         }
@@ -94,6 +100,15 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
         "client_reference_id": str(org_id),
         "metadata": metadata,
         "subscription_data": {"metadata": metadata},
+        # Session-level automatic_tax carries onto the resulting Subscription
+        # object itself (Stripe's own behaviour, confirmed against the SDK —
+        # subscription_data has no automatic_tax field of its own to set), so
+        # renewals keep calculating tax with no extra code.
+        # SubscriptionItem.create (the add-on flow below) has no automatic_tax
+        # field either — it purely inherits whatever the subscription already
+        # has, which is why add_modules_to_subscription re-asserts it via
+        # Subscription.modify for a subscription that predates this change.
+        "automatic_tax": {"enabled": True},
         "success_url": settings.stripe_checkout_success_url,
         "cancel_url": settings.stripe_checkout_cancel_url,
     }
@@ -213,6 +228,7 @@ async def _addon_price_data_items(db: AsyncSession, billing_keys: list[str]) -> 
                 "product": product_id,
                 "unit_amount": item["price"] * 100,
                 "recurring": {"interval": "year"},
+                "tax_behavior": "exclusive",
             },
             "quantity": 1,
         })
@@ -232,6 +248,11 @@ async def preview_add_modules(db: AsyncSession, subscription_id: str, billing_ke
     preview = await stripe.Invoice.create_preview_async(
         subscription=subscription_id,
         subscription_details={"items": items, "proration_behavior": "always_invoice"},
+        # Explicit here (not just relying on the subscription's own setting)
+        # so the preview is accurate even for a subscription created before
+        # automatic tax was wired up — add_modules_to_subscription below
+        # re-asserts it on the subscription itself for the same reason.
+        automatic_tax={"enabled": True},
     )
     lines = [
         {"name": ln.get("description") or "", "amount": (ln.get("amount") or 0) / 100}
@@ -264,5 +285,11 @@ async def add_modules_to_subscription(db: AsyncSession, subscription_id: str,
         )
     all_keys = sorted(set(existing_billing_keys) | set(new_billing_keys))
     return await stripe.Subscription.modify_async(
-        subscription_id, metadata={"billing_keys": ",".join(all_keys)},
+        subscription_id,
+        metadata={"billing_keys": ",".join(all_keys)},
+        # Re-asserted (not just relied on from session creation) so a
+        # subscription that predates automatic tax being wired up also picks
+        # it up from here on — SubscriptionItem.create has no automatic_tax
+        # field of its own to set at item-creation time.
+        automatic_tax={"enabled": True},
     )
