@@ -318,8 +318,16 @@ def account_plan_status(org, now: datetime | None = None) -> list[dict]:
         best = min(member_rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 99)) if member_rows else None
         ever_trialled = any(s.trial_started_at is not None for s in member_rows)
 
+        trial_ends_at = best.trial_ends_at if best else None
         if best is None or best.status in (STATUS_PAUSED, STATUS_CANCELLED):
             status = STATUS_TRIAL_EXPIRED if ever_trialled else STATUS_NEVER_TRIALED
+            # A paused/cancelled row's trial_ends_at can still be in the future
+            # (e.g. a super admin cancelled the trial early, before its natural
+            # end date) — only surface it as an "ended" date once it's actually
+            # past, so the Account page never claims a trial "ended" on a date
+            # that hasn't happened yet.
+            if trial_ends_at is not None and trial_ends_at > now:
+                trial_ends_at = None
         elif best.status in PAID_STATUSES:
             status = STATUS_SUBSCRIBED
         else:  # STATUS_TRIAL
@@ -330,7 +338,7 @@ def account_plan_status(org, now: datetime | None = None) -> list[dict]:
             "name": BILLABLE_MODULE_NAMES.get(billing_key, billing_key),
             "status": status,
             "renewal_date": best.renewal_date.isoformat() if best and best.renewal_date else None,
-            "trial_ends_at": best.trial_ends_at.isoformat() if best and best.trial_ends_at else None,
+            "trial_ends_at": trial_ends_at.isoformat() if trial_ends_at else None,
             "trial_eligible": not ever_trialled and status != STATUS_SUBSCRIBED,
             "can_subscribe": status != STATUS_SUBSCRIBED,
         })
