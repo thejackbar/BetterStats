@@ -1,12 +1,17 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
+import { isMarketingPath } from '../lib/marketingPaths'
 
 /**
  * Light/dark theme state.
  *
  * Resolution order:
- *   1. Visitor override (localStorage 'bs_theme') — set via the navbar toggle.
- *   2. The club's admin default (theme_mode: 'light' | 'dark' | 'auto').
- *   3. 'auto' falls back to the OS colour-scheme preference.
+ *   1. The BetterCricket marketing site is always dark, regardless of any
+ *      visitor override or leftover club default from a prior page — see
+ *      `onMarketingPath` below.
+ *   2. Visitor override (localStorage 'bs_theme') — set via the navbar toggle.
+ *   3. The club's admin default (theme_mode: 'light' | 'dark' | 'auto').
+ *   4. 'auto' falls back to the OS colour-scheme preference.
  *
  * useClubTheme() feeds the club default in via setClubDefault().
  */
@@ -18,6 +23,8 @@ const systemTheme = () =>
   window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
 
 export function ThemeProvider({ children }) {
+  const { pathname } = useLocation()
+  const onMarketingPath = isMarketingPath(pathname)
   const [override, setOverride] = useState(() => {
     const v = localStorage.getItem(STORAGE_KEY)
     return v === 'light' || v === 'dark' ? v : null
@@ -25,25 +32,27 @@ export function ThemeProvider({ children }) {
   const [clubDefault, setClubDefault] = useState('dark')
 
   const resolved = useMemo(() => {
+    if (onMarketingPath) return 'dark'
     if (override) return override
     if (clubDefault === 'auto') return systemTheme()
     return clubDefault === 'light' ? 'light' : 'dark'
-  }, [override, clubDefault])
+  }, [onMarketingPath, override, clubDefault])
 
   useEffect(() => {
     document.documentElement.dataset.theme = resolved
   }, [resolved])
 
-  // Track the OS preference while following 'auto' with no visitor override.
+  // Track the OS preference while following 'auto' with no visitor override
+  // and off the (always-dark) marketing site.
   useEffect(() => {
-    if (override || clubDefault !== 'auto') return
+    if (onMarketingPath || override || clubDefault !== 'auto') return
     const mq = window.matchMedia('(prefers-color-scheme: light)')
     const onChange = () => {
       document.documentElement.dataset.theme = systemTheme()
     }
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
-  }, [override, clubDefault])
+  }, [onMarketingPath, override, clubDefault])
 
   const setOverridePersisted = useCallback((value) => {
     if (value === 'light' || value === 'dark') {
