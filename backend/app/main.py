@@ -2502,6 +2502,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS billing_checkout_override BOOLEAN"
         ))
+        # Stripe Product id cache for add-on subscription items (migration
+        # 152) — see services/stripe_client.py::_ensure_product.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS stripe_products (
+                billing_key TEXT PRIMARY KEY,
+                stripe_product_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
         # CREATE OR REPLACE VIEW only allows appending new columns at the END
         # of the SELECT list — inserting one in the middle shifts every later
         # column's position, which Postgres treats as renaming that column

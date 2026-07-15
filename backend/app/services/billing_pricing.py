@@ -69,3 +69,22 @@ def price_for(selected_keys) -> dict:
         "total": total,
         "module_count": len(bundle_mods),
     }
+
+
+def price_for_addon(selected_keys) -> dict:
+    """Pricing for module(s) added to an ALREADY-LIVE Stripe subscription —
+    no Core line (already being paid for on the existing subscription) and no
+    bundle discount (per direct instruction, the bundle discount only applies
+    to the initial all-at-once subscribe; adding a module later is always
+    priced at that module's plain annual rate). The actual dollar amount the
+    club is charged today is a PRORATION of these full prices down to
+    whatever's left of the current billing period — that math is Stripe's own
+    (see stripe_client.preview_add_modules / add_modules_to_subscription),
+    this function only prices the full annual rate each added module will
+    renew at from then on."""
+    keys = set(selected_keys or [])
+    mods = [m for m in PRICED_MODULES if m["key"] in keys]
+    if FANTASY["key"] in keys:
+        mods = mods + [FANTASY]
+    subtotal = sum(m["price"] for m in mods)
+    return {"line_items": [dict(m) for m in mods], "subtotal": subtotal, "discount": 0, "total": subtotal}

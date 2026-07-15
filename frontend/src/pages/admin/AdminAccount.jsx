@@ -177,8 +177,13 @@ export default function AdminAccount() {
   // stub — not a queued request (per direct instruction: online subscribing
   // shouldn't quietly go through the human-actioned module_action_requests
   // queue in the meantime). Once a super admin switches the flag on, this
-  // creates a real Stripe Checkout Session and redirects there; the actual
-  // entitlement grant happens from the Stripe webhook on return, not here.
+  // either creates a real Stripe Checkout Session and redirects there (a
+  // club with no subscription yet), or — a club that already has one —
+  // charges the prorated add-on amount immediately against the card already
+  // on file and returns { added: true } with no redirect at all, since
+  // there's nothing new to collect. Either way the actual entitlement grant
+  // is confirmed server-side (webhook for the redirect path, synchronously
+  // for the add-on path), never here.
   const submitSubscribe = async () => {
     if (!plan?.billing_checkout_enabled) {
       setStripeNotice(true)
@@ -187,10 +192,18 @@ export default function AdminAccount() {
     setCheckoutBusy(true)
     setError('')
     try {
-      const { url } = await api.billingCreateCheckoutSession([...selected])
-      window.location.href = url
+      const res = await api.billingCreateCheckoutSession([...selected])
+      if (res.url) {
+        window.location.href = res.url
+        return
+      }
+      setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
+      setSelected(new Set())
+      setQuote(null)
+      await load()
     } catch (e) {
       setError(e.message || 'Could not start checkout')
+    } finally {
       setCheckoutBusy(false)
     }
   }
@@ -318,7 +331,7 @@ export default function AdminAccount() {
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                   {selected.size} module{selected.size === 1 ? '' : 's'} selected
                 </p>
-                {plan.billing_checkout_enabled && quote && (
+                {plan.billing_checkout_enabled && quote && quote.mode === 'new_subscription' && (
                   <div className="mb-3 space-y-1">
                     {quote.line_items.map((li) => (
                       <div key={li.key} className="flex items-center justify-between font-mono text-[11px] text-pb-faint">
@@ -338,6 +351,25 @@ export default function AdminAccount() {
                     </div>
                   </div>
                 )}
+                {plan.billing_checkout_enabled && quote && quote.mode === 'add_to_existing' && (
+                  <div className="mb-3 space-y-1">
+                    {quote.line_items.map((li, i) => (
+                      <div key={i} className="flex items-center justify-between font-mono text-[11px] text-pb-faint">
+                        <span>{li.name}</span>
+                        <span>${li.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between font-mono text-[12px] text-pb-text font-semibold pt-2 mt-1 border-t pb-hairline">
+                      <span>Charged today (prorated)</span>
+                      <span>${quote.total.toFixed(2)}</span>
+                    </div>
+                    <p className="font-mono text-[10px] text-pb-faintest pt-1">
+                      No bundle discount on modules added after your initial subscription. Prorated
+                      to your account's current renewal date — each added module then renews at its
+                      full annual price from there, in step with everything else.
+                    </p>
+                  </div>
+                )}
                 {stripeNotice ? (
                   <p className="font-mono text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2">
                     Online subscribing isn't connected yet — this is coming in a follow-up build.
@@ -350,7 +382,11 @@ export default function AdminAccount() {
                     className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold text-pb-bg disabled:opacity-50"
                     style={{ background: 'var(--pb-accent)' }}
                   >
-                    {checkoutBusy ? 'REDIRECTING…' : plan.billing_checkout_enabled ? 'PROCEED TO SECURE CHECKOUT' : 'SUBSCRIBE'}
+                    {checkoutBusy
+                      ? (quote?.mode === 'add_to_existing' ? 'CHARGING…' : 'REDIRECTING…')
+                      : !plan.billing_checkout_enabled ? 'SUBSCRIBE'
+                      : quote?.mode === 'add_to_existing' ? 'CONFIRM & PAY PRORATED AMOUNT'
+                      : 'PROCEED TO SECURE CHECKOUT'}
                   </button>
                 )}
               </div>

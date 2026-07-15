@@ -23,7 +23,8 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, STATUS_PAST_DUE
 from app.models.db import BillingInvoice, ModuleActionRequest, Organisation
-from app.services import billing_pricing, module_subscriptions, stripe_client
+from app.services import module_subscriptions, stripe_client
+from app.services.stripe_client import epoch_to_date, epoch_to_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +91,6 @@ def _parse_billing_keys(metadata) -> list[str]:
     return [k for k in raw.split(",") if k in BILLABLE_MODULES]
 
 
-def _epoch_to_date(ts):
-    return datetime.fromtimestamp(ts, tz=timezone.utc).date() if ts else None
-
-
-def _epoch_to_datetime(ts):
-    return datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
-
-
 def _push_to_twenty(org_id) -> None:
     # Best-effort, mirrors every other subscription-change call site (see
     # club_admin.py::approve_module_request) — never let a Twenty hiccup fail
@@ -140,7 +133,7 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
     if subscription_id:
         try:
             sub = await stripe_client.retrieve_subscription(subscription_id)
-            renewal_date = _epoch_to_date(sub.get("current_period_end"))
+            renewal_date = epoch_to_date(sub.get("current_period_end"))
         except Exception:
             logger.exception("Stripe: could not retrieve subscription %s for renewal date", subscription_id)
 
@@ -165,19 +158,19 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
         return
 
     billing_keys: list[str] = []
-    renewal_date = _epoch_to_date(invoice.get("period_end"))
+    renewal_date = epoch_to_date(invoice.get("period_end"))
     try:
         if sub is None:
             sub = await stripe_client.retrieve_subscription(subscription_id)
         billing_keys = _parse_billing_keys(sub.get("metadata"))
-        renewal_date = _epoch_to_date(sub.get("current_period_end")) or renewal_date
+        renewal_date = epoch_to_date(sub.get("current_period_end")) or renewal_date
     except Exception:
         logger.exception("Stripe: could not retrieve subscription %s for invoice %s", subscription_id, invoice.get("id"))
 
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
-    await _upsert_invoice(db, org, invoice, billing_keys, now)
+    await _upsert_invoice(db, org, invoice, now)
     await db.commit()
 
 
@@ -205,7 +198,7 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_PAST_DUE, now=now)
-    await _upsert_invoice(db, org, invoice, billing_keys, now)
+    await _upsert_invoice(db, org, invoice, now)
     await db.commit()
     _push_to_twenty(org.id)
 
@@ -230,7 +223,15 @@ async def handle_subscription_deleted(db: AsyncSession, subscription: dict) -> N
     _push_to_twenty(org.id)
 
 
-async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, billing_keys: list[str], now: datetime) -> None:
+async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, now: datetime) -> None:
+    """Records ONE Stripe invoice event for the club's Billing History.
+    line_items is read straight off Stripe's own invoice lines, not
+    recomputed from our pricing tables — a renewal invoice bills every
+    currently-held module, but an add-on invoice (adding a module to an
+    already-live subscription, see stripe_client.add_modules_to_subscription)
+    only bills the newly-added one(s), so re-deriving "what's on this
+    invoice" from the subscription's full held-module set would misrepresent
+    a partial invoice as a full one."""
     stripe_invoice_id = invoice.get("id")
     if not stripe_invoice_id:
         return
@@ -245,10 +246,14 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, bi
     row.amount_due = invoice.get("amount_due") or 0
     row.amount_paid = invoice.get("amount_paid") or 0
     row.currency = invoice.get("currency") or "aud"
-    row.period_start = _epoch_to_datetime(invoice.get("period_start"))
-    row.period_end = _epoch_to_datetime(invoice.get("period_end"))
+    row.period_start = epoch_to_datetime(invoice.get("period_start"))
+    row.period_end = epoch_to_datetime(invoice.get("period_end"))
     row.hosted_invoice_url = invoice.get("hosted_invoice_url")
     row.invoice_pdf = invoice.get("invoice_pdf")
-    if billing_keys:
-        row.line_items = billing_pricing.price_for(billing_keys)["line_items"]
+    lines = (invoice.get("lines") or {}).get("data") or []
+    if lines:
+        row.line_items = [
+            {"name": ln.get("description") or "", "price": (ln.get("amount") or 0) / 100}
+            for ln in lines
+        ]
     row.updated_at = now

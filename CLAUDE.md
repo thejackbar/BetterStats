@@ -1363,18 +1363,14 @@ Stripe keys are configured.
   card update / cancel from the Stripe side) and per-club Stripe tax
   handling — both natural follow-ups once the base flow is verified end to
   end with real keys.
-- **One club, one Stripe Subscription — `/checkout-session` refuses a second
-  one.** A Checkout Session in subscription mode always creates a brand NEW
-  Stripe Subscription; it can't add items to one that already exists. Without
-  a guard, a club with a live subscription checking out again (e.g. to add a
-  module) would end up with two parallel subscriptions — Core billed twice,
-  and the original silently orphaned from our tracking the moment
-  `handle_checkout_completed` overwrites `stripe_subscription_id` with the new
-  one. `routers/billing.py::create_checkout_session` 409s when
-  `club.stripe_subscription_id` is already set, rather than letting that
-  happen. **Adding a module to an existing subscription is a real, separate
-  feature** (a Stripe Subscription Item update, not a new Checkout Session) —
-  not built yet; don't remove this guard without building that first.
+- **One club, one Stripe Subscription — never a second, parallel one.** A
+  Checkout Session in subscription mode always creates a brand NEW Stripe
+  Subscription; it can't add items to one that already exists. Originally
+  (this section used to say) `/checkout-session` just 409'd outright once a
+  club had a live subscription, to avoid a double-billed Core and an orphaned
+  original. **v2 (below) replaces that outright block with the real
+  feature** — adding modules to the existing subscription instead of ever
+  creating a second one.
 - **Webhook delivery order isn't guaranteed** — `invoice.paid` for a brand-new
   subscription's first invoice can arrive before `checkout.session.completed`
   has stamped `stripe_subscription_id` onto the org.
@@ -1383,6 +1379,69 @@ Stripe keys are configured.
   by `stripe_subscription_id` yet, and self-heals by stamping it — otherwise
   that first invoice would silently never show up in Billing History even
   though entitlement was still granted correctly via `checkout.session.completed`.
+
+### Adding modules to an already-live subscription (migration 152, Jul 2026)
+
+Per direct instruction: **no bundle discount on a module added after the
+initial subscribe**, and it must be **prorated to the existing subscription's
+renewal date**, then renew at full price from there — Stripe's own
+proration engine does exactly this natively, so we lean on it rather than
+hand-rolling day-count math.
+
+- **Two distinct paths in `routers/billing.py`, chosen by whether
+  `club.stripe_subscription_id` is already set**: no subscription yet → the
+  original Checkout Session flow (`billing_pricing.price_for` — Core +
+  selection, bundle discount, redirect to Stripe to collect payment details).
+  Already subscribed → add items to the EXISTING subscription
+  (`billing_pricing.price_for_addon` — no Core line, no discount, ever). The
+  add-on path never redirects to Stripe at all — the card is already on
+  file, so it charges the prorated amount immediately and synchronously,
+  server-side.
+- **`/quote` mirrors the same branch**: returns `{"mode": "new_subscription",
+  ...price_for()}` or `{"mode": "add_to_existing", ...}` where the add-on
+  shape's `total`/`line_items` come from a REAL Stripe call —
+  `stripe_client.preview_add_modules` calls `Invoice.create_preview` with the
+  hypothetical new items and `proration_behavior=always_invoice` — so the
+  preview is Stripe's own exact proration figure, not an approximation we
+  compute from day-counts. `AdminAccount.jsx` renders each mode differently
+  (a "Charged today (prorated)" total + a note about full-price renewal for
+  the add-on case, vs the usual bundle-discount breakdown for a fresh
+  subscribe).
+- **`stripe_client.add_modules_to_subscription`** creates a `SubscriptionItem`
+  per new module (`proration_behavior=always_invoice`, so Stripe invoices and
+  charges the prorated amount as part of that same call, against the
+  existing payment method — no 3-D Secure/SCA re-authentication flow is
+  handled for this path, a known limitation) and then `Subscription.modify`s
+  the subscription's own `metadata.billing_keys` to the union of old + new
+  keys, so future `invoice.paid` renewals (`stripe_billing.py`) keep
+  refreshing the newly-added module's `renewal_date` too — without this the
+  renewal loop would silently stop touching it, since it reads the
+  subscription's metadata to know what's on it.
+- **Real Stripe Product ids, unlike the Checkout Session path.** Checkout
+  Session line items support an inline ad-hoc `price_data.product_data`
+  (no product to pre-create), but `SubscriptionItem.create` and
+  `Invoice.create_preview` do NOT — both require a real Product id via
+  `price_data.product`. `stripe_client._ensure_product` creates each
+  billable module's Product exactly once and caches the id in the new
+  `stripe_products` table (migration 152) rather than re-creating — or
+  Stripe-searching for — it on every add-on checkout. (Verified this whole
+  parameter shape against Stripe's own current API docs while building it,
+  not assumed from memory — the inline-vs-real-product-id split between
+  these two endpoint families is easy to get wrong.)
+- **Entitlement granted synchronously, not via webhook**, for this path —
+  there's no `checkout.session.completed` event for a flow that never
+  touched Stripe Checkout, so `routers/billing.py::create_checkout_session`
+  itself calls `module_subscriptions.set_status_billing` right after Stripe
+  confirms the item + invoice were created, using the subscription's own
+  freshly-returned `current_period_end` as the renewal date. The `invoice.paid`
+  webhook that follows moments later re-applies the same state — harmless,
+  since every entitlement write here is idempotent.
+- **`stripe_billing._upsert_invoice` now snapshots `line_items` from
+  Stripe's OWN invoice lines**, not recomputed from `billing_pricing` against
+  every currently-held module — a renewal invoice bills everything, but an
+  add-on invoice only bills the newly-added module(s), so re-deriving "what's
+  on this invoice" from the full held-module set would have shown a partial
+  invoice as if it were a full one.
 
 ### Per-club override for testing (migration 151)
 
