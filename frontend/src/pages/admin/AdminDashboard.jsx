@@ -21,7 +21,7 @@ function ModuleName({ name }) {
   return <span className="font-display font-bold text-lg">{name}</span>
 }
 
-function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRequest }) {
+function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onStartTrial }) {
   const brand = moduleBrand(mod.key)
   // Scope the module's accent colour to this tile only — every var(--pb-accent)
   // inside (the name suffix, arrow, tint, border) becomes the module colour.
@@ -89,21 +89,19 @@ function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRe
             <button
               type="button"
               disabled={requesting}
-              onClick={() => onRequest('trial')}
+              onClick={onStartTrial}
               className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border transition-colors disabled:opacity-50"
               style={{ color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' }}
             >
-              {requesting ? '…' : 'Request trial'}
+              {requesting ? '…' : 'START TRIAL'}
             </button>
             {canSubscribe && (
-              <button
-                type="button"
-                disabled={requesting}
-                onClick={() => onRequest('subscribe')}
-                className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+              <Link
+                to="/admin/account"
+                className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
               >
-                Request to subscribe
-              </button>
+                Subscribe
+              </Link>
             )}
           </>
         )}
@@ -113,7 +111,7 @@ function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRe
 }
 
 export default function AdminDashboard() {
-  const { user, hasModule } = useAuth()
+  const { user, hasModule, refetch } = useAuth()
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [myRequests, setMyRequests] = useState([])
@@ -154,14 +152,15 @@ export default function AdminDashboard() {
     return () => { cancelled = true; if (intervalId) clearInterval(intervalId) }
   }, [user?.club_id])
 
-  // Raise a trial / subscription request for a billable module (BetterAdmin covers
-  // fees + comms + merch as one). Queued for a super admin to action.
-  const requestModule = async (moduleKey, kind) => {
+  // Instant self-service trial start for a billable module (BetterAdmin covers
+  // fees + comms + merch as one) — no queue, no approval (see
+  // POST /club-admin/modules/{key}/start-trial). Re-fetches /auth/me so
+  // hasModule() flips the tile open immediately.
+  const startTrial = async (moduleKey) => {
     setRequesting(moduleKey)
     try {
-      await api.requestModule(moduleKey, kind)
-      const d = await api.listMyModuleRequests()
-      setMyRequests(Array.isArray(d) ? d : [])
+      await api.startModuleTrial(moduleKey)
+      await refetch()
     } catch {
       // best-effort; the locked tile just stays requestable
     } finally {
@@ -265,7 +264,7 @@ export default function AdminDashboard() {
                 pendingKind={pending?.kind}
                 canSubscribe={!!user?.is_primary_admin}
                 requesting={requesting === tile.key}
-                onRequest={(kind) => requestModule(tile.key, kind)}
+                onStartTrial={() => startTrial(tile.key)}
               />
             )
           })}
