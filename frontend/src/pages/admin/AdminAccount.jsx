@@ -208,9 +208,11 @@ export default function AdminAccount() {
     }
   }
 
+  const hasSummary = selected.size > 0
+
   return (
     <AdminLayout>
-      <div className="max-w-3xl">
+      <div className={hasSummary ? 'max-w-5xl' : 'max-w-3xl'}>
         <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Account</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-6">
           Your club's plan, module by module.
@@ -227,8 +229,16 @@ export default function AdminAccount() {
         {!plan ? (
           <p className="font-mono text-[11px] text-pb-faint">Loading…</p>
         ) : (
-          <>
-            <div className="space-y-3 mb-4">
+          // The price summary sits in its own sticky column once a module is
+          // selected, instead of stacking below the module list — with 6
+          // possible rows the list alone can push a summary that comes after
+          // it below the fold, right when it's most useful (mid-selection).
+          // lg:sticky keeps it in view as the list/billing history scroll;
+          // below lg it just stacks under the list like before (a 2-column
+          // layout doesn't fit smaller screens).
+          <div className={hasSummary ? 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start' : ''}>
+            <div>
+              <div className="space-y-3 mb-4">
               {rows.map((row) => {
                 const brand = moduleBrand(row.module)
                 const pending = row.pending_requests.length > 0
@@ -326,11 +336,39 @@ export default function AdminAccount() {
               })}
             </div>
 
-            {selected.size > 0 && (
-              <div className="pb-card p-4">
-                <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
-                  {selected.size} module{selected.size === 1 ? '' : 's'} selected
-                </p>
+            {invoices.length > 0 && (
+              <div className="pb-card p-4 mt-6">
+                <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">Billing history</p>
+                <div className="space-y-2">
+                  {invoices.map((inv) => (
+                    <div key={inv.id} className="flex items-center gap-3 font-mono text-[11px]">
+                      <span className="text-pb-faint w-24 shrink-0">{fmtDate(inv.period_end || inv.created_at)}</span>
+                      <span className="text-pb-text w-20 shrink-0">${(inv.amount_paid / 100).toFixed(2)}</span>
+                      <span className={`w-16 shrink-0 uppercase ${inv.status === 'paid' ? 'text-emerald-400' : 'text-amber-300'}`}>
+                        {inv.status}
+                      </span>
+                      {inv.hosted_invoice_url && (
+                        <a
+                          href={inv.hosted_invoice_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-pb-faint hover:text-pb-text underline"
+                        >
+                          View invoice
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {selected.size > 0 && (
+            <div className="pb-card p-4 lg:sticky lg:top-6">
+              <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
+                {selected.size} module{selected.size === 1 ? '' : 's'} selected
+              </p>
                 {plan.billing_checkout_enabled && quote && quote.mode === 'new_subscription' && (
                   <div className="mb-3 space-y-1">
                     {quote.line_items.map((li) => (
@@ -395,34 +433,7 @@ export default function AdminAccount() {
                 )}
               </div>
             )}
-
-            {invoices.length > 0 && (
-              <div className="pb-card p-4 mt-6">
-                <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">Billing history</p>
-                <div className="space-y-2">
-                  {invoices.map((inv) => (
-                    <div key={inv.id} className="flex items-center gap-3 font-mono text-[11px]">
-                      <span className="text-pb-faint w-24 shrink-0">{fmtDate(inv.period_end || inv.created_at)}</span>
-                      <span className="text-pb-text w-20 shrink-0">${(inv.amount_paid / 100).toFixed(2)}</span>
-                      <span className={`w-16 shrink-0 uppercase ${inv.status === 'paid' ? 'text-emerald-400' : 'text-amber-300'}`}>
-                        {inv.status}
-                      </span>
-                      {inv.hosted_invoice_url && (
-                        <a
-                          href={inv.hosted_invoice_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-pb-faint hover:text-pb-text underline"
-                        >
-                          View invoice
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     </AdminLayout>

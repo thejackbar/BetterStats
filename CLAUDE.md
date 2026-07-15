@@ -1599,6 +1599,18 @@ tax configuration alone does nothing without the API request opting in.
   `Invoice.create_preview` call, so once tax is enabled its `total` already
   includes the real GST automatically, no separate note needed there.
 
+### Account page — price summary stays in view while selecting (Jul 2026)
+
+`AdminAccount.jsx`'s module list can run to 6 rows; stacking the price
+summary below it (the original layout) pushed the summary — the part an
+admin most needs while still picking modules — below the fold. Fixed with a
+two-column CSS Grid (`grid-cols-1 lg:grid-cols-[1fr_320px]`) once at least one
+module is selected (`hasSummary`): the module list + billing history stay in
+the left column, the price summary becomes the right column with
+`lg:sticky lg:top-6` so it stays in view as the list scrolls. Below `lg` it
+falls back to the original single-column stack (a sidebar doesn't fit a
+narrow screen). No backend change.
+
 ### Per-club override for testing (migration 151)
 
 `platform_settings.billing_checkout_enabled` is all-or-nothing across the
