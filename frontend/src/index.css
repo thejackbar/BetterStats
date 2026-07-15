@@ -305,6 +305,35 @@
 }
 .glow-pulse { animation: pulseGlow 6s ease-in-out infinite; }
 
+/* ── Marketing homepage "trusted by" logo carousel ────────────────────────
+   A duplicated track scrolls left continuously; hovering (or focusing a
+   logo link, for keyboard users) pauses it in place. Reduced-motion users
+   get a frozen track, which lands exactly on the first (non-duplicated)
+   pass of logos since it starts at translateX(0). */
+.logo-marquee {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+}
+.logo-marquee-track {
+  display: flex;
+  align-items: center;
+  gap: 2.5rem;
+  width: max-content;
+  animation: logo-marquee-scroll 28s linear infinite;
+}
+.logo-marquee:hover .logo-marquee-track,
+.logo-marquee-track:has(:focus-visible) {
+  animation-play-state: paused;
+}
+@keyframes logo-marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-marquee-track { animation: none; }
+}
+
 /* ── Screenshot lightbox (click-to-enlarge) ───────────────────────────────── */
 @keyframes bs-lightbox-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bs-lightbox-zoom {
