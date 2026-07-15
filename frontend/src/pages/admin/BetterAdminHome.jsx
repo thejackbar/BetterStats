@@ -56,8 +56,35 @@ function SubCard({ name, blurb, to, built, entitled }) {
   )
 }
 
+function IntegrationCard({ name, blurb, to, soon }) {
+  if (soon) {
+    return (
+      <div className="pb-card p-3.5 opacity-60 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-display font-bold text-sm text-pb-faint truncate">{name}</div>
+          <div className="text-pb-faintest text-[11px] mt-0.5">{blurb}</div>
+        </div>
+        <span className="font-mono text-[9px] tracking-wide2 text-pb-faint border pb-hairline rounded px-1.5 py-0.5 whitespace-nowrap">SOON</span>
+      </div>
+    )
+  }
+  return (
+    <Link
+      to={to}
+      className="pb-card p-3.5 border-pb-accent/20 hover:border-pb-accent/40 transition-colors group flex items-center justify-between gap-3"
+    >
+      <div className="min-w-0">
+        <div className="font-display font-bold text-sm text-pb-text truncate">{name}</div>
+        <div className="text-pb-faint text-[11px] mt-0.5">{blurb}</div>
+      </div>
+      <span className="text-base group-hover:translate-x-1 transition-transform shrink-0" style={{ color: 'var(--pb-accent)' }}>→</span>
+    </Link>
+  )
+}
+
 export default function BetterAdminHome() {
   const { hasModule } = useAuth()
+  const showIntegrations = hasModule(MODULE.FEES) || hasModule(MODULE.MERCH)
   return (
     <AdminLayout>
       <div className="max-w-3xl" style={{ '--pb-accent': BRAND.accent, '--pb-accent-rgb': BRAND.accentRgb }}>
@@ -82,6 +109,22 @@ export default function BetterAdminHome() {
             blurb="Track club stock — apparel, equipment and canteen — with low-stock alerts."
           />
         </div>
+
+        {showIntegrations && (
+          <>
+            <div className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-7 mb-2">Integrations</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <IntegrationCard
+                name="Connect Square" to="/admin/merch/square"
+                blurb="Mirror your canteen/bar stock and match Square sales to member payments."
+              />
+              <IntegrationCard
+                name="Connect Xero" soon
+                blurb="Sync fees and payments straight to your club's accounting."
+              />
+            </div>
+          </>
+        )}
       </div>
     </AdminLayout>
   )
