@@ -7,10 +7,11 @@ import { moduleBrand } from '../../lib/moduleBrand'
 // self-serve plan status page. A trial (any club admin) and a cancellation
 // (primary admin only) both take effect instantly here — see
 // POST /club-admin/modules/{key}/start-trial and .../cancel — no queue, no
-// super-admin approval. Subscribing is still the module_action_requests
-// queue (migration 119) a super admin actions, since there's no live
-// payment processor yet — the same queue the Super Admin's Module requests
-// page already actions.
+// super-admin approval. Subscribe is a deliberate stub, NOT the
+// module_action_requests queue (migration 119) — per direct instruction,
+// online subscribing is landing in its own phase (Stripe checkout), so this
+// button shouldn't quietly go through the human-actioned request queue in
+// the meantime.
 const STATUS_LABEL = {
   subscribed: 'Subscribed',
   trial: 'In Trial',
@@ -31,6 +32,7 @@ export default function AdminAccount() {
   const [blockedMsg, setBlockedMsg] = useState('')
   const [primaryAdminName, setPrimaryAdminName] = useState('')
   const [cancelConfirm, setCancelConfirm] = useState(null) // { module, text } | null
+  const [stripeNotice, setStripeNotice] = useState(false)
 
   const load = () =>
     api.accountGetPlan().then(setPlan).catch((e) => setError(e.message || 'Could not load your plan'))
@@ -63,6 +65,7 @@ export default function AdminAccount() {
       return
     }
     setBlockedMsg('')
+    setStripeNotice(false)
     setSelected((s) => {
       const next = new Set(s)
       if (next.has(row.module)) next.delete(row.module)
@@ -116,25 +119,12 @@ export default function AdminAccount() {
     }
   }
 
-  const submitSubscribe = async () => {
-    setBusy(true)
-    setError('')
-    setMsg('')
-    try {
-      const targets = selectedRows
-      await Promise.all(targets.map((r) => api.requestModule(r.module, 'subscribe')))
-      setMsg(
-        targets.length === 1
-          ? `Subscription requested for ${targets[0].name} — we'll be in touch to arrange billing.`
-          : `Subscription requested for ${targets.length} modules — we'll be in touch to arrange billing.`
-      )
-      setSelected(new Set())
-      await load()
-    } catch (e) {
-      setError(e.message || 'Could not request a subscription')
-    } finally {
-      setBusy(false)
-    }
+  // Stripe checkout isn't wired up yet — this is a deliberate stub, not a
+  // queued request (per direct instruction: online subscribing is landing in
+  // its own phase, so this button shouldn't quietly go through the human-
+  // actioned module_action_requests queue in the meantime).
+  const submitSubscribe = () => {
+    setStripeNotice(true)
   }
 
   return (
@@ -260,14 +250,20 @@ export default function AdminAccount() {
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                   {selected.size} module{selected.size === 1 ? '' : 's'} selected
                 </p>
-                <button
-                  onClick={submitSubscribe}
-                  disabled={busy}
-                  className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold disabled:opacity-50 text-pb-bg"
-                  style={{ background: 'var(--pb-accent)' }}
-                >
-                  {busy ? 'SENDING…' : 'SUBSCRIBE'}
-                </button>
+                {stripeNotice ? (
+                  <p className="font-mono text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2">
+                    Online subscribing isn't connected yet — this is coming in a follow-up build.
+                    In the meantime, contact the BetterCricket team directly to subscribe.
+                  </p>
+                ) : (
+                  <button
+                    onClick={submitSubscribe}
+                    className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold text-pb-bg"
+                    style={{ background: 'var(--pb-accent)' }}
+                  >
+                    SUBSCRIBE
+                  </button>
+                )}
               </div>
             )}
           </>
