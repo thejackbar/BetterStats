@@ -2511,6 +2511,15 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Stripe Coupon id cache for the bundle discount (migration 153) —
+        # see services/stripe_client.py::_ensure_bundle_coupon.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS stripe_coupons (
+                discount_cents INTEGER PRIMARY KEY,
+                stripe_coupon_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
         # CREATE OR REPLACE VIEW only allows appending new columns at the END
         # of the SELECT list — inserting one in the middle shifts every later
         # column's position, which Postgres treats as renaming that column

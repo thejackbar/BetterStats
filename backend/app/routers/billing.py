@@ -147,6 +147,7 @@ async def create_checkout_session(
     schedule = await platform_settings.get_bundle_discount_schedule(db)
     try:
         session = await stripe_client.create_checkout_session(
+            db,
             org_id=club.id,
             billing_keys=keys,
             customer_id=club.stripe_customer_id,

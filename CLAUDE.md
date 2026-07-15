@@ -1302,8 +1302,9 @@ Stripe keys are configured.
   builds each Checkout Session line item from `price_data` on the fly
   (recurring, `interval: year`, `unit_amount` from `billing_pricing`), so a
   new module or a price change never needs a matching dashboard edit. The
-  bundle discount, when any, is a fresh `Coupon` (`duration: forever`, so it
-  keeps applying on every renewal) created alongside the session.
+  bundle discount, when any, is applied via a cached `duration: once` Coupon
+  (see "Bundle discount coupon fixes" below — this used to say `forever`,
+  which was wrong).
 - **Migration 150** (mirrored idempotently in `main.py`'s lifespan, same
   pattern as every recent migration): `organisations.stripe_customer_id` /
   `.stripe_subscription_id` (set by the webhook once a checkout completes),
@@ -1509,6 +1510,54 @@ number in this app.
   (`GeneralSettingsUpdate.bundle_discount_schedule`, popped out and routed to
   the dedicated setter rather than the generic `_INT_KEYS`/`_BOOL_KEYS`
   `update_settings` path, since it's a nested object).
+
+### Bundle discount coupon fixes: `once` not `forever`, cached not re-minted (migration 153, Jul 2026)
+
+Caught during live testing: two bugs in how the bundle-discount Coupon was
+created at checkout.
+
+- **`duration` was `forever`, should have been `once`.** Per direct
+  instruction: the bundle discount is a one-time incentive for subscribing to
+  several modules at once — it must apply to the initial payment ONLY. A
+  renewal (or an add-on to an already-live subscription, which never gets
+  the bundle discount at all — see above) must bill at full price unless a
+  *separate* coupon is deliberately applied to that specific renewal.
+  `duration=forever` was silently discounting every future renewal too.
+  Fixed: `stripe_client._ensure_bundle_coupon` now creates the coupon with
+  `duration="once"`.
+- **A fresh Coupon was minted on every single checkout attempt** — even two
+  identical attempts (e.g. a retry) produced two separate Coupon objects in
+  the Dashboard, both showing 1 redemption, reading as duplicates. Fixed the
+  same way `_ensure_product` already caches Stripe Products: `stripe_coupons`
+  (migration 153, `discount_cents` primary key → `stripe_coupon_id`) reuses
+  ONE coupon per distinct dollar amount instead of creating a new one each
+  time. Keyed on amount alone since `duration` is fixed at `once` for every
+  bundle coupon today — if duration ever becomes independently configurable
+  per amount, key on `(amount, duration)` instead.
+- **Stripe Coupon fields, for reference** (verified against Stripe's own API
+  docs while fixing this): `duration` (`once`/`repeating`/`forever`) controls
+  how many charges on ONE subscription get the discount once redeemed.
+  `duration_in_months` (only with `repeating`) — on an annual plan,
+  `duration_in_months=12` covers only the first invoice (same practical
+  effect as `once`); `24` covers the first invoice PLUS the next renewal;
+  generally `12 × N` covers N annual charges. `redeem_by`/`max_redemptions`
+  are a completely different axis — they cap the coupon's overall
+  availability (a deadline / a total redemption count across ALL customers),
+  not how long the discount lasts on any one subscription. The Dashboard's
+  "Redemptions" column is `times_redeemed`; "Expires" is `redeem_by`
+  (blank = redeemable indefinitely, which is what every coupon this app
+  creates uses — nothing sets `redeem_by`/`max_redemptions`).
+- **Not built**: applying a coupon to an ALREADY-LIVE subscription ahead of
+  its next renewal (`Subscription.modify(sub_id, discounts=[{coupon: ...}])`
+  — takes effect from the next invoice the subscription generates) — no
+  admin action for this exists yet, in BetterCricket or otherwise; today a
+  coupon can only be attached at Checkout Session creation (the initial
+  subscribe, or theoretically via `allow_promotion_codes` on a future
+  Checkout — but the add-on flow above never redirects to Checkout at all,
+  so a promo code has no entry point there either). Configurable
+  duration/repeat-count for the BUNDLE discount specifically (vs the fixed
+  `once` behaviour above) is also not built — flagged as an open question,
+  not assumed wanted.
 
 ### Per-club override for testing (migration 151)
 

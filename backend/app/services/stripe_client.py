@@ -50,18 +50,20 @@ def epoch_to_datetime(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
 
 
-async def create_checkout_session(*, org_id: str, billing_keys: list[str],
+async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys: list[str],
                                    customer_id: str | None, customer_email: str | None,
                                    discount_schedule: dict | None = None):
     """A Stripe Checkout Session in subscription mode, priced from
     billing_pricing.price_for (dynamic price_data line items, so no Stripe
     Price objects need pre-creating in the dashboard for every module
-    combination). The bundle discount, if any, is applied as a forever coupon
-    created alongside the session so it recurs on every renewal, not just the
-    first invoice. ``discount_schedule`` is the LIVE, super-admin-configured
-    bundle-discount table (platform_settings.get_bundle_discount_schedule) —
-    the caller fetches it (this module has no DB access of its own) and
-    passes it straight through; omitted, price_for falls back to its
+    combination). The bundle discount, if any, is applied via a cached
+    ``duration=once`` coupon — ONCE means it discounts only the very next
+    invoice (the initial subscribe), never a renewal, per direct instruction:
+    a club that renews pays full price for every module unless a fresh
+    coupon is applied to that specific renewal. ``discount_schedule`` is the
+    LIVE, super-admin-configured bundle-discount table
+    (platform_settings.get_bundle_discount_schedule) — the caller fetches it
+    and passes it straight through; omitted, price_for falls back to its
     hardcoded seed default.
 
     org_id + the selected billing_keys are round-tripped through BOTH the
@@ -97,13 +99,8 @@ async def create_checkout_session(*, org_id: str, billing_keys: list[str],
     }
 
     if quote["discount"] > 0:
-        coupon = await stripe.Coupon.create_async(
-            amount_off=quote["discount"] * 100,
-            currency=settings.stripe_currency,
-            duration="forever",
-            name=f"Bundle discount ({quote['module_count']} modules)",
-        )
-        params["discounts"] = [{"coupon": coupon["id"]}]
+        coupon_id = await _ensure_bundle_coupon(db, quote["discount"])
+        params["discounts"] = [{"coupon": coupon_id}]
     else:
         # Stripe rejects a session that sets BOTH discounts and
         # allow_promotion_codes, so only offer the customer-enterable
@@ -124,6 +121,40 @@ async def create_checkout_session(*, org_id: str, billing_keys: list[str],
 async def retrieve_subscription(subscription_id: str):
     _require_configured()
     return await stripe.Subscription.retrieve_async(subscription_id)
+
+
+async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: int) -> str:
+    """Reuses ONE Stripe Coupon per distinct discount amount instead of
+    minting a fresh one on every checkout attempt — cached in
+    stripe_coupons (migration 153), keyed on the dollar amount alone since
+    duration is fixed at 'once' for every bundle coupon today (if duration
+    ever becomes independently configurable, key on (amount, duration)
+    instead). Mirrors _ensure_product below."""
+    cents = discount_dollars * 100
+    row = (await db.execute(
+        text("SELECT stripe_coupon_id FROM stripe_coupons WHERE discount_cents = :c"),
+        {"c": cents},
+    )).first()
+    if row:
+        return row[0]
+    _require_configured()
+    coupon = await stripe.Coupon.create_async(
+        amount_off=cents,
+        currency=settings.stripe_currency,
+        duration="once",
+        name=f"Bundle discount (${discount_dollars} off first payment)",
+    )
+    # Same race-tolerance note as _ensure_product — a concurrent duplicate
+    # is harmless Dashboard clutter, not worth locking for.
+    await db.execute(
+        text(
+            "INSERT INTO stripe_coupons (discount_cents, stripe_coupon_id) VALUES (:c, :p) "
+            "ON CONFLICT (discount_cents) DO NOTHING"
+        ),
+        {"c": cents, "p": coupon["id"]},
+    )
+    await db.commit()
+    return coupon["id"]
 
 
 def construct_webhook_event(payload: bytes, sig_header: str):
