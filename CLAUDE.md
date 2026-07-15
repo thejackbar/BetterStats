@@ -1243,6 +1243,174 @@ onboarding wizard, not the existing per-club rebuild button), not a regression.
   not trigger this (rebuild is the "real completion signal" the shelved plan
   called for; a routine weekly sync isn't).
 
+## Billing checkout — feature-flagged while it's built (v8.65.0, Jul 2026)
+
+The Account page's SUBSCRIBE button (`AdminAccount.jsx`, Phase 19) has always
+been a deliberate stub ("Online subscribing isn't connected yet…"). Work is
+now starting on the real thing — preparing bills/invoices, then a Stripe
+checkout link — and per direct instruction a Primary Admin must **not** be
+able to click through any of it until the team is satisfied it works, even as
+pieces of the real flow land on `main`.
+
+- **`platform_settings.billing_checkout_enabled`** (new boolean key in the
+  existing `_BOOL_KEYS` allowlist, same JSONB singleton as
+  `self_serve_registration_enabled`/`onboarding_wizard_enabled`/
+  `trial_nudges_enabled` — no migration needed). Off by default.
+  `get_billing_checkout_enabled(db)` reads it; **`require_billing_checkout_enabled`**
+  is a ready-to-use FastAPI dependency (`Depends(require_billing_checkout_enabled)`)
+  that 403s a route while the flag is off — **every new invoicing/Stripe-checkout
+  endpoint must depend on it as it's built**, since the frontend gate is UX
+  only and can't be trusted as the real block.
+- **Super admin control**: `GET`/`PATCH /club-admin/super/general-settings`
+  carries `billing_checkout_enabled` alongside the other flags; a "Billing (in
+  progress)" toggle in `SuperClubs.jsx`'s General Settings modal.
+- **Frontend**: `GET /club-admin/account/plan` now returns
+  `billing_checkout_enabled` alongside `modules`/`is_primary_admin`.
+  `AdminAccount.jsx`'s `submitSubscribe` is where the real checkout call will
+  eventually go — for now it always shows the stub notice, but the flag and
+  its comment are already in place so the real implementation branches on
+  `plan.billing_checkout_enabled` from the start instead of needing a
+  follow-up safety retrofit.
+- **Turning it on**: only once the invoicing/checkout build is tested and
+  ready to go live — flip `billing_checkout_enabled` on from General
+  Settings. There is no staging environment, so (same as the other
+  self-serve-onboarding flags) this switch is the only thing standing between
+  "merged" and "a real club paying through it".
+
+## Stripe Checkout — recurring subscription billing (migration 150, Jul 2026)
+
+The real build behind the flag above: a Primary Admin's selected modules
+become a single recurring **Stripe Subscription** per club (one Stripe
+Customer/Subscription covers every module the club buys through Stripe, not
+one subscription per module), priced from the SAME numbers as the public
+pricing calculator. Everything here is still gated by
+`platform_settings.billing_checkout_enabled` (off by default) — this schema
+and code can sit on `main` fully inert until a super admin flips it on, and
+Stripe keys are configured.
+
+- **`services/billing_pricing.py`** is a hand-kept Python port of
+  `frontend/src/data/pricing.js` (`CORE` $399, the four `PRICED_MODULES` at
+  $149/$149/$149/$249, `BUNDLE_DISCOUNT` $0/$0/$48/$97/$146, `FANTASY` $49
+  priced standalone outside the bundle). `price_for(selected_keys)` is the ONE
+  place both the invoice-preview quote and the real Checkout Session line
+  items are computed from — no separate "what Stripe charges" number to drift
+  out of sync with "what the app shows". Verified against pricing.js: Core +
+  all four modules totals **$949**, matching `ALL_IN`. Keep both files in sync
+  by hand; there's no shared build step between the Vite frontend and FastAPI
+  backend.
+- **No pre-created Stripe Price objects** — `services/stripe_client.py`
+  builds each Checkout Session line item from `price_data` on the fly
+  (recurring, `interval: year`, `unit_amount` from `billing_pricing`), so a
+  new module or a price change never needs a matching dashboard edit. The
+  bundle discount, when any, is a fresh `Coupon` (`duration: forever`, so it
+  keeps applying on every renewal) created alongside the session.
+- **Migration 150** (mirrored idempotently in `main.py`'s lifespan, same
+  pattern as every recent migration): `organisations.stripe_customer_id` /
+  `.stripe_subscription_id` (set by the webhook once a checkout completes),
+  and `billing_invoices` — a local mirror of each Stripe Invoice event so the
+  Account page's Billing History never calls the Stripe API directly.
+  `billing_invoices.line_items` is OUR OWN `price_for()` snapshot at the
+  moment the invoice landed, not Stripe's own line items, so it always reads
+  in the same module/price shape the rest of the app uses.
+- **Entitlement still lives entirely in `org_module_subscriptions`**
+  (migration 118) — a successful Stripe payment just calls the SAME
+  `module_subscriptions.set_status_billing`/`remove_billing` writers the
+  existing super-admin "approve a subscribe/cancel request" flow already
+  uses (`club_admin.py::approve_module_request`). There is no separate
+  Stripe-only entitlement path to keep in sync.
+- **`routers/billing.py`** (`/club-admin/billing/*`, gated by
+  `Depends(require_billing_checkout_enabled)` on `/quote` and
+  `/checkout-session` — NOT on `/invoices`, so a club that has already paid
+  can always see its own billing history even if the flag is later switched
+  off for new signups): `POST /quote` previews a selection with no Stripe
+  call (pure `price_for()`); `POST /checkout-session` re-validates the
+  primary-admin gate server-side (mirrors `cancel_own_module`'s pattern) and
+  that none of the selected modules are already a live paid subscription,
+  then returns a real Checkout Session URL to redirect to.
+- **`routers/public_stripe.py`** (`POST /public/stripe/webhook`,
+  unauthenticated by necessity — trust comes from verifying the
+  `Stripe-Signature` header locally against `STRIPE_WEBHOOK_SECRET`, the same
+  "verify the signature, not a login" posture `routers/public_ses.py` uses for
+  inbound SNS events) is the **only place entitlement is actually granted** —
+  the frontend's post-checkout redirect is UX only (shows a status, re-fetches
+  the plan after a short delay). Handles `checkout.session.completed` (grants
+  immediately, using the fresh subscription's period end as the renewal date),
+  `invoice.paid` (rolls renewal_date forward on every renewal, reactivates a
+  `past_due` module, upserts the `billing_invoices` row — idempotent on
+  `stripe_invoice_id` so a replayed event is safe), `invoice.payment_failed`
+  (moves the affected modules to `past_due` — a grace period, not an instant
+  cutoff, matching the existing `ACTIVE_STATUSES` semantics), and
+  `customer.subscription.deleted` (drops every module the subscription
+  covered, same end state as the in-app self-service cancel). Deploy note:
+  register this URL in the Stripe dashboard as
+  `https://betterat.cricket/api/public/stripe/webhook` (nginx strips `/api`).
+  A handler failure returns 500 so Stripe retries, rather than silently
+  swallowing a failed entitlement write.
+- **`org_id` + the selected billing keys round-trip through Stripe's own
+  metadata** (the Checkout Session's `client_reference_id`/`metadata` AND the
+  Subscription's own `metadata`) rather than a custom signed-state JWT (the
+  pattern Square's OAuth callback uses, `routers/merch.py::sign_square_state`)
+  — Stripe already carries `metadata` through the whole
+  session/subscription/invoice object graph, so the webhook never needs a
+  second lookup against our own DB to know what was bought.
+- **Settings** (`config/settings.py`, mirrors the Square block's shape):
+  `stripe_publishable_key` / `stripe_secret_key` / `stripe_webhook_secret` /
+  `stripe_currency` (default `aud`), a `stripe_configured` property (blank
+  keys = every billing call raises `StripeNotConfigured`, turned into a clean
+  503 rather than a raw SDK traceback), and `stripe_checkout_success_url` /
+  `stripe_checkout_cancel_url` computed from `public_base_url`.
+- **Not built this round**: a Stripe Customer Portal link (self-service
+  card update / cancel from the Stripe side) and per-club Stripe tax
+  handling — both natural follow-ups once the base flow is verified end to
+  end with real keys.
+- **One club, one Stripe Subscription — `/checkout-session` refuses a second
+  one.** A Checkout Session in subscription mode always creates a brand NEW
+  Stripe Subscription; it can't add items to one that already exists. Without
+  a guard, a club with a live subscription checking out again (e.g. to add a
+  module) would end up with two parallel subscriptions — Core billed twice,
+  and the original silently orphaned from our tracking the moment
+  `handle_checkout_completed` overwrites `stripe_subscription_id` with the new
+  one. `routers/billing.py::create_checkout_session` 409s when
+  `club.stripe_subscription_id` is already set, rather than letting that
+  happen. **Adding a module to an existing subscription is a real, separate
+  feature** (a Stripe Subscription Item update, not a new Checkout Session) —
+  not built yet; don't remove this guard without building that first.
+- **Webhook delivery order isn't guaranteed** — `invoice.paid` for a brand-new
+  subscription's first invoice can arrive before `checkout.session.completed`
+  has stamped `stripe_subscription_id` onto the org.
+  `stripe_billing._resolve_org_for_subscription` falls back to fetching the
+  subscription and reading its own `metadata.org_id` when the org isn't found
+  by `stripe_subscription_id` yet, and self-heals by stamping it — otherwise
+  that first invoice would silently never show up in Billing History even
+  though entitlement was still granted correctly via `checkout.session.completed`.
+
+### Per-club override for testing (migration 151)
+
+`platform_settings.billing_checkout_enabled` is all-or-nothing across the
+whole platform — no way to let one club's Primary Admin through the real
+Stripe flow while everyone else stays on the stub. `organisations.
+billing_checkout_override` (nullable boolean) sits on top of it: **NULL**
+follows the platform default (the normal case), **true** force-enables
+checkout for that one club regardless of the platform default, **false**
+force-disables it even once the platform default is switched on. Resolved by
+`platform_settings.billing_checkout_enabled_for_org(db, org)` — the function
+`require_billing_checkout_enabled` and `GET /club-admin/account/plan` both now
+call, in place of the old platform-default-only `get_billing_checkout_enabled`
+(that raw getter still exists, for the General Settings page itself and as
+the fallback `billing_checkout_enabled_for_org` reads). `require_billing_
+checkout_enabled` now depends on `get_current_club` as well as `get_db` so it
+can resolve the caller's own club's override.
+
+Super admin control lives on the **club**, not General Settings — a "Stripe
+checkout (this club)" select (Platform default / Force ON / Force OFF) in
+each club's edit panel in `SuperClubs.jsx`, saved via the existing `PATCH
+/club-admin/super/clubs/{id}` (`ClubUpdate.billing_checkout_override`, a
+plain column so the generic `setattr` loop in `patch_club` handles it with no
+special-casing). Typical use: flip one real or test club to Force ON, run a
+live checkout end to end, then flip the platform default on for everyone once
+satisfied (the per-club overrides can stay — they only matter when the
+platform default is off, or when someone still needs a specific club blocked).
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

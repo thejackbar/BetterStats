@@ -958,6 +958,15 @@ export const api = {
   // Module action requests — the trial/subscription queue (migration 119).
   requestModule: (moduleKey, kind = 'trial', note) =>
     request('/club-admin/module-requests', { method: 'POST', body: JSON.stringify({ module_key: moduleKey, kind, note }) }),
+  // Stripe Checkout billing (migration 150) — flag-gated, see
+  // platform_settings.billing_checkout_enabled. billingQuote is pure price
+  // math (no Stripe call); billingCreateCheckoutSession creates a real
+  // Checkout Session and returns its redirect URL.
+  billingQuote: (moduleKeys) =>
+    request('/club-admin/billing/quote', { method: 'POST', body: JSON.stringify({ module_keys: moduleKeys }) }),
+  billingCreateCheckoutSession: (moduleKeys) =>
+    request('/club-admin/billing/checkout-session', { method: 'POST', body: JSON.stringify({ module_keys: moduleKeys }) }),
+  billingListInvoices: () => request('/club-admin/billing/invoices'),
   listMyModuleRequests: () => request('/club-admin/module-requests'),
   superListModuleRequests: (status) =>
     request(`/club-admin/super/module-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),

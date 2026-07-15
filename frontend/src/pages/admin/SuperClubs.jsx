@@ -27,6 +27,7 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    billing_checkout_override: '',
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
@@ -44,7 +45,7 @@ export default function SuperClubs() {
   const [settingsForm, setSettingsForm] = useState({
     default_trial_days: 14, direct_enquiry_hot_days: 30,
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
-    trial_nudges_enabled: false,
+    trial_nudges_enabled: false, billing_checkout_enabled: false,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -75,6 +76,7 @@ export default function SuperClubs() {
         self_serve_registration_enabled: !!s?.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
+        billing_checkout_enabled: !!s?.billing_checkout_enabled,
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -91,6 +93,7 @@ export default function SuperClubs() {
         self_serve_registration_enabled: !!settingsForm.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
         trial_nudges_enabled: !!settingsForm.trial_nudges_enabled,
+        billing_checkout_enabled: !!settingsForm.billing_checkout_enabled,
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -201,6 +204,10 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
+      billing_checkout_override:
+        club.billing_checkout_override === true ? 'true'
+        : club.billing_checkout_override === false ? 'false'
+        : '',
       comms_tier: club.comms_tier || 'sandbox',
       comms_sandbox_cap: club.comms_sandbox_cap ?? '',
       comms_production_cap: club.comms_production_cap ?? '',
@@ -318,6 +325,10 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
+        billing_checkout_override:
+          editForm.billing_checkout_override === 'true' ? true
+          : editForm.billing_checkout_override === 'false' ? false
+          : null,
         comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
         comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
         comms_monthly_cap: editForm.comms_monthly_cap === '' ? null : Number(editForm.comms_monthly_cap),
@@ -504,6 +515,23 @@ export default function SuperClubs() {
                   module trial starts, is about to end, has ended, or converts, plus onboarding
                   nudges (no historical data imported, a trialled module never opened).
                 </p>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Billing (in progress)
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Off keeps every club's Account page SUBSCRIBE button on the "not
+                  connected yet" stub, no matter how much of the invoicing / Stripe
+                  checkout build has landed. Only switch this on once that flow has
+                  been tested and is ready for a real Primary Admin to pay through it.
+                </p>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.billing_checkout_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, billing_checkout_enabled: e.target.checked }))} />
+                  Online billing checkout enabled
+                </label>
               </div>
 
               <div className="flex gap-2">
@@ -886,6 +914,20 @@ export default function SuperClubs() {
                       <input type="date" value={editForm.renewal_date}
                         onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
                         className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Stripe checkout (this club)</label>
+                      <select value={editForm.billing_checkout_override}
+                        onChange={e => setEditForm(f => ({ ...f, billing_checkout_override: e.target.value }))}
+                        className={INPUT_CLS}>
+                        <option value="">Platform default</option>
+                        <option value="true">Force ON — let this club through (testing)</option>
+                        <option value="false">Force OFF — block even if the platform default is on</option>
+                      </select>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                        Overrides General Settings → Billing for this one club — lets you test the
+                        real Stripe flow on a single club before switching it on for everyone.
+                      </p>
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">BetterComms sending tier</label>

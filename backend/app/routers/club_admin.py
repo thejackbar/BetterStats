@@ -1520,6 +1520,9 @@ def _club_payload(org) -> dict:
         "subscription_status": org.subscription_status,
         "renewal_date": org.renewal_date.isoformat() if org.renewal_date else None,
         "billing_cycle": org.billing_cycle,
+        # Per-club override of platform_settings.billing_checkout_enabled
+        # (migration 151) — NULL = follow the platform default.
+        "billing_checkout_override": org.billing_checkout_override,
         "default_trial_days": org_default_trial_days(org),
         "comms_tier": getattr(org, "comms_tier", None) or "sandbox",
         "comms_sandbox_cap": getattr(org, "comms_sandbox_cap", None),
@@ -1558,6 +1561,7 @@ async def get_general_settings(
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
+        "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
     }
 
 
@@ -1567,6 +1571,7 @@ class GeneralSettingsUpdate(BaseModel):
     self_serve_registration_enabled: Optional[bool] = None
     onboarding_wizard_enabled: Optional[bool] = None
     trial_nudges_enabled: Optional[bool] = None
+    billing_checkout_enabled: Optional[bool] = None
 
 
 @router.patch("/super/general-settings")
@@ -1587,6 +1592,7 @@ async def patch_general_settings(
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
+        "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
     }
 
 
@@ -1653,6 +1659,12 @@ class ClubUpdate(BaseModel):
     subscription_status: Optional[str] = None
     renewal_date: Optional[_date] = None
     billing_cycle: Optional[str] = None
+    # Per-club override of platform_settings.billing_checkout_enabled
+    # (migration 151). None/omitted = leave as-is; explicit null in the
+    # request body clears it back to "follow the platform default" (see
+    # patch_club below — Pydantic's exclude_unset distinguishes "not sent"
+    # from "sent as null").
+    billing_checkout_override: Optional[bool] = None
     # Club General Settings — the configurable default trial length (days).
     default_trial_days: Optional[int] = None
     # BetterComms sending tier + optional per-club daily-cap overrides per tier.
@@ -2136,8 +2148,13 @@ async def get_account_plan(
     Super Admin module editor, over the same org_module_subscriptions data.
     ``is_primary_admin`` lets the frontend explain why Subscribe is disabled
     for a non-primary admin (create_module_request enforces the same rule
-    server-side regardless — this is purely so the button doesn't look broken)."""
+    server-side regardless — this is purely so the button doesn't look broken).
+    ``billing_checkout_enabled`` gates the in-progress invoicing / Stripe
+    checkout build — see platform_settings.billing_checkout_enabled_for_org
+    (the platform default, unless this specific club has its own override)
+    and the comment on submitSubscribe in AdminAccount.jsx."""
     from app.auth.modules import account_plan_status
+    from app.services import platform_settings as ps
 
     m = (await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
@@ -2158,7 +2175,11 @@ async def get_account_plan(
     for row in modules:
         row["pending_requests"] = sorted(pending_by_module.get(row["module"], []))
 
-    return {"modules": modules, "is_primary_admin": is_primary_admin}
+    return {
+        "modules": modules,
+        "is_primary_admin": is_primary_admin,
+        "billing_checkout_enabled": await ps.billing_checkout_enabled_for_org(db, club),
+    }
 
 
 @router.post("/modules/{module_key}/start-trial")

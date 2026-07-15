@@ -9,11 +9,14 @@ from __future__ import annotations
 import json
 import logging
 
+from fastapi import Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import DEFAULT_TRIAL_DAYS
 from app.config.settings import settings as app_settings
+from app.models.db import Organisation, get_db
+from app.routers.auth import get_current_club
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,16 @@ _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
 # docs/self-serve-trial-onboarding-plan.md) is built behind one of these so it stays
 # inert in production until explicitly enabled — there is no staging environment, so
 # this is the only safety net between "merged" and "live".
-_BOOL_KEYS = {"self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled"}
+#
+# billing_checkout_enabled gates the in-progress invoicing / Stripe checkout build
+# (Account page SUBSCRIBE flow): off keeps a Primary Admin on the existing "not
+# connected yet" stub notice no matter how much of the real flow has been merged,
+# so half-built billing code can land on main without ever being reachable by a
+# real club until a super admin deliberately switches it on for testing/launch.
+_BOOL_KEYS = {
+    "self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled",
+    "billing_checkout_enabled",
+}
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
 # CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
@@ -224,6 +236,48 @@ async def get_trial_nudges_enabled(db: AsyncSession) -> bool:
     """Whether the daily trial-lifecycle nudge scan (Phase 16) sends real
     outbound email. Off by default — see app/services/trial_lifecycle.py."""
     return await get_feature_flag(db, "trial_nudges_enabled")
+
+
+async def get_billing_checkout_enabled(db: AsyncSession) -> bool:
+    """The PLATFORM DEFAULT for whether a Primary Admin can proceed past the
+    Account page's SUBSCRIBE button into the real invoicing / Stripe checkout
+    flow. Off by default. A club can override this individually — see
+    billing_checkout_enabled_for_org, which is what routes should actually
+    check; this raw platform default is mainly for the General Settings page
+    itself and as the fallback that function reads."""
+    return await get_feature_flag(db, "billing_checkout_enabled")
+
+
+async def billing_checkout_enabled_for_org(db: AsyncSession, org: Organisation) -> bool:
+    """The EFFECTIVE billing-checkout switch for one club: its own
+    ``organisations.billing_checkout_override`` wins when set (True forces it
+    on for this club even while the platform default is off — e.g. a super
+    admin testing the real Stripe flow against one club before going live;
+    False forces it off even once the platform default is on), else falls
+    back to the platform default (get_billing_checkout_enabled)."""
+    override = getattr(org, "billing_checkout_override", None)
+    if override is not None:
+        return bool(override)
+    return await get_billing_checkout_enabled(db)
+
+
+async def require_billing_checkout_enabled(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+) -> None:
+    """FastAPI dependency: 403s a route while billing/checkout is switched off
+    for the CALLER'S CLUB specifically (platform default, unless that club has
+    its own override — see billing_checkout_enabled_for_org). Add
+    ``Depends(require_billing_checkout_enabled)`` to every invoicing /
+    Stripe-checkout route as it's built — the frontend gate on the Account
+    page is UX only, this is the real block, so a direct API call (or a
+    half-wired frontend) can't reach real payment processing before it's
+    switched on for that club."""
+    if not await billing_checkout_enabled_for_org(db, club):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Online billing isn't switched on for your club yet. Contact the BetterCricket team to subscribe.",
+        )
 
 
 # ─── SES send rates ──────────────────────────────────────────────────────────
