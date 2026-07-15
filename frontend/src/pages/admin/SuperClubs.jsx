@@ -452,7 +452,7 @@ export default function SuperClubs() {
                   Self-serve trial onboarding (internal)
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  Not public yet — these only expose the flow from the Super Admin menu, for
+                  Not public yet — only exposes the flow from the Super Admin menu, for
                   internal testing.
                 </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
@@ -460,11 +460,30 @@ export default function SuperClubs() {
                     onChange={e => setSettingsForm(f => ({ ...f, self_serve_registration_enabled: e.target.checked }))} />
                   Self-serve club registration enabled
                 </label>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Setup Guide
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  The "Get your club set up" checklist shown to Club Admins. When on, it opens
+                  automatically the first time an admin logs in (and again once a club's first
+                  sync finishes) until every step is done or dismissed. Turn off to stop it
+                  popping up for every club platform-wide — this doesn't touch a club's own
+                  saved progress, so re-enabling it later picks up right where it left off.
+                </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
                   <input type="checkbox" checked={!!settingsForm.onboarding_wizard_enabled}
                     onChange={e => setSettingsForm(f => ({ ...f, onboarding_wizard_enabled: e.target.checked }))} />
-                  Onboarding wizard enabled
+                  Setup Guide enabled for Club Admins
                 </label>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Trial nudges
+                </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
                   <input type="checkbox" checked={!!settingsForm.trial_nudges_enabled}
                     onChange={e => setSettingsForm(f => ({ ...f, trial_nudges_enabled: e.target.checked }))} />
