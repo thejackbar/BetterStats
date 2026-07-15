@@ -314,7 +314,7 @@ export default function AdminAccount() {
             </div>
 
             {selected.size > 0 && (
-              <div className="pb-card p-4 sticky bottom-4">
+              <div className="pb-card p-4">
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                   {selected.size} module{selected.size === 1 ? '' : 's'} selected
                 </p>
