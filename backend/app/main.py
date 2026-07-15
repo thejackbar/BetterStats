@@ -1908,6 +1908,35 @@ async def lifespan(app: FastAPI):
                 CONSTRAINT uq_merch_square_org UNIQUE (organisation_id)
             )
         """))
+        # BetterFees ← Square sale import (migration 149) — reuses the club's
+        # existing merch_square_connections row, no new OAuth flow.
+        await conn.execute(text("ALTER TABLE merch_square_connections ADD COLUMN IF NOT EXISTS sync_fees BOOLEAN NOT NULL DEFAULT false"))
+        await conn.execute(text("ALTER TABLE merch_square_connections ADD COLUMN IF NOT EXISTS fee_item_keywords TEXT"))
+        await conn.execute(text("ALTER TABLE merch_square_connections ADD COLUMN IF NOT EXISTS fees_last_sync_at TIMESTAMPTZ"))
+        await conn.execute(text("ALTER TABLE merch_square_connections ADD COLUMN IF NOT EXISTS fees_last_sync_status TEXT"))
+        await conn.execute(text("ALTER TABLE merch_square_connections ADD COLUMN IF NOT EXISTS fees_last_sync_error TEXT"))
+        await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'"))
+        await conn.execute(text("ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS external_ref TEXT"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fee_payment_external_ref "
+            "ON fee_payments(organisation_id, external_ref) WHERE external_ref IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fee_square_import_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                external_ref TEXT NOT NULL,
+                status TEXT NOT NULL,
+                fee_payment_id UUID REFERENCES fee_payments(id) ON DELETE SET NULL,
+                item_name TEXT,
+                note TEXT,
+                amount NUMERIC(10, 2),
+                occurred_at DATE,
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fee_square_import_log_ref UNIQUE (organisation_id, external_ref)
+            )
+        """))
         # BetterFantasyCricket — internal club fantasy league (migration 087).
         # Defensive idempotent creates so the API boots even if the numbered
         # migration hasn't run yet (mirrors the BetterMerch / BetterComms blocks).

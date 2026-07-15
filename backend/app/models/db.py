@@ -1954,9 +1954,12 @@ class FeeMatchDay(Base):
 
 
 class FeePayment(Base):
-    """A payment reconciled against a bank statement. Defined now so Phase 2
-    (payments + financial status) is purely additive; no endpoints write here
-    yet."""
+    """A payment reconciled against a bank statement, or (since the Square
+    import) a completed Square sale a club admin matched to a member.
+    `source` ('manual' | 'square') + `external_ref` (the Square line-item ref,
+    NULL for manual rows) mirror `merch_movements`' own dedupe pattern — a
+    unique index on (organisation_id, external_ref) stops a re-run of the
+    Square import from double-recording the same sale."""
     __tablename__ = "fee_payments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1968,11 +1971,37 @@ class FeePayment(Base):
     method = Column(Text, nullable=True)
     bank_ref = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    source = Column(Text, nullable=False, server_default="manual")  # 'manual' | 'square'
+    external_ref = Column(Text, nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     member_season = relationship("FeeMemberSeason", back_populates="payments")
+
+
+class FeeSquareImportLog(Base):
+    """One row per Square sale a BetterFees admin has resolved (applied or
+    dismissed) in the Square import review queue — keyed by `external_ref` so
+    a resolved sale (either way) never resurfaces on the next preview, even
+    though the preview itself is stateless (it re-scans Square on every call
+    rather than tracking a sync cursor)."""
+    __tablename__ = "fee_square_import_log"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "external_ref", name="uq_fee_square_import_log_ref"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    external_ref = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)  # 'applied' | 'dismissed'
+    fee_payment_id = Column(UUID(as_uuid=True), ForeignKey("fee_payments.id", ondelete="SET NULL"), nullable=True)
+    item_name = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    amount = Column(Numeric(10, 2), nullable=True)
+    occurred_at = Column(Date, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────
@@ -2148,6 +2177,16 @@ class MerchSquareConnection(Base):
     last_sync_status = Column(Text, nullable=True)   # 'ok' | 'error'
     last_sync_error = Column(Text, nullable=True)
     sales_cursor = Column(TIMESTAMP(timezone=True), nullable=True)  # import orders closed after this
+    # BetterFees reuses this same connection (one Square account per club) to
+    # pull completed sales that look like match-fee/membership payments. Off
+    # by default — a club turns it on and sets its own item-name keywords
+    # before the Square review queue starts surfacing anything. Kept as its
+    # own last-sync trio so a fees-side failure never clobbers merch's status.
+    sync_fees = Column(Boolean, nullable=False, server_default="false")
+    fee_item_keywords = Column(Text, nullable=True)  # comma-separated, e.g. "match fee, membership"
+    fees_last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    fees_last_sync_status = Column(Text, nullable=True)   # 'ok' | 'error'
+    fees_last_sync_error = Column(Text, nullable=True)
     connected_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     connected_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

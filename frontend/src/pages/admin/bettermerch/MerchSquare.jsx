@@ -102,7 +102,25 @@ export default function MerchSquare() {
           {!status.configured ? (
             <div className="pb-card p-5 border-pb-amber/30">
               <div className="flex items-center gap-2 mb-1"><Icon name="info" size={16} className="text-pb-amber" /><b className="text-sm">Square isn't set up on the server yet</b></div>
-              <p className="text-[12.5px] text-pb-faint">An administrator needs to register a Square app and set <code className="text-pb-text">SQUARE_APP_ID</code> and <code className="text-pb-text">SQUARE_APP_SECRET</code>. Once that's done this page lets each club connect its own account.</p>
+              <p className="text-[12.5px] text-pb-faint mb-3">This is a one-off, server-wide setup an administrator does once. After it's done, every club connects its own Square account from this page.</p>
+              <ol className="space-y-2.5 text-[12.5px] text-pb-faint list-decimal list-inside">
+                <li>Go to <span className="text-pb-text">developer.squareup.com/apps</span> and sign in with your Square account.</li>
+                <li>Click <b className="text-pb-text">+ Create App</b> (or open an existing one).</li>
+                <li>Open the <b className="text-pb-text">Credentials</b> tab and copy the <b className="text-pb-text">Production Application ID</b> and <b className="text-pb-text">Application Secret</b>.</li>
+                <li>
+                  Open the <b className="text-pb-text">OAuth</b> tab and add this as an Authorized Redirect URL:
+                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">https://betterat.cricket/api/public/square/callback</code></div>
+                </li>
+                <li>
+                  Add these to the server's <code className="text-pb-text">.env</code> and redeploy the backend:
+                  <div className="mt-1 space-y-0.5">
+                    <div><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px]">SQUARE_APP_ID=&hellip;</code></div>
+                    <div><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px]">SQUARE_APP_SECRET=&hellip;</code></div>
+                    <div><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px]">SQUARE_ENVIRONMENT=production</code></div>
+                  </div>
+                </li>
+              </ol>
+              <p className="text-[11.5px] text-pb-faintest mt-3">Once that's live, this notice is replaced by a Connect Square button for each club to use.</p>
             </div>
           ) : !status.connected ? (
             <div className="pb-card p-6 text-center">
