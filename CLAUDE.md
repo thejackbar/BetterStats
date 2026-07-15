@@ -1277,6 +1277,93 @@ pieces of the real flow land on `main`.
   self-serve-onboarding flags) this switch is the only thing standing between
   "merged" and "a real club paying through it".
 
+## Stripe Checkout — recurring subscription billing (migration 150, Jul 2026)
+
+The real build behind the flag above: a Primary Admin's selected modules
+become a single recurring **Stripe Subscription** per club (one Stripe
+Customer/Subscription covers every module the club buys through Stripe, not
+one subscription per module), priced from the SAME numbers as the public
+pricing calculator. Everything here is still gated by
+`platform_settings.billing_checkout_enabled` (off by default) — this schema
+and code can sit on `main` fully inert until a super admin flips it on, and
+Stripe keys are configured.
+
+- **`services/billing_pricing.py`** is a hand-kept Python port of
+  `frontend/src/data/pricing.js` (`CORE` $399, the four `PRICED_MODULES` at
+  $149/$149/$149/$249, `BUNDLE_DISCOUNT` $0/$0/$48/$97/$146, `FANTASY` $49
+  priced standalone outside the bundle). `price_for(selected_keys)` is the ONE
+  place both the invoice-preview quote and the real Checkout Session line
+  items are computed from — no separate "what Stripe charges" number to drift
+  out of sync with "what the app shows". Verified against pricing.js: Core +
+  all four modules totals **$949**, matching `ALL_IN`. Keep both files in sync
+  by hand; there's no shared build step between the Vite frontend and FastAPI
+  backend.
+- **No pre-created Stripe Price objects** — `services/stripe_client.py`
+  builds each Checkout Session line item from `price_data` on the fly
+  (recurring, `interval: year`, `unit_amount` from `billing_pricing`), so a
+  new module or a price change never needs a matching dashboard edit. The
+  bundle discount, when any, is a fresh `Coupon` (`duration: forever`, so it
+  keeps applying on every renewal) created alongside the session.
+- **Migration 150** (mirrored idempotently in `main.py`'s lifespan, same
+  pattern as every recent migration): `organisations.stripe_customer_id` /
+  `.stripe_subscription_id` (set by the webhook once a checkout completes),
+  and `billing_invoices` — a local mirror of each Stripe Invoice event so the
+  Account page's Billing History never calls the Stripe API directly.
+  `billing_invoices.line_items` is OUR OWN `price_for()` snapshot at the
+  moment the invoice landed, not Stripe's own line items, so it always reads
+  in the same module/price shape the rest of the app uses.
+- **Entitlement still lives entirely in `org_module_subscriptions`**
+  (migration 118) — a successful Stripe payment just calls the SAME
+  `module_subscriptions.set_status_billing`/`remove_billing` writers the
+  existing super-admin "approve a subscribe/cancel request" flow already
+  uses (`club_admin.py::approve_module_request`). There is no separate
+  Stripe-only entitlement path to keep in sync.
+- **`routers/billing.py`** (`/club-admin/billing/*`, gated by
+  `Depends(require_billing_checkout_enabled)` on `/quote` and
+  `/checkout-session` — NOT on `/invoices`, so a club that has already paid
+  can always see its own billing history even if the flag is later switched
+  off for new signups): `POST /quote` previews a selection with no Stripe
+  call (pure `price_for()`); `POST /checkout-session` re-validates the
+  primary-admin gate server-side (mirrors `cancel_own_module`'s pattern) and
+  that none of the selected modules are already a live paid subscription,
+  then returns a real Checkout Session URL to redirect to.
+- **`routers/public_stripe.py`** (`POST /public/stripe/webhook`,
+  unauthenticated by necessity — trust comes from verifying the
+  `Stripe-Signature` header locally against `STRIPE_WEBHOOK_SECRET`, the same
+  "verify the signature, not a login" posture `routers/public_ses.py` uses for
+  inbound SNS events) is the **only place entitlement is actually granted** —
+  the frontend's post-checkout redirect is UX only (shows a status, re-fetches
+  the plan after a short delay). Handles `checkout.session.completed` (grants
+  immediately, using the fresh subscription's period end as the renewal date),
+  `invoice.paid` (rolls renewal_date forward on every renewal, reactivates a
+  `past_due` module, upserts the `billing_invoices` row — idempotent on
+  `stripe_invoice_id` so a replayed event is safe), `invoice.payment_failed`
+  (moves the affected modules to `past_due` — a grace period, not an instant
+  cutoff, matching the existing `ACTIVE_STATUSES` semantics), and
+  `customer.subscription.deleted` (drops every module the subscription
+  covered, same end state as the in-app self-service cancel). Deploy note:
+  register this URL in the Stripe dashboard as
+  `https://betterat.cricket/api/public/stripe/webhook` (nginx strips `/api`).
+  A handler failure returns 500 so Stripe retries, rather than silently
+  swallowing a failed entitlement write.
+- **`org_id` + the selected billing keys round-trip through Stripe's own
+  metadata** (the Checkout Session's `client_reference_id`/`metadata` AND the
+  Subscription's own `metadata`) rather than a custom signed-state JWT (the
+  pattern Square's OAuth callback uses, `routers/merch.py::sign_square_state`)
+  — Stripe already carries `metadata` through the whole
+  session/subscription/invoice object graph, so the webhook never needs a
+  second lookup against our own DB to know what was bought.
+- **Settings** (`config/settings.py`, mirrors the Square block's shape):
+  `stripe_publishable_key` / `stripe_secret_key` / `stripe_webhook_secret` /
+  `stripe_currency` (default `aud`), a `stripe_configured` property (blank
+  keys = every billing call raises `StripeNotConfigured`, turned into a clean
+  503 rather than a raw SDK traceback), and `stripe_checkout_success_url` /
+  `stripe_checkout_cancel_url` computed from `public_base_url`.
+- **Not built this round**: a Stripe Customer Portal link (self-service
+  card update / cancel from the Stripe side) and per-club Stripe tax
+  handling — both natural follow-ups once the base flow is verified end to
+  end with real keys.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

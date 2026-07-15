@@ -279,6 +279,38 @@ class Settings(BaseSettings):
     def square_configured(self) -> bool:
         return bool(self.square_app_id and self.square_app_secret)
 
+    # ─── Billing — Stripe Checkout (recurring subscriptions) ───────────────────
+    # Platform-owned Stripe account (not per-club OAuth, unlike Square) — one
+    # BetterCricket Stripe account bills every club. A club's selected modules
+    # become subscription line items priced from services/billing_pricing.py
+    # (mirrors the public pricing model in frontend/src/data/pricing.js), so no
+    # per-module Stripe Price objects need to be pre-created in the dashboard.
+    # Blank secret/publishable key = "not configured"; the real block regardless
+    # is platform_settings.billing_checkout_enabled (off by default — see
+    # CLAUDE.md "Billing checkout — feature-flagged while it's built"), so this
+    # can be safely populated well before the flag is switched on.
+    stripe_publishable_key: str = ""
+    stripe_secret_key: str = ""
+    # Signing secret for the /public/stripe/webhook endpoint (Stripe dashboard →
+    # Webhooks → this endpoint's "Signing secret"). Blank = the webhook route
+    # rejects every event (fails closed — never trust an unverified event).
+    stripe_webhook_secret: str = ""
+    stripe_currency: str = "aud"
+
+    @property
+    def stripe_configured(self) -> bool:
+        return bool(self.stripe_secret_key and self.stripe_publishable_key)
+
+    @property
+    def stripe_checkout_success_url(self) -> str:
+        # {CHECKOUT_SESSION_ID} is a literal Stripe template placeholder, not an
+        # f-string substitution — the doubled braces below render it verbatim.
+        return f"{self.public_base_url}/admin/account?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
+
+    @property
+    def stripe_checkout_cancel_url(self) -> str:
+        return f"{self.public_base_url}/admin/account?checkout=cancelled"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]

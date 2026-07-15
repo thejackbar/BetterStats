@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { api } from '../../lib/api'
 import { moduleBrand } from '../../lib/moduleBrand'
@@ -41,11 +42,54 @@ export default function AdminAccount() {
   const [primaryAdminName, setPrimaryAdminName] = useState('')
   const [cancelConfirm, setCancelConfirm] = useState(null) // { module, text } | null
   const [stripeNotice, setStripeNotice] = useState(false)
+  // Real Stripe Checkout — only ever exercised once plan.billing_checkout_enabled
+  // is true (see submitSubscribe below).
+  const [quote, setQuote] = useState(null)
+  const [checkoutBusy, setCheckoutBusy] = useState(false)
+  const [invoices, setInvoices] = useState([])
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const load = () =>
     api.accountGetPlan().then(setPlan).catch((e) => setError(e.message || 'Could not load your plan'))
 
   useEffect(() => { load() }, [])
+
+  // Returning from a real Stripe Checkout Session — the redirect is UX only
+  // (the webhook is what actually grants entitlement, see
+  // routers/public_stripe.py), so this just shows a status and re-fetches the
+  // plan; a moment's delay covers the small race where the webhook hasn't
+  // landed yet by the time the browser bounces back.
+  useEffect(() => {
+    const checkout = searchParams.get('checkout')
+    if (!checkout) return
+    if (checkout === 'success') {
+      setMsg("Payment received — you're subscribed. It can take a few seconds to show below.")
+      setTimeout(load, 3000)
+    } else if (checkout === 'cancelled') {
+      setMsg('Checkout was cancelled — nothing was charged.')
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('checkout')
+    next.delete('session_id')
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    api.billingListInvoices().then(setInvoices).catch(() => {})
+  }, [])
+
+  // Live invoice preview for the current selection — only once billing
+  // checkout is actually switched on (the endpoint 403s otherwise).
+  useEffect(() => {
+    if (!plan?.billing_checkout_enabled || selected.size === 0) {
+      setQuote(null)
+      return
+    }
+    let cancelled = false
+    api.billingQuote([...selected]).then((q) => { if (!cancelled) setQuote(q) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [plan?.billing_checkout_enabled, selected])
 
   useEffect(() => {
     api.getPrimaryAdmin()
@@ -127,14 +171,26 @@ export default function AdminAccount() {
     }
   }
 
-  // Stripe checkout isn't wired up yet — and even once it is, it stays behind
-  // plan.billing_checkout_enabled until a super admin switches it on (General
-  // Settings), so this shows the stub notice either way for now. Not a
-  // queued request (per direct instruction: online subscribing is landing in
-  // its own phase, so this button shouldn't quietly go through the human-
-  // actioned module_action_requests queue in the meantime).
-  const submitSubscribe = () => {
-    setStripeNotice(true)
+  // While plan.billing_checkout_enabled is off, this is still the deliberate
+  // stub — not a queued request (per direct instruction: online subscribing
+  // shouldn't quietly go through the human-actioned module_action_requests
+  // queue in the meantime). Once a super admin switches the flag on, this
+  // creates a real Stripe Checkout Session and redirects there; the actual
+  // entitlement grant happens from the Stripe webhook on return, not here.
+  const submitSubscribe = async () => {
+    if (!plan?.billing_checkout_enabled) {
+      setStripeNotice(true)
+      return
+    }
+    setCheckoutBusy(true)
+    setError('')
+    try {
+      const { url } = await api.billingCreateCheckoutSession([...selected])
+      window.location.href = url
+    } catch (e) {
+      setError(e.message || 'Could not start checkout')
+      setCheckoutBusy(false)
+    }
   }
 
   return (
@@ -260,6 +316,26 @@ export default function AdminAccount() {
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                   {selected.size} module{selected.size === 1 ? '' : 's'} selected
                 </p>
+                {plan.billing_checkout_enabled && quote && (
+                  <div className="mb-3 space-y-1">
+                    {quote.line_items.map((li) => (
+                      <div key={li.key} className="flex items-center justify-between font-mono text-[11px] text-pb-faint">
+                        <span>{li.name}</span>
+                        <span>${li.price}/yr</span>
+                      </div>
+                    ))}
+                    {quote.discount > 0 && (
+                      <div className="flex items-center justify-between font-mono text-[11px] text-emerald-400">
+                        <span>Bundle discount</span>
+                        <span>-${quote.discount}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between font-mono text-[12px] text-pb-text font-semibold pt-2 mt-1 border-t pb-hairline">
+                      <span>Total, billed annually</span>
+                      <span>${quote.total}/yr</span>
+                    </div>
+                  </div>
+                )}
                 {stripeNotice ? (
                   <p className="font-mono text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2">
                     Online subscribing isn't connected yet — this is coming in a follow-up build.
@@ -268,12 +344,40 @@ export default function AdminAccount() {
                 ) : (
                   <button
                     onClick={submitSubscribe}
-                    className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold text-pb-bg"
+                    disabled={checkoutBusy}
+                    className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold text-pb-bg disabled:opacity-50"
                     style={{ background: 'var(--pb-accent)' }}
                   >
-                    SUBSCRIBE
+                    {checkoutBusy ? 'REDIRECTING…' : plan.billing_checkout_enabled ? 'PROCEED TO SECURE CHECKOUT' : 'SUBSCRIBE'}
                   </button>
                 )}
+              </div>
+            )}
+
+            {invoices.length > 0 && (
+              <div className="pb-card p-4 mt-6">
+                <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">Billing history</p>
+                <div className="space-y-2">
+                  {invoices.map((inv) => (
+                    <div key={inv.id} className="flex items-center gap-3 font-mono text-[11px]">
+                      <span className="text-pb-faint w-24 shrink-0">{fmtDate(inv.period_end || inv.created_at)}</span>
+                      <span className="text-pb-text w-20 shrink-0">${(inv.amount_paid / 100).toFixed(2)}</span>
+                      <span className={`w-16 shrink-0 uppercase ${inv.status === 'paid' ? 'text-emerald-400' : 'text-amber-300'}`}>
+                        {inv.status}
+                      </span>
+                      {inv.hosted_invoice_url && (
+                        <a
+                          href={inv.hosted_invoice_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-pb-faint hover:text-pb-text underline"
+                        >
+                          View invoice
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </>

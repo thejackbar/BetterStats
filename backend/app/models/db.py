@@ -252,6 +252,14 @@ class Organisation(Base):
     subscription_status = Column(Text, nullable=False, server_default="active", default="active")
     renewal_date = Column(Date, nullable=True)
     billing_cycle = Column(Text, nullable=True)  # 'monthly' | 'annual' | None
+    # ─── Stripe Checkout (migration 150) ──────────────────────────────────────
+    # Set by the /public/stripe/webhook handler once a Primary Admin completes a
+    # real subscription checkout — see services/stripe_billing.py. NULL until a
+    # club has ever paid through Stripe. One Stripe Customer/Subscription per
+    # club, covering every module it holds via Stripe (subscription items), not
+    # one Stripe subscription per module.
+    stripe_customer_id = Column(Text, nullable=True)
+    stripe_subscription_id = Column(Text, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only
@@ -598,6 +606,35 @@ class ModuleActionRequest(Base):
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     result_subscription_id = Column(UUID(as_uuid=True), ForeignKey("org_module_subscriptions.id", ondelete="SET NULL"), nullable=True)
     external_ref = Column(Text, nullable=True)          # dedupe key for a Twenty-origin request
+
+
+class BillingInvoice(Base):
+    """A mirror of a Stripe Invoice, written by the /public/stripe/webhook handler
+    (migration 150) so a club's Account page can show its own billing history
+    without ever calling the Stripe API directly. ``line_items`` is OUR OWN quote
+    snapshot (services/billing_pricing.price_for) at the moment the invoice event
+    landed — not Stripe's line items — so it always reads in the same module/price
+    shape the rest of the app uses, no Stripe-response parsing needed to display it.
+    """
+    __tablename__ = "billing_invoices"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    stripe_invoice_id = Column(Text, nullable=False, unique=True)
+    stripe_subscription_id = Column(Text, nullable=True)
+    status = Column(Text, nullable=False)  # paid | open | void | uncollectible | draft
+    amount_due = Column(Integer, nullable=False, server_default="0", default=0)   # cents
+    amount_paid = Column(Integer, nullable=False, server_default="0", default=0)  # cents
+    currency = Column(Text, nullable=False, server_default="aud", default="aud")
+    period_start = Column(TIMESTAMP(timezone=True), nullable=True)
+    period_end = Column(TIMESTAMP(timezone=True), nullable=True)
+    hosted_invoice_url = Column(Text, nullable=True)
+    invoice_pdf = Column(Text, nullable=True)
+    line_items = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    organisation = relationship("Organisation")
 
 
 class CommsLimitRequest(Base):

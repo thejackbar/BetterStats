@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, billing, public_stripe
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2466,6 +2466,37 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS claim_note TEXT"
         ))
+        # Stripe Checkout billing (migration 150) — see services/stripe_billing.py.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS billing_invoices (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                stripe_invoice_id TEXT NOT NULL,
+                stripe_subscription_id TEXT,
+                status TEXT NOT NULL,
+                amount_due INTEGER NOT NULL DEFAULT 0,
+                amount_paid INTEGER NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'aud',
+                period_start TIMESTAMPTZ,
+                period_end TIMESTAMPTZ,
+                hosted_invoice_url TEXT,
+                invoice_pdf TEXT,
+                line_items JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_billing_invoices_stripe_id UNIQUE (stripe_invoice_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_billing_invoices_org "
+            "ON billing_invoices(organisation_id, created_at DESC)"
+        ))
         # CREATE OR REPLACE VIEW only allows appending new columns at the END
         # of the SELECT list — inserting one in the middle shifts every later
         # column's position, which Postgres treats as renaming that column
@@ -2674,6 +2705,7 @@ app.include_router(clubs.router)
 app.include_router(website.public_router)   # Front-end Website (public, Core)
 app.include_router(website.admin_router)    # Front-end Website (admin CRUD)
 app.include_router(club_admin.router)
+app.include_router(billing.router)  # Account page Stripe Checkout (flag-gated — see platform_settings.billing_checkout_enabled)
 app.include_router(organisations.router)
 app.include_router(players.router)
 app.include_router(games.router)
@@ -2722,6 +2754,7 @@ app.include_router(public_comms.router)                                         
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
+app.include_router(public_stripe.router)                                                  # Billing (Stripe webhook, signature-verified)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
 app.include_router(pipeline_gauge.router)                                                 # Twenty CRM dashboard gauge (own HTTP Basic Auth, not require_module)
 app.include_router(ladders.router)  # standings power public club pages — not gated
