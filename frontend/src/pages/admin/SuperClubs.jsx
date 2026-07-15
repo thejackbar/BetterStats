@@ -435,15 +435,16 @@ export default function SuperClubs() {
         </div>
 
         {showSettings && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowSettings(false)}>
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={() => setShowSettings(false)}>
             <form onSubmit={saveSettings} onClick={e => e.stopPropagation()}
-              className="pb-card p-5 w-full max-w-sm space-y-4 bg-pb-surface">
-              <div>
+              className="pb-card w-full max-w-sm bg-pb-surface mt-16 max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="p-5 pb-0 shrink-0">
                 <h2 className="font-display font-bold text-lg text-pb-text">General Settings</h2>
                 <p className="font-mono text-[10px] text-pb-faintest mt-1">
                   Platform-wide defaults, applied across all clubs.
                 </p>
               </div>
+              <div className="p-5 overflow-y-auto space-y-4">
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Default trial days</label>
                 <input type="number" min="1" value={settingsForm.default_trial_days}
@@ -533,8 +534,9 @@ export default function SuperClubs() {
                   Online billing checkout enabled
                 </label>
               </div>
+              </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 p-5 pt-3 border-t pb-hairline shrink-0">
                 <button type="submit" disabled={settingsSaving}
                   className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
                   style={{ background: 'var(--pb-accent)' }}>
