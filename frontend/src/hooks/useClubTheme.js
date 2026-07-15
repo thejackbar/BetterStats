@@ -32,5 +32,9 @@ export function useClubTheme(club) {
     if (!club) return
     const mode = club.theme_mode
     setClubDefault(mode === 'light' || mode === 'dark' ? mode : 'auto')
+    // Reset to the BetterStats default on unmount — otherwise a club's
+    // light/auto theme_mode keeps applying to whatever the visitor navigates
+    // to next (including the always-dark marketing site).
+    return () => setClubDefault('dark')
   }, [club?.theme_mode, setClubDefault])
 }

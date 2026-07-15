@@ -6,7 +6,7 @@ import Reveal from '../../components/marketing/Reveal'
 import CountUp from '../../components/marketing/CountUp'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
-import DotGrid from '../../components/marketing/DotGrid'
+import DotField from '../../components/marketing/DotField'
 import {
   MockHeritageCard,
   MockLeaderboard,
@@ -23,31 +23,44 @@ import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
+function hexToRgba(hex, alpha) {
+  const m = hex.trim().match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i)
+  if (!m) return hex
+  const r = parseInt(m[1], 16)
+  const g = parseInt(m[2], 16)
+  const b = parseInt(m[3], 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 // ─── Hero ────────────────────────────────────────────────────────────────
 function Hero() {
-  // Drive the dot grid straight from the theme tokens so it always matches the
-  // site CSS — subtle hairline dots that light up the brand accent near the cursor.
+  // Drive the dot field straight from the theme tokens so it always matches the
+  // site CSS — a brand green→blue gradient that bulges away from the cursor.
   const dots = useMemo(() => {
-    const fallback = { base: '#262d3d', active: '#16c784' }
+    const fallback = { from: 'rgba(22, 199, 132, 0.35)', to: 'rgba(59, 130, 246, 0.22)', glow: '#0a0d14' }
     if (typeof window === 'undefined') return fallback
     const cs = getComputedStyle(document.documentElement)
+    const accent = cs.getPropertyValue('--pb-accent').trim() || '#16c784'
+    const accent2 = cs.getPropertyValue('--pb-accent-2').trim() || '#3b82f6'
+    const bg = cs.getPropertyValue('--pb-bg').trim() || '#0a0d14'
     return {
-      base: cs.getPropertyValue('--pb-hairline2').trim() || fallback.base,
-      active: cs.getPropertyValue('--pb-accent').trim() || fallback.active,
+      from: hexToRgba(accent, 0.35),
+      to: hexToRgba(accent2, 0.22),
+      glow: bg,
     }
   }, [])
   return (
     <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <DotGrid
-          dotSize={4}
-          gap={26}
-          proximity={120}
-          shockRadius={220}
-          shockStrength={4}
-          baseColor={dots.base}
-          activeColor={dots.active}
-          className="!p-0"
+        <DotField
+          dotRadius={1.5}
+          dotSpacing={14}
+          cursorRadius={260}
+          bulgeStrength={40}
+          glowRadius={200}
+          gradientFrom={dots.from}
+          gradientTo={dots.to}
+          glowColor={dots.glow}
         />
       </div>
       <div className="absolute inset-0 hero-glow pointer-events-none" />
