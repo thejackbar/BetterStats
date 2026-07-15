@@ -14,6 +14,7 @@ separate entitlement path.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -28,15 +29,25 @@ logger = logging.getLogger(__name__)
 
 
 async def _load_org(db: AsyncSession, org_id) -> Organisation | None:
+    """org_id arrives as a plain string from Stripe's client_reference_id /
+    metadata — parse it to a real uuid.UUID before handing it to db.get()
+    rather than relying on the ORM/driver to coerce a bare string for a UUID
+    PK column (untested against a live DB; explicit is cheap and matches the
+    pattern routers/public_square.py already uses for the same situation)."""
     if not org_id:
         return None
     try:
+        org_uuid = uuid.UUID(str(org_id))
+    except (ValueError, TypeError, AttributeError):
+        logger.warning("Stripe billing: invalid org_id=%r", org_id)
+        return None
+    try:
         return await db.get(
-            Organisation, org_id,
+            Organisation, org_uuid,
             options=[selectinload(Organisation.module_subscriptions)],
         )
     except Exception:
-        logger.exception("Stripe billing: could not load org_id=%s", org_id)
+        logger.exception("Stripe billing: could not load org_id=%s", org_uuid)
         return None
 
 
@@ -48,6 +59,30 @@ async def _load_org_by_subscription(db: AsyncSession, subscription_id: str | Non
         .where(Organisation.stripe_subscription_id == subscription_id)
         .options(selectinload(Organisation.module_subscriptions))
     )).scalar_one_or_none()
+
+
+async def _resolve_org_for_subscription(db: AsyncSession, subscription_id: str | None):
+    """Loads the org owning a subscription, preferring our own indexed
+    stripe_subscription_id (no Stripe call needed) but falling back to
+    fetching the subscription and reading its own metadata.org_id. Stripe
+    doesn't guarantee webhook delivery order — invoice.paid for the very
+    first invoice can arrive before checkout.session.completed has had a
+    chance to stamp stripe_subscription_id onto the org, which would
+    otherwise silently drop that invoice. Self-heals by stamping it here too.
+    Returns (org, subscription_or_None) — the subscription is returned when
+    already fetched here so the caller doesn't fetch it twice."""
+    org = await _load_org_by_subscription(db, subscription_id)
+    if org is not None or not subscription_id:
+        return org, None
+    try:
+        sub = await stripe_client.retrieve_subscription(subscription_id)
+    except Exception:
+        logger.exception("Stripe: could not retrieve subscription %s", subscription_id)
+        return None, None
+    org = await _load_org(db, (sub.get("metadata") or {}).get("org_id"))
+    if org is not None:
+        org.stripe_subscription_id = subscription_id
+    return org, sub
 
 
 def _parse_billing_keys(metadata) -> list[str]:
@@ -124,7 +159,7 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     history (idempotent on stripe_invoice_id — a replayed event just re-upserts
     the same row)."""
     subscription_id = invoice.get("subscription")
-    org = await _load_org_by_subscription(db, subscription_id)
+    org, sub = await _resolve_org_for_subscription(db, subscription_id)
     if org is None:
         logger.warning("Stripe invoice.paid: unknown subscription=%r", subscription_id)
         return
@@ -132,7 +167,8 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     billing_keys: list[str] = []
     renewal_date = _epoch_to_date(invoice.get("period_end"))
     try:
-        sub = await stripe_client.retrieve_subscription(subscription_id)
+        if sub is None:
+            sub = await stripe_client.retrieve_subscription(subscription_id)
         billing_keys = _parse_billing_keys(sub.get("metadata"))
         renewal_date = _epoch_to_date(sub.get("current_period_end")) or renewal_date
     except Exception:
@@ -153,14 +189,15 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
     Stripe's own dunning schedule gives up and fires
     customer.subscription.deleted."""
     subscription_id = invoice.get("subscription")
-    org = await _load_org_by_subscription(db, subscription_id)
+    org, sub = await _resolve_org_for_subscription(db, subscription_id)
     if org is None:
         logger.warning("Stripe invoice.payment_failed: unknown subscription=%r", subscription_id)
         return
 
     billing_keys: list[str] = []
     try:
-        sub = await stripe_client.retrieve_subscription(subscription_id)
+        if sub is None:
+            sub = await stripe_client.retrieve_subscription(subscription_id)
         billing_keys = _parse_billing_keys(sub.get("metadata"))
     except Exception:
         logger.exception("Stripe: could not retrieve subscription %s for failed invoice %s", subscription_id, invoice.get("id"))

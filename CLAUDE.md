@@ -1363,6 +1363,26 @@ Stripe keys are configured.
   card update / cancel from the Stripe side) and per-club Stripe tax
   handling — both natural follow-ups once the base flow is verified end to
   end with real keys.
+- **One club, one Stripe Subscription — `/checkout-session` refuses a second
+  one.** A Checkout Session in subscription mode always creates a brand NEW
+  Stripe Subscription; it can't add items to one that already exists. Without
+  a guard, a club with a live subscription checking out again (e.g. to add a
+  module) would end up with two parallel subscriptions — Core billed twice,
+  and the original silently orphaned from our tracking the moment
+  `handle_checkout_completed` overwrites `stripe_subscription_id` with the new
+  one. `routers/billing.py::create_checkout_session` 409s when
+  `club.stripe_subscription_id` is already set, rather than letting that
+  happen. **Adding a module to an existing subscription is a real, separate
+  feature** (a Stripe Subscription Item update, not a new Checkout Session) —
+  not built yet; don't remove this guard without building that first.
+- **Webhook delivery order isn't guaranteed** — `invoice.paid` for a brand-new
+  subscription's first invoice can arrive before `checkout.session.completed`
+  has stamped `stripe_subscription_id` onto the org.
+  `stripe_billing._resolve_org_for_subscription` falls back to fetching the
+  subscription and reading its own `metadata.org_id` when the org isn't found
+  by `stripe_subscription_id` yet, and self-heals by stamping it — otherwise
+  that first invoice would silently never show up in Billing History even
+  though entitlement was still granted correctly via `checkout.session.completed`.
 
 ### Per-club override for testing (migration 151)
 

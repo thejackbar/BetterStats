@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from stripe import error as stripe_error
 
 from app.auth.modules import account_plan_status
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
@@ -73,6 +74,20 @@ async def create_checkout_session(
     if not is_super and not (m and m.club_id == club.id and m.role == "club_admin" and m.is_primary_admin):
         raise HTTPException(status_code=403, detail="Only the club's primary admin can subscribe")
 
+    # A Checkout Session in subscription mode always creates a BRAND NEW Stripe
+    # Subscription — it can't add items to one that already exists. A club that
+    # already has a live Stripe subscription and checks out again would end up
+    # with a second, parallel subscription (Core billed twice, and the original
+    # orphaned the moment handle_checkout_completed overwrites
+    # stripe_subscription_id with the new one) — block it here rather than
+    # silently double-charging the club. Adding a module to an existing
+    # subscription needs a Subscription Update call, a separate feature.
+    if club.stripe_subscription_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Your club already has an active subscription. Contact the BetterCricket team to add modules to it.",
+        )
+
     # Never let a checkout re-buy something the club already pays for — the
     # quote/UI should already prevent this, but it's cheap to enforce here too.
     plan_by_key = {row["module"]: row for row in account_plan_status(club)}
@@ -92,6 +107,11 @@ async def create_checkout_session(
         )
     except stripe_client.StripeNotConfigured:
         raise HTTPException(status_code=503, detail="Online billing isn't configured yet. Contact the BetterCricket team to subscribe.")
+    except stripe_error.StripeError as e:
+        # Mirrors the square_client.SquareError handling elsewhere (merch.py) —
+        # a bad Stripe response is an upstream failure, not ours, and its raw
+        # SDK exception shouldn't leak to the client as an unhandled 500.
+        raise HTTPException(status_code=502, detail=str(e) or "Stripe checkout could not be started")
 
     return {"url": session["url"]}
 
