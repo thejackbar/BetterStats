@@ -33,10 +33,16 @@ FANTASY = {"key": "fantasy", "name": "BetterFantasyCricket", "price": 49}
 # are selected (not a percentage) — mirrors BUNDLE_DISCOUNT in pricing.js.
 BUNDLE_DISCOUNT = {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}
 
-# Every module a Primary Admin can actually check out for — Core is implicit
-# (always included, never a line item to "select"), Fantasy is priced but
-# outside the bundle.
-CHECKOUT_MODULE_NAMES = {m["key"]: m["name"] for m in PRICED_MODULES} | {FANTASY["key"]: FANTASY["name"]}
+# Every module key the checkout-session endpoint accepts. Core is always
+# priced in automatically (price_for() below adds it unconditionally,
+# regardless of what's in selected_keys) — it's included here purely so
+# selecting the Account page's BetterStats/Core row doesn't 422 as "unknown";
+# passing it through selected_keys is a harmless no-op, not a second charge.
+# Fantasy is priced but kept outside the bundle discount.
+CHECKOUT_MODULE_NAMES = (
+    {m["key"]: m["name"] for m in PRICED_MODULES}
+    | {FANTASY["key"]: FANTASY["name"], CORE["key"]: CORE["name"]}
+)
 
 
 def bundle_discount(module_count: int) -> int:
