@@ -2004,6 +2004,65 @@ class FeeSquareImportLog(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class FeeXeroConnection(Base):
+    """A club's OAuth connection to its own Xero organisation ('tenant') — one
+    per club. Unlike Square, this belongs to BetterFees alone: it exists purely
+    to pull bank transactions for reconciliation against fee payments, never to
+    write anything back. Xero access tokens last 30 minutes (refreshed
+    liberally before each use, see services/fees_xero.ensure_fresh_token);
+    refresh tokens have a rolling 60-day expiry that resets on every use, so a
+    connection stays alive indefinitely as long as it's used at least that
+    often. `tenant_id`/`bank_account_id` are null until the admin picks them
+    (a Xero login can grant access to more than one organisation)."""
+    __tablename__ = "fee_xero_connections"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", name="uq_fee_xero_org"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(Text, nullable=True)
+    tenant_name = Column(Text, nullable=True)
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    scopes = Column(Text, nullable=True)
+    bank_account_id = Column(Text, nullable=True)
+    bank_account_name = Column(Text, nullable=True)
+    sync_enabled = Column(Boolean, nullable=False, server_default="false")
+    last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_sync_status = Column(Text, nullable=True)   # 'ok' | 'error'
+    last_sync_error = Column(Text, nullable=True)
+    connected_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    connected_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FeeXeroImportLog(Base):
+    """One row per Xero bank transaction a BetterFees admin has resolved
+    (applied or dismissed) in the Xero import review queue — mirrors
+    fee_square_import_log exactly, kept as its own table (rather than a
+    shared/generalised one) so each provider's import stays independently
+    reasoned about, matching how this codebase treats other per-integration
+    tables (KlubPro, Play-Cricket, Square)."""
+    __tablename__ = "fee_xero_import_log"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "external_ref", name="uq_fee_xero_import_log_ref"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    external_ref = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)  # 'applied' | 'dismissed'
+    fee_payment_id = Column(UUID(as_uuid=True), ForeignKey("fee_payments.id", ondelete="SET NULL"), nullable=True)
+    description = Column(Text, nullable=True)
+    amount = Column(Numeric(10, 2), nullable=True)
+    occurred_at = Column(Date, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────
 # One engine, three category templates: apparel (sized/coloured variants),
 # equipment (quantity OR individual assets), food_drink (canteen/bar stock with

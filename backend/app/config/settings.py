@@ -69,6 +69,18 @@ class Settings(BaseSettings):
     square_environment: str = "production"  # 'sandbox' | 'production'
     square_api_version: str = ""
 
+    # ─── BetterFees — Xero bank transaction import (reconciliation only) ───────
+    # A club connects its own Xero organisation via OAuth. Register ONE Xero
+    # app (developer.xero.com/app/manage) as a "Web app" (NOT a Custom
+    # Connection — those are pinned to a single Xero org, and this needs to
+    # work for every club), then set the client id + secret here and add the
+    # redirect URL (xero_oauth_redirect below) to the app's OAuth 2.0 redirect
+    # URIs. Blank id/secret = the Xero page shows "not configured" and nothing
+    # connects. Read-only scope only (accounting.transactions.read) — nothing
+    # here ever writes to Xero.
+    xero_client_id: str = ""
+    xero_client_secret: str = ""
+
     # ─── Marketing club directory crawl (BetterCricket outreach, super-admin) ──
     # Walks the CA/grassroots org graph to build the national club list for our
     # own outreach. Politeness is deliberate: low concurrency + a jittered delay
@@ -278,6 +290,15 @@ class Settings(BaseSettings):
     @property
     def square_configured(self) -> bool:
         return bool(self.square_app_id and self.square_app_secret)
+
+    @property
+    def xero_oauth_redirect(self) -> str:
+        # nginx strips the /api prefix, so this resolves at the public callback.
+        return f"{self.public_base_url}/api/public/xero/callback"
+
+    @property
+    def xero_configured(self) -> bool:
+        return bool(self.xero_client_id and self.xero_client_secret)
 
     @property
     def cors_origins_list(self) -> List[str]:

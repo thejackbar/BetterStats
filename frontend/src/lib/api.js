@@ -350,6 +350,24 @@ export const api = {
     request('/club-admin/fees/square/commit', { method: 'POST', body: JSON.stringify({ items }) }),
   feeSquareDismiss: (data) =>
     request('/club-admin/fees/square/dismiss', { method: 'POST', body: JSON.stringify(data) }),
+  // Xero import (own OAuth connection, owned entirely by BetterFees)
+  feeXeroStatus: () => request('/club-admin/fees/xero/status'),
+  feeXeroConnectUrl: () => request('/club-admin/fees/xero/connect-url'),
+  feeXeroTenants: () => request('/club-admin/fees/xero/tenants'),
+  feeXeroSetTenant: (tenantId, tenantName) =>
+    request('/club-admin/fees/xero/tenant', { method: 'POST', body: JSON.stringify({ tenant_id: tenantId, tenant_name: tenantName }) }),
+  feeXeroBankAccounts: () => request('/club-admin/fees/xero/bank-accounts'),
+  feeXeroSetBankAccount: (bankAccountId, bankAccountName) =>
+    request('/club-admin/fees/xero/bank-account', { method: 'POST', body: JSON.stringify({ bank_account_id: bankAccountId, bank_account_name: bankAccountName }) }),
+  feeXeroSettings: (data) =>
+    request('/club-admin/fees/xero/settings', { method: 'POST', body: JSON.stringify(data) }),
+  feeXeroPreview: (seasonId) =>
+    request(`/club-admin/fees/xero/preview?season_id=${seasonId}`, { method: 'POST' }),
+  feeXeroCommit: (items) =>
+    request('/club-admin/fees/xero/commit', { method: 'POST', body: JSON.stringify({ items }) }),
+  feeXeroDismiss: (data) =>
+    request('/club-admin/fees/xero/dismiss', { method: 'POST', body: JSON.stringify(data) }),
+  feeXeroDisconnect: () => request('/club-admin/fees/xero/disconnect', { method: 'POST' }),
   // ─── BetterMerch (BetterAdmin module) — club stock register ─────────────────
   merchOverview: () => request('/club-admin/merch/overview'),
   merchAlerts: () => request('/club-admin/merch/alerts'),
