@@ -1480,7 +1480,8 @@ export const api = {
   bsUpdateTeam: (id, data) =>
     request(`/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   bsDeleteTeam: (id) => request(`/teams/${id}`, { method: 'DELETE' }),
-  bsSeedTeams: () => request('/teams/seed', { method: 'POST' }),
+  bsSeedTeams: (body) => request('/teams/seed', { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  bsSeedCandidates: ({ seasons = 3 } = {}) => request(`/teams/seed-candidates?seasons=${seasons}`),
   bsAutoAssignSuggest: ({ seasons = 2, onlyUnassigned = true } = {}) =>
     request(`/teams/auto-assign-suggest?seasons=${seasons}&only_unassigned=${onlyUnassigned}`),
   bsTeamMembers: (id) => request(`/teams/${id}/members`),

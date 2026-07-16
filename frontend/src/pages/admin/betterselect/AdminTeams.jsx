@@ -416,6 +416,121 @@ function AutoAssignModal({ onApply, onClose }) {
   )
 }
 
+/* ── Auto-seed modal: discover team names from the last N seasons, tick which
+ * ones should become squads, confirm — then squads are created and every
+ * player who played is auto-assigned into theirs in one go. Combines what
+ * used to be two separate steps (seed, then auto-assign) into one flow so a
+ * club realistically ends up with everyone in a squad. */
+function AutoSeedModal({ onSeeded, onClose }) {
+  const toast = useToast()
+  const [seasons, setSeasons] = useState(3)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)   // { seasons_considered, candidates }
+  const [picked, setPicked] = useState(() => new Set())
+  const [working, setWorking] = useState(false)
+
+  const load = useCallback(async (s) => {
+    setLoading(true); setResult(null)
+    try {
+      const d = await api.bsSeedCandidates({ seasons: s })
+      setResult(d)
+      setPicked(new Set((d.candidates || []).filter((c) => !c.exists).map((c) => c.name)))
+    } catch (e) { toast.error('Preview failed: ' + e.message) }
+    finally { setLoading(false) }
+  }, [toast])
+
+  useEffect(() => { load(3) }, [load])
+
+  const toggle = (name) => setPicked((s) => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
+
+  const candidates = result?.candidates || []
+  const fresh = candidates.filter((c) => !c.exists)
+  const already = candidates.filter((c) => c.exists)
+
+  const confirm = async () => {
+    setWorking(true)
+    try {
+      const seedRes = await api.bsSeedTeams({ names: [...picked] })
+      const suggest = await api.bsAutoAssignSuggest({ seasons, onlyUnassigned: true })
+      const byTeam = new Map()
+      ;(suggest.suggestions || []).forEach((s) => {
+        if (!byTeam.has(s.team_id)) byTeam.set(s.team_id, [])
+        byTeam.get(s.team_id).push(s.player_id)
+      })
+      let assigned = 0
+      for (const [teamId, ids] of byTeam.entries()) { await api.bsAssignSquad(ids, teamId); assigned += ids.length }
+      const unmatched = suggest.unmatched?.length || 0
+      toast.success(
+        `Created ${seedRes.created} squad${seedRes.created === 1 ? '' : 's'}, assigned ${assigned} player${assigned === 1 ? '' : 's'}`
+        + (unmatched ? ` · ${unmatched} still need a manual squad` : ''),
+      )
+      onSeeded()
+      onClose()
+    } catch (e) { toast.error('Auto-seed failed: ' + e.message) }
+    finally { setWorking(false) }
+  }
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()} className="w-[560px] max-w-full max-h-[88%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+        <div className="flex items-start gap-3 px-[18px] py-4 border-b pb-hairline">
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Auto-seed squads</div>
+            <div className="font-display font-bold text-[18px] mt-0.5">Bring in the teams you've actually played</div>
+            <div className="text-[12px] text-pb-faint mt-1">Tick which teams from recent match history should become squads. On confirm we create them, then auto-assign every player who played into their squad.</div>
+          </div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1 shrink-0"><Icon name="close" size={18} /></button>
+        </div>
+
+        <div className="px-4 py-3 border-b pb-hairline flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-pb-faint">
+            Last
+            {[1, 2, 3, 5].map((n) => (
+              <Chip key={n} label={`${n}`} active={seasons === n} onClick={() => { setSeasons(n); load(n) }} />
+            ))}
+            season{seasons === 1 ? '' : 's'}
+          </span>
+          {result?.seasons_considered?.length > 0 && (
+            <span className="ml-auto font-mono text-[10px] text-pb-faintest truncate" title={result.seasons_considered.join(', ')}>{result.seasons_considered.join(' · ')}</span>
+          )}
+        </div>
+
+        <div className="overflow-auto flex-1 pb-scroll">
+          {loading ? <div className="py-10"><PbSpinner message="Looking through match history…" /></div> : (
+            fresh.length === 0 ? (
+              <div className="px-4 py-10"><Empty>{already.length > 0 ? 'Every team from this window already has a squad.' : 'No team names found in this window.'}</Empty></div>
+            ) : (
+              fresh.map((c) => {
+                const on = picked.has(c.name)
+                return (
+                  <label key={c.name} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? '' : 'opacity-50'}`}>
+                    <input type="checkbox" checked={on} onChange={() => toggle(c.name)} className="accent-pb-accent w-[15px] h-[15px]" />
+                    <span className="flex-1 text-[13.5px] font-medium truncate">{c.name}</span>
+                    <span className="font-mono text-[11px] text-pb-faint pb-num shrink-0">{c.players} player{c.players === 1 ? '' : 's'} · {c.games}g</span>
+                  </label>
+                )
+              })
+            )
+          )}
+          {already.length > 0 && (
+            <div className="px-4 py-2 text-[10.5px] text-pb-faintest">{already.length} team{already.length === 1 ? '' : 's'} in this window already {already.length === 1 ? 'has' : 'have'} a squad, so it's skipped here, but still gets re-checked when assigning players below.</div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2.5 px-4 py-3 border-t pb-hairline">
+          <span className={`font-mono text-xs ${picked.size ? 'text-pb-accent' : 'text-pb-faint'}`}>{picked.size} squad{picked.size === 1 ? '' : 's'} to create</span>
+          <div className="ml-auto flex gap-2">
+            <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+            <Btn variant="primary" sm icon="bolt" disabled={working || loading} onClick={confirm}>
+              {working ? 'Seeding…' : 'Create & auto-seed players'}
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminTeams() {
   const { hasCapability } = useAuth()
   const toast = useToast()
@@ -428,7 +543,7 @@ export default function AdminTeams() {
   const [editing, setEditing] = useState(undefined)
   const [addTo, setAddTo] = useState(undefined)        // BulkAddModal target: a team (fixed), or null (choose squad)
   const [over, setOver] = useState(null)
-  const [seeding, setSeeding] = useState(false)
+  const [autoSeed, setAutoSeed] = useState(false)      // auto-seed modal open
   const [autoAssign, setAutoAssign] = useState(false)  // auto-assign modal open
   const [availEdit, setAvailEdit] = useState(null)     // player for quick-update modal
 
@@ -552,12 +667,6 @@ export default function AdminTeams() {
     catch (e) { toast.error('Could not update availability: ' + e.message); loadMatrix() }
   }
 
-  const seed = async () => {
-    setSeeding(true)
-    try { const r = await api.bsSeedTeams(); toast.success(`Created ${r.created} squad(s) from match data`); loadTeams() }
-    catch (e) { toast.error('Seed failed: ' + e.message) }
-    finally { setSeeding(false) }
-  }
   const del = async (t) => {
     if (!window.confirm(`Delete squad "${t.name}"? Players in it become Unassigned.`)) return
     try { await api.bsDeleteTeam(t.id); toast.success('Deleted'); loadTeams(); loadPlayers() }
@@ -572,7 +681,7 @@ export default function AdminTeams() {
   const loading = teams === null || players === null
   const actions = canManage && (
     <div className="flex gap-2">
-      {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="bolt" onClick={seed} disabled={seeding}>{seeding ? 'Seeding…' : 'Auto-seed'}</Btn>}
+      <Btn variant="ghost" sm icon="bolt" onClick={() => setAutoSeed(true)}>Auto-seed squads</Btn>
       {(teams?.length || 0) > 0 && <Btn variant="soft" sm icon="bolt" onClick={() => setAutoAssign(true)}>Auto-assign players</Btn>}
       <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
     </div>
@@ -592,6 +701,7 @@ export default function AdminTeams() {
           current={statusOf(availEdit.id)} onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
       {autoAssign && <AutoAssignModal onApply={applyAutoAssign} onClose={() => setAutoAssign(false)} />}
+      {autoSeed && <AutoSeedModal onSeeded={() => { loadTeams(); loadPlayers() }} onClose={() => setAutoSeed(false)} />}
 
       {loading ? <PbSpinner message="Loading squads…" /> : (
         (teams.length === 0) ? (
@@ -599,7 +709,7 @@ export default function AdminTeams() {
             <p className="text-pb-faint text-sm mb-4">No squads yet.{canManage && ' Auto-seed from your match history, or create one.'}</p>
             {canManage && (
               <div className="flex gap-2 justify-center">
-                <Btn variant="ghost" sm icon="bolt" onClick={seed} disabled={seeding}>{seeding ? 'Seeding…' : 'Auto-seed from data'}</Btn>
+                <Btn variant="ghost" sm icon="bolt" onClick={() => setAutoSeed(true)}>Auto-seed from data</Btn>
                 <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
               </div>
             )}

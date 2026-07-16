@@ -19,7 +19,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text, func
+from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -246,8 +246,86 @@ async def delete_team(
     await db.commit()
 
 
+class SeedTeamsBody(BaseModel):
+    # When provided (even as an empty list), only these exact names are
+    # created as squads — powers the "tick which teams to bring in" auto-seed
+    # modal, which sources the list from GET /teams/seed-candidates. When
+    # omitted entirely (no body sent), falls back to the original
+    # single-season auto-discovery below, for backward compatibility.
+    names: Optional[list[str]] = None
+
+
+@router.get("/seed-candidates")
+async def seed_candidates(
+    seasons: int = 3,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Distinct team names our players appeared for over the last `seasons`
+    seasons (default 3) — the picker behind the auto-seed modal, so an admin
+    can tick which ones should become squads before anything is created.
+
+    Each candidate reports how many of our players and games it covers, and
+    whether a squad with that name already exists (so the UI can skip it).
+    """
+    seasons = max(1, min(int(seasons or 3), 60))
+
+    season_rows = (await db.execute(
+        select(Season.id, Season.name)
+        .where(Season.organisation_id == club.id)
+        .order_by(Season.year.desc().nullslast(), Season.name.desc())
+        .limit(seasons)
+    )).all()
+    season_ids = [r[0] for r in season_rows]
+    season_names = [r[1] for r in season_rows]
+    if not season_ids:
+        return {"seasons_considered": [], "candidates": []}
+
+    rows = (await db.execute(
+        select(
+            GameAppearance.team_name,
+            func.count(distinct(GameAppearance.player_id)).label("players"),
+            func.count().label("games"),
+            func.max(Game.played_at).label("last_played"),
+        )
+        .join(Game, Game.id == GameAppearance.game_id)
+        .join(Grade, Grade.id == Game.grade_id)
+        .join(Player, Player.id == GameAppearance.player_id)
+        .where(
+            Player.organisation_id == club.id,
+            Grade.season_id.in_(season_ids),
+            GameAppearance.team_name.isnot(None),
+            GameAppearance.team_name != "",
+        )
+        .group_by(GameAppearance.team_name)
+        .order_by(func.count(distinct(GameAppearance.player_id)).desc(), func.count().desc())
+    )).all()
+
+    existing_res = await db.execute(
+        select(Team.name).where(Team.organisation_id == club.id)
+    )
+    existing = {(n or "").strip().lower() for n in existing_res.scalars().all()}
+
+    candidates = []
+    for name, players_n, games_n, last_played in rows:
+        clean = (name or "").strip()
+        if not clean:
+            continue
+        candidates.append({
+            "name": clean,
+            "players": int(players_n),
+            "games": int(games_n),
+            "last_played": last_played.isoformat() if last_played else None,
+            "exists": clean.lower() in existing,
+        })
+
+    return {"seasons_considered": season_names, "candidates": candidates}
+
+
 @router.post("/seed")
 async def seed_teams(
+    body: Optional[SeedTeamsBody] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
@@ -259,11 +337,35 @@ async def seed_teams(
     the list. Picks the latest season (by year, then name) that actually has
     appearances. Idempotent: only names not already present (case-insensitive)
     are added, as source='auto'. Existing teams are left untouched.
+
+    If `names` is supplied in the body (the auto-seed modal's tick-box flow),
+    that exact list is created instead of re-discovering a season — the
+    caller has already picked which candidates from GET /teams/seed-candidates
+    it wants brought in.
     """
     existing_res = await db.execute(
         select(Team.name).where(Team.organisation_id == club.id)
     )
     existing = {(n or "").strip().lower() for n in existing_res.scalars().all()}
+
+    if body is not None and body.names is not None:
+        created = 0
+        for name in body.names:
+            clean = (name or "").strip()
+            if not clean or clean.lower() in existing:
+                continue
+            db.add(Team(
+                id=uuid.uuid4(),
+                organisation_id=club.id,
+                name=clean,
+                sequence=_guess_sequence(clean),
+                source="auto",
+                is_active=True,
+            ))
+            existing.add(clean.lower())
+            created += 1
+        await db.commit()
+        return {"created": created, "total_discovered": len(body.names), "season": None}
 
     # Most recent season this club has team-name appearances in.
     season_row = (await db.execute(
