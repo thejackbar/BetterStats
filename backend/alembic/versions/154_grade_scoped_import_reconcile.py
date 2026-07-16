@@ -31,15 +31,15 @@ going forward, with no destructive rewrite of already-committed data — a
 re-run of ``reconcile_imported_totals`` (self-healing, wipe-and-rebuild by
 design) picks up the fix for existing orgs.
 
-Revision ID: 152
-Revises: 151
+Revision ID: 154
+Revises: 153
 Create Date: 2026-07-16
 """
 from alembic import op
 
 
-revision = '152'
-down_revision = '151'
+revision = '154'
+down_revision = '153'
 branch_labels = None
 depends_on = None
 
