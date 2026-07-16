@@ -47,6 +47,7 @@ const INTEREST_OPTIONS = [
   'Fee tracking',
   'Bulk email to members',
   'Opposition analysis (BetterIQ)',
+  'Fantasy Cricket',
   'Other',
 ]
 
