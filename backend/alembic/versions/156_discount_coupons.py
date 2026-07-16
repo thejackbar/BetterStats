@@ -12,15 +12,15 @@ discount_coupon_redemptions is the audit trail AND the "one live redemption
 per club per coupon" enforcement (a partial unique index on non-revoked rows,
 so a Super Admin's revoke frees the slot for a genuine mistake).
 
-Revision ID: 154
-Revises: 153
+Revision ID: 156
+Revises: 155
 Create Date: 2026-07-16
 """
 from alembic import op
 
 
-revision = '154'
-down_revision = '153'
+revision = '156'
+down_revision = '155'
 branch_labels = None
 depends_on = None
 

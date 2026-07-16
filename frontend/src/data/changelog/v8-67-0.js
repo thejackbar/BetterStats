@@ -2,9 +2,8 @@ export default {
   version: 'v8.67.0',
   date: '2026-07-16',
   sortKey: '2026-07-16T09:00:00Z',
-  title: 'Discount coupons',
+  title: 'Grade-scoped historical imports now reconcile correctly',
   items: [
-    'Super Admin can now create and manage discount coupons entirely inside BetterCricket, with a code, a dollar or percentage discount, optional module coverage, redemption windows, a duration (once, a set number of renewals, or forever) and whether it can combine with the bundle discount.',
-    'A club can redeem a code at signup, and a Primary Admin or a Super Admin can apply one to an already-subscribed club ahead of its next renewal — nothing is charged until that renewal happens.',
+    'A BetterImport historical stats upload scoped to one grade (common in Premier cricket, where a club keeps a detailed 1st Grade honour board but nothing for the lower grades) was being reconciled against the player\'s Cricket Australia coverage across every grade, not just the grade the upload actually covers. That understated the top-up for players who also had synced history in other grades, and grade-filtered ladders never showed the import figure at all, since it carried no grade of its own. Both are fixed: the reconciler now matches a grade-labelled upload against that grade\'s own Grassroots coverage, and grade-filtered leaderboards read the resulting figure.',
   ],
 }

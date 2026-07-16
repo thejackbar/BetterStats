@@ -1,4 +1,4 @@
-"""BetterCricket-managed discount coupons (migration 154).
+"""BetterCricket-managed discount coupons (migration 156).
 
 Super Admin owns the whole lifecycle — code, display name, module coverage,
 redemption windows, duration, stackability, max redemptions — entirely

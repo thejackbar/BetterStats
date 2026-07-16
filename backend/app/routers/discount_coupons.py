@@ -1,4 +1,4 @@
-"""BetterCricket-managed discount coupons (migration 154).
+"""BetterCricket-managed discount coupons (migration 156).
 
 Super-Admin CRUD over the coupon catalogue, plus the club-facing "redeem a
 code ahead of your renewal" action. The new-signup redemption path doesn't

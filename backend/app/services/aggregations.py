@@ -23,6 +23,39 @@ _GRADE_MATCH = (
     " AND gr2.display_name_override = :grade_name))))"
 )
 
+# Same merge-aware match, but against an ``import_effective_deltas`` row's free-text
+# grade_label (ied must already be in scope) — a career-scope import residual has no
+# grade_id (it spans many seasons' worth of same-named grades, see migration 154),
+# so grade-filtered leaderboards match it by name exactly like _GRADE_MATCH does for
+# a real grades row.
+_IMPORT_GRADE_MATCH = (
+    "(ied.grade_label = :grade_name"
+    " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
+    " WHERE gml.org_id = CAST(:org_id AS UUID)"
+    " AND gml.alias_name = ied.grade_label AND gml.undone_at IS NULL"
+    " AND (gml.canonical_name = :grade_name"
+    " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
+    " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org_id AS UUID)"
+    " AND gr2.display_name_override = :grade_name))))"
+)
+
+
+async def _resolve_grade_name(session: AsyncSession, org_id: str, grade_id: str) -> Optional[str]:
+    """A grade_id's display name, for feeding _IMPORT_GRADE_MATCH from a grade_id filter.
+
+    Import residuals (career-scope especially) carry no grade_id of their own —
+    only the grade_id-filtered leaderboard branches need this one extra lookup
+    to translate "this exact season's grade row" into the name their import
+    match has to compare against.
+    """
+    row = (
+        await session.execute(
+            text("SELECT COALESCE(display_name_override, name) AS n FROM grades WHERE id = CAST(:gid AS UUID)"),
+            {"gid": grade_id},
+        )
+    ).mappings().first()
+    return row["n"] if row else None
+
 
 async def get_career_batting(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
     season_ids = await resolve_season_filter_no_org(session, season_id)
@@ -412,24 +445,62 @@ async def get_fielding_leaderboard(
     if season_ids:
         params["season_ids"] = season_ids
 
+    # See the equivalent note in get_batting_leaderboard_extended: import residuals
+    # can't be attributed to a final or a captain's game, so are only blended in
+    # for the plain grade view.
+    include_import = not captain_only and not finals_only
+
     if grade_id:
         params["grade_id"] = grade_id
+        import_cte = ""
+        import_join = ""
+        qualify_clause = "fs.player_id IS NOT NULL"
+        if include_import:
+            import_grade_name = await _resolve_grade_name(session, org_id, grade_id)
+            if import_grade_name:
+                params["grade_name"] = import_grade_name
+                import_season_clause = " AND ied.season_id = ANY(:season_ids)" if season_ids else ""
+                qualify_clause = "fs.player_id IS NOT NULL OR it.player_id IS NOT NULL"
+                import_cte = f"""
+                , import_totals AS (
+                    SELECT ied.player_id,
+                        COALESCE(SUM(ied.matches), 0) AS games,
+                        COALESCE(SUM(ied.catches), 0) AS total_catches,
+                        COALESCE(SUM(ied.catches_wk), 0) AS total_catches_wk,
+                        COALESCE(SUM(ied.run_outs), 0) AS total_run_outs,
+                        COALESCE(SUM(ied.stumpings), 0) AS total_stumpings
+                    FROM import_effective_deltas ied
+                    WHERE ied.organisation_id = :org_id AND {_IMPORT_GRADE_MATCH}{import_season_clause}
+                    GROUP BY ied.player_id
+                )
+                """
+                import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         base = f"""
-            SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COUNT(DISTINCT fs.game_id) AS games,
-                COALESCE(SUM(fs.catches), 0) AS total_catches,
-                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
-                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
-                COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
-                COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
-                COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
-            FROM v_effective_fielding_stats fs
-            JOIN v_effective_games g ON g.id = fs.game_id{captain_join}
-            JOIN players p ON p.id = fs.player_id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            WITH fielding_qualifying AS (
+                SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id{captain_join}
+                WHERE g.grade_id = :grade_id{finals_clause}
+            ){import_cte}
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(DISTINCT fs.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    COALESCE(SUM(fs.catches), 0) + COALESCE(MAX(it.total_catches), 0) AS total_catches,
+                    COALESCE(SUM(fs.catches_wk), 0) + COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_wk,
+                    COALESCE(SUM(fs.catches - fs.catches_wk), 0) + COALESCE(MAX(it.total_catches), 0) - COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_non_wk,
+                    COALESCE(SUM(fs.run_outs), 0) + COALESCE(MAX(it.total_run_outs), 0) AS total_run_outs,
+                    COALESCE(SUM(fs.stumpings), 0) + COALESCE(MAX(it.total_stumpings), 0) AS total_stumpings,
+                    COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0)
+                        + COALESCE(MAX(it.total_catches), 0) + COALESCE(MAX(it.total_run_outs), 0) + COALESCE(MAX(it.total_stumpings), 0) AS total_dismissals
+                FROM players p
+                LEFT JOIN fielding_qualifying fs ON fs.player_id = p.id
+                {import_join}
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND ({qualify_clause})
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
         result = await session.execute(text(base), params)
@@ -438,24 +509,53 @@ async def get_fielding_leaderboard(
     if grade_name:
         params["grade_name"] = grade_name
         season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
+        import_cte = ""
+        import_join = ""
+        qualify_clause = "fs.player_id IS NOT NULL"
+        if include_import:
+            qualify_clause = "fs.player_id IS NOT NULL OR it.player_id IS NOT NULL"
+            import_season_clause = " AND ied.season_id = ANY(:season_ids)" if season_ids else ""
+            import_cte = f"""
+            , import_totals AS (
+                SELECT ied.player_id,
+                    COALESCE(SUM(ied.matches), 0) AS games,
+                    COALESCE(SUM(ied.catches), 0) AS total_catches,
+                    COALESCE(SUM(ied.catches_wk), 0) AS total_catches_wk,
+                    COALESCE(SUM(ied.run_outs), 0) AS total_run_outs,
+                    COALESCE(SUM(ied.stumpings), 0) AS total_stumpings
+                FROM import_effective_deltas ied
+                WHERE ied.organisation_id = :org_id AND {_IMPORT_GRADE_MATCH}{import_season_clause}
+                GROUP BY ied.player_id
+            )
+            """
+            import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         base = f"""
-            SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COUNT(DISTINCT fs.game_id) AS games,
-                COALESCE(SUM(fs.catches), 0) AS total_catches,
-                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
-                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
-                COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
-                COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
-                COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
-            FROM v_effective_fielding_stats fs
-            JOIN v_effective_games g ON g.id = fs.game_id
-            JOIN grades gr ON gr.id = g.grade_id{captain_join}
-            JOIN players p ON p.id = fs.player_id
-            WHERE {_GRADE_MATCH}{season_clause}
-              AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            WITH fielding_qualifying AS (
+                SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id
+                JOIN grades gr ON gr.id = g.grade_id{captain_join}
+                WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
+            ){import_cte}
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(DISTINCT fs.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    COALESCE(SUM(fs.catches), 0) + COALESCE(MAX(it.total_catches), 0) AS total_catches,
+                    COALESCE(SUM(fs.catches_wk), 0) + COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_wk,
+                    COALESCE(SUM(fs.catches - fs.catches_wk), 0) + COALESCE(MAX(it.total_catches), 0) - COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_non_wk,
+                    COALESCE(SUM(fs.run_outs), 0) + COALESCE(MAX(it.total_run_outs), 0) AS total_run_outs,
+                    COALESCE(SUM(fs.stumpings), 0) + COALESCE(MAX(it.total_stumpings), 0) AS total_stumpings,
+                    COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0)
+                        + COALESCE(MAX(it.total_catches), 0) + COALESCE(MAX(it.total_run_outs), 0) + COALESCE(MAX(it.total_stumpings), 0) AS total_dismissals
+                FROM players p
+                LEFT JOIN fielding_qualifying fs ON fs.player_id = p.id
+                {import_join}
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND ({qualify_clause})
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
         result = await session.execute(text(base), params)
@@ -1651,8 +1751,42 @@ async def get_batting_leaderboard_extended(
     if season_ids:
         params["season_ids"] = season_ids
 
+    # Import residuals (BetterImport historical CSVs) are career/season aggregate
+    # counts, not per-innings detail — they can't say whether an innings was a
+    # captain's or a final, so they're only blended into the plain grade view.
+    include_import = not captain_only and not finals_only
+
     if grade_id:
         params["grade_id"] = grade_id
+        import_cte = ""
+        import_join = ""
+        qualify_clause = "q.player_id IS NOT NULL"
+        if include_import:
+            import_grade_name = await _resolve_grade_name(session, org_id, grade_id)
+            if import_grade_name:
+                params["grade_name"] = import_grade_name
+                import_season_clause = " AND ied.season_id = ANY(:season_ids)" if season_ids else ""
+                qualify_clause = "q.player_id IS NOT NULL OR it.player_id IS NOT NULL"
+                import_cte = f"""
+                , import_totals AS (
+                    SELECT ied.player_id,
+                        COALESCE(SUM(ied.matches), 0) AS games,
+                        COALESCE(SUM(ied.batting_innings), 0) AS innings,
+                        COALESCE(SUM(ied.runs), 0) AS total_runs,
+                        MAX(ied.high_score) AS high_score,
+                        COALESCE(SUM(ied.fifties), 0) AS fifties,
+                        COALESCE(SUM(ied.hundreds), 0) AS hundreds,
+                        COALESCE(SUM(ied.ducks), 0) AS ducks,
+                        COALESCE(SUM(ied.fours), 0) AS total_fours,
+                        COALESCE(SUM(ied.sixes), 0) AS total_sixes,
+                        COALESCE(SUM(ied.balls_faced), 0) AS total_balls,
+                        COALESCE(SUM(ied.not_outs), 0) AS not_outs
+                    FROM import_effective_deltas ied
+                    WHERE ied.organisation_id = :org_id AND {_IMPORT_GRADE_MATCH}{import_season_clause}
+                    GROUP BY ied.player_id
+                )
+                """
+                import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -1661,28 +1795,35 @@ async def get_batting_leaderboard_extended(
                 WHERE g.grade_id = :grade_id
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
-            )
-            SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COUNT(*) AS innings,
-                COALESCE(SUM(q.runs), 0) AS total_runs,
-                MAX(q.runs) AS high_score,
-                ROUND(SUM(q.runs)::numeric / NULLIF(COUNT(*) - SUM(q.not_out::int), 0), 2) AS average,
-                ROUND(SUM(q.runs)::numeric / NULLIF(SUM(q.balls), 0) * 100, 2) AS strike_rate,
-                SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) AS fifties,
-                SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
-                SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) AS ducks,
-                COUNT(DISTINCT q.game_id) AS games,
-                COALESCE(SUM(q.fours), 0) AS total_fours,
-                COALESCE(SUM(q.sixes), 0) AS total_sixes
-            FROM qualifying q
-            JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ){import_cte}
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(q.player_id) + COALESCE(MAX(it.innings), 0) AS innings,
+                    COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0) AS total_runs,
+                    GREATEST(MAX(q.runs), MAX(it.high_score)) AS high_score,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
+                        / NULLIF((COUNT(q.player_id) + COALESCE(MAX(it.innings), 0))
+                                 - (COALESCE(SUM(q.not_out::int), 0) + COALESCE(MAX(it.not_outs), 0)), 0), 2) AS average,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
+                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(it.total_balls), 0), 0) * 100, 2) AS strike_rate,
+                    SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.fifties), 0) AS fifties,
+                    SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.hundreds), 0) AS hundreds,
+                    SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(it.ducks), 0) AS ducks,
+                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    COALESCE(SUM(q.fours), 0) + COALESCE(MAX(it.total_fours), 0) AS total_fours,
+                    COALESCE(SUM(q.sixes), 0) + COALESCE(MAX(it.total_sixes), 0) AS total_sixes
+                FROM players p
+                LEFT JOIN qualifying q ON q.player_id = p.id
+                {import_join}
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND ({qualify_clause})
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
         """
         if min_runs > 0:
-            base += " HAVING SUM(q.runs) >= :min_runs"
+            base += " WHERE total_runs >= :min_runs"
             params["min_runs"] = min_runs
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
@@ -1691,6 +1832,32 @@ async def get_batting_leaderboard_extended(
     if grade_name:
         params["grade_name"] = grade_name
         season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
+        import_cte = ""
+        import_join = ""
+        qualify_clause = "q.player_id IS NOT NULL"
+        if include_import:
+            qualify_clause = "q.player_id IS NOT NULL OR it.player_id IS NOT NULL"
+            import_season_clause = " AND ied.season_id = ANY(:season_ids)" if season_ids else ""
+            import_cte = f"""
+            , import_totals AS (
+                SELECT ied.player_id,
+                    COALESCE(SUM(ied.matches), 0) AS games,
+                    COALESCE(SUM(ied.batting_innings), 0) AS innings,
+                    COALESCE(SUM(ied.runs), 0) AS total_runs,
+                    MAX(ied.high_score) AS high_score,
+                    COALESCE(SUM(ied.fifties), 0) AS fifties,
+                    COALESCE(SUM(ied.hundreds), 0) AS hundreds,
+                    COALESCE(SUM(ied.ducks), 0) AS ducks,
+                    COALESCE(SUM(ied.fours), 0) AS total_fours,
+                    COALESCE(SUM(ied.sixes), 0) AS total_sixes,
+                    COALESCE(SUM(ied.balls_faced), 0) AS total_balls,
+                    COALESCE(SUM(ied.not_outs), 0) AS not_outs
+                FROM import_effective_deltas ied
+                WHERE ied.organisation_id = :org_id AND {_IMPORT_GRADE_MATCH}{import_season_clause}
+                GROUP BY ied.player_id
+            )
+            """
+            import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -1700,28 +1867,35 @@ async def get_batting_leaderboard_extended(
                 WHERE {_GRADE_MATCH}{season_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
-            )
-            SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COUNT(*) AS innings,
-                COALESCE(SUM(q.runs), 0) AS total_runs,
-                MAX(q.runs) AS high_score,
-                ROUND(SUM(q.runs)::numeric / NULLIF(COUNT(*) - SUM(q.not_out::int), 0), 2) AS average,
-                ROUND(SUM(q.runs)::numeric / NULLIF(SUM(q.balls), 0) * 100, 2) AS strike_rate,
-                SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) AS fifties,
-                SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
-                SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) AS ducks,
-                COUNT(DISTINCT q.game_id) AS games,
-                COALESCE(SUM(q.fours), 0) AS total_fours,
-                COALESCE(SUM(q.sixes), 0) AS total_sixes
-            FROM qualifying q
-            JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ){import_cte}
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(q.player_id) + COALESCE(MAX(it.innings), 0) AS innings,
+                    COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0) AS total_runs,
+                    GREATEST(MAX(q.runs), MAX(it.high_score)) AS high_score,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
+                        / NULLIF((COUNT(q.player_id) + COALESCE(MAX(it.innings), 0))
+                                 - (COALESCE(SUM(q.not_out::int), 0) + COALESCE(MAX(it.not_outs), 0)), 0), 2) AS average,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
+                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(it.total_balls), 0), 0) * 100, 2) AS strike_rate,
+                    SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.fifties), 0) AS fifties,
+                    SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.hundreds), 0) AS hundreds,
+                    SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(it.ducks), 0) AS ducks,
+                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    COALESCE(SUM(q.fours), 0) + COALESCE(MAX(it.total_fours), 0) AS total_fours,
+                    COALESCE(SUM(q.sixes), 0) + COALESCE(MAX(it.total_sixes), 0) AS total_sixes
+                FROM players p
+                LEFT JOIN qualifying q ON q.player_id = p.id
+                {import_join}
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND ({qualify_clause})
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
         """
         if min_runs > 0:
-            base += " HAVING SUM(q.runs) >= :min_runs"
+            base += " WHERE total_runs >= :min_runs"
             params["min_runs"] = min_runs
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
@@ -1895,49 +2069,106 @@ async def get_bowling_leaderboard_extended(
     else:
         order_clause = f"ORDER BY {sort_by} {sort_dir} NULLS LAST"
 
+    # See the equivalent note in get_batting_leaderboard_extended: import residuals
+    # are aggregate counts with no per-spell detail, so they can't be attributed
+    # to a final or a captain's spell and are only blended into the plain grade view.
+    include_import = not captain_only and not finals_only
+
+    def _import_bowling_cte(grade_match_sql, import_season_clause):
+        return f"""
+        , import_totals AS (
+            SELECT ied.player_id,
+                COALESCE(SUM(ied.matches), 0) AS games,
+                COALESCE(SUM(ied.wickets), 0) AS total_wickets,
+                COALESCE(SUM(ied.runs_conceded), 0) AS total_runs_conceded,
+                COALESCE(SUM(ied.overs), 0) AS total_overs,
+                COALESCE(SUM(ied.maidens), 0) AS total_maidens,
+                COALESCE(SUM(ied.five_wicket_innings), 0) AS five_fors
+            FROM import_effective_deltas ied
+            WHERE ied.organisation_id = :org_id AND {grade_match_sql}{import_season_clause}
+            GROUP BY ied.player_id
+        ),
+        import_best AS (
+            SELECT DISTINCT ON (ied.player_id)
+                ied.player_id, ied.best_bowling_wickets, ied.best_bowling_figures
+            FROM import_effective_deltas ied
+            WHERE ied.organisation_id = :org_id AND {grade_match_sql}{import_season_clause}
+              AND ied.best_bowling_wickets IS NOT NULL
+            ORDER BY ied.player_id, ied.best_bowling_wickets DESC
+        )
+        """
+
     if grade_id:
         params["grade_id"] = grade_id
+        import_cte = ""
+        import_join = ""
+        qualify_clause = "bq.player_id IS NOT NULL"
+        if include_import:
+            import_grade_name = await _resolve_grade_name(session, org_id, grade_id)
+            if import_grade_name:
+                params["grade_name"] = import_grade_name
+                import_season_clause = " AND ied.season_id = ANY(:season_ids)" if season_ids else ""
+                qualify_clause = "bq.player_id IS NOT NULL OR it.player_id IS NOT NULL"
+                import_cte = _import_bowling_cte(_IMPORT_GRADE_MATCH, import_season_clause)
+                import_join = ("LEFT JOIN import_totals it ON it.player_id = p.id "
+                               "LEFT JOIN import_best ib ON ib.player_id = p.id")
         base = f"""
-            WITH best_spell AS (
-                SELECT DISTINCT ON (bs.player_id)
-                    bs.player_id,
-                    bs.wickets AS best_figures_wickets,
-                    bs.runs AS best_figures_runs,
-                    bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
+            WITH bowling_qualifying AS (
+                SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.overs, bs.maidens
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id{captain_join}
                 WHERE g.grade_id = :grade_id{finals_clause}
-                ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
-            )
+            ),
+            best_spell AS (
+                SELECT DISTINCT ON (bq.player_id)
+                    bq.player_id,
+                    bq.wickets AS best_figures_wickets,
+                    bq.runs AS best_figures_runs,
+                    bq.wickets::text || '/' || bq.runs::text AS best_bowling_figures
+                FROM bowling_qualifying bq
+                ORDER BY bq.player_id, bq.wickets DESC, bq.runs ASC
+            ){import_cte}
             SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COUNT(DISTINCT bs.game_id) AS games,
-                COALESCE(SUM(bs.wickets), 0) AS total_wickets,
-                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
-                bsf.best_figures_wickets,
-                bsf.best_figures_runs,
-                bsf.best_bowling_figures,
-                COALESCE(SUM(bs.maidens), 0) AS total_maidens,
-                COALESCE(SUM(bs.overs), 0) AS total_overs,
-                COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
-            FROM v_effective_bowling_spells bs
-            JOIN v_effective_games g ON g.id = bs.game_id{captain_join}
-            JOIN players p ON p.id = bs.player_id
-            LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
+                player_id, name, games, total_wickets, average, economy, total_maidens, total_overs, five_fors,
+                CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_wkts ELSE im_wkts END AS best_figures_wickets,
+                CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_runs ELSE NULL END AS best_figures_runs,
+                CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_bb ELSE im_bb END AS best_bowling_figures
+            FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(DISTINCT bq.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0) AS total_wickets,
+                    ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
+                        / NULLIF(COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0), 0), 2) AS average,
+                    ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
+                        / NULLIF(COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0), 0), 2) AS economy,
+                    COALESCE(SUM(bq.maidens), 0) + COALESCE(MAX(it.total_maidens), 0) AS total_maidens,
+                    COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0) AS total_overs,
+                    COALESCE(SUM(CASE WHEN bq.wickets >= 5 THEN 1 ELSE 0 END), 0) + COALESCE(MAX(it.five_fors), 0) AS five_fors,
+                    MAX(bsf.best_figures_wickets) AS sc_wkts,
+                    MAX(bsf.best_figures_runs) AS sc_runs,
+                    MAX(bsf.best_bowling_figures) AS sc_bb,
+                    MAX(ib.best_bowling_wickets) AS im_wkts,
+                    MAX(ib.best_bowling_figures) AS im_bb
+                FROM players p
+                LEFT JOIN bowling_qualifying bq ON bq.player_id = p.id
+                LEFT JOIN best_spell bsf ON bsf.player_id = p.id
+                {import_join}
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND ({qualify_clause})
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
         """
         having_clauses = []
         if min_overs > 0:
-            having_clauses.append("COALESCE(SUM(bs.overs), 0) >= :min_overs")
+            having_clauses.append("total_overs >= :min_overs")
             params["min_overs"] = min_overs
         if min_wickets > 0:
-            having_clauses.append("COALESCE(SUM(bs.wickets), 0) >= :min_wickets")
+            having_clauses.append("total_wickets >= :min_wickets")
             params["min_wickets"] = min_wickets
         if having_clauses:
-            base += " HAVING " + " AND ".join(having_clauses)
+            base += " WHERE " + " AND ".join(having_clauses)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]
@@ -1945,50 +2176,73 @@ async def get_bowling_leaderboard_extended(
     if grade_name:
         params["grade_name"] = grade_name
         season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
+        import_cte = ""
+        import_join = ""
+        qualify_clause = "bq.player_id IS NOT NULL"
+        if include_import:
+            qualify_clause = "bq.player_id IS NOT NULL OR it.player_id IS NOT NULL"
+            import_season_clause = " AND ied.season_id = ANY(:season_ids)" if season_ids else ""
+            import_cte = _import_bowling_cte(_IMPORT_GRADE_MATCH, import_season_clause)
+            import_join = ("LEFT JOIN import_totals it ON it.player_id = p.id "
+                           "LEFT JOIN import_best ib ON ib.player_id = p.id")
         base = f"""
-            WITH best_spell AS (
-                SELECT DISTINCT ON (bs.player_id)
-                    bs.player_id,
-                    bs.wickets AS best_figures_wickets,
-                    bs.runs AS best_figures_runs,
-                    bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
+            WITH bowling_qualifying AS (
+                SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.overs, bs.maidens
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
                 WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
-                ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
-            )
+            ),
+            best_spell AS (
+                SELECT DISTINCT ON (bq.player_id)
+                    bq.player_id,
+                    bq.wickets AS best_figures_wickets,
+                    bq.runs AS best_figures_runs,
+                    bq.wickets::text || '/' || bq.runs::text AS best_bowling_figures
+                FROM bowling_qualifying bq
+                ORDER BY bq.player_id, bq.wickets DESC, bq.runs ASC
+            ){import_cte}
             SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COUNT(DISTINCT bs.game_id) AS games,
-                COALESCE(SUM(bs.wickets), 0) AS total_wickets,
-                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
-                bsf.best_figures_wickets,
-                bsf.best_figures_runs,
-                bsf.best_bowling_figures,
-                COALESCE(SUM(bs.maidens), 0) AS total_maidens,
-                COALESCE(SUM(bs.overs), 0) AS total_overs,
-                COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
-            FROM v_effective_bowling_spells bs
-            JOIN v_effective_games g ON g.id = bs.game_id
-            JOIN grades gr ON gr.id = g.grade_id{captain_join}
-            JOIN players p ON p.id = bs.player_id
-            LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
-              AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
+                player_id, name, games, total_wickets, average, economy, total_maidens, total_overs, five_fors,
+                CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_wkts ELSE im_wkts END AS best_figures_wickets,
+                CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_runs ELSE NULL END AS best_figures_runs,
+                CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_bb ELSE im_bb END AS best_bowling_figures
+            FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(DISTINCT bq.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0) AS total_wickets,
+                    ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
+                        / NULLIF(COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0), 0), 2) AS average,
+                    ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
+                        / NULLIF(COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0), 0), 2) AS economy,
+                    COALESCE(SUM(bq.maidens), 0) + COALESCE(MAX(it.total_maidens), 0) AS total_maidens,
+                    COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0) AS total_overs,
+                    COALESCE(SUM(CASE WHEN bq.wickets >= 5 THEN 1 ELSE 0 END), 0) + COALESCE(MAX(it.five_fors), 0) AS five_fors,
+                    MAX(bsf.best_figures_wickets) AS sc_wkts,
+                    MAX(bsf.best_figures_runs) AS sc_runs,
+                    MAX(bsf.best_bowling_figures) AS sc_bb,
+                    MAX(ib.best_bowling_wickets) AS im_wkts,
+                    MAX(ib.best_bowling_figures) AS im_bb
+                FROM players p
+                LEFT JOIN bowling_qualifying bq ON bq.player_id = p.id
+                LEFT JOIN best_spell bsf ON bsf.player_id = p.id
+                {import_join}
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND ({qualify_clause})
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
         """
         having_clauses = []
         if min_overs > 0:
-            having_clauses.append("COALESCE(SUM(bs.overs), 0) >= :min_overs")
+            having_clauses.append("total_overs >= :min_overs")
             params["min_overs"] = min_overs
         if min_wickets > 0:
-            having_clauses.append("COALESCE(SUM(bs.wickets), 0) >= :min_wickets")
+            having_clauses.append("total_wickets >= :min_wickets")
             params["min_wickets"] = min_wickets
         if having_clauses:
-            base += " HAVING " + " AND ".join(having_clauses)
+            base += " WHERE " + " AND ".join(having_clauses)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]

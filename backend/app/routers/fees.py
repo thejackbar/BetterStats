@@ -13,11 +13,12 @@ import csv
 import io
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from jose import jwt
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -27,17 +28,37 @@ from app.models.db import (
     User, Organisation, Season, Grade, Game, Player,
     FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay, FeePayment,
     FeeSquareImportLog, MerchSquareConnection,
+    FeeXeroConnection, FeeXeroImportLog,
     FEE_PAYMENT_TYPES, FEE_FORMATS, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_FEES
 from app.services import fees as fee_service
 from app.services import fees_square as fee_square_service
+from app.services import fees_xero as fee_xero_service
 from app.services import square_client, square_sync
+from app.services import xero_client
 
 router = APIRouter(prefix="/club-admin/fees", tags=["club-admin-fees"])
 
 _require = Depends(require_cap(MANAGE_FEES))
+
+# Signed state for the Xero OAuth handshake — ties the public callback back to
+# the club + user that started it, and self-expires. Mirrors merch.py's
+# sign_square_state; Xero's connect flow lives entirely in this router (unlike
+# Square, nothing else uses this connection) so it's defined here rather than
+# in a separate module.
+XERO_STATE_TYP = "xero_oauth"
+
+
+def sign_xero_state(org_id, user_id) -> str:
+    payload = {
+        "org": str(org_id),
+        "uid": str(user_id),
+        "typ": XERO_STATE_TYP,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=20),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 # Bank-statement-friendly payment kinds + methods. Free-form 'Other' is allowed.
 PAYMENT_KINDS = ("membership", "match_day")
@@ -1941,4 +1962,317 @@ async def fee_square_dismiss(
         occurred_at=_parse_date(data.occurred_at), created_by_user_id=user.id,
     ))
     await db.commit()
+    return {"ok": True}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Xero import — completed bank transactions reviewed and matched to a member
+# ───────────────────────────────────────────────────────────────────────────
+# Unlike Square, this connection is owned entirely by BetterFees, so its OAuth
+# connect/disconnect lives here rather than being shared with another module.
+# Read-only (accounting.transactions.read only) — nothing here ever writes to
+# Xero. The public callback (routers/public_xero.py) exchanges the code and
+# stores the token; this router covers status, tenant/bank-account pickers,
+# settings, and the preview/commit/dismiss review flow.
+
+def _fee_xero_status(conn: Optional[FeeXeroConnection]) -> dict:
+    return {
+        "configured": settings.xero_configured,
+        "connected": bool(conn and conn.access_token),
+        "tenant_name": conn.tenant_name if conn else None,
+        "needs_tenant": bool(conn and conn.access_token and not conn.tenant_id),
+        "bank_account_name": conn.bank_account_name if conn else None,
+        "needs_bank_account": bool(conn and conn.access_token and conn.tenant_id and not conn.bank_account_id),
+        "sync_enabled": conn.sync_enabled if conn else False,
+        "last_sync_at": conn.last_sync_at.isoformat() if conn and conn.last_sync_at else None,
+        "last_sync_status": conn.last_sync_status if conn else None,
+        "last_sync_error": conn.last_sync_error if conn else None,
+    }
+
+
+@router.get("/xero/status")
+async def fee_xero_status(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    return _fee_xero_status(conn)
+
+
+@router.get("/xero/connect-url")
+async def fee_xero_connect_url(
+    current_user: User = Depends(require_cap(MANAGE_FEES)),
+    club: Organisation = Depends(get_current_club),
+):
+    if not settings.xero_configured:
+        raise HTTPException(status_code=400, detail="Xero is not configured on this server")
+    state = sign_xero_state(club.id, current_user.id)
+    return {"url": xero_client.authorize_url(state)}
+
+
+@router.get("/xero/tenants")
+async def fee_xero_tenants(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Xero first")
+    try:
+        token = await fee_xero_service.ensure_fresh_token(db, conn)
+        tenants = await xero_client.list_connections(token)
+    except xero_client.XeroError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"tenants": [{"id": t.get("tenantId"), "name": t.get("tenantName")} for t in tenants]}
+
+
+class XeroTenantIn(BaseModel):
+    tenant_id: str
+    tenant_name: Optional[str] = None
+
+
+@router.post("/xero/tenant")
+async def fee_xero_set_tenant(
+    body: XeroTenantIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Xero first")
+    conn.tenant_id = body.tenant_id
+    conn.tenant_name = body.tenant_name
+    # Switching organisation invalidates any previously-picked bank account.
+    conn.bank_account_id = None
+    conn.bank_account_name = None
+    await db.commit()
+    return _fee_xero_status(conn)
+
+
+@router.get("/xero/bank-accounts")
+async def fee_xero_bank_accounts(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if not conn or not conn.access_token or not conn.tenant_id:
+        raise HTTPException(status_code=400, detail="Connect Xero and pick an organisation first")
+    try:
+        token = await fee_xero_service.ensure_fresh_token(db, conn)
+        accounts = await xero_client.list_bank_accounts(token, conn.tenant_id)
+    except xero_client.XeroError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"accounts": [{"id": a.get("AccountID"), "name": a.get("Name"), "code": a.get("Code")} for a in accounts]}
+
+
+class XeroBankAccountIn(BaseModel):
+    bank_account_id: str
+    bank_account_name: Optional[str] = None
+
+
+@router.post("/xero/bank-account")
+async def fee_xero_set_bank_account(
+    body: XeroBankAccountIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Xero first")
+    conn.bank_account_id = body.bank_account_id
+    conn.bank_account_name = body.bank_account_name
+    await db.commit()
+    return _fee_xero_status(conn)
+
+
+class FeeXeroSettings(BaseModel):
+    sync_enabled: Optional[bool] = None
+
+
+@router.post("/xero/settings")
+async def fee_xero_settings(
+    data: FeeXeroSettings,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Xero first")
+    if data.sync_enabled is not None:
+        conn.sync_enabled = data.sync_enabled
+    await db.commit()
+    return _fee_xero_status(conn)
+
+
+@router.post("/xero/preview")
+async def fee_xero_preview(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Completed Xero bank transactions on the chosen account, each with a
+    suggested member match — nothing is written until /xero/commit."""
+    season = await _season_or_404(db, club, season_id)
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Xero first")
+    if not conn.tenant_id:
+        raise HTTPException(status_code=400, detail="Pick a Xero organisation first")
+    if not conn.bank_account_id:
+        raise HTTPException(status_code=400, detail="Pick a Xero bank account first")
+    if not conn.sync_enabled:
+        raise HTTPException(status_code=400, detail="Turn on Xero import below first")
+    try:
+        rows = await fee_xero_service.fetch_candidates(db, club, season.id, conn)
+        conn.last_sync_at = datetime.now(timezone.utc)
+        conn.last_sync_status = "ok"
+        conn.last_sync_error = None
+        await db.commit()
+    except xero_client.XeroError as e:
+        conn.last_sync_at = datetime.now(timezone.utc)
+        conn.last_sync_status = "error"
+        conn.last_sync_error = str(e)[:500]
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"rows": rows}
+
+
+class FeeXeroCommitItem(BaseModel):
+    external_ref: str
+    description: str
+    amount: float
+    occurred_at: Optional[str] = None
+    note: Optional[str] = None
+    member_season_id: str
+    kind: str = "match_day"
+
+
+class FeeXeroCommit(BaseModel):
+    items: List[FeeXeroCommitItem]
+
+
+@router.post("/xero/commit")
+async def fee_xero_commit(
+    data: FeeXeroCommit,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply reviewed Xero bank transactions as fee payments. Every item must
+    already carry the member the admin picked in the review UI. Any row
+    already resolved since preview was fetched is silently skipped rather
+    than double-applied."""
+    if not data.items:
+        return {"created": 0, "skipped": 0}
+
+    ms_cache: dict = {}
+    for i, item in enumerate(data.items):
+        try:
+            ms_id = uuid.UUID(item.member_season_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail=f"Row {i}: invalid member_season_id")
+        if ms_id not in ms_cache:
+            ms = await db.get(FeeMemberSeason, ms_id)
+            if not ms or ms.organisation_id != club.id:
+                raise HTTPException(status_code=422, detail=f"Row {i}: member season not found")
+            ms_cache[ms_id] = ms
+        if item.kind not in PAYMENT_KINDS:
+            raise HTTPException(status_code=422, detail=f"Row {i}: kind must be one of {PAYMENT_KINDS}")
+        if item.amount <= 0:
+            raise HTTPException(status_code=422, detail=f"Row {i}: amount must be > 0")
+
+    created = 0
+    skipped = 0
+    for item in data.items:
+        existing = (await db.execute(
+            select(FeeXeroImportLog).where(
+                FeeXeroImportLog.organisation_id == club.id,
+                FeeXeroImportLog.external_ref == item.external_ref,
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            skipped += 1
+            continue
+        payment = FeePayment(
+            id=uuid.uuid4(),
+            member_season_id=uuid.UUID(item.member_season_id),
+            organisation_id=club.id,
+            amount=_money(item.amount),
+            paid_at=_parse_date(item.occurred_at),
+            kind=item.kind,
+            method="Xero",
+            notes=item.note or item.description,
+            source="xero",
+            external_ref=item.external_ref,
+            created_by_user_id=user.id,
+        )
+        db.add(payment)
+        await db.flush()
+        db.add(FeeXeroImportLog(
+            id=uuid.uuid4(), organisation_id=club.id, external_ref=item.external_ref,
+            status="applied", fee_payment_id=payment.id, description=item.description,
+            amount=_money(item.amount), occurred_at=_parse_date(item.occurred_at),
+            created_by_user_id=user.id,
+        ))
+        created += 1
+    await db.commit()
+    return {"created": created, "skipped": skipped}
+
+
+class FeeXeroDismiss(BaseModel):
+    external_ref: str
+    description: Optional[str] = None
+    amount: Optional[float] = None
+    occurred_at: Optional[str] = None
+
+
+@router.post("/xero/dismiss")
+async def fee_xero_dismiss(
+    data: FeeXeroDismiss,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a Xero bank transaction as not a fee payment (e.g. sponsorship
+    income sitting in the same account) so it stops showing up in review."""
+    existing = (await db.execute(
+        select(FeeXeroImportLog).where(
+            FeeXeroImportLog.organisation_id == club.id,
+            FeeXeroImportLog.external_ref == data.external_ref,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        return {"ok": True, "already_resolved": True}
+    db.add(FeeXeroImportLog(
+        id=uuid.uuid4(), organisation_id=club.id, external_ref=data.external_ref,
+        status="dismissed", description=data.description,
+        amount=_money(data.amount) if data.amount is not None else None,
+        occurred_at=_parse_date(data.occurred_at), created_by_user_id=user.id,
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/xero/disconnect")
+async def fee_xero_disconnect(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await fee_xero_service.get_connection(db, club.id)
+    if conn:
+        if conn.refresh_token:
+            try:
+                await xero_client.revoke_token(conn.refresh_token)
+            except Exception:
+                pass  # best-effort; still drop our stored copy
+        await db.delete(conn)
+        await db.commit()
     return {"ok": True}

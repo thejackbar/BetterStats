@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.import_reconcile import (  # noqa: E402
     COUNT_METRICS, balls_to_overs, accumulate, resolve_club_totals, reconcile_player,
+    _grade_key,
 )
 
 _FAILURES = []
@@ -164,6 +165,15 @@ def main():
           f"{230 + (career_f['matches'] if career_f else 0)}")
     if not shrank:
         _FAILURES.append("F self-healing")
+
+    print("\n_grade_key normalisation (migration 154 grade-scoped reconcile):")
+    for raw, want in [(None, None), ("", None), ("   ", None),
+                       ("1st Grade", "1st Grade"), ("  1st Grade  ", "1st Grade")]:
+        got = _grade_key(raw)
+        tag = "PASS" if got == want else "FAIL"
+        print(f"  [{tag}] _grade_key({raw!r}) -> {got!r} (want {want!r})")
+        if got != want:
+            _FAILURES.append(f"_grade_key({raw!r})")
 
     print()
     if _FAILURES:

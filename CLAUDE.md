@@ -1669,7 +1669,7 @@ live checkout end to end, then flip the platform default on for everyone once
 satisfied (the per-club overrides can stay — they only matter when the
 platform default is off, or when someone still needs a specific club blocked).
 
-## BetterCricket-managed discount coupons (migration 154, Jul 2026)
+## BetterCricket-managed discount coupons (migration 156, Jul 2026)
 
 A full coupon engine, entirely owned by BetterCricket — per direct
 instruction, **Super Admin never edits a Coupon by hand in the Stripe

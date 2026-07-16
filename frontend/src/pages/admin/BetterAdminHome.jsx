@@ -84,7 +84,9 @@ function IntegrationCard({ name, blurb, to, soon }) {
 
 export default function BetterAdminHome() {
   const { hasModule } = useAuth()
-  const showIntegrations = hasModule(MODULE.FEES) || hasModule(MODULE.MERCH)
+  const showSquare = hasModule(MODULE.FEES) || hasModule(MODULE.MERCH)
+  const showXero = hasModule(MODULE.FEES)
+  const showIntegrations = showSquare || showXero
   return (
     <AdminLayout>
       <div className="max-w-3xl" style={{ '--pb-accent': BRAND.accent, '--pb-accent-rgb': BRAND.accentRgb }}>
@@ -114,14 +116,18 @@ export default function BetterAdminHome() {
           <>
             <div className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-7 mb-2">Integrations</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <IntegrationCard
-                name="Connect Square" to="/admin/merch/square"
-                blurb="Mirror your canteen/bar stock and match Square sales to member payments."
-              />
-              <IntegrationCard
-                name="Connect Xero" soon
-                blurb="Sync fees and payments straight to your club's accounting."
-              />
+              {showSquare && (
+                <IntegrationCard
+                  name="Connect Square" to="/admin/merch/square"
+                  blurb="Mirror your canteen/bar stock and match Square sales to member payments."
+                />
+              )}
+              {showXero && (
+                <IntegrationCard
+                  name="Connect Xero" to="/admin/fees/xero"
+                  blurb="Pull bank transactions from Xero and match them to member fee payments."
+                />
+              )}
             </div>
           </>
         )}
