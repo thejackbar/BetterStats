@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -194,11 +195,33 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     except Exception:
         logger.exception("Stripe: could not retrieve subscription %s for invoice %s", subscription_id, invoice.get("id"))
 
+    org_id = org.id
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
     await _upsert_invoice(db, org, invoice, now)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The synchronous add-on-purchase request (routers/billing.py) can
+        # race this SAME invoice event and win — found live. Both write the
+        # identical entitlement from the same Stripe data, so losing this
+        # race is benign, but a bare rollback would also lose the
+        # BillingInvoice write for Billing History, which nothing else
+        # redoes. Re-fetch a fresh org (the rolled-back one's attributes
+        # aren't safe to touch — SQLAlchemy expires objects on rollback) and
+        # record just the invoice; module_subscriptions needs no retry, the
+        # winner already wrote it.
+        await db.rollback()
+        logger.info(
+            "Stripe invoice.paid: entitlement for org %s already granted concurrently — "
+            "re-recording the invoice only", org_id,
+        )
+        org = await _load_org(db, org_id)
+        if org is None:
+            return
+        await _upsert_invoice(db, org, invoice, now)
+        await db.commit()
 
     # Best-effort receipt to the club's primary admin — covers the first
     # invoice on a brand new subscribe, an add-on purchase, and every

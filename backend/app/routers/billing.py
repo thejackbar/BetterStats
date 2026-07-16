@@ -30,12 +30,14 @@ subscription (``club.stripe_subscription_id``):
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from stripe import error as stripe_error
 
@@ -46,6 +48,7 @@ from app.services import billing_pricing, discount_coupons, module_subscriptions
 from app.services.platform_settings import require_billing_checkout_enabled
 
 router = APIRouter(prefix="/club-admin/billing", tags=["club-admin-billing"])
+logger = logging.getLogger(__name__)
 
 
 class QuoteIn(BaseModel):
@@ -232,14 +235,30 @@ async def create_checkout_session(
 
         # No Checkout Session happened for this path, so there's no
         # checkout.session.completed webhook to grant entitlement — do it
-        # synchronously here, same renewal_date Stripe just reported back
-        # (the invoice.paid webhook that follows moments later re-applies the
-        # same state — harmless, entitlement writes are idempotent).
+        # synchronously here, same renewal_date Stripe just reported back.
+        # The invoice.paid webhook for this SAME charge can genuinely race
+        # this request (found live: it can land, and commit, before this
+        # handler's own commit does) — when the module already holds a row,
+        # both writers just UPDATE it with the same values, harmless. But
+        # for a module with NO row yet, both racing writers see "nothing
+        # there" and both try to INSERT, and the DB's uq_org_module
+        # constraint lets only one through — Postgres itself is the
+        # correctness backstop here, not application logic. The loser isn't
+        # wrong, just late: the winner (whichever request it was) already
+        # wrote the identical end state from the same Stripe data, so this
+        # is a benign double-write, not a real conflict — no retry needed.
         renewal_date = stripe_client.epoch_to_date(sub.get("current_period_end"))
         now = datetime.now(timezone.utc)
         for key in addon_keys:
             module_subscriptions.set_status_billing(club, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            logger.info(
+                "billing add-on: entitlement for %s already granted concurrently (likely the invoice.paid "
+                "webhook winning the race) — treating as success", addon_keys,
+            )
         return {"added": True, "modules": addon_keys}
 
     schedule = await platform_settings.get_bundle_discount_schedule(db)
