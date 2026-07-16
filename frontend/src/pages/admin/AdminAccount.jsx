@@ -31,6 +31,10 @@ const STATUS_LABEL = {
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : null
 
+// Survives the full-page redirect out to Stripe's setup-mode Checkout and
+// back — see submitSubscribe's needs_payment_method branch.
+const ADDON_RETRY_KEY = 'bs_addon_retry_modules'
+
 export default function AdminAccount() {
   const [plan, setPlan] = useState(null)
   const [error, setError] = useState('')
@@ -76,9 +80,19 @@ export default function AdminAccount() {
     const checkout = searchParams.get('checkout')
     if (!checkout) return
     if (checkout === 'success') {
-      setMsg("Payment received — you're subscribed. It can take a few seconds to show below.")
-      setTimeout(load, 3000)
+      const retryModules = sessionStorage.getItem(ADDON_RETRY_KEY)
+      if (retryModules) {
+        // That "success" was the setup-mode session adding a card, not a
+        // real charge — finish the add-on purchase it was standing in for.
+        sessionStorage.removeItem(ADDON_RETRY_KEY)
+        setMsg('Payment method saved — finishing your purchase…')
+        retryAddonPurchase(JSON.parse(retryModules))
+      } else {
+        setMsg("Payment received — you're subscribed. It can take a few seconds to show below.")
+        setTimeout(load, 3000)
+      }
     } else if (checkout === 'cancelled') {
+      sessionStorage.removeItem(ADDON_RETRY_KEY)
       setMsg('Checkout was cancelled — nothing was charged.')
     }
     const next = new URLSearchParams(searchParams)
@@ -249,6 +263,14 @@ export default function AdminAccount() {
     setError('')
     try {
       const res = await api.billingCreateCheckoutSession([...selected], appliedCouponCode)
+      if (res.needs_payment_method) {
+        // The add-on charge failed because this club has no payment method
+        // on file — res.url is a Stripe setup-mode session (add a card, no
+        // charge). Remember which modules we were adding so the checkout=
+        // success handler below can retry the exact same purchase once the
+        // club is back with a card on file.
+        sessionStorage.setItem(ADDON_RETRY_KEY, JSON.stringify([...selected]))
+      }
       if (res.url) {
         window.location.href = res.url
         return
@@ -260,6 +282,31 @@ export default function AdminAccount() {
       await load()
     } catch (e) {
       setError(e.message || 'Could not start checkout')
+    } finally {
+      setCheckoutBusy(false)
+    }
+  }
+
+  // Re-attempts the same add-on purchase after a round trip to add a
+  // payment method (see submitSubscribe's needs_payment_method branch) — a
+  // second failure here is a real error (not just "still no card"), since
+  // the club just came back from successfully adding one.
+  const retryAddonPurchase = async (modules) => {
+    setCheckoutBusy(true)
+    try {
+      const res = await api.billingCreateCheckoutSession(modules, '')
+      if (res.url) {
+        // Still needs a payment method somehow, or a brand new subscribe —
+        // either way, follow the same redirect rule as a fresh attempt.
+        window.location.href = res.url
+        return
+      }
+      setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
+      setSelected(new Set())
+      setQuote(null)
+      await load()
+    } catch (e) {
+      setError(e.message || 'Could not finish adding the module(s) — your card was saved, try again below.')
     } finally {
       setCheckoutBusy(false)
     }

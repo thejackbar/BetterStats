@@ -225,6 +225,37 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     return await stripe.checkout.Session.create_async(**params)
 
 
+async def create_setup_session(customer_id: str):
+    """A Checkout Session in ``setup`` mode — collects/updates a payment
+    method for an already-existing customer, no charge involved. Used when
+    the add-on-to-existing-subscription flow's synchronous charge fails
+    because the customer has no payment method on file at all (observed
+    live: "This customer has no attached payment source or default payment
+    method" from SubscriptionItem.create's proration invoice) — instead of
+    a dead-end error, the club is bounced here to add a card, then
+    redirected back to /admin/account to retry the same add-on purchase
+    (see is_missing_payment_method_error below and AdminAccount.jsx's
+    sessionStorage-based retry-on-return)."""
+    _require_configured()
+    return await stripe.checkout.Session.create_async(
+        mode="setup",
+        customer=customer_id,
+        success_url=settings.stripe_checkout_success_url,
+        cancel_url=settings.stripe_checkout_cancel_url,
+    )
+
+
+def is_missing_payment_method_error(e) -> bool:
+    """True for the specific Stripe failure a customer with no payment
+    method on file produces when we try to charge them synchronously (the
+    add-on flow's proration invoice) — matched on message text since Stripe
+    doesn't expose a distinct machine-readable error code for this case, only
+    a human-readable one ("This customer has no attached payment source or
+    default payment method...")."""
+    msg = (getattr(e, "user_message", None) or str(e) or "").lower()
+    return "no attached payment source" in msg or "no default payment method" in msg
+
+
 async def retrieve_subscription(subscription_id: str):
     _require_configured()
     return await stripe.Subscription.retrieve_async(subscription_id)

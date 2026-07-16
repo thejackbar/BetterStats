@@ -221,6 +221,13 @@ async def create_checkout_session(
         except stripe_client.StripeNotConfigured:
             raise HTTPException(status_code=503, detail="Online billing isn't configured yet. Contact the BetterCricket team to subscribe.")
         except stripe_error.StripeError as e:
+            if stripe_client.is_missing_payment_method_error(e):
+                # No dead end: bounce the club to a Stripe-hosted setup-mode
+                # Checkout Session to add a card (no charge), then redirect
+                # back to retry this same add-on purchase — see
+                # stripe_client.create_setup_session's docstring.
+                setup = await stripe_client.create_setup_session(club.stripe_customer_id)
+                return {"needs_payment_method": True, "url": setup.url}
             raise HTTPException(status_code=502, detail=str(e) or "Could not add the module(s)")
 
         # No Checkout Session happened for this path, so there's no
