@@ -214,7 +214,9 @@ async def fetch_gr_by_player(session, org_uuid, pids) -> dict:
 
     Scoped exactly like the effective view's ``api`` branch (player's org ==
     season's org, or a NULL-org player), so the preview and the commit agree
-    with what the profile actually reads.
+    with what the profile actually reads. Used for ungraded uploads (no
+    ``grade_label``) — reconciled against the player's whole GR history across
+    every grade, same as always.
     """
     from sqlalchemy import select, or_
     from app.models.db import Player, Season, PlayerSeasonStats
@@ -236,6 +238,78 @@ async def fetch_gr_by_player(session, org_uuid, pids) -> dict:
         g = out.setdefault(pss.player_id, {"season_ids": set(), "totals": None})
         g["season_ids"].add(pss.season_id)
         g["totals"] = accumulate(g["totals"], pss_to_metrics(pss))
+    return out
+
+
+def _psgs_to_metrics(row) -> dict:
+    """PlayerSeasonGradeStats ORM row -> canonical metric dict.
+
+    The per-grade aggregate carries a narrower column set than the season
+    (all-grades) aggregate — no fifties/hundreds/ducks/balls/fours/sixes/
+    maidens/five-fors/wides/no-balls/catches_wk/stumpings breakdown, since CA's
+    per-grade endpoints don't return them. Metrics this table can't provide
+    stay at 0, which only ever pushes the residual up (never claims coverage
+    the per-grade aggregate can't actually back), matching the guarantee's own
+    ``max(0, club - gr - emitted)`` bias toward the club's book.
+    """
+    m = _blank()
+    m["matches"] = row.matches or 0
+    m["batting_innings"] = row.batting_innings or 0
+    m["runs"] = row.runs or 0
+    m["not_outs"] = row.not_outs or 0
+    m["high_score"] = row.high_score
+    m["bowling_innings"] = row.bowling_innings or 0
+    m["wickets"] = row.wickets or 0
+    m["runs_conceded"] = row.runs_conceded or 0
+    m["catches"] = row.catches or 0
+    m["run_outs"] = row.run_outs or 0
+    m["stumpings"] = row.stumpings or 0
+    return m
+
+
+async def fetch_gr_by_player_for_grade(session, org_uuid, pids, grade_label: str) -> dict:
+    """Per-player GR coverage scoped to ONE grade **name**, for a grade-scoped upload.
+
+    A CA grade is a per-season row (a new "1st Grade" row is minted every
+    season — see the grade-collision-fix era notes), so "GR's 1st Grade
+    coverage" isn't one row to join to; it's every grade row across every
+    season whose name matches, fuzzy/merge-alias-aware exactly like a
+    grade-filtered leaderboard already matches (``aggregations._GRADE_MATCH``).
+    Reads ``player_season_grade_stats`` — CA's own per-grade aggregate, synced
+    alongside the season totals (``sync.py``'s "per-grade aggregate sync") —
+    not per-game scorecards, so a grade with thin scorecard coverage still
+    reconciles correctly against CA's real per-grade numbers.
+    """
+    from sqlalchemy import text
+    from app.services.aggregations import _GRADE_MATCH
+
+    if not pids or not grade_label:
+        return {}
+    rows = (
+        await session.execute(
+            text(f"""
+                SELECT psgs.player_id, psgs.season_id, psgs.matches, psgs.batting_innings,
+                       psgs.runs, psgs.not_outs, psgs.high_score, psgs.bowling_innings,
+                       psgs.wickets, psgs.runs_conceded, psgs.catches, psgs.run_outs, psgs.stumpings
+                FROM player_season_grade_stats psgs
+                JOIN grades gr ON gr.id = psgs.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                JOIN players p ON p.id = psgs.player_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND (p.organisation_id IS NULL OR p.organisation_id = s.organisation_id)
+                  AND psgs.player_id = ANY(CAST(:pids AS uuid[]))
+                  AND {_GRADE_MATCH}
+            """),
+            {"org_id": str(org_uuid), "pids": [str(p) for p in pids],
+             "grade_name": grade_label},
+        )
+    ).mappings().all()
+    out: dict = {}
+    for row in rows:
+        pid = row["player_id"]
+        g = out.setdefault(pid, {"season_ids": set(), "totals": None})
+        g["season_ids"].add(row["season_id"])
+        g["totals"] = accumulate(g["totals"], _psgs_to_metrics(row))
     return out
 
 
@@ -304,6 +378,12 @@ def delta_kwargs(m: dict) -> dict:
 # ── DB orchestrator ──────────────────────────────────────────────────────────
 
 
+def _grade_key(label) -> Optional[str]:
+    """Normalise a row's grade_label to a comparison key, or None (ungraded)."""
+    label = (label or "").strip()
+    return label or None
+
+
 async def reconcile_imported_totals(org_id_str: str) -> int:
     """Regenerate ``import_effective_deltas`` for an org from ``imported_stats``.
 
@@ -311,6 +391,14 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
     against current GR coverage. A no-op (returns 0) for orgs with no imports, so
     it's safe to call unconditionally at the end of every sync. Returns the number
     of delta rows written.
+
+    Reconciles **per (player, grade)**, not just per player: a club's upload
+    can carry a ``grade_label`` (e.g. every row says "1st Grade"), and that
+    portion of the club's book must only be compared against the player's GR
+    coverage for that same grade — never diluted by subtracting their GR
+    history in other grades the sheet never claimed to cover (see migration
+    152). Rows with no grade_label keep the original all-grades comparison
+    unchanged, so ungraded imports (every existing club) are unaffected.
     """
     import uuid as _uuid
 
@@ -340,21 +428,38 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
             await session.commit()
             return 0
 
-        by_player: dict = {}
+        # Group by (player, grade_key) — a player may have rows for more than
+        # one grade (a future club could upload both a 1sts and a 2nds sheet).
+        by_group: dict = {}
         for r in truth_rows:
-            by_player.setdefault(r.player_id, []).append(r)
+            key = (r.player_id, _grade_key(r.grade_label))
+            by_group.setdefault(key, []).append(r)
 
-        pids = list(by_player.keys())
-        gr_by_player = await fetch_gr_by_player(session, org_uuid, pids)
+        ungraded_pids = [pid for pid, grade in by_group.keys() if grade is None]
+        grade_labels = sorted({grade for _pid, grade in by_group.keys() if grade is not None})
+
+        # Ungraded GR fetch (existing all-grades comparison), only for players
+        # who actually have an ungraded group.
+        gr_by_player = await fetch_gr_by_player(session, org_uuid, ungraded_pids)
+
+        # One grade-scoped GR fetch per distinct grade label, each covering
+        # every player that has a row under that label.
+        gr_by_grade: dict = {}
+        for grade in grade_labels:
+            grade_pids = [pid for pid, g in by_group.keys() if g == grade]
+            gr_by_grade[grade] = await fetch_gr_by_player_for_grade(
+                session, org_uuid, grade_pids, grade
+            )
 
         written = 0
-        for pid, rows in by_player.items():
+        for (pid, grade), rows in by_group.items():
             club, import_seasons = assemble_club_inputs([
                 {"scope": r.scope, "season_id": r.season_id,
                  "is_prior_bucket": r.is_prior_bucket, "metrics": imported_to_metrics(r)}
                 for r in rows
             ])
-            gr = gr_by_player.get(pid, {"season_ids": set(), "totals": None})
+            gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
+            gr = gr_pool.get(pid, {"season_ids": set(), "totals": None})
             gr_totals = gr["totals"] if gr["totals"] is not None else _blank()
 
             season_deltas, career = reconcile_player(
@@ -365,6 +470,7 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
                 session.add(ImportEffectiveDelta(
                     organisation_id=org_uuid, player_id=pid,
                     scope="season", season_id=season_id, grade_id=None,
+                    grade_label=grade,
                     **delta_kwargs(metrics),
                 ))
                 written += 1
@@ -373,6 +479,7 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
                 session.add(ImportEffectiveDelta(
                     organisation_id=org_uuid, player_id=pid,
                     scope="career", season_id=None, grade_id=None,
+                    grade_label=grade,
                     **delta_kwargs(career),
                 ))
                 written += 1

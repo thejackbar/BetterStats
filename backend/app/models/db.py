@@ -1688,6 +1688,12 @@ class ImportEffectiveDelta(Base):
     scope = Column(Text, nullable=False)  # season | career
     season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="SET NULL"), nullable=True)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    # Free-text grade name (migration 152), set on career-scope residual rows
+    # reconciled against a grade-scoped upload — a career residual spans many
+    # seasons' worth of same-named grades, so unlike a season delta's exact
+    # grade_id it can only be matched by name (mirrors ImportedStat.grade_label
+    # and aggregations._GRADE_MATCH's fuzzy/merge-aware matching).
+    grade_label = Column(Text, nullable=True)
     matches = Column(Integer, server_default="0", nullable=False)
     batting_innings = Column(Integer, server_default="0", nullable=False)
     runs = Column(Integer, server_default="0", nullable=False)

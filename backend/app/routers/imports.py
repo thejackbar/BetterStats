@@ -207,29 +207,49 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         else:
             skipped_rows += 1
 
-    pids = [uuid.UUID(p) for p in items_by_player.keys()]
-    gr_by_player = await recon.fetch_gr_by_player(db, org_id, pids)
-
-    preview = []
+    # Grade-scope the preview exactly like the commit-time reconciler does
+    # (services/import_reconcile.reconcile_imported_totals, migration 152):
+    # a grade-labelled group's "what GR already has" must be that grade's own
+    # coverage, not the player's whole cross-grade history, or the preview
+    # would show a residual the commit wouldn't actually produce.
+    items_by_player_grade: dict = {}
     for pid_str, items in items_by_player.items():
+        for it in items:
+            grade = recon._grade_key(it.get("grade_label"))
+            items_by_player_grade.setdefault((pid_str, grade), []).append(it)
+
+    ungraded_pids = [uuid.UUID(pid) for pid, grade in items_by_player_grade if grade is None]
+    grade_labels = sorted({grade for _pid, grade in items_by_player_grade if grade is not None})
+    gr_by_player = await recon.fetch_gr_by_player(db, org_id, ungraded_pids)
+    gr_by_grade: dict = {}
+    for grade in grade_labels:
+        grade_pids = [uuid.UUID(pid) for pid, g in items_by_player_grade if g == grade]
+        gr_by_grade[grade] = await recon.fetch_gr_by_player_for_grade(db, org_id, grade_pids, grade)
+
+    preview_by_player: dict = {}
+    for (pid_str, grade), items in items_by_player_grade.items():
         club, import_seasons = recon.assemble_club_inputs(items)
-        gr = gr_by_player.get(uuid.UUID(pid_str), {"season_ids": set(), "totals": None})
+        gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
+        gr = gr_pool.get(uuid.UUID(pid_str), {"season_ids": set(), "totals": None})
         gr_tot = gr["totals"] if gr["totals"] is not None else recon._blank()
         s = recon.summarize(club, gr_tot, import_seasons, gr["season_ids"])
-        preview.append({
-            "player_id": pid_str,
-            "player_name": name_by_pid.get(pid_str),
-            "new": False,
-            "club_games": club.get("matches", 0),
-            "club_runs": club.get("runs", 0),
-            "gr_games": s["gr"]["matches"],
-            "gr_runs": s["gr"]["runs"],
-            "residual_games": (s["residual"] or {}).get("matches", 0),
-            "final_games": s["final"]["matches"],
-            "final_runs": s["final"]["runs"],
-            "season_deltas": s["season_delta_count"],
-            "gr_exceeds": s["gr_exceeds"],
+        agg = preview_by_player.setdefault(pid_str, {
+            "player_id": pid_str, "player_name": name_by_pid.get(pid_str), "new": False,
+            "club_games": 0, "club_runs": 0, "gr_games": 0, "gr_runs": 0,
+            "residual_games": 0, "final_games": 0, "final_runs": 0,
+            "season_deltas": 0, "gr_exceeds": False,
         })
+        agg["club_games"] += club.get("matches", 0)
+        agg["club_runs"] += club.get("runs", 0)
+        agg["gr_games"] += s["gr"]["matches"]
+        agg["gr_runs"] += s["gr"]["runs"]
+        agg["residual_games"] += (s["residual"] or {}).get("matches", 0)
+        agg["final_games"] += s["final"]["matches"]
+        agg["final_runs"] += s["final"]["runs"]
+        agg["season_deltas"] += s["season_delta_count"]
+        agg["gr_exceeds"] = agg["gr_exceeds"] or s["gr_exceeds"]
+
+    preview = list(preview_by_player.values())
     # Create-new players have no GR — their full club totals are added as-is.
     for nm, items in new_items_by_name.items():
         club, import_seasons = recon.assemble_club_inputs(items)
