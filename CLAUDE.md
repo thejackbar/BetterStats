@@ -199,6 +199,50 @@ Each release lives in its own file under **`frontend/src/data/changelog/`** — 
 
 See "Feature Changelog" below for the file format.
 
+## Club Setup Wizard (v8.70.0, Jul 2026)
+
+The Phase-15 checklist modal (`OnboardingWizardModal.jsx`, deleted) grew into a
+full-page, whole-platform **Setup Wizard** at `/admin/setup(/:stepKey)`
+(`frontend/src/pages/admin/setup/` — `SetupWizard.jsx` + `SetupInlineSteps.jsx`
++ `SetupModuleSteps.jsx` + `setupUi.jsx`). 28 steps in 7 groups (data in →
+data tools → BetterSelect → BetterSocials → BetterAdmin → BetterIQ →
+BetterFantasy), same table/flag/router as before:
+
+- **Backend** `routers/onboarding_wizard.py`, still gated by
+  `onboarding_wizard_enabled` + club-admin auth. `GET /flow` is the wizard:
+  step registry (`GROUPS`) filtered to the club's entitlements, per-step
+  auto-detection (`_detect_steps` — cheap org-scoped EXISTS: logo set, sponsor
+  rows, merge_logs, fee_schedules, fantasy season/pool, a `ready` dossier…),
+  and it **persists newly-detected completion into `completed_steps`** so the
+  cheap `GET /state` summary (AdminLayout polls it every mount) reads stored
+  state only. `POST /steps/{key}` takes `{done?, skipped?}` (mutually
+  exclusive; detection beats a skip). `skipped_steps` column = migration 157
+  (+ lifespan mirror). Steps the DB can't see (socials palette → localStorage,
+  the review-only fantasy steps) are manual-mark only.
+- **Sync gating**: the "Tidy your data" group locks until a successful full
+  pull. `_sync_ready` now accepts `org_full` **or** `org_hard_refresh` — the
+  old checklist only looked for `org_full`, so a club whose first complete
+  pull was a Full Rebuild never unlocked those steps (fixed here).
+- **Hybrid steps**: simple actions run inline through their EXISTING endpoints
+  (hard-refresh + sync-log polling, branding PATCH, sponsor create, fixture
+  sync, squad seed/auto-assign, availability self-serve, website enable, comms
+  sender settings, fantasy season/pool); complex tools are link-out steps.
+  Link-outs stamp `sessionStorage.bs_setup_return` and
+  `SetupReturnBar.jsx` (mounted in `ProtectedRoute` beside `TrialBanner`, so
+  it covers module layouts too) offers "back to setup". Vital steps
+  (full_rebuild, merge_players, merge_grades) get a concrete-consequences
+  confirm before skipping.
+- **IQ pre-warm** (`services/iq_prewarm.py`; `GET/POST /iq/opposition/prewarm*`):
+  builds every known opponent's dossier for chosen grades **one at a time** in
+  a detached task (in-process progress dict, ≤40 opponents, 5-min per-build
+  timeout), reusing `iq_opponent.get_or_start_dossier` — a fresh dossier is a
+  cache hit, so re-runs are cheap. Grade options come from the latest season
+  year with per-grade distinct-opponent counts; busiest 3 pre-ticked.
+- **Auto-open** is now a NAVIGATION to `/admin/setup` on fresh login (same
+  `should_auto_open` + `dismissed_at`/`sync_steps_shown_at` semantics; the
+  header SETUP GUIDE button navigates too). Old `explore_*` step keys may
+  linger in stored `completed_steps` — harmless, ignored by the registry.
+
 ## Awards — default templates (v8.28.0, Jun 2026)
 
 Award catalogue lives in two tables (created in `main.py` lifespan, not Alembic):

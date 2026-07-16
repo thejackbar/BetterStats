@@ -13,7 +13,6 @@ import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import BrandLogo from '../BrandLogo'
-import OnboardingWizardModal from './OnboardingWizardModal'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -126,11 +125,10 @@ export default function AdminLayout({ children }) {
   const [bellSummary, setBellSummary] = useState(null)
   const [bellError, setBellError] = useState(null)
   const [bellRefresh, setBellRefresh] = useState(0)
-  // Onboarding wizard (Phase 15) — availability is only known once the first
+  // Setup Wizard (/admin/setup) — availability is only known once the first
   // state fetch succeeds (the endpoint 404s outright when the platform flag
   // is off, same "doesn't exist" convention as the self-serve flag).
   const [wizardAvailable, setWizardAvailable] = useState(false)
-  const [wizardOpen, setWizardOpen] = useState(false)
 
   // Filter nav: drop links the user lacks the cap for. Empty sections are
   // dropped too so a heading never renders with nothing under it. (Club admins
@@ -225,19 +223,20 @@ export default function AdminLayout({ children }) {
     return () => { cancelled = true }
   }, [justLoggedIn, user, clearJustLoggedIn])
 
-  // Onboarding wizard: availability (the SETUP GUIDE button) is checked on
+  // Setup Wizard: availability (the SETUP GUIDE button) is checked on
   // every mount, not gated to justLoggedIn — every admin page wraps itself
   // in its own <AdminLayout>, so this component remounts on every in-app
   // navigation, and a check tied to justLoggedIn (a one-shot flag cleared
   // right after the first effect run following a real login) would only
   // ever catch the very first page after login, vanishing on the next click.
-  // The auto-open POPUP still only fires on a genuine fresh login (read from
-  // justLoggedIn's value at the moment this runs, not as a dependency) so it
-  // doesn't re-pop on every ordinary navigation — should_auto_open's own
-  // dismissed_at/sync_steps_shown_at gating is what makes that safe to check
-  // this often. 404 (flag off) is treated the same as "nothing to show" —
-  // silently. Club-admin-only (the mirror of the bell's own super_admin-only
-  // gate above): onboarding guidance belongs to the club's own admin, not a
+  // The auto-open (now a NAVIGATION to /admin/setup, not a modal) still only
+  // fires on a genuine fresh login (read from justLoggedIn's value at the
+  // moment this runs, not as a dependency) so it doesn't re-fire on every
+  // ordinary navigation — should_auto_open's own dismissed_at/
+  // sync_steps_shown_at gating is what makes that safe to check this often.
+  // 404 (flag off) is treated the same as "nothing to show" — silently.
+  // Club-admin-only (the mirror of the bell's own super_admin-only gate
+  // above): onboarding guidance belongs to the club's own admin, not a
   // super admin just visiting/acting-as the club.
   useEffect(() => {
     if (!user || user.role === 'super_admin') { setWizardAvailable(false); return }
@@ -247,7 +246,9 @@ export default function AdminLayout({ children }) {
         const s = await api.getOnboardingWizardState()
         if (cancelled) return
         setWizardAvailable(true)
-        if (justLoggedIn && s.should_auto_open) setWizardOpen(true)
+        if (justLoggedIn && s.should_auto_open && !location.pathname.startsWith('/admin/setup')) {
+          navigate('/admin/setup')
+        }
       } catch {
         // 404 (flag off) or any other failure — just hide the entry point
         if (!cancelled) setWizardAvailable(false)
@@ -298,7 +299,7 @@ export default function AdminLayout({ children }) {
             <BookmarkButton pageLabel={labelForPath(location.pathname)} />
             {wizardAvailable && (
               <button
-                onClick={() => setWizardOpen(true)}
+                onClick={() => navigate('/admin/setup')}
                 title="Setup guide"
                 className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
               >
@@ -515,7 +516,6 @@ export default function AdminLayout({ children }) {
       {user?.role === 'super_admin' && (
         <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
       )}
-      {wizardOpen && <OnboardingWizardModal onClose={() => setWizardOpen(false)} />}
     </div>
   )
 }

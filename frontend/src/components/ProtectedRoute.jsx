@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import TrialBanner from './admin/TrialBanner'
+import SetupReturnBar from './admin/SetupReturnBar'
 
 export default function ProtectedRoute({ children, requireRole, requireModule }) {
   const { user, hasModule } = useAuth()
@@ -28,6 +29,7 @@ export default function ProtectedRoute({ children, requireRole, requireModule })
   return (
     <>
       <TrialBanner />
+      <SetupReturnBar />
       {children}
     </>
   )
