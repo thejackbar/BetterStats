@@ -125,13 +125,22 @@ export default function ImageEditorModal({
 
   // AI subject cut-out — good for photos (people, products). Runs on whatever
   // is currently shown.
+  //
+  // The underlying @imgly/background-removal call is a black-box WASM/ONNX
+  // pipeline with no way to cancel it, and has been observed to never settle
+  // (neither resolve nor reject) for some inputs. Race it against a timeout
+  // so a stuck call always surfaces as an error instead of leaving the modal
+  // permanently undismissable (Cancel/✕/Escape are all gated on `removingBg`).
   const handleRemoveBg = useCallback(async () => {
     if (!srcUrl) return
     setShowColourKey(false)
     setRemovingBg(true)
     try {
+      const timeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Background removal timed out. Please try again or use "Remove background (logo)" instead.')), 30000)
+      })
       const { removeBackground } = await import('@imgly/background-removal')
-      const blob = await removeBackground(srcUrl, { debug: false })
+      const blob = await Promise.race([removeBackground(srcUrl, { debug: false }), timeout])
       setDerived(blob)
     } catch (err) {
       setLoadError(err.message || 'Background removal failed')
