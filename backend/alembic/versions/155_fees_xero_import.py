@@ -11,15 +11,15 @@ fee_payments for the Square import). `fee_xero_import_log` mirrors
 `fee_square_import_log` — a per-club resolved-events ledger (applied or
 dismissed) so a dismissed transaction never resurfaces on the next preview.
 
-Revision ID: 150
-Revises: 149
+Revision ID: 155
+Revises: 154
 Create Date: 2026-07-15
 """
 from alembic import op
 
 
-revision = '150'
-down_revision = '149'
+revision = '155'
+down_revision = '154'
 branch_labels = None
 depends_on = None
 
