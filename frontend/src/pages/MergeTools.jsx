@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
 import Dropdown from '../components/Dropdown'
+import { ProgressBar } from '../components/ProgressBar'
 
 function StatBadge({ label, value }) {
   return (
@@ -256,7 +257,7 @@ function pickKeep(pair) {
   return a.seasons_count >= b.seasons_count ? a.id : b.id
 }
 
-function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored }) {
+function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
   const [keepId, setKeepId] = useState(() => pickKeep(pair))
   const [merging, setMerging] = useState(false)
   const [ignoring, setIgnoring] = useState(false)
@@ -286,7 +287,7 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored }) {
     }
   }
 
-  const busy = merging || ignoring
+  const busy = merging || ignoring || disabled
 
   return (
     <div className="pb-card p-5">
@@ -466,6 +467,7 @@ export default function MergeTools({ embeddedOrgId }) {
   const [mergedCount, setMergedCount] = useState(0)
   const [historyKey, setHistoryKey] = useState(0)
   const [bulkMerging, setBulkMerging] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState(null) // { done, total }
   const [bulkResult, setBulkResult] = useState(null)
 
   function load() {
@@ -495,24 +497,34 @@ export default function MergeTools({ embeddedOrgId }) {
     setBulkMerging(true)
     setBulkResult(null)
     setError(null)
-    try {
-      const pairs = bulkEligible.map(pair => {
-        const keepPlayerId = pickKeep(pair)
-        const removePlayerId = keepPlayerId === pair.player_a.id ? pair.player_b.id : pair.player_a.id
-        return { keep_player_id: keepPlayerId, remove_player_id: removePlayerId }
-      })
-      const result = await api.bulkMergePlayers(orgId, pairs)
-      setBulkResult(result)
-      if (result.merged > 0) {
-        setMergedCount(c => c + result.merged)
-        setHistoryKey(k => k + 1)
+    const total = bulkEligible.length
+    setBulkProgress({ done: 0, total })
+
+    // Merged one pair at a time (not a single batch call) so the bar below
+    // reflects real progress — each merge does several sequential DB writes,
+    // so a fake "climbing" bar would badly mislead on a big batch.
+    let merged = 0
+    let failed = 0
+    for (const pair of bulkEligible) {
+      const keepPlayerId = pickKeep(pair)
+      const removePlayerId = keepPlayerId === pair.player_a.id ? pair.player_b.id : pair.player_a.id
+      try {
+        await api.mergePlayers(keepPlayerId, removePlayerId, orgId)
+        merged++
+      } catch {
+        failed++
       }
-      load()
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBulkMerging(false)
+      setBulkProgress(p => ({ ...p, done: p.done + 1 }))
     }
+
+    setBulkResult({ merged, skipped: bulkRedactedCount, failed })
+    if (merged > 0) {
+      setMergedCount(c => c + merged)
+      setHistoryKey(k => k + 1)
+    }
+    setBulkProgress(null)
+    setBulkMerging(false)
+    load()
   }
 
   if (loading) return <PbSpinner message="Scanning for duplicates…" />
@@ -547,20 +559,29 @@ export default function MergeTools({ embeddedOrgId }) {
       )}
 
       {visible.length > 0 && (
-        <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-          <p className="font-mono text-[11px] text-pb-faint">
-            {visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found
-            {bulkRedactedCount > 0 ? ` (${bulkRedactedCount} need manual review)` : ''}.
-          </p>
-          <button
-            onClick={handleBulkApprove}
-            disabled={bulkMerging || bulkEligible.length === 0}
-            title="Merges every exact-name-match pair below except redacted (********) names"
-            className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}
-          >
-            {bulkMerging ? 'Bulk merging…' : `Bulk Approve (${bulkEligible.length})`}
-          </button>
+        <div className="mb-5">
+          {bulkMerging && bulkProgress ? (
+            <ProgressBar
+              pct={(bulkProgress.done / bulkProgress.total) * 100}
+              label={`Merging ${bulkProgress.done} of ${bulkProgress.total}…`}
+            />
+          ) : (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="font-mono text-[11px] text-pb-faint">
+                {visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found
+                {bulkRedactedCount > 0 ? ` (${bulkRedactedCount} need manual review)` : ''}.
+              </p>
+              <button
+                onClick={handleBulkApprove}
+                disabled={bulkEligible.length === 0}
+                title="Merges every exact-name-match pair below except redacted (********) names"
+                className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                Bulk Approve ({bulkEligible.length})
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -591,6 +612,7 @@ export default function MergeTools({ embeddedOrgId }) {
                 onMerged={() => { setMergedCount(c => c + 1); setHistoryKey(k => k + 1); load() }}
                 onSkipped={() => setSkipped(s => new Set([...s, `${pair.player_a.id}:${pair.player_b.id}`]))}
                 onIgnored={() => load()}
+                disabled={bulkMerging}
               />
             ))}
           </div>

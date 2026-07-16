@@ -402,66 +402,6 @@ async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), c
     )
 
 
-class BulkMergePair(BaseModel):
-    keep_player_id: str
-    remove_player_id: str
-
-
-class BulkMergeRequest(BaseModel):
-    org_id: str
-    pairs: list[BulkMergePair]
-
-
-@router.post("/merge-players/bulk")
-async def bulk_merge_players(
-    req: BulkMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES)),
-):
-    """Bulk-approve a batch of exact-name-match merge candidates in one go.
-    Every candidate pair from /merge-candidates is already a 100% normalised-
-    name match (that's the only thing that groups them), so there's no
-    confidence threshold to apply here beyond that — except a pair is always
-    skipped, never auto-merged, when either player's name is a CA-redacted
-    placeholder (see _is_redacted_name): those aren't provably the same
-    person, just two anonymised juniors who happen to share the same
-    placeholder text. Per-pair commit + per-pair error, so one bad pair can't
-    poison the batch."""
-    org_id = uuid.UUID(req.org_id)
-    results = []
-    for pair in req.pairs:
-        try:
-            keep_id = uuid.UUID(pair.keep_player_id)
-            remove_id = uuid.UUID(pair.remove_player_id)
-        except ValueError:
-            results.append({**pair.model_dump(), "status": "error", "reason": "Invalid player id"})
-            continue
-
-        if keep_id == remove_id:
-            results.append({**pair.model_dump(), "status": "skipped", "reason": "Same player"})
-            continue
-
-        keep = await db.get(Player, keep_id)
-        remove = await db.get(Player, remove_id)
-        if not keep or not remove or keep.organisation_id != org_id or remove.organisation_id != org_id:
-            results.append({**pair.model_dump(), "status": "error", "reason": "Player not found in this club"})
-            continue
-        if _is_redacted_name(keep.display_name) or _is_redacted_name(remove.display_name):
-            results.append({**pair.model_dump(), "status": "skipped", "reason": "Redacted player name — needs manual review"})
-            continue
-
-        try:
-            await _merge_players_core(db, keep_id, remove_id, org_id, current_user)
-            results.append({**pair.model_dump(), "status": "merged"})
-        except HTTPException as e:
-            results.append({**pair.model_dump(), "status": "error", "reason": e.detail})
-
-    return {
-        "merged": sum(1 for r in results if r["status"] == "merged"),
-        "skipped": sum(1 for r in results if r["status"] == "skipped"),
-        "failed": sum(1 for r in results if r["status"] == "error"),
-        "results": results,
-    }
-
-
 class UndoMergeRequest(BaseModel):
     merge_log_id: int
     org_id: str
