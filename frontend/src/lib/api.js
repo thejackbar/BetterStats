@@ -180,6 +180,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId }),
     }),
+  bulkMergePlayers: (orgId, pairs) =>
+    request('/admin/merge-players/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, pairs }),
+    }),
   ignorePair: (playerAId, playerBId, orgId) =>
     request('/admin/ignore-pair', {
       method: 'POST',
