@@ -434,12 +434,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
         </div>
 
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          <p className="font-mono text-[11px] text-pb-faintest">
-            Internal preview — not yet reachable from the public site. This registers a
-            real club and admin account, exactly like the eventual public flow will,
-            for testing before launch.
-          </p>
-
           <ol className="flex flex-wrap gap-2">
             {STEPS.map((s, i) => {
               const currentIndex = STEPS.findIndex((x) => x.key === step)
@@ -642,9 +636,8 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
 
               <div className="pb-card p-4 bg-pb-surface2">
                 <p className="font-mono text-[11px] text-pb-faint">
-                  Password isn't set here — you'll set it right before submitting, once
-                  email verification and acknowledgements are built (later phases of
-                  docs/self-serve-trial-onboarding-plan.md).
+                  Password isn't set here. You'll set it once email verification and
+                  acknowledgements are confirmed.
                 </p>
               </div>
             </div>
@@ -780,21 +773,8 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
                     >
                       {loggingInAs ? 'Logging in…' : 'Log in as new admin'}
                     </button>
-                    <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
-                      Internal-testing only — ends your Super Admin session and logs
-                      you in as the club admin just created, so you can see their
-                      admin dashboard directly. On the eventual public site this
-                      happens automatically right after registration.
-                    </p>
                     {loginAsError && <p className="font-mono text-[10px] text-pb-red mt-1">{loginAsError}</p>}
                   </div>
-
-                  <p className="font-mono text-[11px] text-pb-faint mt-3">
-                    The onboarding wizard (Phase 15) and lifecycle nudge emails (Phase 16)
-                    are both live now, gated behind their own General Settings flags. Yearbook
-                    auto-generation (Phase 22) is still a later phase — see
-                    docs/self-serve-trial-onboarding-plan.md.
-                  </p>
                 </div>
               ) : (
                 <>

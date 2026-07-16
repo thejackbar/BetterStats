@@ -18,7 +18,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import BILLABLE_MODULES, MODULE_CORE
-from app.models.db import ClubMembership, Organisation, SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db
+from app.models.db import (
+    ClubMembership, ModuleActionRequest, Organisation, SelfServeAcknowledgement,
+    SelfServeIdempotencyKey, User, get_db,
+)
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import module_subscriptions as mod_subs
 from app.services import password_policy
@@ -550,6 +553,35 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         # brings it back — un-archiving is what "available to register again"
         # actually means once submit reaches this point and reuses the row.
         org.archived_at = None
+        # A previously-archived club can carry an entire real billing history
+        # on this same row (same CA org id, reused rather than duplicated) —
+        # a prior real Stripe subscription/cancellation, and the org-level
+        # subscription_status/renewal_date/billing_cycle a super admin last
+        # left it at. None of that belongs to THIS registration: it's a brand
+        # new 14-day trial, not a continuation. Reset it to the same blank
+        # state a genuinely new org starts at (start_trial_billing below
+        # already re-trials every module cleanly either way — this is the
+        # org-level state that isn't touched by a per-module trial start).
+        org.stripe_customer_id = None
+        org.stripe_subscription_id = None
+        org.subscription_status = "active"
+        org.renewal_date = None
+        org.billing_cycle = None
+        # Likewise, any outstanding subscribe/trial/cancel request from the
+        # club's previous life is stale — it was never actioned before the
+        # club was archived, and re-showing it now (e.g. "subscribe
+        # requested" next to a module that just started a brand new trial)
+        # misrepresents this as a continuation of the old club rather than a
+        # fresh signup.
+        stale_requests = (await db.execute(
+            select(ModuleActionRequest).where(
+                ModuleActionRequest.organisation_id == org.id,
+                ModuleActionRequest.status == "outstanding",
+            )
+        )).scalars().all()
+        for stale in stale_requests:
+            stale.status = "dismissed"
+            stale.completed_at = datetime.now(timezone.utc)
 
         db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
         await db.flush()
