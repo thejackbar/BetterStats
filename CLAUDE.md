@@ -238,14 +238,20 @@ BetterFantasy), same table/flag/router as before:
   old checklist only looked for `org_full`, so a club whose first complete
   pull was a Full Rebuild never unlocked those steps (fixed here).
 - **Hybrid steps**: simple actions run inline through their EXISTING endpoints
-  (hard-refresh + sync-log polling, branding PATCH, sponsor create, fixture
+  (hard-refresh + sync-log polling, branding, sponsor create, fixture
   sync, squad seed/auto-assign, availability self-serve, website enable, comms
-  sender settings, fantasy season/pool); complex tools are link-out steps.
-  Link-outs stamp `sessionStorage.bs_setup_return` and
-  `SetupReturnBar.jsx` (mounted in `ProtectedRoute` beside `TrialBanner`, so
-  it covers module layouts too) offers "back to setup". Vital steps
+  sender settings, Square/Xero connect [live status + the OAuth connect-url,
+  stamping the return flag before redirecting], fantasy season/pool); complex
+  tools are link-out steps. Link-outs stamp `sessionStorage.bs_setup_return`
+  and `SetupReturnBar.jsx` (a **floating bottom pill**, gradient-ringed,
+  mounted in `ProtectedRoute` beside `TrialBanner` so it covers module
+  layouts and OAuth round-trips too) offers "back to setup". Vital steps
   (full_rebuild, merge_players, merge_grades) get a concrete-consequences
-  confirm before skipping.
+  confirm before skipping. **The branding step edits `theme_config`
+  (accent/accent2, merged over the stored config), NOT the legacy
+  `primary_color`/`accent_color` columns** — theme_config is what actually
+  themes the site (v8.70.2 fix); logo upload goes through `ImageEditorModal`
+  (crop + background removal) before saving.
 - **IQ pre-warm** (`services/iq_prewarm.py`; `GET/POST /iq/opposition/prewarm*`):
   builds every known opponent's dossier for chosen grades **one at a time** in
   a detached task (in-process progress dict, ≤40 opponents, 5-min per-build
@@ -254,6 +260,19 @@ BetterFantasy), same table/flag/router as before:
   year with per-grade distinct-opponent counts; busiest 3 pre-ticked.
 - Old `explore_*` step keys may linger in stored `completed_steps` —
   harmless, ignored by the registry.
+
+### Secondary accent, luminance-guarded (v8.70.2)
+
+`theme.js::safeAccent2(accent2, accent, mode)`: many clubs' second colour is
+black or white, which vanishes against the matching theme background.
+`buildThemeCss` now emits per-theme `--pb-accent-2-safe`, a per-theme
+`--pb-gradient`, and a per-theme `--pb-chart-wickets` (all guarded: near-black
+falls back to the PRIMARY accent on dark, near-white on light; the raw
+`--pb-accent-2` stays available). Consumers of the pairing: Navbar active-tab
+underline, `StatCard`'s accent variant (small gradient bar), the wizard
+progress bar + return pill, plus the pre-existing `.pb-gradient` utilities /
+presskit. **Paint club colour pairs with `var(--pb-gradient)` or
+`--pb-accent-2-safe`, never raw `--pb-accent-2`, unless you know the surface.**
 
 ## Awards — default templates (v8.28.0, Jun 2026)
 

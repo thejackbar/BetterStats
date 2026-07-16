@@ -19,7 +19,8 @@ import { Notice, WizardButton } from './setupUi'
 import { BrandingStep, FullRebuildStep, SponsorsStep } from './SetupInlineSteps'
 import {
   AssignPlayersStep, CommsStep, FantasyPoolStep, FantasySeasonStep,
-  FixturesStep, IqPrewarmStep, SelfServeStep, SquadsStep, WebsiteStep,
+  FixturesStep, IqPrewarmStep, SelfServeStep, SquadsStep, SquareStep,
+  WebsiteStep, XeroStep,
 } from './SetupModuleSteps'
 
 const INLINE_STEPS = {
@@ -31,6 +32,8 @@ const INLINE_STEPS = {
   assign_players: AssignPlayersStep,
   self_serve: SelfServeStep,
   website: WebsiteStep,
+  square: SquareStep,
+  xero: XeroStep,
   comms: CommsStep,
   iq_prewarm: IqPrewarmStep,
   fantasy_season: FantasySeasonStep,
@@ -190,6 +193,7 @@ export default function SetupWizard() {
             <div className="pb-card bg-pb-surface p-4 space-y-3">
               <ProgressBar
                 pct={pct}
+                color="var(--pb-gradient)"
                 label={`${progress.done} done${progress.addressed > progress.done ? `, ${progress.addressed - progress.done} skipped` : ''} of ${progress.total} steps`}
               />
               {/* Group rail */}
@@ -306,7 +310,7 @@ export default function SetupWizard() {
 
 function StepBody({ step, onRefresh, onOpenTool }) {
   const Inline = INLINE_STEPS[step.key]
-  if (Inline) return <Inline step={step} onRefresh={onRefresh} />
+  if (Inline) return <Inline step={step} onRefresh={onRefresh} onOpenTool={onOpenTool} />
   // Link-out step: the tool is a full page in its own right.
   return (
     <div className="space-y-3">

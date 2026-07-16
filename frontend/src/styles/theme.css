@@ -13,6 +13,9 @@
   /* Secondary club accent + the primary→secondary gradient built from it.
      Club white-labelling overrides both (see buildThemeCss). */
   --pb-accent-2:        #3b82f6;
+  /* Luminance-guarded secondary — buildThemeCss overrides this PER THEME so a
+     club whose second colour is black/white never paints invisible ink. */
+  --pb-accent-2-safe:   #3b82f6;
   --pb-gradient:        linear-gradient(135deg, #16c784 0%, #3b82f6 100%);
   /* Fixed BetterStats brand green — NEVER overridden by club white-labelling
      (buildThemeCss writes --pb-accent and friends, never this). Used for the

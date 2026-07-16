@@ -214,7 +214,7 @@ export default function Navbar() {
                         {isActive && (
                           <span
                             className="absolute left-1 right-1 -bottom-[1px] h-[2px]"
-                            style={{ background: "var(--pb-accent)" }}
+                            style={{ background: "var(--pb-gradient)" }}
                           />
                         )}
                       </>
@@ -238,7 +238,7 @@ export default function Navbar() {
                   {item.isActive && !isOpen && (
                     <span
                       className="absolute left-1 right-1 -bottom-[1px] h-[2px]"
-                      style={{ background: "var(--pb-accent)" }}
+                      style={{ background: "var(--pb-gradient)" }}
                     />
                   )}
                 </button>

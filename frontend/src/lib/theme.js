@@ -108,6 +108,36 @@ export function deriveDarkPalette(bg, base = BRAND.dark) {
 export const gradientCss = (accent, accent2) =>
   `linear-gradient(135deg, ${accent} 0%, ${accent2} 100%)`
 
+/** WCAG relative luminance (0 = black, 1 = white) of a hex colour. */
+function relLuminance(hex) {
+  const h = normHex(hex)
+  if (!h) return 0.5
+  const n = parseInt(h.slice(1), 16)
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/**
+ * The secondary accent, made safe to paint on the given theme's surfaces.
+ * Plenty of clubs' second colour is black or white (Applecross, the classic
+ * navy/white kits) — used raw, that disappears against the matching theme
+ * background. Near-black falls back to the primary accent on the dark theme,
+ * near-white falls back on the light theme; everything else passes through
+ * untouched. Fall back to the PRIMARY accent (a solid, on-brand read) rather
+ * than trying to bend the colour itself into something the club never chose.
+ */
+export function safeAccent2(accent2, accent, mode) {
+  const h = normHex(accent2)
+  if (!h) return accent
+  const L = relLuminance(h)
+  if (mode === 'dark' && L < 0.05) return accent
+  if (mode === 'light' && L > 0.8) return accent
+  return h
+}
+
 /** Merge a club's stored theme_config over the brand defaults. */
 export function resolveTheme(config) {
   const c = config || {}
@@ -162,7 +192,21 @@ export function buildThemeCss(config) {
     `--pb-faintest:${p.faintest}`,
   ].join(';')
 
+  // Per-theme SAFE secondary accent (see safeAccent2): the raw --pb-accent-2
+  // stays available, but anything painting on theme surfaces (the gradient,
+  // the wickets chart line, --pb-accent-2-safe consumers) gets the guarded
+  // value so a black or white club colour never vanishes into the background.
+  const safeVars = (mode) => {
+    const a2 = safeAccent2(t.accent2, t.accent, mode)
+    const wk = t.chart_wickets === t.accent2 ? a2 : safeAccent2(t.chart_wickets, t.accent, mode)
+    return [
+      `--pb-accent-2-safe:${a2}`,
+      `--pb-gradient:${gradientCss(t.accent, a2)}`,
+      `--pb-chart-wickets:${wk}`,
+    ].join(';')
+  }
+
   return `:root{${shared}}` +
-    `[data-theme="dark"]{${palette(t.dark)}}` +
-    `[data-theme="light"]{${palette(t.light)}}`
+    `[data-theme="dark"]{${palette(t.dark)};${safeVars('dark')}}` +
+    `[data-theme="light"]{${palette(t.light)};${safeVars('light')}}`
 }

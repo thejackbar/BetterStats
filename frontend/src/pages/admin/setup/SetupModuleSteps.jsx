@@ -3,6 +3,7 @@
    SetupInlineSteps: every action calls the existing module endpoint. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
 import { ProgressBar } from '../../../components/ProgressBar'
 import { DoneStrip, FieldLabel, Notice, Spinner, TextInput, WizardButton } from './setupUi'
 
@@ -317,6 +318,140 @@ export function WebsiteStep({ step, onRefresh }) {
         News, honour boards, committee and galleries are all edited from the Website section
         of the admin, add them whenever suits.
       </p>
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+    </div>
+  )
+}
+
+/* ── BetterAdmin: Connect Square (one connection per club, made in
+   BetterMerch, shared with BetterFees) ──────────────────────────────────── */
+
+export function SquareStep({ step, onOpenTool }) {
+  const { hasModule } = useAuth()
+  const canConnect = hasModule('merch') // the OAuth connect lives on the merch router
+  const [status, setStatus] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    const fetchStatus = canConnect ? api.merchSquareStatus : api.feeSquareStatus
+    fetchStatus().then(setStatus).catch(() => setStatus({ configured: false }))
+  }, [canConnect])
+
+  const connect = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const res = await api.merchSquareConnectUrl()
+      if (res?.url) {
+        // Off to Square's consent page — the OAuth callback lands back in the
+        // admin, where the floating "back to setup" pill brings them home.
+        try { sessionStorage.setItem('bs_setup_return', step.key) } catch { /* private mode */ }
+        window.location.assign(res.url)
+        return
+      }
+      setMsg({ tone: 'bad', text: 'Could not get a Square sign-in link.' })
+    } catch (e) {
+      setMsg({ tone: 'bad', text: e?.message || 'Could not start the Square connection.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {status === null && <p className="font-mono text-[11px] text-pb-faint">Checking your Square connection…</p>}
+      {status?.connected && (
+        <DoneStrip>
+          Square is connected{status.location_name ? ` (${status.location_name})` : ''} and shared across
+          BetterMerch and BetterFees.
+        </DoneStrip>
+      )}
+      {status && !status.connected && !status.configured && (
+        <Notice tone="warn">Square isn't configured on the server yet — get in touch and we'll switch it on.</Notice>
+      )}
+      {status && !status.connected && status.configured && (
+        canConnect ? (
+          <WizardButton onClick={connect} disabled={busy}>
+            {busy ? <Spinner /> : null} CONNECT SQUARE
+          </WizardButton>
+        ) : (
+          <Notice tone="info">
+            Square connects once per club through BetterMerch. Open the Square page for the
+            connection status and next steps.
+          </Notice>
+        )
+      )}
+      {status?.connected && status.needs_location && (
+        <Notice tone="warn">Connected, but Square needs a location picked — finish that on the Square page.</Notice>
+      )}
+      {status?.connected && (
+        <WizardButton variant="secondary" onClick={() => onOpenTool(step)}>OPEN SQUARE SETTINGS →</WizardButton>
+      )}
+      {status && !status.connected && !canConnect && (
+        <WizardButton variant="secondary" onClick={() => onOpenTool(step)}>OPEN THE SQUARE PAGE →</WizardButton>
+      )}
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+    </div>
+  )
+}
+
+/* ── BetterAdmin: Connect Xero ──────────────────────────────────────────── */
+
+export function XeroStep({ step, onOpenTool }) {
+  const [status, setStatus] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    api.feeXeroStatus().then(setStatus).catch(() => setStatus({ configured: false }))
+  }, [])
+
+  const connect = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const res = await api.feeXeroConnectUrl()
+      if (res?.url) {
+        try { sessionStorage.setItem('bs_setup_return', step.key) } catch { /* private mode */ }
+        window.location.assign(res.url)
+        return
+      }
+      setMsg({ tone: 'bad', text: 'Could not get a Xero sign-in link.' })
+    } catch (e) {
+      setMsg({ tone: 'bad', text: e?.message || 'Could not start the Xero connection.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const needsFinishing = status?.connected && (status.needs_tenant || status.needs_bank_account)
+  return (
+    <div className="space-y-4">
+      {status === null && <p className="font-mono text-[11px] text-pb-faint">Checking your Xero connection…</p>}
+      {status?.connected && (
+        <DoneStrip>
+          Xero is connected{status.tenant_name ? ` (${status.tenant_name})` : ''}
+          {status.bank_account_name ? `, watching ${status.bank_account_name}` : ''}.
+        </DoneStrip>
+      )}
+      {status && !status.connected && !status.configured && (
+        <Notice tone="warn">Xero isn't configured on the server yet — get in touch and we'll switch it on.</Notice>
+      )}
+      {status && !status.connected && status.configured && (
+        <WizardButton onClick={connect} disabled={busy}>
+          {busy ? <Spinner /> : null} CONNECT XERO
+        </WizardButton>
+      )}
+      {needsFinishing && (
+        <Notice tone="warn">
+          Connected, but Xero still needs {status.needs_tenant ? 'an organisation' : 'a bank account'} picked —
+          finish that on the Xero page.
+        </Notice>
+      )}
+      {status?.connected && (
+        <WizardButton variant="secondary" onClick={() => onOpenTool(step)}>OPEN XERO SETTINGS →</WizardButton>
+      )}
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
     </div>
   )

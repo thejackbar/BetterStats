@@ -9,6 +9,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../lib/api'
 import { ProgressBar } from '../../../components/ProgressBar'
+import ImageEditorModal from '../../../components/ImageEditorModal'
+import { gradientCss, resolveTheme } from '../../../lib/theme'
 import { DoneStrip, FieldLabel, Notice, Spinner, TextInput, WizardButton } from './setupUi'
 
 const NAME_FORMATS = [
@@ -105,17 +107,23 @@ export function FullRebuildStep({ step, onRefresh }) {
 export function BrandingStep({ onRefresh }) {
   const [settings, setSettings] = useState(null)
   const [primary, setPrimary] = useState('#16c784')
-  const [accent, setAccent] = useState('#243352')
+  const [secondary, setSecondary] = useState('#3b82f6')
   const [nameFormat, setNameFormat] = useState('last_first')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [editorSource, setEditorSource] = useState(null) // File | url string | null
   const [msg, setMsg] = useState(null) // {tone, text}
 
   useEffect(() => {
     api.adminGetSettings().then((s) => {
       setSettings(s)
-      if (s?.primary_color) setPrimary(s.primary_color)
-      if (s?.accent_color) setAccent(s.accent_color)
+      // Colours live in theme_config (the palette the whole site is themed
+      // from) — resolveTheme fills brand defaults for anything unset. The
+      // legacy primary_color/accent_color columns are mirrored by the
+      // backend, never edited directly.
+      const t = resolveTheme(s?.theme_config)
+      setPrimary(t.accent)
+      setSecondary(t.accent2)
       if (s?.player_name_format) setNameFormat(s.player_name_format)
     }).catch(() => {})
   }, [])
@@ -127,7 +135,7 @@ export function BrandingStep({ onRefresh }) {
     try {
       const res = await api.adminUploadLogo(file)
       setSettings((s) => ({ ...s, logo_url: res?.logo_url || s?.logo_url || 'uploaded' }))
-      setMsg({ tone: 'good', text: 'Logo uploaded.' })
+      setMsg({ tone: 'good', text: 'Logo saved.' })
       onRefresh()
     } catch (e) {
       setMsg({ tone: 'bad', text: e?.message || 'Upload failed. JPG, PNG, WEBP or GIF up to 2 MB.' })
@@ -140,7 +148,11 @@ export function BrandingStep({ onRefresh }) {
     setSaving(true)
     setMsg(null)
     try {
-      await api.adminPatchSettings({ primary_color: primary, accent_color: accent, player_name_format: nameFormat })
+      // Merge onto the stored config so chart/palette keys a club has already
+      // customised survive the wizard's narrower edit.
+      const theme_config = { ...(settings?.theme_config || {}), accent: primary, accent2: secondary }
+      await api.adminPatchSettings({ theme_config, player_name_format: nameFormat })
+      setSettings((s) => ({ ...s, theme_config }))
       setMsg({ tone: 'good', text: 'Saved.' })
       onRefresh()
     } catch (e) {
@@ -154,7 +166,7 @@ export function BrandingStep({ onRefresh }) {
     <div className="space-y-5">
       <div>
         <FieldLabel>Club logo</FieldLabel>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           {settings?.logo_url ? (
             <img src={settings.logo_url} alt="Club logo" className="w-14 h-14 object-contain rounded border pb-hairline bg-pb-bg" />
           ) : (
@@ -164,9 +176,22 @@ export function BrandingStep({ onRefresh }) {
           )}
           <label className="cursor-pointer inline-flex items-center gap-2 font-mono text-[11px] tracking-wide2 border pb-hairline rounded px-4 py-2 text-pb-faint hover:text-pb-text hover:bg-pb-surface2">
             {uploading ? <Spinner /> : null} {settings?.logo_url ? 'REPLACE LOGO' : 'UPLOAD LOGO'}
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadLogo(e.target.files?.[0])} />
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => { if (e.target.files?.[0]) setEditorSource(e.target.files[0]); e.target.value = '' }}
+            />
           </label>
+          {settings?.logo_url && (
+            <WizardButton variant="secondary" onClick={() => setEditorSource(settings.logo_url)} disabled={uploading}>
+              EDIT / REMOVE BACKGROUND
+            </WizardButton>
+          )}
         </div>
+        <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+          The editor opens on upload so you can crop and strip the background before it saves.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
@@ -180,10 +205,15 @@ export function BrandingStep({ onRefresh }) {
         <div>
           <FieldLabel>Secondary colour</FieldLabel>
           <div className="flex items-center gap-2">
-            <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="w-9 h-9 rounded border pb-hairline bg-pb-bg cursor-pointer" />
-            <TextInput value={accent} onChange={(e) => setAccent(e.target.value)} className="font-mono text-[12px]" />
+            <input type="color" value={secondary} onChange={(e) => setSecondary(e.target.value)} className="w-9 h-9 rounded border pb-hairline bg-pb-bg cursor-pointer" />
+            <TextInput value={secondary} onChange={(e) => setSecondary(e.target.value)} className="font-mono text-[12px]" />
           </div>
         </div>
+      </div>
+
+      <div className="max-w-md">
+        <FieldLabel>How your two colours pair up</FieldLabel>
+        <div className="h-8 rounded border pb-hairline" style={{ background: gradientCss(primary, secondary) }} />
       </div>
 
       <div className="max-w-xs">
@@ -201,6 +231,17 @@ export function BrandingStep({ onRefresh }) {
         <WizardButton onClick={save} disabled={saving}>{saving ? <Spinner /> : null} SAVE</WizardButton>
         {msg && <span className={`font-mono text-[11px] ${msg.tone === 'good' ? 'text-pb-positive' : 'text-pb-red'}`}>{msg.text}</span>}
       </div>
+
+      <ImageEditorModal
+        open={!!editorSource}
+        source={editorSource}
+        title="Edit Club Logo"
+        aspect={null}
+        outputType="image/png"
+        outputName="club-logo.png"
+        onCancel={() => setEditorSource(null)}
+        onApply={async (file) => { setEditorSource(null); await uploadLogo(file) }}
+      />
     </div>
   )
 }

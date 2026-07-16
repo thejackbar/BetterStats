@@ -8,6 +8,9 @@ export default function StatCard({ label, value, sub, accent = false, large = fa
     )}
     style={accent ? { background: 'color-mix(in srgb, var(--pb-accent) 5%, var(--pb-surface))' } : {}}
     >
+      {accent && (
+        <span aria-hidden className="h-[3px] w-8 rounded-full mb-0.5" style={{ background: 'var(--pb-gradient)' }} />
+      )}
       <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{label}</span>
       <span className={clsx(
         'font-mono font-bold leading-none',
