@@ -16,6 +16,17 @@ const isoToLocalInput = (iso) => (iso ? toLocalInput(new Date(iso)) : '')
 
 const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
 
+// Rows shown in the General Settings bundle-discount editor. Only 1-4 have a
+// live effect today (there are 4 priced bolt-on modules); 5/6 are pre-wired
+// so a future 5th/6th priced module needs no code change here, just a value
+// typed into an already-existing row.
+const BUNDLE_DISCOUNT_ROWS = [1, 2, 3, 4, 5, 6]
+const normalizeBundleSchedule = (raw) => {
+  const out = {}
+  for (const n of BUNDLE_DISCOUNT_ROWS) out[n] = Number(raw?.[n] ?? raw?.[String(n)] ?? 0)
+  return out
+}
+
 export default function SuperClubs() {
   const [clubs, setClubs] = useState([])
   const [showCreate, setShowCreate] = useState(false)
@@ -27,6 +38,7 @@ export default function SuperClubs() {
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    billing_checkout_override: '',
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
@@ -44,7 +56,8 @@ export default function SuperClubs() {
   const [settingsForm, setSettingsForm] = useState({
     default_trial_days: 14, direct_enquiry_hot_days: 30,
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
-    trial_nudges_enabled: false,
+    trial_nudges_enabled: false, billing_checkout_enabled: false,
+    bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -75,6 +88,8 @@ export default function SuperClubs() {
         self_serve_registration_enabled: !!s?.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
+        billing_checkout_enabled: !!s?.billing_checkout_enabled,
+        bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -91,6 +106,10 @@ export default function SuperClubs() {
         self_serve_registration_enabled: !!settingsForm.self_serve_registration_enabled,
         onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
         trial_nudges_enabled: !!settingsForm.trial_nudges_enabled,
+        billing_checkout_enabled: !!settingsForm.billing_checkout_enabled,
+        bundle_discount_schedule: Object.fromEntries(
+          BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
+        ),
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -201,6 +220,10 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
+      billing_checkout_override:
+        club.billing_checkout_override === true ? 'true'
+        : club.billing_checkout_override === false ? 'false'
+        : '',
       comms_tier: club.comms_tier || 'sandbox',
       comms_sandbox_cap: club.comms_sandbox_cap ?? '',
       comms_production_cap: club.comms_production_cap ?? '',
@@ -262,10 +285,20 @@ export default function SuperClubs() {
   const setModuleRenewal = (clubId, key, date) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { renewal_date: date || null }))
   // Status select: 'trial' opens the inline date editor (persisted on Apply) seeded
-  // from the row's draft; any other status applies immediately.
+  // from the row's draft; 'reset' isn't a real persisted status — it wipes the
+  // module's subscription row(s) entirely (same as un-granting via the chip
+  // button), which is what actually clears trial_started_at and makes the
+  // module trial_eligible again for the club's own self-service Start Trial /
+  // Subscribe (account_plan_status reads "never held a row" as never_trialed).
+  // Any other status applies immediately.
   const onModuleStatus = (clubId, key, status, seedDraft) => {
     if (status === 'trial') {
       setTrialEdit(t => ({ ...t, [key]: seedDraft }))
+      return
+    }
+    if (status === 'reset') {
+      clearTrialEdit(key)
+      removeModule(clubId, key)
       return
     }
     clearTrialEdit(key)
@@ -308,6 +341,10 @@ export default function SuperClubs() {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
         billing_cycle: editForm.billing_cycle || null,
+        billing_checkout_override:
+          editForm.billing_checkout_override === 'true' ? true
+          : editForm.billing_checkout_override === 'false' ? false
+          : null,
         comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
         comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
         comms_monthly_cap: editForm.comms_monthly_cap === '' ? null : Number(editForm.comms_monthly_cap),
@@ -414,15 +451,16 @@ export default function SuperClubs() {
         </div>
 
         {showSettings && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowSettings(false)}>
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={() => setShowSettings(false)}>
             <form onSubmit={saveSettings} onClick={e => e.stopPropagation()}
-              className="pb-card p-5 w-full max-w-sm space-y-4 bg-pb-surface">
-              <div>
+              className="pb-card w-full max-w-sm bg-pb-surface mt-16 max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="p-5 pb-0 shrink-0">
                 <h2 className="font-display font-bold text-lg text-pb-text">General Settings</h2>
                 <p className="font-mono text-[10px] text-pb-faintest mt-1">
                   Platform-wide defaults, applied across all clubs.
                 </p>
               </div>
+              <div className="p-5 overflow-y-auto space-y-4">
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Default trial days</label>
                 <input type="number" min="1" value={settingsForm.default_trial_days}
@@ -496,7 +534,55 @@ export default function SuperClubs() {
                 </p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Billing (in progress)
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Off keeps every club's Account page SUBSCRIBE button on the "not
+                  connected yet" stub, no matter how much of the invoicing / Stripe
+                  checkout build has landed. Only switch this on once that flow has
+                  been tested and is ready for a real Primary Admin to pay through it.
+                </p>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.billing_checkout_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, billing_checkout_enabled: e.target.checked }))} />
+                  Online billing checkout enabled
+                </label>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Bundle discount schedule
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Whole-dollar discount off the annual total, by how many priced modules a club
+                  selects in ONE initial subscribe (BetterSelect/BetterSocials/BetterAdmin/BetterIQ —
+                  BetterFantasyCricket is priced separately and never discounted). Never applies to a
+                  module added later to an already-live subscription. Rows 5-6 are here for a future
+                  5th/6th priced module — harmless to leave at $0 until then.
+                </p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  {BUNDLE_DISCOUNT_ROWS.map((n) => (
+                    <label key={n} className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                      <span className="w-20 shrink-0">{n} module{n === 1 ? '' : 's'}</span>
+                      <span className="text-pb-faintest">$</span>
+                      <input
+                        type="number" min="0"
+                        value={settingsForm.bundle_discount_schedule[n] ?? 0}
+                        onChange={e => setSettingsForm(f => ({
+                          ...f,
+                          bundle_discount_schedule: { ...f.bundle_discount_schedule, [n]: e.target.value },
+                        }))}
+                        className={INPUT_CLS}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+              </div>
+
+              <div className="flex gap-2 p-5 pt-3 border-t pb-hairline shrink-0">
                 <button type="submit" disabled={settingsSaving}
                   className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
                   style={{ background: 'var(--pb-accent)' }}>
@@ -802,8 +888,10 @@ export default function SuperClubs() {
                                 <>
                                   <select value={editingTrial ? 'trial' : sub.status} disabled={busy}
                                     onChange={e => onModuleStatus(club.id, key, e.target.value, draft)}
+                                    title="Reset wipes the module's trial/subscription history so the club can start a fresh trial or subscribe again"
                                     className="bg-pb-surface border pb-hairline rounded px-1.5 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent disabled:opacity-50">
                                     {SUBSCRIPTION_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                                    <option value="reset">Reset (make eligible again)</option>
                                   </select>
                                   {trialView ? (
                                     // Keep Start / End / Apply together on one line: they're one
@@ -874,6 +962,20 @@ export default function SuperClubs() {
                       <input type="date" value={editForm.renewal_date}
                         onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
                         className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Stripe checkout (this club)</label>
+                      <select value={editForm.billing_checkout_override}
+                        onChange={e => setEditForm(f => ({ ...f, billing_checkout_override: e.target.value }))}
+                        className={INPUT_CLS}>
+                        <option value="">Platform default</option>
+                        <option value="true">Force ON — let this club through (testing)</option>
+                        <option value="false">Force OFF — block even if the platform default is on</option>
+                      </select>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                        Overrides General Settings → Billing for this one club — lets you test the
+                        real Stripe flow on a single club before switching it on for everyone.
+                      </p>
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">BetterComms sending tier</label>

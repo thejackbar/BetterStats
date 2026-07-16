@@ -93,6 +93,7 @@ export const MODULE_GROUPS = {
   // every club so the Core website is never gated behind the socials module.
   socials: {
     key: 'bettersocials',
+    billingKey: 'socials',
     name: 'BetterSocials',
     blurb: 'Your public website plus auto-posts for lineups, scorecards and milestones.',
     to: '/admin/bettersocials',
@@ -100,6 +101,7 @@ export const MODULE_GROUPS = {
   },
   admin: {
     key: 'admin',
+    billingKey: 'admin',
     name: 'BetterAdmin',
     blurb: 'Run the back office — fees, comms and merch in one place.',
     to: '/admin/betteradmin',

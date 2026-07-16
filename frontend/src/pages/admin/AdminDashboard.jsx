@@ -8,6 +8,9 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import SyncRunCard from '../../components/admin/SyncRunCard'
 import { formatSeason } from '../../lib/cricketFormat'
 
+const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : null
+
 // Render "BetterX" with the suffix in the club accent colour, matching the
 // existing BetterSelect treatment.
 function ModuleName({ name }) {
@@ -21,7 +24,7 @@ function ModuleName({ name }) {
   return <span className="font-display font-bold text-lg">{name}</span>
 }
 
-function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRequest }) {
+function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, requesting, error, onStartTrial }) {
   const brand = moduleBrand(mod.key)
   // Scope the module's accent colour to this tile only — every var(--pb-accent)
   // inside (the name suffix, arrow, tint, border) becomes the module colour.
@@ -43,7 +46,8 @@ function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRe
     )
   }
 
-  // Entitled → opens.
+  // Entitled → opens. Subscribed/Trial rows also show their status + date,
+  // straight from the same Account-page data (GET /club-admin/account/plan).
   if (entitled) {
     return (
       <Link
@@ -59,11 +63,25 @@ function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRe
           <span className="text-2xl group-hover:translate-x-1 transition-transform" style={{ color: 'var(--pb-accent)' }}>→</span>
         </div>
         <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
+        {planRow?.status === 'subscribed' && (
+          <p className="font-mono text-[10px] text-pb-faintest mt-2">
+            Subscribed{planRow.renewal_date ? ` · renews ${fmtDate(planRow.renewal_date)}` : ''}
+          </p>
+        )}
+        {planRow?.status === 'trial' && (
+          <p className="font-mono text-[10px] text-pb-faintest mt-2">
+            Trial{planRow.trial_ends_at ? ` · ends ${fmtDate(planRow.trial_ends_at)}` : ''}
+          </p>
+        )}
       </Link>
     )
   }
 
-  // Locked → not entitled. It's an add-on the club can turn on.
+  // Locked → not entitled. It's an add-on the club can turn on. START TRIAL
+  // only renders when the row is actually trial_eligible (never_trialed) —
+  // a module that's already been trialled (or is mid-cancellation) has
+  // nothing to offer here, so showing the button would just fail silently.
+  const trialEligible = !planRow || planRow.trial_eligible
   return (
     <div className="pb-card p-5 opacity-75" style={{ ...brandVars, borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
@@ -86,45 +104,56 @@ function ModuleTile({ mod, entitled, pendingKind, canSubscribe, requesting, onRe
           </span>
         ) : (
           <>
-            <button
-              type="button"
-              disabled={requesting}
-              onClick={() => onRequest('trial')}
-              className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border transition-colors disabled:opacity-50"
-              style={{ color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' }}
-            >
-              {requesting ? '…' : 'Request trial'}
-            </button>
-            {canSubscribe && (
+            {trialEligible && (
               <button
                 type="button"
                 disabled={requesting}
-                onClick={() => onRequest('subscribe')}
-                className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+                onClick={onStartTrial}
+                className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border transition-colors disabled:opacity-50"
+                style={{ color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' }}
               >
-                Request to subscribe
+                {requesting ? '…' : 'START TRIAL'}
               </button>
+            )}
+            {canSubscribe && (
+              <Link
+                to="/admin/account"
+                className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+              >
+                SUBSCRIBE
+              </Link>
             )}
           </>
         )}
       </div>
+      {error && <p className="font-mono text-[10px] text-pb-red mt-2">{error}</p>}
     </div>
   )
 }
 
 export default function AdminDashboard() {
-  const { user, hasModule } = useAuth()
+  const { user, hasModule, refetch } = useAuth()
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [myRequests, setMyRequests] = useState([])
   const [requesting, setRequesting] = useState('')
+  const [tileErrors, setTileErrors] = useState({})
   const [latestSyncRun, setLatestSyncRun] = useState(null)
+  // Per-module status/dates (Subscribed · renews X / Trial · ends X) and
+  // trial_eligible, the same data the Account page shows — GET /account/plan.
+  const [plan, setPlan] = useState([])
+
+  const loadPlan = () =>
+    api.accountGetPlan().then(d => setPlan(Array.isArray(d?.modules) ? d.modules : [])).catch(() => {})
 
   useEffect(() => {
     api.adminGetSettings().then(setSettings).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
     api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
+    loadPlan()
   }, [])
+
+  const planByModule = Object.fromEntries(plan.map(r => [r.module, r]))
 
   // Live sync progress — driven entirely by re-fetching sync_runs, so it's
   // correct on every fresh page load / re-login with no client-side state to
@@ -154,16 +183,18 @@ export default function AdminDashboard() {
     return () => { cancelled = true; if (intervalId) clearInterval(intervalId) }
   }, [user?.club_id])
 
-  // Raise a trial / subscription request for a billable module (BetterAdmin covers
-  // fees + comms + merch as one). Queued for a super admin to action.
-  const requestModule = async (moduleKey, kind) => {
+  // Instant self-service trial start for a billable module (BetterAdmin covers
+  // fees + comms + merch as one) — no queue, no approval (see
+  // POST /club-admin/modules/{key}/start-trial). Re-fetches /auth/me so
+  // hasModule() flips the tile open immediately.
+  const startTrial = async (moduleKey) => {
     setRequesting(moduleKey)
+    setTileErrors(e => ({ ...e, [moduleKey]: '' }))
     try {
-      await api.requestModule(moduleKey, kind)
-      const d = await api.listMyModuleRequests()
-      setMyRequests(Array.isArray(d) ? d : [])
-    } catch {
-      // best-effort; the locked tile just stays requestable
+      await api.startModuleTrial(moduleKey)
+      await Promise.all([refetch(), loadPlan()])
+    } catch (e) {
+      setTileErrors(errs => ({ ...errs, [moduleKey]: e.message || 'Could not start the trial' }))
     } finally {
       setRequesting('')
     }
@@ -254,18 +285,25 @@ export default function AdminDashboard() {
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
           {dashboardTiles().map(tile => {
-            // tile.key is the billable module key (BetterAdmin = 'admin'), so a
-            // request for the group is one request, not one per member.
-            const pending = myRequests.find(r => r.status === 'outstanding' && r.module_key === tile.key)
+            // The billable module key (BetterAdmin = 'admin', BetterSocials =
+            // 'socials') doesn't always equal the tile's own key — the
+            // BetterSocials group tile is keyed 'bettersocials' (its umbrella
+            // route/UI identity) but bills as 'socials'. Fall back to tile.key
+            // for ungrouped tiles, which are keyed as their billing key already.
+            const billingKey = tile.billingKey || tile.key
+            // A request for the group is one request, not one per member.
+            const pending = myRequests.find(r => r.status === 'outstanding' && r.module_key === billingKey)
             return (
               <ModuleTile
                 key={tile.key}
                 mod={tile}
                 entitled={tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key))}
+                planRow={planByModule[billingKey]}
                 pendingKind={pending?.kind}
                 canSubscribe={!!user?.is_primary_admin}
-                requesting={requesting === tile.key}
-                onRequest={(kind) => requestModule(tile.key, kind)}
+                requesting={requesting === billingKey}
+                error={tileErrors[billingKey]}
+                onStartTrial={() => startTrial(billingKey)}
               />
             )
           })}

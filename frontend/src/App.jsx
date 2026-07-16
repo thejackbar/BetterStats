@@ -12,14 +12,12 @@ import ScrollToTop from './components/ScrollToTop'
 import FaviconManager from './components/FaviconManager'
 import ClubCTABar from './components/ClubCTABar'
 import { usePageView } from './hooks/usePageView'
+import { MARKETING_PATHS, isMarketingPath } from './lib/marketingPaths'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes.
 // Also the reference list for ClubCTABar (which BetterCricket pages vs. club public
 // pages get the "get your club on BetterCricket" bar shown to every visitor).
-export const MARKETING_PATHS = ['/', '/overview', '/features', '/pricing', '/compare', '/modules', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
-export function isMarketingPath(pathname) {
-  return MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
-}
+export { MARKETING_PATHS, isMarketingPath }
 function ConditionalNavbar() {
   const { pathname } = useLocation()
   const isMarketing = isMarketingPath(pathname)
