@@ -18,7 +18,7 @@ from sqlalchemy import select, text
 
 from app.models.db import ImportedStat, async_session_maker
 from app.services import import_reconcile as recon
-from app.services.aggregations import _GRADE_MATCH
+from app.services.aggregations import _GRADE_MATCH, get_batting_leaderboard_extended
 
 
 async def diagnose(org_id_str: str, player_id_str: str) -> None:
@@ -137,6 +137,15 @@ async def diagnose(org_id_str: str, player_id_str: str) -> None:
                     )
                 ).mappings().first()
                 print(f"v_effective_batting_innings for matched grade ids: {dict(veff)}")
+
+                # The ACTUAL leaderboard function, called exactly like the live
+                # endpoint would (no hand-reconstructed SQL), filtered to this player.
+                board = await get_batting_leaderboard_extended(
+                    session, str(org_uuid), None, None, "total_runs", 5000, 0, grade,
+                )
+                mine = next((r for r in board if str(r["player_id"]) == str(player_uuid)), None)
+                print(f"\nget_batting_leaderboard_extended(grade_name={grade!r}) row for this player: {mine}")
+                print(f"(leaderboard returned {len(board)} players total for this grade)")
 
 
 if __name__ == "__main__":
