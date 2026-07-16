@@ -208,8 +208,22 @@ full-page, whole-platform **Setup Wizard** at `/admin/setup(/:stepKey)`
 data tools → BetterSelect → BetterSocials → BetterAdmin → BetterIQ →
 BetterFantasy), same table/flag/router as before:
 
-- **Backend** `routers/onboarding_wizard.py`, still gated by
-  `onboarding_wizard_enabled` + club-admin auth. `GET /flow` is the wizard:
+- **Entry points (v8.70.1)**: a permanent **"Setup Wizard" sidebar item** (top
+  unheaded section, beside Dashboard, every role) plus the header SETUP GUIDE
+  shortcut (any role whose `/state` fetch succeeds — a super admin needs an
+  acting-as club). The `onboarding_wizard_enabled` platform-flag gate was
+  REMOVED from the router (the flag + `require_onboarding_wizard_enabled` in
+  `auth.py` still exist but gate nothing — the General Settings toggle is
+  inert for the wizard now). Sidebar sections (and Better HQ links, after
+  Platform Overview) are kept in ALPHABETICAL order by label — keep it that
+  way when adding links.
+- **Auto-open is conservative** (because the gate is gone): fresh-login
+  navigation to `/admin/setup` fires only for (a) a brand-new club — no
+  successful full sync — that hasn't dismissed it, or (b) the one-shot
+  Decision-11 reopen-after-sync, only if stored progress exists (`engaged`),
+  so long-established clubs are never yanked into setup. Super admins are
+  never auto-navigated.
+- **Backend** `routers/onboarding_wizard.py`, club-admin auth. `GET /flow` is the wizard:
   step registry (`GROUPS`) filtered to the club's entitlements, per-step
   auto-detection (`_detect_steps` — cheap org-scoped EXISTS: logo set, sponsor
   rows, merge_logs, fee_schedules, fantasy season/pool, a `ready` dossier…),
@@ -238,10 +252,8 @@ BetterFantasy), same table/flag/router as before:
   timeout), reusing `iq_opponent.get_or_start_dossier` — a fresh dossier is a
   cache hit, so re-runs are cheap. Grade options come from the latest season
   year with per-grade distinct-opponent counts; busiest 3 pre-ticked.
-- **Auto-open** is now a NAVIGATION to `/admin/setup` on fresh login (same
-  `should_auto_open` + `dismissed_at`/`sync_steps_shown_at` semantics; the
-  header SETUP GUIDE button navigates too). Old `explore_*` step keys may
-  linger in stored `completed_steps` — harmless, ignored by the registry.
+- Old `explore_*` step keys may linger in stored `completed_steps` —
+  harmless, ignored by the registry.
 
 ## Awards — default templates (v8.28.0, Jun 2026)
 

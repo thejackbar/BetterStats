@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
 import AdminLayout from '../../../components/admin/AdminLayout'
 import { ProgressBar } from '../../../components/ProgressBar'
 import { Notice, WizardButton } from './setupUi'
@@ -50,6 +51,7 @@ const VITAL_SKIP_WARNINGS = {
 export default function SetupWizard() {
   const { stepKey } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [flow, setFlow] = useState(null)
   const [error, setError] = useState('')
   const [confirmSkip, setConfirmSkip] = useState(null) // step object pending skip confirmation
@@ -62,9 +64,14 @@ export default function SetupWizard() {
       setError('')
       return f
     } catch (e) {
-      setError(e?.message || 'The setup wizard is not available right now.')
+      setError(
+        user?.role === 'super_admin'
+          ? 'Pick a club with the club switcher up top first, then run setup for that club.'
+          : (e?.message || 'The setup wizard is not available right now.')
+      )
       return null
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

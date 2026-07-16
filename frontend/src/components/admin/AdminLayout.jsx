@@ -29,14 +29,22 @@ function compareVersions(a, b) {
 // `cap: <CAP>` hides the link from users without that capability.
 // BetterSelect / BetterSocials / BetterFees are NOT here — each is its own
 // module surface (own layout + nav), reached from the dashboard module tiles.
+// Items within each headed section are kept in ALPHABETICAL order (by label)
+// — keep it that way when adding links. Dashboard and the Setup Wizard sit in
+// the unheaded top section as the two standing entry points.
 const NAV_SECTIONS = [
-  { items: [{ to: '/admin', label: 'Dashboard', exact: true, cap: null }] },
+  {
+    items: [
+      { to: '/admin', label: 'Dashboard', exact: true, cap: null },
+      { to: '/admin/setup', label: 'Setup Wizard', cap: null },
+    ],
+  },
   {
     heading: 'Cricket Data',
     items: [
+      { to: '/admin/players/import', label: 'Import Players', cap: CAP.MANAGE_PLAYERS },
       { to: '/admin/games', label: 'Matches', cap: null },
       { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
-      { to: '/admin/players/import', label: 'Import Players', cap: CAP.MANAGE_PLAYERS },
       { to: '/admin/seasons', label: 'Seasons', cap: null },
     ],
   },
@@ -55,42 +63,44 @@ const NAV_SECTIONS = [
       { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
       { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
       { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
-      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
-      { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
-      { to: '/admin/upload-scorecard', label: 'Upload Scorecard', cap: CAP.MANAGE_MANUAL_ENTRIES },
       { to: '/admin/import', label: 'Import Stats', cap: CAP.MANAGE_MANUAL_ENTRIES },
+      { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
+      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
       { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
       { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
       { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/reports', label: 'Saved Reports', cap: CAP.MANAGE_REPORTS },
+      { to: '/admin/upload-scorecard', label: 'Upload Scorecard', cap: CAP.MANAGE_MANUAL_ENTRIES },
     ],
   },
   {
     heading: 'Account',
     items: [
+      { to: '/admin/account', label: 'Plan & Billing', cap: null },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
-      { to: '/admin/account', label: 'Plan & Billing', cap: null },
     ],
   },
 ]
 
+// Platform Overview (Better HQ's own dashboard) stays first; the rest are
+// kept in ALPHABETICAL order by label — keep it that way when adding links.
 const SUPER_LINKS = [
   { to: '/admin/super', label: 'Platform Overview', exact: true },
   { to: '/admin/super/clubs', label: 'All Clubs' },
-  { to: '/admin/super/users', label: 'Users' },
+  { to: '/admin/changelog', label: 'Changelog' },
+  { to: '/admin/super/announce', label: 'Club Announcements' },
+  { to: '/admin/super/marketing', label: 'Club Directory' },
+  { to: '/admin/super/comms-limits', label: 'Comms Limits', badge: 'commsRequests' },
+  { to: '/admin/super/coupons', label: 'Discount Coupons' },
+  { to: '/admin/super/migration', label: 'KlubPro Migration' },
+  { to: '/admin/super/login-attempts', label: 'Login Attempts' },
+  { to: '/admin/super/meta-ads', label: 'Meta Ads' },
+  { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
   { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
-  { to: '/admin/super/meta-ads', label: 'Meta Ads' },
-  { to: '/admin/super/login-attempts', label: 'Login Attempts' },
-  { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
-  { to: '/admin/super/comms-limits', label: 'Comms Limits', badge: 'commsRequests' },
-  { to: '/admin/super/announce', label: 'Club Announcements' },
   { to: '/admin/usage', label: 'Usage' },
-  { to: '/admin/super/migration', label: 'KlubPro Migration' },
-  { to: '/admin/super/marketing', label: 'Club Directory' },
-  { to: '/admin/super/coupons', label: 'Discount Coupons' },
-  { to: '/admin/changelog', label: 'Changelog' },
+  { to: '/admin/super/users', label: 'Users' },
 ]
 
 export default function AdminLayout({ children }) {
@@ -232,25 +242,28 @@ export default function AdminLayout({ children }) {
   // The auto-open (now a NAVIGATION to /admin/setup, not a modal) still only
   // fires on a genuine fresh login (read from justLoggedIn's value at the
   // moment this runs, not as a dependency) so it doesn't re-fire on every
-  // ordinary navigation — should_auto_open's own dismissed_at/
-  // sync_steps_shown_at gating is what makes that safe to check this often.
-  // 404 (flag off) is treated the same as "nothing to show" — silently.
-  // Club-admin-only (the mirror of the bell's own super_admin-only gate
-  // above): onboarding guidance belongs to the club's own admin, not a
-  // super admin just visiting/acting-as the club.
+  // ordinary navigation — should_auto_open's own conservative gating
+  // (brand-new club, or the one-shot reopen-after-sync for a club that
+  // engaged) is what makes that safe to check this often. The button shows
+  // for every role — a super admin acting-as a club can run setup too —
+  // but the auto-navigation stays club-admin-only so a super admin is
+  // never yanked into a club's onboarding. A failed state fetch (e.g. no
+  // acting-as club selected) just hides the header shortcut; the sidebar
+  // Setup Wizard item is the unconditional entry point.
   useEffect(() => {
-    if (!user || user.role === 'super_admin') { setWizardAvailable(false); return }
+    if (!user) { setWizardAvailable(false); return }
     let cancelled = false
     ;(async () => {
       try {
         const s = await api.getOnboardingWizardState()
         if (cancelled) return
         setWizardAvailable(true)
-        if (justLoggedIn && s.should_auto_open && !location.pathname.startsWith('/admin/setup')) {
+        if (justLoggedIn && s.should_auto_open && user.role !== 'super_admin'
+            && !location.pathname.startsWith('/admin/setup')) {
           navigate('/admin/setup')
         }
       } catch {
-        // 404 (flag off) or any other failure — just hide the entry point
+        // No club context (or any other failure) — just hide the shortcut
         if (!cancelled) setWizardAvailable(false)
       }
     })()

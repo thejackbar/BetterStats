@@ -20,11 +20,13 @@ Completion is a blend of two signals, resolved in ``GET /flow``:
   skipped) by the admin; steps whose effect we can't see in the DB
   (e.g. the Socials palette, which lives in localStorage) are manual-only.
 
-Gated behind the ``onboarding_wizard_enabled`` platform flag
-(``require_onboarding_wizard_enabled`` — 404s when off) plus ordinary
-club-admin auth. No special capability is required to VIEW the wizard —
-onboarding guidance isn't privileged — but each inline action goes through
-its own existing endpoint, which enforces its own capability.
+Always available (the old ``onboarding_wizard_enabled`` flag gate was
+dropped when the wizard became a permanent menu item — it only orchestrates
+existing tools, so there's nothing risky to gate). Ordinary club-admin auth;
+no special capability is required to VIEW the wizard — onboarding guidance
+isn't privileged — but each inline action goes through its own existing
+endpoint, which enforces its own capability. Auto-open stays conservative
+(see get_state) so long-established clubs are never yanked into it.
 """
 import logging
 from datetime import datetime, timezone
@@ -55,14 +57,11 @@ from app.models.db import (
     Team,
     get_db,
 )
-from app.routers.auth import get_current_club, require_onboarding_wizard_enabled
+from app.routers.auth import get_current_club
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/club-admin/onboarding-wizard", tags=["onboarding-wizard"],
-    dependencies=[Depends(require_onboarding_wizard_enabled)],
-)
+router = APIRouter(prefix="/club-admin/onboarding-wizard", tags=["onboarding-wizard"])
 
 
 # ─── Step registry ────────────────────────────────────────────────────────────
@@ -549,13 +548,19 @@ async def get_state(club: Organisation = Depends(get_current_club), db: AsyncSes
     done_n = sum(1 for k in keys if k in completed)
     addressed = sum(1 for k in keys if k in completed or k in skipped)
     all_addressed = bool(keys) and addressed == len(keys)
-    # Auto-open whenever nothing has been explicitly dismissed yet, OR the
-    # sync-dependent steps just became available and haven't been shown once
-    # yet (Decision 11's "reopens automatically") — gated on there being
-    # anything left to do at all.
+    # Auto-open (a navigation to /admin/setup on fresh login) is deliberately
+    # conservative now that the wizard is always available: (a) a BRAND-NEW
+    # club — no successful full sync yet — that hasn't dismissed the wizard;
+    # or (b) Decision 11's reopen-once-when-sync-completes, but only for a
+    # club that actually engaged with the wizard before its sync finished
+    # (stored progress exists). Without (b)'s engagement guard, dropping the
+    # old flag gate would auto-navigate every long-established club's admin
+    # into setup on their next login. The Setup Wizard menu item is the
+    # any-time entry point; auto-open is only for genuine onboarding.
+    engaged = bool(completed or skipped)
     should_auto_open = (not all_addressed) and (
-        state.dismissed_at is None
-        or (sync_ready and state.sync_steps_shown_at is None)
+        (not sync_ready and state.dismissed_at is None)
+        or (sync_ready and state.sync_steps_shown_at is None and engaged)
     )
     return {
         "done": done_n, "total": len(keys), "all_done": all_addressed,
