@@ -165,6 +165,19 @@ async def retrieve_subscription(subscription_id: str):
     return await stripe.Subscription.retrieve_async(subscription_id)
 
 
+async def cancel_subscription(subscription_id: str) -> None:
+    """Cancels a subscription immediately (not at period end) — used when a
+    club's self-service cancel leaves it with zero held modules, so Stripe
+    stops billing it and the eventual customer.subscription.deleted webhook
+    is a harmless no-op (the org's stripe_subscription_id is already cleared
+    by the caller). A subscription already gone on Stripe's side (deleted
+    directly in the dashboard, or a race with the webhook) raises
+    InvalidRequestError, which callers should swallow — there's nothing left
+    to cancel."""
+    _require_configured()
+    await stripe.Subscription.cancel_async(subscription_id)
+
+
 async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: int) -> str:
     """Reuses ONE Stripe Coupon per distinct discount amount instead of
     minting a fresh one on every checkout attempt — cached in
