@@ -2565,6 +2565,16 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS billing_checkout_override BOOLEAN"
         ))
+        # Club address (migration 158) — resolved at self-serve registration
+        # (routers/self_serve_trial.py, PlayHQ public directory first, the
+        # Club Directory as fallback) so the Stripe Customer created at
+        # checkout has a real address for automatic tax from the start. See
+        # services/stripe_client.py::_ensure_customer.
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS address_line1 TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS suburb TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS state TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS postcode TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS country TEXT"))
         # Stripe Product id cache for add-on subscription items (migration
         # 152) — see services/stripe_client.py::_ensure_product.
         await conn.execute(text("""

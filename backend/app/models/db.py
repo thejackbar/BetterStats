@@ -271,6 +271,15 @@ class Organisation(Base):
     # it either way for this club regardless of the platform default. See
     # services/platform_settings.billing_checkout_enabled_for_org.
     billing_checkout_override = Column(Boolean, nullable=True)
+    # Club address (migration 158) — resolved at self-serve registration
+    # (routers/self_serve_trial.py) so a Stripe Customer can be created with
+    # a real address from the first checkout attempt (automatic tax needs
+    # one). Mirrors marketing_clubs' address columns for consistency.
+    address_line1 = Column(Text, nullable=True)
+    suburb = Column(Text, nullable=True)
+    state = Column(Text, nullable=True)
+    postcode = Column(Text, nullable=True)
+    country = Column(Text, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only

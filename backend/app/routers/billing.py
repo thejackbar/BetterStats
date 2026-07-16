@@ -105,6 +105,26 @@ def _apply_coupon_to_quote(quote: dict, coupon) -> dict:
     return quote
 
 
+def _stripe_address(club: Organisation) -> dict | None:
+    """Stripe's Address shape ({"line1","city","state","postal_code","country"})
+    from the club's resolved address (see self_serve_trial._resolve_club_address),
+    or None if nothing's on file — automatic_tax then falls back to whatever
+    the payer enters at checkout (customer_update: {"address": "auto"}) in
+    stripe_client.create_checkout_session. Country is always "AU": every club
+    on this platform is an Australian Cricket Australia club (source data is
+    always AU-tenant-filtered), and PlayHQ's own country field is a full name
+    ("Australia"), not the ISO-3166 alpha-2 code Stripe requires."""
+    if not (club.address_line1 or club.suburb):
+        return None
+    return {
+        "line1": club.address_line1 or "",
+        "city": club.suburb or "",
+        "state": club.state or "",
+        "postal_code": club.postcode or "",
+        "country": "AU",
+    }
+
+
 def _validate_keys(module_keys: List[str]) -> list[str]:
     keys = sorted(set(module_keys or []))
     bad = [k for k in keys if k not in billing_pricing.CHECKOUT_MODULE_NAMES]
@@ -254,6 +274,7 @@ async def create_checkout_session(
             # admin's email for a brand new self-serve club, which rarely
             # has contact_email set yet.
             customer_email=club.contact_email or current_user.email,
+            customer_address=_stripe_address(club),
             discount_schedule=schedule,
             extra_coupon_id=extra_coupon_id,
             extra_stackable=extra_stackable,

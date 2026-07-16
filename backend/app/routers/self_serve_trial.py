@@ -86,6 +86,56 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     return out
 
 
+async def _resolve_club_address(db: AsyncSession, *, org_id: str, name: str) -> dict | None:
+    """The club's real street address, for the Stripe Customer created at its
+    first checkout — automatic tax calculation needs one (see
+    stripe_client._ensure_customer). Two sources, tried in order:
+
+    1. A live PlayHQ public-directory search for this club by name, matched
+       back to the exact org GUID (the search is name-fuzzy, not a direct
+       GUID lookup, so results are filtered). ``delay=(0, 0.5)`` overrides
+       the client's default 15-40s *background-crawl* politeness delay —
+       this is one interactive lookup during a registration a person is
+       sitting in front of, not a bulk crawl.
+    2. Club Directory (marketing_clubs) — already-crawled data for this same
+       GUID, if the live search found nothing (offline, name mismatch, or
+       the club isn't in PlayHQ's public search for some other reason).
+
+    Returns None (not raised) on any failure — an unresolved address isn't
+    fatal to registration; create_checkout_session's own
+    ``customer_update: {"address": "auto"}`` covers the gap by saving
+    whatever the payer enters at checkout instead."""
+    from app.models.db import MarketingClub
+    from app.services import playhq_directory_client as phq
+
+    try:
+        results, _total = await phq.search_organisations("CLUB", name, page=1, limit=25, delay=(0, 0.5))
+    except Exception:
+        results = None
+    for r in (results or []):
+        if str(r.get("id") or "").lower() == str(org_id).lower():
+            addr = r.get("address") or {}
+            if addr.get("line1") or addr.get("suburb"):
+                return {
+                    "line1": addr.get("line1") or None,
+                    "suburb": addr.get("suburb") or None,
+                    "state": addr.get("state") or None,
+                    "postcode": addr.get("postcode") or None,
+                    "country": addr.get("country") or None,
+                }
+            break
+
+    club = (await db.execute(
+        select(MarketingClub).where(MarketingClub.grassroots_guid == str(org_id))
+    )).scalar_one_or_none()
+    if club and (club.address_line1 or club.suburb):
+        return {
+            "line1": club.address_line1, "suburb": club.suburb,
+            "state": club.state, "postcode": club.postcode, "country": club.country,
+        }
+    return None
+
+
 def _slugify(name: str) -> str:
     """Same algorithm SuperClubs.jsx's selectOrg uses to auto-fill a slug from a
     club name (lowercase, collapse non-alphanumeric runs to one dash, trim),
@@ -548,6 +598,19 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         org.is_active = True
         if not org.slug:
             org.slug = await _unique_slug(db, _slugify(name))
+        # Real street address, for the Stripe Customer this club's first
+        # checkout creates — automatic tax calculation needs one on file (see
+        # _resolve_club_address's own docstring). Never overwrites an address
+        # already on the row (a super admin's manual edit, or one this same
+        # resolution already found on an earlier registration attempt).
+        if not org.address_line1:
+            addr = await _resolve_club_address(db, org_id=str(org_id), name=name)
+            if addr:
+                org.address_line1 = addr["line1"]
+                org.suburb = addr["suburb"]
+                org.state = addr["state"]
+                org.postcode = addr["postcode"]
+                org.country = addr["country"]
         # Registering a previously-archived club (the duplicate-check above
         # deliberately ignores archived matches, see find_matching_organisation)
         # brings it back — un-archiving is what "available to register again"

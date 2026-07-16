@@ -50,7 +50,8 @@ def epoch_to_datetime(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
 
 
-async def _ensure_customer(*, org_id: str, club_name: str, email: str | None) -> str:
+async def _ensure_customer(*, org_id: str, club_name: str, email: str | None,
+                            address: dict | None = None) -> str:
     """Creates a Stripe Customer carrying the CLUB's own name — a Checkout
     Session that's only given ``customer_email`` (no explicit customer) lets
     Stripe auto-create the Customer at checkout completion using whatever
@@ -61,17 +62,24 @@ async def _ensure_customer(*, org_id: str, club_name: str, email: str | None) ->
     identity for it, not the payer's. One customer per club — its id is
     persisted onto the org once the session actually completes (see
     stripe_billing.handle_checkout_completed); this is only reached before
-    that first completion, so there's nothing to dedupe against yet."""
+    that first completion, so there's nothing to dedupe against yet.
+
+    ``address``, when resolved (see routers/self_serve_trial.py's
+    _resolve_club_address), is set directly here so automatic_tax has
+    something to calculate against from the very first checkout attempt —
+    Stripe's own {"line1", "city", "state", "postal_code", "country"} shape."""
     _require_configured()
-    customer = await stripe.Customer.create_async(
-        name=club_name, email=email, metadata={"org_id": str(org_id)},
-    )
+    kwargs = {"name": club_name, "email": email, "metadata": {"org_id": str(org_id)}}
+    if address:
+        kwargs["address"] = address
+    customer = await stripe.Customer.create_async(**kwargs)
     return customer["id"]
 
 
 async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys: list[str],
                                    club_name: str,
                                    customer_id: str | None, customer_email: str | None,
+                                   customer_address: dict | None = None,
                                    discount_schedule: dict | None = None,
                                    extra_coupon_id: str | None = None, extra_stackable: bool = False,
                                    extra_coupon_off_dollars: float | None = None,
@@ -196,7 +204,23 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
         # A brand new club (no Stripe customer yet) — create one up front
         # with the club's own name rather than passing customer_email alone
         # (see _ensure_customer's docstring for why that matters).
-        params["customer"] = await _ensure_customer(org_id=org_id, club_name=club_name, email=customer_email)
+        params["customer"] = await _ensure_customer(
+            org_id=org_id, club_name=club_name, email=customer_email, address=customer_address,
+        )
+    # automatic_tax needs an address on the Customer to know which
+    # jurisdiction to tax — Stripe rejects the session outright without one
+    # ("Automatic tax calculation in Checkout requires a valid address on
+    # the Customer") once an explicit `customer` is passed (see
+    # _ensure_customer above — every session passes one now, always).
+    # customer_address, when resolved, is set directly on the Customer at
+    # creation so tax is right from the first attempt; this is the fallback
+    # for whenever it isn't (a club search couldn't resolve one, or an
+    # existing customer predates this) — 'auto' saves whatever the payer
+    # types into Checkout's own billing-address field onto the Customer.
+    # Deliberately NOT 'name': 'auto' here — that would let Checkout
+    # overwrite the club's name back to the cardholder's own name, undoing
+    # the fix _ensure_customer exists for.
+    params["customer_update"] = {"address": "auto"}
 
     return await stripe.checkout.Session.create_async(**params)
 

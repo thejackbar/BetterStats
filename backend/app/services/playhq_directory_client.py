@@ -114,12 +114,16 @@ async def _post(url: str, payload: dict, extra_headers: dict | None = None,
 
 
 async def search_organisations(org_type: str, query: str = "", page: int = 1,
-                               limit: int = 100) -> tuple[Optional[list[dict]], int]:
+                               limit: int = 100, delay: tuple | None = None) -> tuple[Optional[list[dict]], int]:
     """One page of the org search. Returns (results, total_records). ``org_type``
     is an ``OrganisationType`` enum value (e.g. ``CLUB`` / ``ASSOCIATION``).
     ``results`` is **None on a fetch failure** (so the caller can retry rather than
     mistake a transient error for the end of the list), and an empty list only when
-    the page genuinely has no results."""
+    the page genuinely has no results. ``delay`` overrides the (polite, slow —
+    15-40s by default) background-crawl delay for a short interactive lookup
+    (e.g. resolving one specific club by GUID at self-serve registration),
+    same pattern as discover_org_contact's own ``delay`` param."""
+    lo, hi = (delay or (settings.marketing_crawl_min_delay, settings.marketing_crawl_max_delay))
     payload = {
         "query": _SEARCH_QUERY,
         "variables": {"filter": {
@@ -127,7 +131,7 @@ async def search_organisations(org_type: str, query: str = "", page: int = 1,
             "organisation": {"query": query, "types": [org_type], "sports": ["CRICKET"]},
         }},
     }
-    data = await _post(settings.playhq_search_url, payload)
+    data = await _post(settings.playhq_search_url, payload, min_delay=lo, max_delay=hi)
     if data is None or data.get("search") is None:
         return None, 0
     search = data["search"]
