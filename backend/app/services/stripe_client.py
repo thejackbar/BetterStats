@@ -239,6 +239,11 @@ async def create_setup_session(customer_id: str):
     _require_configured()
     return await stripe.checkout.Session.create_async(
         mode="setup",
+        # Unlike subscription/payment mode (where currency comes from the
+        # line items), a setup-mode session has no line items to infer it
+        # from — Stripe rejects the call outright without one ("Missing
+        # required param: currency"), found live.
+        currency=settings.stripe_currency,
         customer=customer_id,
         success_url=settings.stripe_checkout_success_url,
         cancel_url=settings.stripe_checkout_cancel_url,
