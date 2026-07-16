@@ -224,12 +224,12 @@ function SquadColumn({ col, members, statusOf, canManage, collapsed, onToggleCol
             <span className="inline-block transition-transform" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}><Icon name="chevron" size={13} /></span>
           </button>
           <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: col.tint }} />
-          <span className="font-display font-bold text-[14px] truncate">{col.name}</span>
+          <span className="font-display font-bold text-[14px] truncate" title={col.short_name ? col.name : undefined}>{col.short_name || col.name}</span>
           <span className="ml-auto font-mono text-xs text-pb-faint pb-num shrink-0">{members.length}</span>
           {canManage && !col.unassigned && (
             <div className="flex items-center gap-1 ml-1 shrink-0">
               <button onClick={onEdit} title="Edit squad" className="text-pb-faintest hover:text-pb-text p-0.5"><Icon name="filter" size={13} /></button>
-              <button onClick={onDelete} title="Delete squad" className="text-pb-faintest hover:text-pb-red p-0.5"><Icon name="close" size={13} /></button>
+              <button onClick={onDelete} title="Delete squad" className="text-pb-faintest hover:text-pb-red p-0.5"><Icon name="trash" size={13} /></button>
             </div>
           )}
         </div>
@@ -531,6 +531,84 @@ function AutoSeedModal({ onSeeded, onClose }) {
   )
 }
 
+/* ── Manage squads modal: a plain list of every squad with a checkbox, for
+ * bulk deletion — quicker than the per-column delete icon when cleaning up
+ * after an auto-seed that created more (or wrongly-ordered) squads than
+ * wanted. Members shown per squad so a full one isn't deleted by mistake. */
+function ManageSquadsModal({ teams, players, onDeleted, onClose }) {
+  const toast = useToast()
+  const [sel, setSel] = useState(() => new Set())
+  const [deleting, setDeleting] = useState(false)
+
+  const memberCount = useMemo(() => {
+    const m = new Map()
+    ;(players || []).forEach((p) => { if (p.squad_team_id) m.set(p.squad_team_id, (m.get(p.squad_team_id) || 0) + 1) })
+    return m
+  }, [players])
+
+  const sorted = useMemo(
+    () => [...(teams || [])].sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.name.localeCompare(b.name)),
+    [teams],
+  )
+
+  const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel((s) => (s.size === sorted.length ? new Set() : new Set(sorted.map((t) => t.id))))
+
+  const submit = async () => {
+    if (!sel.size) return
+    const names = sorted.filter((t) => sel.has(t.id)).map((t) => t.name)
+    if (!window.confirm(`Delete ${sel.size} squad${sel.size === 1 ? '' : 's'} (${names.join(', ')})? Players in them become Unassigned.`)) return
+    setDeleting(true)
+    try {
+      for (const id of sel) await api.bsDeleteTeam(id)
+      toast.success(`Deleted ${sel.size} squad${sel.size === 1 ? '' : 's'}`)
+      onDeleted()
+      onClose()
+    } catch (e) { toast.error('Delete failed: ' + e.message) }
+    finally { setDeleting(false) }
+  }
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()} className="w-[480px] max-w-full max-h-[84%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+        <div className="flex items-center gap-3 px-[18px] py-4 border-b pb-hairline">
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Manage squads</div>
+            <div className="font-display font-bold text-[18px] mt-0.5">Remove squads in bulk</div>
+          </div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
+        </div>
+        <label className="flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer text-[12px] text-pb-faint">
+          <input type="checkbox" checked={sorted.length > 0 && sel.size === sorted.length} onChange={toggleAll} className="accent-pb-accent w-[15px] h-[15px]" />
+          Select all
+        </label>
+        <div className="overflow-auto flex-1 pb-scroll">
+          {sorted.map((t) => {
+            const on = sel.has(t.id)
+            return (
+              <label key={t.id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? 'bg-pb-red/[0.06]' : ''}`}>
+                <input type="checkbox" checked={on} onChange={() => toggle(t.id)} className="accent-pb-red w-[15px] h-[15px]" />
+                <span className="flex-1 min-w-0 text-[13.5px] font-medium truncate">{t.name}{t.short_name ? ` (${t.short_name})` : ''}</span>
+                <span className="font-mono text-[11px] text-pb-faint pb-num shrink-0">{memberCount.get(t.id) || 0} players</span>
+              </label>
+            )
+          })}
+          {sorted.length === 0 && <div className="px-4 py-6"><Empty>No squads yet.</Empty></div>}
+        </div>
+        <div className="flex items-center gap-2.5 px-4 py-3 border-t pb-hairline">
+          <span className={`font-mono text-xs ${sel.size ? 'text-pb-red' : 'text-pb-faint'}`}>{sel.size} selected</span>
+          <div className="ml-auto flex gap-2">
+            <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+            <Btn variant="danger" sm icon="trash" disabled={!sel.size || deleting} onClick={submit}>
+              {deleting ? 'Deleting…' : `Delete ${sel.size || ''}`}
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminTeams() {
   const { hasCapability } = useAuth()
   const toast = useToast()
@@ -545,6 +623,8 @@ export default function AdminTeams() {
   const [over, setOver] = useState(null)
   const [autoSeed, setAutoSeed] = useState(false)      // auto-seed modal open
   const [autoAssign, setAutoAssign] = useState(false)  // auto-assign modal open
+  const [manageSquads, setManageSquads] = useState(false)  // bulk-delete modal open
+  const [resequencing, setResequencing] = useState(false)
   const [availEdit, setAvailEdit] = useState(null)     // player for quick-update modal
 
   // Filters + view — years/recency is a quiet control; the rest are facets.
@@ -589,7 +669,7 @@ export default function AdminTeams() {
   const columns = useMemo(() => {
     const cols = [{ key: '__unassigned__', id: null, name: 'Unassigned', unassigned: true, tint: UNASSIGNED_TINT }]
     ;(teams || []).forEach((t, i) => cols.push({
-      key: t.id, id: t.id, name: t.name, grade_name: t.grade_name,
+      key: t.id, id: t.id, name: t.name, short_name: t.short_name, grade_name: t.grade_name,
       tint: COLUMN_TINTS[i % COLUMN_TINTS.length], team: t,
     }))
     return cols
@@ -677,12 +757,22 @@ export default function AdminTeams() {
     for (const [teamId, ids] of entries) await api.bsAssignSquad(ids, teamId)
     loadPlayers()
   }
+  // Re-guess column order for auto-seeded squads (fixes squads created under
+  // an older/naive sequence guess — never touches a manually-set order).
+  const fixOrder = async () => {
+    setResequencing(true)
+    try { const r = await api.bsResequenceTeams(); toast.success(`Reordered ${r.updated} squad${r.updated === 1 ? '' : 's'}`); loadTeams() }
+    catch (e) { toast.error('Reorder failed: ' + e.message) }
+    finally { setResequencing(false) }
+  }
 
   const loading = teams === null || players === null
   const actions = canManage && (
     <div className="flex gap-2">
       <Btn variant="ghost" sm icon="bolt" onClick={() => setAutoSeed(true)}>Auto-seed squads</Btn>
       {(teams?.length || 0) > 0 && <Btn variant="soft" sm icon="bolt" onClick={() => setAutoAssign(true)}>Auto-assign players</Btn>}
+      {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="reset" onClick={fixOrder} disabled={resequencing}>{resequencing ? 'Reordering…' : 'Fix order'}</Btn>}
+      {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="trash" onClick={() => setManageSquads(true)}>Manage squads</Btn>}
       <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
     </div>
   )
@@ -702,6 +792,10 @@ export default function AdminTeams() {
       )}
       {autoAssign && <AutoAssignModal onApply={applyAutoAssign} onClose={() => setAutoAssign(false)} />}
       {autoSeed && <AutoSeedModal onSeeded={() => { loadTeams(); loadPlayers() }} onClose={() => setAutoSeed(false)} />}
+      {manageSquads && (
+        <ManageSquadsModal teams={teams || []} players={players || []}
+          onDeleted={() => { loadTeams(); loadPlayers() }} onClose={() => setManageSquads(false)} />
+      )}
 
       {loading ? <PbSpinner message="Loading squads…" /> : (
         (teams.length === 0) ? (

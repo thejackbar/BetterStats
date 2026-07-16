@@ -95,10 +95,49 @@ async def ensure_team_grades(db: AsyncSession, club_id) -> int:
     return linked
 
 
+_ORDINAL_WORDS = {
+    "1st": 1, "first": 1, "firsts": 1,
+    "2nd": 2, "second": 2, "seconds": 2,
+    "3rd": 3, "third": 3, "thirds": 3,
+    "4th": 4, "fourth": 4, "fourths": 4,
+    "5th": 5, "fifth": 5, "fifths": 5,
+    "6th": 6, "sixth": 6, "sixths": 6,
+    "7th": 7, "seventh": 7, "sevenths": 7,
+    "8th": 8, "eighth": 8, "eighths": 8,
+    "9th": 9, "ninth": 9, "ninths": 9,
+    "10th": 10, "tenth": 10, "tenths": 10,
+}
+_ORDINAL_RE = re.compile(r"\b(" + "|".join(_ORDINAL_WORDS) + r")\b", re.IGNORECASE)
+_AGE_GROUP_RE = re.compile(r"\bu\s?(\d{1,2})\b", re.IGNORECASE)
+_GRADE_LETTER_RE = re.compile(r"\b([a-h])\s*grade\b", re.IGNORECASE)
+UNRANKED_SEQUENCE = 50  # default for names with no recognisable hierarchy marker
+
+
 def _guess_sequence(name: str) -> int:
-    """Pull a hierarchy rank from a team name ('Applecross 2nd XI' -> 2)."""
-    m = re.search(r"(\d+)", name or "")
-    return int(m.group(1)) if m else 0
+    """Best-effort hierarchy rank for ordering squad columns, from a team or
+    grade name: 'Club 2nd XI' -> 2, 'Seconds' -> 2, 'A Grade' -> 1, 'U13 Boys'
+    -> 113 (colts sort after every senior XI, in age order).
+
+    Real-world team/grade names carry all sorts of numbers unrelated to XI
+    rank — age brackets ('U13'), cup/shield names, grade codes — so a naive
+    "first digit anywhere in the string" grab (the old behaviour) picked those
+    up as if they were the 1st/2nd/3rd order, producing a nonsensical column
+    order. Only an explicit ordinal word ('1st', 'seconds'...), an age group,
+    or a grade letter is trusted; anything else (cup names, ungraded women's/
+    social sides) falls back to a fixed middle value so it sorts after the
+    numbered senior XIs instead of colliding at 0 or a stray digit.
+    """
+    text = (name or "").lower()
+    m = _ORDINAL_RE.search(text)
+    if m:
+        return _ORDINAL_WORDS[m.group(1).lower()]
+    m = _AGE_GROUP_RE.search(text)
+    if m:
+        return 100 + min(int(m.group(1)), 99)
+    m = _GRADE_LETTER_RE.search(text)
+    if m:
+        return ord(m.group(1).upper()) - ord("A") + 1
+    return UNRANKED_SEQUENCE
 
 
 async def _assert_grade_in_club(db: AsyncSession, grade_id: Optional[uuid.UUID], club_id) -> None:
@@ -244,6 +283,35 @@ async def delete_team(
     t = await _get_owned_team(db, team_id, club.id)
     await db.delete(t)
     await db.commit()
+
+
+@router.post("/resequence")
+async def resequence_teams(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Re-guess the column order for auto-seeded squads with the current
+    _guess_sequence heuristic. Only touches source='auto' squads — a manual
+    squad's Order is always an explicit admin choice (the create/edit form
+    always sends a sequence, even a default 0) and is never overwritten.
+
+    Exists so a club whose squads were auto-seeded under an older/naive guess
+    (or just look wrong today) can re-sort them without deleting and
+    re-seeding everything.
+    """
+    teams = (await db.execute(
+        select(Team).where(Team.organisation_id == club.id, Team.source == "auto")
+    )).scalars().all()
+    updated = 0
+    for t in teams:
+        guessed = _guess_sequence(t.name)
+        if t.sequence != guessed:
+            t.sequence = guessed
+            updated += 1
+    if updated:
+        await db.commit()
+    return {"updated": updated, "total_auto": len(teams)}
 
 
 class SeedTeamsBody(BaseModel):
