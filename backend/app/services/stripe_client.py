@@ -50,7 +50,27 @@ def epoch_to_datetime(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
 
 
+async def _ensure_customer(*, org_id: str, club_name: str, email: str | None) -> str:
+    """Creates a Stripe Customer carrying the CLUB's own name — a Checkout
+    Session that's only given ``customer_email`` (no explicit customer) lets
+    Stripe auto-create the Customer at checkout completion using whatever
+    name the payer types into the billing-details field, which defaults to
+    the cardholder's own name (observed live: "EA BARENDSE" — the card
+    holder — instead of the club). Creating the Customer ourselves up front,
+    with ``name`` set explicitly, means Checkout always uses OUR chosen
+    identity for it, not the payer's. One customer per club — its id is
+    persisted onto the org once the session actually completes (see
+    stripe_billing.handle_checkout_completed); this is only reached before
+    that first completion, so there's nothing to dedupe against yet."""
+    _require_configured()
+    customer = await stripe.Customer.create_async(
+        name=club_name, email=email, metadata={"org_id": str(org_id)},
+    )
+    return customer["id"]
+
+
 async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys: list[str],
+                                   club_name: str,
                                    customer_id: str | None, customer_email: str | None,
                                    discount_schedule: dict | None = None,
                                    extra_coupon_id: str | None = None, extra_stackable: bool = False,
@@ -172,8 +192,11 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
 
     if customer_id:
         params["customer"] = customer_id
-    elif customer_email:
-        params["customer_email"] = customer_email
+    else:
+        # A brand new club (no Stripe customer yet) — create one up front
+        # with the club's own name rather than passing customer_email alone
+        # (see _ensure_customer's docstring for why that matters).
+        params["customer"] = await _ensure_customer(org_id=org_id, club_name=club_name, email=customer_email)
 
     return await stripe.checkout.Session.create_async(**params)
 

@@ -246,8 +246,14 @@ async def create_checkout_session(
             db,
             org_id=club.id,
             billing_keys=keys,
+            club_name=club.name,
             customer_id=club.stripe_customer_id,
-            customer_email=current_user.email,
+            # The club's own contact address when it has one, so the Stripe
+            # Customer represents the club rather than whichever admin
+            # happened to run the checkout — falls back to the submitting
+            # admin's email for a brand new self-serve club, which rarely
+            # has contact_email set yet.
+            customer_email=club.contact_email or current_user.email,
             discount_schedule=schedule,
             extra_coupon_id=extra_coupon_id,
             extra_stackable=extra_stackable,
