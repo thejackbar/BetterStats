@@ -16,9 +16,9 @@ import sys
 
 from sqlalchemy import select, text
 
-from app.models.db import ImportedStat, async_session_maker
+from app.models.db import ImportedStat, ImportEffectiveDelta, async_session_maker
 from app.services import import_reconcile as recon
-from app.services.aggregations import _GRADE_MATCH, get_batting_leaderboard_extended
+from app.services.aggregations import _GRADE_MATCH, _IMPORT_GRADE_MATCH, get_batting_leaderboard_extended
 
 
 async def diagnose(org_id_str: str, player_id_str: str) -> None:
@@ -146,6 +146,73 @@ async def diagnose(org_id_str: str, player_id_str: str) -> None:
                 mine = next((r for r in board if str(r["player_id"]) == str(player_uuid)), None)
                 print(f"\nget_batting_leaderboard_extended(grade_name={grade!r}) row for this player: {mine}")
                 print(f"(leaderboard returned {len(board)} players total for this grade)")
+
+                # The exact qualifying-CTE shape the leaderboard uses (inline
+                # _GRADE_MATCH, not a precomputed grade-id list), filtered to
+                # this player only, to catch any inline-vs-precomputed drift.
+                inline = (
+                    await session.execute(
+                        text(f"""
+                            SELECT bi.player_id, bi.game_id, bi.runs
+                            FROM v_effective_batting_innings bi
+                            JOIN v_effective_games g ON g.id = bi.game_id
+                            JOIN grades gr ON gr.id = g.grade_id
+                            WHERE {_GRADE_MATCH}
+                              AND NOT COALESCE(bi.did_not_bat, FALSE)
+                              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                              AND bi.player_id = CAST(:pid AS UUID)
+                        """),
+                        {"org_id": str(org_uuid), "grade_name": grade, "pid": str(player_uuid)},
+                    )
+                ).mappings().all()
+                fifties_inline = sum(1 for r in inline if 50 <= r["runs"] < 100)
+                hundreds_inline = sum(1 for r in inline if r["runs"] >= 100)
+                distinct_games = len({r["game_id"] for r in inline})
+                print(f"inline-_GRADE_MATCH qualifying CTE (leaderboard's exact shape, filtered to this player): "
+                      f"innings={len(inline)} distinct_games={distinct_games} fifties={fifties_inline} hundreds={hundreds_inline}")
+
+                # What's ACTUALLY sitting in import_effective_deltas right now for
+                # this player (every row, any grade_label) — not a fresh recompute.
+                # If this doesn't match the "career residual" printed above, the
+                # stored deltas are stale relative to current GR/scorecard coverage
+                # and reconcile_imports needs re-running.
+                stored = (
+                    await session.execute(
+                        select(ImportEffectiveDelta).where(
+                            ImportEffectiveDelta.organisation_id == org_uuid,
+                            ImportEffectiveDelta.player_id == player_uuid,
+                        )
+                    )
+                ).scalars().all()
+                print(f"\nstored import_effective_deltas rows ({len(stored)}):")
+                for d in stored:
+                    print(f"  id={d.id} scope={d.scope} season_id={d.season_id} grade_label={d.grade_label!r} "
+                          f"innings={d.batting_innings} runs={d.runs} fifties={d.fifties} hundreds={d.hundreds}")
+
+                # The exact import_totals CTE the leaderboard runs (SUM over
+                # _IMPORT_GRADE_MATCH), filtered to this player only — the live
+                # "it" side of the blend, straight from the stored table.
+                it_cte = (
+                    await session.execute(
+                        text(f"""
+                            SELECT
+                                COALESCE(SUM(ied.batting_innings), 0) AS innings,
+                                COALESCE(SUM(ied.runs), 0) AS total_runs,
+                                COALESCE(SUM(ied.fifties), 0) AS fifties,
+                                COALESCE(SUM(ied.hundreds), 0) AS hundreds
+                            FROM import_effective_deltas ied
+                            WHERE ied.organisation_id = CAST(:org_id AS UUID)
+                              AND ied.player_id = CAST(:pid AS UUID)
+                              AND {_IMPORT_GRADE_MATCH}
+                        """),
+                        {"org_id": str(org_uuid), "grade_name": grade, "pid": str(player_uuid)},
+                    )
+                ).mappings().first()
+                print(f"leaderboard's import_totals CTE (_IMPORT_GRADE_MATCH), filtered to this player: {dict(it_cte)}")
+                print(f"=> q + it should be: innings={len(inline)}+{it_cte['innings']}="
+                      f"{len(inline) + it_cte['innings']}  fifties={fifties_inline}+{it_cte['fifties']}="
+                      f"{fifties_inline + it_cte['fifties']}  hundreds={hundreds_inline}+{it_cte['hundreds']}="
+                      f"{hundreds_inline + it_cte['hundreds']}")
 
 
 if __name__ == "__main__":
