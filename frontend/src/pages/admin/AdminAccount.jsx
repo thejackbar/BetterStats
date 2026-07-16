@@ -148,6 +148,16 @@ export default function AdminAccount() {
 
   const rows = plan?.modules || []
   const selectedRows = rows.filter((r) => selected.has(r.module))
+  // "Redeem a discount code" only ever discounts a module the club is
+  // ALREADY paying for (redeem_for_existing_subscription only looks at
+  // status === 'subscribed' rows) — plan.stripe_subscription_active just
+  // means a Stripe subscription id exists on the club, which can be true
+  // with every module still Trial/Never Trialed (e.g. everything on the
+  // original subscription has since been cancelled). Without this check the
+  // card renders anyway and any code typed in there fails with "doesn't
+  // apply to any of your selected modules", since there's nothing held to
+  // apply it to.
+  const hasSubscribedModule = rows.some((r) => r.status === 'subscribed')
 
   // A Trial-status row, or a Never Trialed row, can be selected for the bulk
   // Subscribe request below — Never Trialed is included so a club can go
@@ -383,7 +393,7 @@ export default function AdminAccount() {
               })}
             </div>
 
-            {plan.billing_checkout_enabled && plan.stripe_subscription_active && plan.is_primary_admin && (
+            {plan.billing_checkout_enabled && plan.stripe_subscription_active && plan.is_primary_admin && hasSubscribedModule && (
               <div className="pb-card p-4 mt-6">
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                   Redeem a discount code
