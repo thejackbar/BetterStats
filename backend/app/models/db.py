@@ -161,6 +161,10 @@ class OnboardingWizardState(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"),
                              primary_key=True)
     completed_steps = Column(JSON, nullable=False, default=list)
+    # Steps the admin explicitly skipped in the Setup Wizard (migration 157) —
+    # "addressed but not done". Separate from completed_steps so existing
+    # progress rows and consumers keep working untouched.
+    skipped_steps = Column(JSON, nullable=False, default=list)
     dismissed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     sync_steps_shown_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
