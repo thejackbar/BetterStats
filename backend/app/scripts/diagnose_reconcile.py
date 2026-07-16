@@ -14,10 +14,11 @@ Usage from the backend container:
 import asyncio
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.db import ImportedStat, async_session_maker
 from app.services import import_reconcile as recon
+from app.services.aggregations import _GRADE_MATCH
 
 
 async def diagnose(org_id_str: str, player_id_str: str) -> None:
@@ -78,6 +79,64 @@ async def diagnose(org_id_str: str, player_id_str: str) -> None:
                       f"fours={career['fours']} sixes={career['sixes']}")
             else:
                 print("career residual: None")
+
+            if grade is not None:
+                print(f"\n--- cross-check for grade={grade!r} ---")
+                narrow = await recon._scorecard_narrow_metrics(session, org_uuid, [player_uuid], grade)
+                print(f"_scorecard_narrow_metrics raw: {narrow.get(player_uuid)}")
+
+                # Which real `grades` rows does _GRADE_MATCH resolve this label to?
+                matched_grades = (
+                    await session.execute(
+                        text(f"""
+                            SELECT gr.id, gr.name, gr.display_name_override, s.year
+                            FROM grades gr JOIN seasons s ON s.id = gr.season_id
+                            WHERE s.organisation_id = CAST(:org_id AS UUID) AND {_GRADE_MATCH}
+                            ORDER BY s.year
+                        """),
+                        {"org_id": str(org_uuid), "grade_name": grade},
+                    )
+                ).mappings().all()
+                print(f"matched grades ({len(matched_grades)}): "
+                      f"{[(g['name'], g['display_name_override'], g['year']) for g in matched_grades]}")
+
+                # Raw count + fifties straight off batting_innings for those grade ids,
+                # same predicate as the leaderboard's own qualifying CTE.
+                raw = (
+                    await session.execute(
+                        text("""
+                            SELECT COUNT(*) AS innings,
+                                COALESCE(SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END), 0) AS fifties,
+                                COALESCE(SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END), 0) AS hundreds
+                            FROM batting_innings bi
+                            JOIN games g ON g.id = bi.game_id
+                            WHERE bi.player_id = CAST(:pid AS UUID)
+                              AND g.grade_id = ANY(CAST(:gids AS UUID[]))
+                              AND NOT COALESCE(bi.did_not_bat, FALSE)
+                              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                        """),
+                        {"pid": str(player_uuid), "gids": [str(g["id"]) for g in matched_grades]},
+                    )
+                ).mappings().first()
+                print(f"raw batting_innings (base table, not v_effective_*) for matched grade ids: {dict(raw)}")
+
+                veff = (
+                    await session.execute(
+                        text("""
+                            SELECT COUNT(*) AS innings,
+                                COALESCE(SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END), 0) AS fifties,
+                                COALESCE(SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END), 0) AS hundreds
+                            FROM v_effective_batting_innings bi
+                            JOIN v_effective_games g ON g.id = bi.game_id
+                            WHERE bi.player_id = CAST(:pid AS UUID)
+                              AND g.grade_id = ANY(CAST(:gids AS UUID[]))
+                              AND NOT COALESCE(bi.did_not_bat, FALSE)
+                              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                        """),
+                        {"pid": str(player_uuid), "gids": [str(g["id"]) for g in matched_grades]},
+                    )
+                ).mappings().first()
+                print(f"v_effective_batting_innings for matched grade ids: {dict(veff)}")
 
 
 if __name__ == "__main__":
