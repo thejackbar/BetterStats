@@ -220,6 +220,7 @@ async def create_checkout_session(
     redemption_id = None
     extra_coupon_id = None
     extra_stackable = False
+    extra_coupon_off = None
     if body.coupon_code:
         try:
             redeemed = await discount_coupons.redeem_for_new_signup(
@@ -230,6 +231,15 @@ async def create_checkout_session(
         redemption_id = redeemed["redemption_id"]
         extra_coupon_id = redeemed["stripe_coupon_id"]
         extra_stackable = redeemed["stackable_with_bundle"]
+        if extra_stackable:
+            # Checkout Session can carry at most one discount, so a stacking
+            # coupon can't ride alongside the bundle coupon — stripe_client
+            # combines them into a single ad-hoc coupon instead, and needs
+            # the coupon's own dollar contribution to do that. Computed with
+            # the SAME math /quote's preview uses (_apply_coupon_to_quote),
+            # so what gets charged matches what was previewed.
+            preview_quote = billing_pricing.price_for(keys, schedule=schedule)
+            extra_coupon_off = _apply_coupon_to_quote(preview_quote, redeemed["coupon"])["coupon"]["amount_off"]
 
     try:
         session = await stripe_client.create_checkout_session(
@@ -241,6 +251,7 @@ async def create_checkout_session(
             discount_schedule=schedule,
             extra_coupon_id=extra_coupon_id,
             extra_stackable=extra_stackable,
+            extra_coupon_off_dollars=extra_coupon_off,
             coupon_redemption_id=redemption_id,
         )
     except stripe_client.StripeNotConfigured:
