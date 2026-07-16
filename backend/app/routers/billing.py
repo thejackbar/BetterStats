@@ -31,7 +31,7 @@ subscription (``club.stripe_subscription_id``):
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -42,7 +42,7 @@ from stripe import error as stripe_error
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
 from app.routers.auth import get_current_user, get_current_club
-from app.services import billing_pricing, module_subscriptions, platform_settings, stripe_client
+from app.services import billing_pricing, discount_coupons, module_subscriptions, platform_settings, stripe_client
 from app.services.platform_settings import require_billing_checkout_enabled
 
 router = APIRouter(prefix="/club-admin/billing", tags=["club-admin-billing"])
@@ -50,6 +50,37 @@ router = APIRouter(prefix="/club-admin/billing", tags=["club-admin-billing"])
 
 class QuoteIn(BaseModel):
     module_keys: List[str] = []
+    coupon_code: Optional[str] = None
+
+
+def _apply_coupon_to_quote(quote: dict, coupon) -> dict:
+    """Folds a validated discount-coupon into a new_subscription price_for()
+    quote — pure local math for the preview (no Stripe call, matching /quote's
+    existing no-Stripe-call design); the real Checkout Session's own discounts
+    array is Stripe's own authoritative number at actual checkout. A
+    non-stackable coupon REPLACES the bundle discount rather than combining
+    with it, mirroring stripe_client.create_checkout_session's own rule."""
+    covered = set(coupon.module_keys) if coupon.module_keys else {li["key"] for li in quote["line_items"]}
+    covered_subtotal = sum(li["price"] for li in quote["line_items"] if li["key"] in covered)
+    if coupon.discount_type == "percent":
+        coupon_off = round(covered_subtotal * float(coupon.discount_value) / 100, 2)
+    else:
+        coupon_off = min(float(coupon.discount_value), covered_subtotal)
+
+    if not coupon.stackable_with_bundle and quote["discount"] > 0:
+        quote["discount"] = 0
+        quote["total"] = quote["subtotal"] - coupon_off
+    else:
+        quote["total"] = round(quote["total"] - coupon_off, 2)
+    quote["coupon"] = {
+        "code": coupon.code,
+        "display_name": coupon.display_name,
+        "discount_type": coupon.discount_type,
+        "discount_value": float(coupon.discount_value),
+        "amount_off": coupon_off,
+        "stackable_with_bundle": coupon.stackable_with_bundle,
+    }
+    return quote
 
 
 def _validate_keys(module_keys: List[str]) -> list[str]:
@@ -66,6 +97,15 @@ def _addon_keys(keys: list[str]) -> list[str]:
     # included it), and the frontend stops showing its checkbox once
     # subscribed anyway. Filtered defensively here too.
     return [k for k in keys if k != "core"]
+
+
+def _with_core(keys: list[str]) -> list[str]:
+    # billing_pricing.price_for always force-includes Core as a line item
+    # regardless of whether the frontend's checkbox for it was ticked (a
+    # never-subscribed club is always buying Core alongside anything else) —
+    # a coupon's module-coverage check needs to see the same set that's
+    # actually being priced, not just the raw selection.
+    return keys if "core" in keys else [*keys, "core"]
 
 
 @router.post("/quote", dependencies=[Depends(require_billing_checkout_enabled)])
@@ -87,7 +127,16 @@ async def get_quote(
             raise HTTPException(status_code=502, detail=str(e) or "Could not price this change")
         return {"mode": "add_to_existing", **preview}
     schedule = await platform_settings.get_bundle_discount_schedule(db)
-    return {"mode": "new_subscription", **billing_pricing.price_for(keys, schedule=schedule)}
+    quote = billing_pricing.price_for(keys, schedule=schedule)
+    if body.coupon_code:
+        try:
+            coupon = await discount_coupons.validate_redemption(
+                db, body.coupon_code, club, is_new_signup=True, candidate_module_keys=_with_core(keys),
+            )
+        except discount_coupons.CouponError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        quote = _apply_coupon_to_quote(quote, coupon)
+    return {"mode": "new_subscription", **quote}
 
 
 @router.post("/checkout-session", dependencies=[Depends(require_billing_checkout_enabled)])
@@ -145,6 +194,21 @@ async def create_checkout_session(
         return {"added": True, "modules": addon_keys}
 
     schedule = await platform_settings.get_bundle_discount_schedule(db)
+
+    redemption_id = None
+    extra_coupon_id = None
+    extra_stackable = False
+    if body.coupon_code:
+        try:
+            redeemed = await discount_coupons.redeem_for_new_signup(
+                db, body.coupon_code, club, _with_core(keys), current_user,
+            )
+        except discount_coupons.CouponError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        redemption_id = redeemed["redemption_id"]
+        extra_coupon_id = redeemed["stripe_coupon_id"]
+        extra_stackable = redeemed["stackable_with_bundle"]
+
     try:
         session = await stripe_client.create_checkout_session(
             db,
@@ -153,10 +217,20 @@ async def create_checkout_session(
             customer_id=club.stripe_customer_id,
             customer_email=current_user.email,
             discount_schedule=schedule,
+            extra_coupon_id=extra_coupon_id,
+            extra_stackable=extra_stackable,
+            coupon_redemption_id=redemption_id,
         )
     except stripe_client.StripeNotConfigured:
+        if redemption_id:
+            # The redemption was recorded before this Stripe call — free the
+            # club's one-time slot back up so a config issue on our side
+            # doesn't permanently burn their code.
+            await discount_coupons.revoke_redemption(db, redemption_id)
         raise HTTPException(status_code=503, detail="Online billing isn't configured yet. Contact the BetterCricket team to subscribe.")
     except stripe_error.StripeError as e:
+        if redemption_id:
+            await discount_coupons.revoke_redemption(db, redemption_id)
         # Mirrors the square_client.SquareError handling elsewhere (merch.py) —
         # a bad Stripe response is an upstream failure, not ours, and its raw
         # SDK exception shouldn't leak to the client as an unhandled 500.

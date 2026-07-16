@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, billing, public_stripe
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, billing, public_stripe, discount_coupons
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2579,6 +2579,56 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_trial_lifecycle_nudges_org "
             "ON trial_lifecycle_nudges(organisation_id, sent_at DESC)"
         ))
+        # BetterCricket-managed discount coupons (migration 154) — see
+        # services/discount_coupons.py + services/stripe_client.py's coupon
+        # sync helpers. Super Admin owns the whole lifecycle in BetterCricket;
+        # Stripe is a pure sync target.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS discount_coupons (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                code TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                discount_type TEXT NOT NULL,
+                discount_value NUMERIC NOT NULL,
+                module_keys JSONB,
+                redeem_window_start DATE,
+                redeem_window_end DATE,
+                new_signup_window_start DATE,
+                new_signup_window_end DATE,
+                loyalty_window_start DATE,
+                loyalty_window_end DATE,
+                duration_mode TEXT NOT NULL DEFAULT 'once',
+                duration_renewals INTEGER,
+                stackable_with_bundle BOOLEAN NOT NULL DEFAULT false,
+                max_redemptions INTEGER,
+                active BOOLEAN NOT NULL DEFAULT true,
+                stripe_coupon_id TEXT,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS discount_coupon_redemptions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                coupon_id UUID NOT NULL REFERENCES discount_coupons(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                redeemed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                applied_via TEXT NOT NULL,
+                redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                stripe_subscription_id TEXT,
+                status TEXT NOT NULL DEFAULT 'active'
+            )
+        """))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_coupon_redemption_live_slot
+            ON discount_coupon_redemptions (coupon_id, organisation_id)
+            WHERE status <> 'revoked'
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon "
+            "ON discount_coupon_redemptions(coupon_id, redeemed_at DESC)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -2729,6 +2779,7 @@ app.include_router(website.public_router)   # Front-end Website (public, Core)
 app.include_router(website.admin_router)    # Front-end Website (admin CRUD)
 app.include_router(club_admin.router)
 app.include_router(billing.router)  # Account page Stripe Checkout (flag-gated — see platform_settings.billing_checkout_enabled)
+app.include_router(discount_coupons.router)  # BetterCricket-managed discount coupons (migration 154)
 app.include_router(organisations.router)
 app.include_router(players.router)
 app.include_router(games.router)

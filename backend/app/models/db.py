@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Boolean, Integer, Numeric, Date, Text, ForeignKey,
-    TIMESTAMP, JSON, UniqueConstraint, LargeBinary
+    TIMESTAMP, JSON, UniqueConstraint, LargeBinary, Index, text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -641,6 +641,102 @@ class BillingInvoice(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
+    organisation = relationship("Organisation")
+
+
+class DiscountCoupon(Base):
+    """A BetterCricket-managed discount coupon (migration 154). Super Admin
+    owns the full lifecycle entirely inside BetterCricket — never in the
+    Stripe Dashboard directly; ``stripe_coupon_id`` is a synced mirror pushed
+    via services/stripe_client.sync_coupon_to_stripe, and BetterCricket's own
+    columns here (not Stripe's redeem_by/max_redemptions) are the sole
+    eligibility gate — see services/discount_coupons.validate_redemption.
+
+    ``module_keys`` null/empty means "all billable modules"; otherwise a
+    JSON array of module keys, mirrored onto Stripe's own
+    ``Coupon.applies_to.products`` so a covered/non-covered mix on one
+    invoice is split automatically by Stripe.
+
+    ``redeem_window_*`` gates when the code can be entered at all (either
+    role, either flow). ``new_signup_window_*`` additionally restricts a
+    code to a club's very first subscribe if set; ``loyalty_window_*``
+    instead restricts it to a club whose original subscription start falls
+    in that historical range. Both are optional and independent — a coupon
+    can set neither (any club, any time within the redeem window), either
+    one, or both (in which case a redemption must satisfy the one that
+    matches its flow — new signup vs already-subscribed).
+
+    ``duration_mode`` mirrors Stripe's own Coupon duration vocabulary:
+    'once' (first invoice only), 'repeating' (``duration_renewals`` years,
+    converted to Stripe's duration_in_months = 12 * N), 'forever'.
+
+    Once a coupon has a live (non-revoked) redemption, its financial terms
+    (discount_type/discount_value/module_keys/duration_mode/
+    duration_renewals) are locked — Stripe Coupons are themselves immutable
+    on these fields after creation, and changing them out from under an
+    already-redeemed club would silently rewrite what they were promised.
+    See services/discount_coupons.update_coupon.
+    """
+    __tablename__ = "discount_coupons"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(Text, nullable=False, unique=True)  # stored/compared uppercase
+    display_name = Column(Text, nullable=False)
+    discount_type = Column(Text, nullable=False)   # percent | amount
+    discount_value = Column(Numeric, nullable=False)
+    module_keys = Column(JSONB, nullable=True)      # null/[] = all billable modules
+    redeem_window_start = Column(Date, nullable=True)
+    redeem_window_end = Column(Date, nullable=True)
+    new_signup_window_start = Column(Date, nullable=True)
+    new_signup_window_end = Column(Date, nullable=True)
+    loyalty_window_start = Column(Date, nullable=True)
+    loyalty_window_end = Column(Date, nullable=True)
+    duration_mode = Column(Text, nullable=False, server_default="once", default="once")  # once | repeating | forever
+    duration_renewals = Column(Integer, nullable=True)  # years, only for 'repeating'
+    stackable_with_bundle = Column(Boolean, nullable=False, server_default="false", default=False)
+    max_redemptions = Column(Integer, nullable=True)
+    active = Column(Boolean, nullable=False, server_default="true", default=True)
+    stripe_coupon_id = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class DiscountCouponRedemption(Base):
+    """One club's use of a DiscountCoupon (migration 154) — the audit trail
+    AND the enforcement of "one redemption per club, ever" (the partial
+    unique index only counts non-revoked rows, so a Super Admin's revoke
+    frees the slot for a genuine mistake).
+
+    ``status`` is 'pending' only for a new-signup redemption between
+    Checkout Session creation and the checkout.session.completed webhook
+    confirming it (stripe_billing.py flips it to 'active' there); an
+    existing-subscription redemption applies synchronously and is written
+    straight in as 'active' — there's no webhook round-trip for that path.
+    """
+    __tablename__ = "discount_coupon_redemptions"
+    __table_args__ = (
+        # Partial unique index, not a plain UniqueConstraint — a 3-column
+        # constraint including status would let 'pending' and 'active' rows
+        # coexist for the same club+coupon (different status values, same
+        # slot). This enforces "at most one NON-REVOKED redemption" instead,
+        # matching the docstring above.
+        Index(
+            "uq_coupon_redemption_live_slot", "coupon_id", "organisation_id",
+            unique=True, postgresql_where=text("status <> 'revoked'"),
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    coupon_id = Column(UUID(as_uuid=True), ForeignKey("discount_coupons.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    redeemed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    applied_via = Column(Text, nullable=False)  # self_serve | super_admin
+    redeemed_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    stripe_subscription_id = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="active", default="active")  # pending | active | revoked
+
+    coupon = relationship("DiscountCoupon")
     organisation = relationship("Organisation")
 
 

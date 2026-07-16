@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, STATUS_PAST_DUE
 from app.models.db import BillingInvoice, ModuleActionRequest, Organisation
-from app.services import module_subscriptions, stripe_client
+from app.services import discount_coupons, module_subscriptions, stripe_client
 from app.services.stripe_client import epoch_to_date, epoch_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,15 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
         await _record_action(db, org, key, "subscribe", "Paid via Stripe Checkout", now)
+
+    # A discount-coupon redeemed alongside this signup (see
+    # discount_coupons.redeem_for_new_signup) was recorded 'pending' at
+    # Checkout Session creation — this is the confirmation that the
+    # subscription it was meant for actually got created.
+    redemption_id = (session.get("metadata") or {}).get("coupon_redemption_id")
+    if redemption_id and subscription_id:
+        await discount_coupons.mark_redemption_confirmed(db, redemption_id, subscription_id)
+
     await db.commit()
     _push_to_twenty(org.id)
 

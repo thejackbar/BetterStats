@@ -2188,6 +2188,9 @@ async def get_account_plan(
         "modules": modules,
         "is_primary_admin": is_primary_admin,
         "billing_checkout_enabled": await ps.billing_checkout_enabled_for_org(db, club),
+        # Drives the "redeem a discount code ahead of your renewal" box on
+        # the Account page — see routers/discount_coupons.py's /redeem.
+        "stripe_subscription_active": bool(club.stripe_subscription_id),
     }
 
 

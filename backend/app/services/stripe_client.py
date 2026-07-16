@@ -52,7 +52,9 @@ def epoch_to_datetime(ts):
 
 async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys: list[str],
                                    customer_id: str | None, customer_email: str | None,
-                                   discount_schedule: dict | None = None):
+                                   discount_schedule: dict | None = None,
+                                   extra_coupon_id: str | None = None, extra_stackable: bool = False,
+                                   coupon_redemption_id: str | None = None):
     """A Stripe Checkout Session in subscription mode, priced from
     billing_pricing.price_for (dynamic price_data line items, so no Stripe
     Price objects need pre-creating in the dashboard for every module
@@ -65,6 +67,16 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     (platform_settings.get_bundle_discount_schedule) — the caller fetches it
     and passes it straight through; omitted, price_for falls back to its
     hardcoded seed default.
+
+    ``extra_coupon_id`` is a validated discount_coupons.stripe_coupon_id from
+    services/discount_coupons.redeem_for_new_signup — Stripe natively
+    supports multiple simultaneous discounts (``discounts`` is a list on
+    Checkout Session, Subscription, and Invoice preview alike, confirmed
+    against the SDK's own param typing), so a stackable coupon is combined
+    with the bundle discount rather than replacing it. A non-stackable
+    coupon (``extra_stackable=False``) instead WINS outright — the bundle
+    discount is suppressed for that checkout, so a deliberately-targeted
+    promo code is never silently diluted by the generic bundle schedule.
 
     org_id + the selected billing_keys are round-tripped through BOTH the
     session's own metadata/client_reference_id AND the subscription's metadata
@@ -94,6 +106,11 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     ]
 
     metadata = {"org_id": str(org_id), "billing_keys": ",".join(sorted(billing_keys))}
+    if coupon_redemption_id:
+        # Read back by stripe_billing.handle_checkout_completed to flip the
+        # matching discount_coupon_redemptions row from 'pending' to
+        # 'active' once this session's subscription is actually created.
+        metadata["coupon_redemption_id"] = str(coupon_redemption_id)
     params = {
         "mode": "subscription",
         "line_items": line_items,
@@ -113,16 +130,26 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
         "cancel_url": settings.stripe_checkout_cancel_url,
     }
 
-    if quote["discount"] > 0:
-        coupon_id = await _ensure_bundle_coupon(db, quote["discount"])
-        params["discounts"] = [{"coupon": coupon_id}]
+    discounts: list[dict] = []
+    if extra_coupon_id and not extra_stackable:
+        # A non-stackable discount-coupon wins outright — the bundle
+        # discount is suppressed for this checkout, never combined.
+        discounts = [{"coupon": extra_coupon_id}]
+    else:
+        if quote["discount"] > 0:
+            discounts.append({"coupon": await _ensure_bundle_coupon(db, quote["discount"])})
+        if extra_coupon_id:
+            discounts.append({"coupon": extra_coupon_id})
+
+    if discounts:
+        params["discounts"] = discounts
     else:
         # Stripe rejects a session that sets BOTH discounts and
         # allow_promotion_codes, so only offer the customer-enterable
-        # promotion-code field when our own bundle discount isn't already
-        # applying — real promotional codes are created/managed directly in
-        # the Stripe Dashboard (Product catalogue → Coupons), no admin UI of
-        # our own needed for that.
+        # promotion-code field when no discount (bundle or coupon) is
+        # already applying — real promotional codes are created/managed
+        # directly in the Stripe Dashboard (Product catalogue → Coupons),
+        # no admin UI of our own needed for that.
         params["allow_promotion_codes"] = True
 
     if customer_id:
@@ -328,4 +355,81 @@ async def add_modules_to_subscription(db: AsyncSession, subscription_id: str,
         # it up from here on — SubscriptionItem.create has no automatic_tax
         # field of its own to set at item-creation time.
         automatic_tax={"enabled": True},
+    )
+
+
+# ─── BetterCricket-managed discount coupons (migration 154) ────────────────
+# Super Admin manages the whole catalogue inside BetterCricket — see
+# services/discount_coupons.py, which owns every eligibility rule (module
+# coverage, redemption windows, duration, max redemptions, stackability).
+# These two functions are the ONLY place BetterCricket talks to Stripe about
+# a discount_coupons row: creating the mirrored Coupon object once, and
+# attaching it to an already-live subscription ahead of its next renewal.
+
+async def sync_coupon_to_stripe(db: AsyncSession, coupon) -> str:
+    """Creates the Stripe Coupon backing a discount_coupons row. Called once,
+    from services/discount_coupons.create_coupon — Stripe Coupons are
+    immutable on their financial terms after creation, which is exactly why
+    update_coupon locks those fields once a coupon has a live redemption
+    (there would be nothing to re-sync).
+
+    Deliberately sets NO ``redeem_by``/``max_redemptions`` on the Stripe side
+    — BetterCricket's own columns are the sole eligibility gate (see
+    discount_coupons.validate_redemption), so there is exactly one place a
+    redemption is decided, never two systems that could disagree.
+
+    ``applies_to.products`` restricts the discount to the coupon's covered
+    modules (None/empty = every module, i.e. no restriction) — reuses the
+    SAME Stripe Product per billing_key that _ensure_product already caches
+    for the add-on-module flow, so a covered vs non-covered module split on
+    one invoice is handled natively by Stripe, no extra bookkeeping here."""
+    _require_configured()
+    kwargs: dict = {
+        "duration": coupon.duration_mode,
+        "name": coupon.display_name,
+    }
+    if coupon.discount_type == "percent":
+        kwargs["percent_off"] = float(coupon.discount_value)
+    else:
+        kwargs["amount_off"] = int(round(float(coupon.discount_value) * 100))
+        kwargs["currency"] = settings.stripe_currency
+    if coupon.duration_mode == "repeating":
+        kwargs["duration_in_months"] = int(coupon.duration_renewals or 1) * 12
+    module_keys = coupon.module_keys or []
+    if module_keys:
+        product_ids = [await _ensure_product(db, key) for key in module_keys]
+        kwargs["applies_to"] = {"products": product_ids}
+    created = await stripe.Coupon.create_async(**kwargs)
+    return created["id"]
+
+
+async def attach_discount_to_subscription(subscription_id: str, coupon_id: str) -> None:
+    """Queues a discount-coupon onto an ALREADY-LIVE subscription — Stripe
+    applies a subscription-level discount starting at the NEXT invoice the
+    subscription generates, never retroactively against an already-issued
+    one, so this is exactly "apply ahead of the renewal date" with no
+    proration or immediate charge triggered.
+
+    Fetches the subscription's current discounts and APPENDS rather than
+    overwrites — Subscription.modify's ``discounts`` param replaces the
+    whole list, so blindly setting ``discounts=[{coupon: new_id}]`` would
+    silently evict a different coupon a club redeemed earlier for the same
+    upcoming renewal."""
+    _require_configured()
+    # expand=["discounts"] turns the array of Discount IDs into full Discount
+    # objects; each object's own `coupon` field is a plain string ID unless
+    # separately expanded (which isn't needed here — just the id).
+    sub = await stripe.Subscription.retrieve_async(subscription_id, expand=["discounts"])
+    existing_ids = []
+    for d in (sub.get("discounts") or []):
+        if not isinstance(d, dict):
+            continue
+        coupon_ref = d.get("coupon")
+        cid = coupon_ref.get("id") if isinstance(coupon_ref, dict) else coupon_ref
+        if cid and cid != coupon_id:
+            existing_ids.append(cid)
+    all_ids = existing_ids + [coupon_id]
+    await stripe.Subscription.modify_async(
+        subscription_id,
+        discounts=[{"coupon": cid} for cid in all_ids],
     )

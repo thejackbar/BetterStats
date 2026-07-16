@@ -90,6 +90,7 @@ const SUPER_LINKS = [
   { to: '/admin/usage', label: 'Usage' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
   { to: '/admin/super/marketing', label: 'Club Directory' },
+  { to: '/admin/super/coupons', label: 'Discount Coupons' },
   { to: '/admin/changelog', label: 'Changelog' },
 ]
 

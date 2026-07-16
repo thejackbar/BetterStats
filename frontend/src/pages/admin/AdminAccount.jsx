@@ -48,6 +48,19 @@ export default function AdminAccount() {
   const [checkoutBusy, setCheckoutBusy] = useState(false)
   const [invoices, setInvoices] = useState([])
   const [searchParams, setSearchParams] = useSearchParams()
+  // Discount coupons (migration 154) — couponCode is what's typed in;
+  // appliedCouponCode is the committed value the quote effect actually
+  // sends, only updated on APPLY so re-selecting modules doesn't re-fire a
+  // request on every keystroke. redeem* is the SEPARATE "apply a code to my
+  // already-live subscription ahead of renewal" box, independent of module
+  // selection entirely.
+  const [couponCode, setCouponCode] = useState('')
+  const [appliedCouponCode, setAppliedCouponCode] = useState('')
+  const [couponError, setCouponError] = useState('')
+  const [redeemCode, setRedeemCode] = useState('')
+  const [redeemBusy, setRedeemBusy] = useState(false)
+  const [redeemMsg, setRedeemMsg] = useState('')
+  const [redeemError, setRedeemError] = useState('')
 
   const load = () =>
     api.accountGetPlan().then(setPlan).catch((e) => setError(e.message || 'Could not load your plan'))
@@ -87,9 +100,42 @@ export default function AdminAccount() {
       return
     }
     let cancelled = false
-    api.billingQuote([...selected]).then((q) => { if (!cancelled) setQuote(q) }).catch(() => {})
+    setCouponError('')
+    api.billingQuote([...selected], appliedCouponCode)
+      .then((q) => { if (!cancelled) setQuote(q) })
+      .catch((e) => {
+        if (cancelled) return
+        if (appliedCouponCode) setCouponError(e.message || "That code couldn't be applied")
+        setQuote(null)
+      })
     return () => { cancelled = true }
-  }, [plan?.billing_checkout_enabled, selected])
+  }, [plan?.billing_checkout_enabled, selected, appliedCouponCode])
+
+  const applyCoupon = () => {
+    setCouponError('')
+    setAppliedCouponCode(couponCode.trim())
+  }
+  const clearCoupon = () => {
+    setCouponCode('')
+    setAppliedCouponCode('')
+    setCouponError('')
+  }
+
+  const submitRedeem = async () => {
+    if (!redeemCode.trim()) return
+    setRedeemBusy(true)
+    setRedeemError('')
+    setRedeemMsg('')
+    try {
+      await api.couponRedeem(redeemCode.trim())
+      setRedeemMsg("Code applied — it'll reduce your next renewal.")
+      setRedeemCode('')
+    } catch (e) {
+      setRedeemError(e.message || "That code couldn't be applied")
+    } finally {
+      setRedeemBusy(false)
+    }
+  }
 
   useEffect(() => {
     api.getPrimaryAdmin()
@@ -192,7 +238,7 @@ export default function AdminAccount() {
     setCheckoutBusy(true)
     setError('')
     try {
-      const res = await api.billingCreateCheckoutSession([...selected])
+      const res = await api.billingCreateCheckoutSession([...selected], appliedCouponCode)
       if (res.url) {
         window.location.href = res.url
         return
@@ -200,6 +246,7 @@ export default function AdminAccount() {
       setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
       setSelected(new Set())
       setQuote(null)
+      clearCoupon()
       await load()
     } catch (e) {
       setError(e.message || 'Could not start checkout')
@@ -336,6 +383,37 @@ export default function AdminAccount() {
               })}
             </div>
 
+            {plan.billing_checkout_enabled && plan.stripe_subscription_active && plan.is_primary_admin && (
+              <div className="pb-card p-4 mt-6">
+                <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
+                  Redeem a discount code
+                </p>
+                <p className="font-mono text-[11px] text-pb-faint mb-3">
+                  Applies to your account's next renewal, not the current billing period — nothing is
+                  charged today.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={redeemCode}
+                    onChange={(e) => setRedeemCode(e.target.value)}
+                    placeholder="Discount code"
+                    className="flex-1 bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                  />
+                  <button
+                    type="button"
+                    onClick={submitRedeem}
+                    disabled={redeemBusy || !redeemCode.trim()}
+                    className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50 shrink-0"
+                  >
+                    {redeemBusy ? 'APPLYING…' : 'REDEEM'}
+                  </button>
+                </div>
+                {redeemMsg && <p className="font-mono text-[11px] text-emerald-400 mt-2">{redeemMsg}</p>}
+                {redeemError && <p className="font-mono text-[11px] text-pb-red mt-2">{redeemError}</p>}
+              </div>
+            )}
+
             {invoices.length > 0 && (
               <div className="pb-card p-4 mt-6">
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">Billing history</p>
@@ -369,6 +447,43 @@ export default function AdminAccount() {
               <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                 {selected.size} module{selected.size === 1 ? '' : 's'} selected
               </p>
+                {plan.billing_checkout_enabled && !plan.stripe_subscription_active && (
+                  <div className="mb-3">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={couponCode}
+                        onChange={(e) => setCouponCode(e.target.value)}
+                        placeholder="Have a discount code?"
+                        className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-[11px] font-mono focus:outline-none focus:border-pb-accent"
+                      />
+                      {appliedCouponCode ? (
+                        <button
+                          type="button"
+                          onClick={clearCoupon}
+                          className="font-mono text-[10px] tracking-wide2 px-2 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text shrink-0"
+                        >
+                          REMOVE
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={applyCoupon}
+                          disabled={!couponCode.trim()}
+                          className="font-mono text-[10px] tracking-wide2 px-2 py-1.5 rounded border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50 shrink-0"
+                        >
+                          APPLY
+                        </button>
+                      )}
+                    </div>
+                    {couponError && <p className="font-mono text-[10px] text-pb-red mt-1">{couponError}</p>}
+                    {quote?.coupon && (
+                      <p className="font-mono text-[10px] text-emerald-400 mt-1">
+                        ✓ {quote.coupon.display_name} applied
+                      </p>
+                    )}
+                  </div>
+                )}
                 {plan.billing_checkout_enabled && quote && quote.mode === 'new_subscription' && (
                   <div className="mb-3 space-y-1">
                     {quote.line_items.map((li) => (
@@ -381,6 +496,12 @@ export default function AdminAccount() {
                       <div className="flex items-center justify-between font-mono text-[11px] text-emerald-400">
                         <span>Bundle discount</span>
                         <span>-${quote.discount}</span>
+                      </div>
+                    )}
+                    {quote.coupon && (
+                      <div className="flex items-center justify-between font-mono text-[11px] text-emerald-400">
+                        <span>{quote.coupon.display_name} ({quote.coupon.code})</span>
+                        <span>-${quote.coupon.amount_off}</span>
                       </div>
                     )}
                     <div className="flex items-center justify-between font-mono text-[12px] text-pb-text font-semibold pt-2 mt-1 border-t pb-hairline">

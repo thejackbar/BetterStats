@@ -1669,6 +1669,91 @@ live checkout end to end, then flip the platform default on for everyone once
 satisfied (the per-club overrides can stay — they only matter when the
 platform default is off, or when someone still needs a specific club blocked).
 
+## BetterCricket-managed discount coupons (migration 154, Jul 2026)
+
+A full coupon engine, entirely owned by BetterCricket — per direct
+instruction, **Super Admin never edits a Coupon by hand in the Stripe
+Dashboard for this** (unlike the earlier bundle-discount coupon, which was a
+simple cached single-purpose object). Every eligibility rule lives in
+BetterCricket's own tables and is decided before Stripe is ever touched; the
+corresponding Stripe Coupon is a pure sync target with no `redeem_by`/
+`max_redemptions` of its own, so there's exactly one place a redemption is
+judged valid.
+
+- **`discount_coupons`** (the catalogue) + **`discount_coupon_redemptions`**
+  (the audit trail and the "one live redemption per club per coupon"
+  enforcement — a partial unique index on non-`revoked` rows, so a Super
+  Admin's revoke frees the slot back up). A coupon has: `code` (typed in) +
+  `display_name`; `discount_type` (percent | amount) + `discount_value`;
+  `module_keys` (null/empty = every billable module, else restricted —
+  mirrored onto Stripe's native `Coupon.applies_to.products`, reusing the
+  SAME per-module Stripe Product `stripe_client._ensure_product` already
+  caches for the add-on-module flow, so a covered/non-covered mix on one
+  invoice is split automatically by Stripe); `redeem_window_*` (when the code
+  can be entered at all); `new_signup_window_*` (only usable at a club's
+  very first subscribe, and only if that subscribe falls in this range) and
+  `loyalty_window_*` (only usable by a club whose original subscription
+  start — `MIN(org_module_subscriptions.started_at)` — falls in this
+  historical range) — **both optional and independent**, each restricting
+  nothing unless at least one of its own bounds is set;
+  `duration_mode` (once | repeating | forever, `duration_renewals` years for
+  repeating → Stripe's `duration_in_months = 12×N`); `stackable_with_bundle`;
+  `max_redemptions`; `active` (the deactivate switch — coupons are never
+  deleted, so history stays traceable).
+- **Financial-terms lock**: once a coupon has ≥1 non-revoked redemption,
+  `services/discount_coupons.update_coupon` rejects changes to
+  `discount_type`/`discount_value`/`module_keys`/`duration_mode`/
+  `duration_renewals` — Stripe Coupons are themselves immutable on these
+  fields after creation, and rewriting them out from under an
+  already-redeemed club would silently change what that club was promised.
+  Only `display_name`, the window dates, `max_redemptions`,
+  `stackable_with_bundle` and `active` stay editable after that point; the
+  Super Admin edit modal (`SuperCoupons.jsx`) greys those fields out and
+  explains why once `redemption_count > 0`.
+- **Two redemption flows, one rule engine**
+  (`discount_coupons.validate_redemption`, called by both):
+  - **New signup** — a club with no Stripe subscription yet, entering a code
+    alongside their module selection. `routers/billing.py`'s existing
+    `/quote` and `/checkout-session` both grew an optional `coupon_code` —
+    `/quote` validates read-only and folds the discount into the preview
+    numbers (`_apply_coupon_to_quote`, pure local math, no Stripe call, same
+    as the rest of `/quote`); `/checkout-session` calls
+    `redeem_for_new_signup` (writes a `pending` redemption row) and passes
+    the resulting Stripe coupon id through to
+    `stripe_client.create_checkout_session`'s new `extra_coupon_id`/
+    `extra_stackable` params — Stripe natively supports multiple
+    simultaneous discounts (`discounts` is a list on Checkout Session,
+    Subscription and Invoice preview alike, confirmed against the SDK's own
+    param typing), so a stackable coupon combines with the bundle discount;
+    a non-stackable one **replaces** it outright (never diluted by the
+    generic bundle schedule). If Stripe then fails, the `pending` redemption
+    is revoked so a config hiccup on our side can't permanently burn a
+    club's one-time code. `stripe_billing.handle_checkout_completed` reads
+    `coupon_redemption_id` back out of the session's metadata and flips the
+    row to `active` once the subscription is actually confirmed created.
+  - **Already-subscribed, ahead of renewal** — a Primary Admin (self-serve,
+    a new "Redeem a discount code" card on the Account page, separate from
+    module selection) or a Super Admin (`force=True` on the new
+    "Force-apply…" action in `SuperCoupons.jsx`, which skips the
+    redeem-window/max-redemption checks but never "already redeemed" or
+    "inactive") call `redeem_for_existing_subscription` →
+    `stripe_client.attach_discount_to_subscription`. This is a genuine
+    **fetch-then-append**, not an overwrite — `Subscription.modify`'s
+    `discounts` param replaces the whole list, so blindly setting a new
+    single-entry list would silently evict a different coupon redeemed
+    earlier for the same upcoming renewal. Stripe applies a
+    subscription-level discount starting at the **next** invoice the
+    subscription generates, never retroactively — exactly "apply ahead of
+    the renewal date", no proration or immediate charge triggered.
+- **Not built**: a self-serve "browse eligible codes" list (deliberately —
+  confirmed a typed-in code is the right UX, matching how a coupon code
+  normally works); configurable per-coupon retry/grace period for a stuck
+  `pending` new-signup redemption beyond the immediate Stripe-failure revoke
+  above (a truly abandoned Checkout Session — the club navigates away
+  without completing — leaves the redemption `pending` forever, which the
+  "already redeemed" check treats as used; a Super Admin can manually revoke
+  it via the Redemptions modal as the recovery path today).
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

@@ -961,12 +961,41 @@ export const api = {
   // Stripe Checkout billing (migration 150) — flag-gated, see
   // platform_settings.billing_checkout_enabled. billingQuote is pure price
   // math (no Stripe call); billingCreateCheckoutSession creates a real
-  // Checkout Session and returns its redirect URL.
-  billingQuote: (moduleKeys) =>
-    request('/club-admin/billing/quote', { method: 'POST', body: JSON.stringify({ module_keys: moduleKeys }) }),
-  billingCreateCheckoutSession: (moduleKeys) =>
-    request('/club-admin/billing/checkout-session', { method: 'POST', body: JSON.stringify({ module_keys: moduleKeys }) }),
+  // Checkout Session and returns its redirect URL. couponCode (migration 154)
+  // is optional on both — a discount-coupon redeemed alongside a fresh
+  // subscribe, see services/discount_coupons.py.
+  billingQuote: (moduleKeys, couponCode) =>
+    request('/club-admin/billing/quote', {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  billingCreateCheckoutSession: (moduleKeys, couponCode) =>
+    request('/club-admin/billing/checkout-session', {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
   billingListInvoices: () => request('/club-admin/billing/invoices'),
+  // BetterCricket-managed discount coupons (migration 154) —
+  // routers/discount_coupons.py. couponRedeem is the club-facing "apply a
+  // code to my already-live subscription ahead of renewal" action; the rest
+  // are Super-Admin catalogue CRUD.
+  couponRedeem: (code) =>
+    request('/club-admin/coupons/redeem', { method: 'POST', body: JSON.stringify({ code }) }),
+  superListCoupons: () => request('/club-admin/coupons'),
+  superCreateCoupon: (data) =>
+    request('/club-admin/coupons', { method: 'POST', body: JSON.stringify(data) }),
+  superUpdateCoupon: (couponId, data) =>
+    request(`/club-admin/coupons/${couponId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superDeactivateCoupon: (couponId) =>
+    request(`/club-admin/coupons/${couponId}/deactivate`, { method: 'POST' }),
+  superCouponRedemptions: (couponId) => request(`/club-admin/coupons/${couponId}/redemptions`),
+  superRevokeCouponRedemption: (couponId, redemptionId) =>
+    request(`/club-admin/coupons/${couponId}/revoke/${redemptionId}`, { method: 'POST' }),
+  superForceApplyCoupon: (organisationId, code) =>
+    request('/club-admin/coupons/force-apply', {
+      method: 'POST',
+      body: JSON.stringify({ organisation_id: organisationId, code }),
+    }),
   listMyModuleRequests: () => request('/club-admin/module-requests'),
   superListModuleRequests: (status) =>
     request(`/club-admin/super/module-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),
