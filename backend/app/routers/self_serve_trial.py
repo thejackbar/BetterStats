@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import BILLABLE_MODULES, MODULE_CORE
 from app.models.db import (
-    ClubMembership, ModuleActionRequest, Organisation, SelfServeAcknowledgement,
-    SelfServeIdempotencyKey, User, get_db,
+    ClubMembership, DiscountCouponRedemption, ModuleActionRequest, Organisation,
+    SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db,
 )
 from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
 from app.services import module_subscriptions as mod_subs
@@ -582,6 +582,21 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         for stale in stale_requests:
             stale.status = "dismissed"
             stale.completed_at = datetime.now(timezone.utc)
+        # Same story for discount-coupon redemptions: the "one redemption per
+        # club, ever" unique slot (discount_coupon_redemptions) is still held
+        # by whatever this row redeemed in its previous life, so a genuinely
+        # fresh signup would get "Your club has already used this code" for
+        # a code it's never actually used. Revoking (not deleting) frees the
+        # slot back up the same way a Super Admin's manual revoke does,
+        # keeping the audit trail intact.
+        stale_redemptions = (await db.execute(
+            select(DiscountCouponRedemption).where(
+                DiscountCouponRedemption.organisation_id == org.id,
+                DiscountCouponRedemption.status != "revoked",
+            )
+        )).scalars().all()
+        for stale in stale_redemptions:
+            stale.status = "revoked"
 
         db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
         await db.flush()
