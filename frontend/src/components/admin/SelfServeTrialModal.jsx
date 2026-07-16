@@ -642,9 +642,8 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
 
               <div className="pb-card p-4 bg-pb-surface2">
                 <p className="font-mono text-[11px] text-pb-faint">
-                  Password isn't set here — you'll set it right before submitting, once
-                  email verification and acknowledgements are built (later phases of
-                  docs/self-serve-trial-onboarding-plan.md).
+                  Password isn't set here. You'll set it once email verification and
+                  acknowledgements are confirmed.
                 </p>
               </div>
             </div>
