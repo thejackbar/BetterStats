@@ -246,11 +246,14 @@ def _psgs_to_metrics(row) -> dict:
 
     The per-grade aggregate carries a narrower column set than the season
     (all-grades) aggregate — no fifties/hundreds/ducks/balls/fours/sixes/
-    maidens/five-fors/wides/no-balls/catches_wk/stumpings breakdown, since CA's
-    per-grade endpoints don't return them. Metrics this table can't provide
-    stay at 0, which only ever pushes the residual up (never claims coverage
-    the per-grade aggregate can't actually back), matching the guarantee's own
-    ``max(0, club - gr - emitted)`` bias toward the club's book.
+    maidens/five-fors/wides/no-balls/catches_wk breakdown, since CA's
+    per-grade endpoints don't return them. Those metrics are filled in
+    separately from per-game scorecards (``_scorecard_narrow_metrics``) — see
+    the caller, ``fetch_gr_by_player_for_grade``. Leaving them at 0 here (as
+    an earlier version of this function did) double-counted: the leaderboard
+    computes fifties/hundreds/etc directly from the same scorecards, so a
+    residual calculated against a false "GR has zero of this" baseline added
+    the club's full figure on top of what the scorecards already show.
     """
     m = _blank()
     m["matches"] = row.matches or 0
@@ -267,6 +270,99 @@ def _psgs_to_metrics(row) -> dict:
     return m
 
 
+async def _scorecard_narrow_metrics(session, org_uuid, pids, grade_label: str) -> dict:
+    """Per-player {fifties, hundreds, ducks, fours, sixes, balls_faced, bowling_balls,
+    maidens, five_wicket_innings, wides, no_balls, catches_wk}, computed straight
+    from per-game scorecards for the grade — the exact same source and formula
+    the grade-filtered leaderboard itself uses (aggregations.py's ``qualifying``
+    CTEs), so reconciling against this can never double-count what's already on
+    screen there. player_season_grade_stats has no columns for these metrics at
+    all (see ``_psgs_to_metrics``), so there is no aggregate-API alternative.
+    """
+    from sqlalchemy import text
+    from app.services.aggregations import _GRADE_MATCH
+
+    if not pids or not grade_label:
+        return {}
+    params = {"org_id": str(org_uuid), "pids": [str(p) for p in pids], "grade_name": grade_label}
+
+    bat_rows = (
+        await session.execute(
+            text(f"""
+                SELECT bi.player_id,
+                    COALESCE(SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END), 0) AS fifties,
+                    COALESCE(SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END), 0) AS hundreds,
+                    COALESCE(SUM(CASE WHEN bi.runs = 0 AND NOT bi.not_out THEN 1 ELSE 0 END), 0) AS ducks,
+                    COALESCE(SUM(bi.fours), 0) AS fours,
+                    COALESCE(SUM(bi.sixes), 0) AS sixes,
+                    COALESCE(SUM(bi.balls), 0) AS balls_faced
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND bi.player_id = ANY(CAST(:pids AS uuid[]))
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                  AND {_GRADE_MATCH}
+                GROUP BY bi.player_id
+            """),
+            params,
+        )
+    ).mappings().all()
+
+    bowl_rows = (
+        await session.execute(
+            text(f"""
+                SELECT bs.player_id,
+                    COALESCE(SUM(FLOOR(bs.overs)::integer * 6
+                                 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)::integer), 0) AS bowling_balls,
+                    COALESCE(SUM(bs.maidens), 0) AS maidens,
+                    COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_wicket_innings,
+                    COALESCE(SUM(bs.wides), 0) AS wides,
+                    COALESCE(SUM(bs.no_balls), 0) AS no_balls
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND bs.player_id = ANY(CAST(:pids AS uuid[]))
+                  AND {_GRADE_MATCH}
+                GROUP BY bs.player_id
+            """),
+            params,
+        )
+    ).mappings().all()
+
+    field_rows = (
+        await session.execute(
+            text(f"""
+                SELECT fs.player_id, COALESCE(SUM(fs.catches_wk), 0) AS catches_wk
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND fs.player_id = ANY(CAST(:pids AS uuid[]))
+                  AND {_GRADE_MATCH}
+                GROUP BY fs.player_id
+            """),
+            params,
+        )
+    ).mappings().all()
+
+    out: dict = {}
+    for row in bat_rows:
+        d = out.setdefault(row["player_id"], {})
+        d.update({k: row[k] for k in ("fifties", "hundreds", "ducks", "fours", "sixes", "balls_faced")})
+    for row in bowl_rows:
+        d = out.setdefault(row["player_id"], {})
+        d.update({k: row[k] for k in ("bowling_balls", "maidens", "five_wicket_innings", "wides", "no_balls")})
+    for row in field_rows:
+        out.setdefault(row["player_id"], {})["catches_wk"] = row["catches_wk"]
+    return out
+
+
 async def fetch_gr_by_player_for_grade(session, org_uuid, pids, grade_label: str) -> dict:
     """Per-player GR coverage scoped to ONE grade **name**, for a grade-scoped upload.
 
@@ -278,7 +374,11 @@ async def fetch_gr_by_player_for_grade(session, org_uuid, pids, grade_label: str
     Reads ``player_season_grade_stats`` — CA's own per-grade aggregate, synced
     alongside the season totals (``sync.py``'s "per-grade aggregate sync") —
     not per-game scorecards, so a grade with thin scorecard coverage still
-    reconciles correctly against CA's real per-grade numbers.
+    reconciles correctly against CA's real per-grade numbers for the metrics
+    it carries. The metrics it doesn't carry (fifties/hundreds/etc — see
+    ``_psgs_to_metrics``) are filled in from the scorecards directly
+    (``_scorecard_narrow_metrics``) so they can't be double-counted against
+    what the grade-filtered leaderboard already shows for those.
     """
     from sqlalchemy import text
     from app.services.aggregations import _GRADE_MATCH
@@ -310,6 +410,13 @@ async def fetch_gr_by_player_for_grade(session, org_uuid, pids, grade_label: str
         g = out.setdefault(pid, {"season_ids": set(), "totals": None})
         g["season_ids"].add(row["season_id"])
         g["totals"] = accumulate(g["totals"], _psgs_to_metrics(row))
+
+    narrow = await _scorecard_narrow_metrics(session, org_uuid, pids, grade_label)
+    for pid, narrow_metrics in narrow.items():
+        g = out.setdefault(pid, {"season_ids": set(), "totals": None})
+        if g["totals"] is None:
+            g["totals"] = _blank()
+        g["totals"].update(narrow_metrics)
     return out
 
 
