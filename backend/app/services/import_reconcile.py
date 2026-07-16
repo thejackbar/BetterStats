@@ -278,6 +278,19 @@ async def _scorecard_narrow_metrics(session, org_uuid, pids, grade_label: str) -
     CTEs), so reconciling against this can never double-count what's already on
     screen there. player_season_grade_stats has no columns for these metrics at
     all (see ``_psgs_to_metrics``), so there is no aggregate-API alternative.
+
+    Scoping matches the leaderboard's qualifying CTE EXACTLY: grade matched by
+    name via ``_GRADE_MATCH``, gated on the player ids — deliberately NOT
+    org-scoped through the grade's season. A CA grade is competition-wide and
+    owned by whichever club synced it first (see the grade-collision-fix notes),
+    so a club's own games can sit under grade rows whose season belongs to a
+    sibling org. The leaderboard counts those innings (they're the player's own
+    games, gated by player_id); an org-scoped baseline here missed them,
+    inflating the residual by exactly what the leaderboard already shows —
+    verified live on Scarborough (Clint Heron: 33 scorecard fifties under
+    "1st Grade"-named grades, only 21 of them under Scarborough-owned grade
+    rows, so the residual was 12 fifties too fat and the ladder read 51 not 39).
+    The pid gate is the effective org scope: player ids are per-club.
     """
     from sqlalchemy import text
     from app.services.aggregations import _GRADE_MATCH
@@ -299,9 +312,7 @@ async def _scorecard_narrow_metrics(session, org_uuid, pids, grade_label: str) -
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND bi.player_id = ANY(CAST(:pids AS uuid[]))
+                WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
                   AND {_GRADE_MATCH}
@@ -324,9 +335,7 @@ async def _scorecard_narrow_metrics(session, org_uuid, pids, grade_label: str) -
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND bs.player_id = ANY(CAST(:pids AS uuid[]))
+                WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
                   AND {_GRADE_MATCH}
                 GROUP BY bs.player_id
             """),
@@ -341,9 +350,7 @@ async def _scorecard_narrow_metrics(session, org_uuid, pids, grade_label: str) -
                 FROM v_effective_fielding_stats fs
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND fs.player_id = ANY(CAST(:pids AS uuid[]))
+                WHERE fs.player_id = ANY(CAST(:pids AS uuid[]))
                   AND {_GRADE_MATCH}
                 GROUP BY fs.player_id
             """),
