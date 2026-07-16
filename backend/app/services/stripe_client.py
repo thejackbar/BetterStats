@@ -54,6 +54,7 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
                                    customer_id: str | None, customer_email: str | None,
                                    discount_schedule: dict | None = None,
                                    extra_coupon_id: str | None = None, extra_stackable: bool = False,
+                                   extra_coupon_off_dollars: float | None = None,
                                    coupon_redemption_id: str | None = None):
     """A Stripe Checkout Session in subscription mode, priced from
     billing_pricing.price_for (dynamic price_data line items, so no Stripe
@@ -69,14 +70,26 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     hardcoded seed default.
 
     ``extra_coupon_id`` is a validated discount_coupons.stripe_coupon_id from
-    services/discount_coupons.redeem_for_new_signup — Stripe natively
-    supports multiple simultaneous discounts (``discounts`` is a list on
-    Checkout Session, Subscription, and Invoice preview alike, confirmed
-    against the SDK's own param typing), so a stackable coupon is combined
-    with the bundle discount rather than replacing it. A non-stackable
-    coupon (``extra_stackable=False``) instead WINS outright — the bundle
-    discount is suppressed for that checkout, so a deliberately-targeted
+    services/discount_coupons.redeem_for_new_signup. A NON-stackable coupon
+    (``extra_stackable=False``) WINS outright — passed alone as the
+    session's one discount, bundle suppressed, so a deliberately-targeted
     promo code is never silently diluted by the generic bundle schedule.
+
+    A STACKING coupon can NOT simply be added as a second list entry:
+    Checkout Session's ``discounts`` accepts at most ONE element — Stripe
+    rejects a second with "Array discounts exceeded maximum 1 allowed
+    elements" (found live, not documented up front; the SDK's param typing
+    allows a list but the API enforces the cap). So a stacking coupon is
+    instead pre-combined with the bundle discount into ONE ad-hoc amount_off
+    coupon: ``extra_coupon_off_dollars`` is the coupon's own dollar
+    contribution (computed by the caller with routers/billing.py's
+    _apply_coupon_to_quote — the SAME math the /quote preview uses, so the
+    real charge matches what was previewed), added to the bundle discount
+    and passed through _ensure_bundle_coupon as a single combined figure.
+    ``extra_coupon_id`` itself is unused in this branch — the coupon's own
+    Stripe Coupon object (which may carry a module restriction via
+    applies_to.products) is bypassed in favour of the pre-computed flat
+    dollar amount, which already accounts for that scoping.
 
     org_id + the selected billing_keys are round-tripped through BOTH the
     session's own metadata/client_reference_id AND the subscription's metadata
@@ -133,13 +146,18 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     discounts: list[dict] = []
     if extra_coupon_id and not extra_stackable:
         # A non-stackable discount-coupon wins outright — the bundle
-        # discount is suppressed for this checkout, never combined.
+        # discount is suppressed for this checkout, never combined. Exactly
+        # one discount, so no combining needed.
         discounts = [{"coupon": extra_coupon_id}]
     else:
-        if quote["discount"] > 0:
-            discounts.append({"coupon": await _ensure_bundle_coupon(db, quote["discount"])})
+        # Checkout Session allows at most one discounts entry — a stacking
+        # coupon and the bundle discount are folded into a single ad-hoc
+        # coupon (see the docstring above) rather than passed as two.
+        combined = quote["discount"]
         if extra_coupon_id:
-            discounts.append({"coupon": extra_coupon_id})
+            combined += extra_coupon_off_dollars or 0
+        if combined > 0:
+            discounts.append({"coupon": await _ensure_bundle_coupon(db, combined)})
 
     if discounts:
         params["discounts"] = discounts
@@ -178,14 +196,17 @@ async def cancel_subscription(subscription_id: str) -> None:
     await stripe.Subscription.cancel_async(subscription_id)
 
 
-async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: int) -> str:
+async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> str:
     """Reuses ONE Stripe Coupon per distinct discount amount instead of
     minting a fresh one on every checkout attempt — cached in
     stripe_coupons (migration 153), keyed on the dollar amount alone since
     duration is fixed at 'once' for every bundle coupon today (if duration
     ever becomes independently configurable, key on (amount, duration)
-    instead). Mirrors _ensure_product below."""
-    cents = discount_dollars * 100
+    instead). Mirrors _ensure_product below. discount_dollars can carry
+    cents (e.g. a stacking discount-coupon combined with the bundle
+    discount, see create_checkout_session below) — rounded to the nearest
+    cent, since Stripe's amount_off is cents-integer, not a float."""
+    cents = round(discount_dollars * 100)
     row = (await db.execute(
         text("SELECT stripe_coupon_id FROM stripe_coupons WHERE discount_cents = :c"),
         {"c": cents},
@@ -197,7 +218,7 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: int) -> str:
         amount_off=cents,
         currency=settings.stripe_currency,
         duration="once",
-        name=f"Bundle discount (${discount_dollars} off first payment)",
+        name=f"Discount (${discount_dollars:.2f} off first payment)",
     )
     # Same race-tolerance note as _ensure_product — a concurrent duplicate
     # is harmless Dashboard clutter, not worth locking for.
