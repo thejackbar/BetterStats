@@ -53,6 +53,23 @@ async def _load_org(db: AsyncSession, org_id) -> Organisation | None:
         return None
 
 
+def _invoice_subscription_id(invoice: dict) -> str | None:
+    """The subscription an invoice belongs to. Newer Stripe API versions
+    (found live — the account's configured default is newer than this SDK's
+    2024-06-20) nest this under invoice.parent.subscription_details.subscription
+    and the top-level invoice.subscription field is simply absent (None, not
+    missing-but-falsy in some other way) — every invoice.paid /
+    invoice.payment_failed webhook was silently no-op'ing ("unknown
+    subscription=None") because of this, including the receipt email these
+    handlers send. Checks both shapes so it works regardless of which API
+    version the Stripe account is actually sending webhooks at."""
+    direct = invoice.get("subscription")
+    if direct:
+        return direct
+    parent = invoice.get("parent") or {}
+    return ((parent.get("subscription_details") or {}).get("subscription"))
+
+
 async def _load_org_by_subscription(db: AsyncSession, subscription_id: str | None) -> Organisation | None:
     if not subscription_id:
         return None
@@ -161,7 +178,7 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     that had gone past_due, and records the invoice for the club's own Billing
     history (idempotent on stripe_invoice_id — a replayed event just re-upserts
     the same row)."""
-    subscription_id = invoice.get("subscription")
+    subscription_id = _invoice_subscription_id(invoice)
     org, sub = await _resolve_org_for_subscription(db, subscription_id)
     if org is None:
         logger.warning("Stripe invoice.paid: unknown subscription=%r", subscription_id)
@@ -285,7 +302,7 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
     club off immediately, giving them a chance to update their card before
     Stripe's own dunning schedule gives up and fires
     customer.subscription.deleted."""
-    subscription_id = invoice.get("subscription")
+    subscription_id = _invoice_subscription_id(invoice)
     org, sub = await _resolve_org_for_subscription(db, subscription_id)
     if org is None:
         logger.warning("Stripe invoice.payment_failed: unknown subscription=%r", subscription_id)
@@ -385,7 +402,7 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
     if row is None:
         row = BillingInvoice(organisation_id=org.id, stripe_invoice_id=stripe_invoice_id)
         db.add(row)
-    row.stripe_subscription_id = invoice.get("subscription")
+    row.stripe_subscription_id = _invoice_subscription_id(invoice)
     row.status = invoice.get("status") or "open"
     row.amount_due = invoice.get("amount_due") or 0
     row.amount_paid = invoice.get("amount_paid") or 0
