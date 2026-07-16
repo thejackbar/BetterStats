@@ -25,7 +25,7 @@ _GRADE_MATCH = (
 
 # Same merge-aware match, but against an ``import_effective_deltas`` row's free-text
 # grade_label (ied must already be in scope) — a career-scope import residual has no
-# grade_id (it spans many seasons' worth of same-named grades, see migration 152),
+# grade_id (it spans many seasons' worth of same-named grades, see migration 154),
 # so grade-filtered leaderboards match it by name exactly like _GRADE_MATCH does for
 # a real grades row.
 _IMPORT_GRADE_MATCH = (

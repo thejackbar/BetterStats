@@ -4,7 +4,7 @@
 self-healing — it wipes and recomputes an org's `import_effective_deltas` from
 its `imported_stats` truth rows and current GR coverage, and already runs
 automatically as the final pass of every org sync. This script exists so a
-fix to the reconciler itself (e.g. migration 152's grade-scoped reconciliation)
+fix to the reconciler itself (e.g. migration 154's grade-scoped reconciliation)
 can be applied to an org's already-committed import batches immediately,
 without waiting for that club's next sync.
 

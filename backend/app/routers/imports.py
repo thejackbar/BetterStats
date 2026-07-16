@@ -208,7 +208,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             skipped_rows += 1
 
     # Grade-scope the preview exactly like the commit-time reconciler does
-    # (services/import_reconcile.reconcile_imported_totals, migration 152):
+    # (services/import_reconcile.reconcile_imported_totals, migration 154):
     # a grade-labelled group's "what GR already has" must be that grade's own
     # coverage, not the player's whole cross-grade history, or the preview
     # would show a residual the commit wouldn't actually produce.

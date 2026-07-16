@@ -166,7 +166,7 @@ def main():
     if not shrank:
         _FAILURES.append("F self-healing")
 
-    print("\n_grade_key normalisation (migration 152 grade-scoped reconcile):")
+    print("\n_grade_key normalisation (migration 154 grade-scoped reconcile):")
     for raw, want in [(None, None), ("", None), ("   ", None),
                        ("1st Grade", "1st Grade"), ("  1st Grade  ", "1st Grade")]:
         got = _grade_key(raw)
