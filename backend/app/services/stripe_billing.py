@@ -232,6 +232,46 @@ async def handle_subscription_deleted(db: AsyncSession, subscription: dict) -> N
     _push_to_twenty(org.id)
 
 
+async def sweep_dangling_stripe_subscriptions(db: AsyncSession) -> list[str]:
+    """One-off repair, run on API boot: before this module's cancel paths
+    started clearing stripe_subscription_id themselves (see
+    routers/club_admin.py::_cancel_stripe_subscription_if_nothing_held),
+    module_subscriptions.remove_billing was DB-only — a club that cancelled
+    every module it held kept a stale stripe_subscription_id, which routed
+    its Account page into the coupon-free "add modules to an already-live
+    subscription" checkout branch forever instead of falling back to a
+    normal new-signup checkout. Self-heals any club already stuck in that
+    state; idempotent (a no-op once nothing is left to fix). Returns the
+    affected org ids."""
+    from stripe import error as stripe_error
+
+    from app.auth.modules import account_plan_status
+
+    orgs = (await db.execute(
+        select(Organisation)
+        .where(Organisation.stripe_subscription_id.isnot(None))
+        .options(selectinload(Organisation.module_subscriptions))
+    )).scalars().all()
+    affected: list[str] = []
+    for org in orgs:
+        if any(r["status"] == "subscribed" for r in account_plan_status(org)):
+            continue
+        try:
+            await stripe_client.cancel_subscription(org.stripe_subscription_id)
+        except (stripe_client.StripeNotConfigured, stripe_error.InvalidRequestError):
+            pass  # nothing configured, or Stripe already considers it gone — either way, clear our side
+        except stripe_error.StripeError:
+            logger.exception(
+                "Stripe subscription sweep: could not cancel %s for org %s", org.stripe_subscription_id, org.id
+            )
+            continue
+        org.stripe_subscription_id = None
+        affected.append(str(org.id))
+    if affected:
+        await db.commit()
+    return affected
+
+
 async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, now: datetime) -> None:
     """Records ONE Stripe invoice event for the club's Billing History.
     line_items is read straight off Stripe's own invoice lines, not
