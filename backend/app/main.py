@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, billing, public_stripe
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, billing, public_stripe
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -1937,6 +1937,47 @@ async def lifespan(app: FastAPI):
                 CONSTRAINT uq_fee_square_import_log_ref UNIQUE (organisation_id, external_ref)
             )
         """))
+        # BetterFees ← Xero bank transaction import (migration 150) — a
+        # dedicated per-club Xero OAuth connection (unlike Square, nothing else
+        # uses it), plus its own resolved-events log mirroring the Square one.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fee_xero_connections (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                tenant_id TEXT,
+                tenant_name TEXT,
+                access_token TEXT,
+                refresh_token TEXT,
+                token_expires_at TIMESTAMPTZ,
+                scopes TEXT,
+                bank_account_id TEXT,
+                bank_account_name TEXT,
+                sync_enabled BOOLEAN NOT NULL DEFAULT false,
+                last_sync_at TIMESTAMPTZ,
+                last_sync_status TEXT,
+                last_sync_error TEXT,
+                connected_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                connected_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fee_xero_org UNIQUE (organisation_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fee_xero_import_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                external_ref TEXT NOT NULL,
+                status TEXT NOT NULL,
+                fee_payment_id UUID REFERENCES fee_payments(id) ON DELETE SET NULL,
+                description TEXT,
+                amount NUMERIC(10, 2),
+                occurred_at DATE,
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fee_xero_import_log_ref UNIQUE (organisation_id, external_ref)
+            )
+        """))
         # BetterFantasyCricket — internal club fantasy league (migration 087).
         # Defensive idempotent creates so the API boots even if the numbered
         # migration hasn't run yet (mirrors the BetterMerch / BetterComms blocks).
@@ -2777,6 +2818,7 @@ app.include_router(public_comms.router)                                         
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
+app.include_router(public_xero.router)                                                    # BetterFees (Xero OAuth callback)
 app.include_router(public_stripe.router)                                                  # Billing (Stripe webhook, signature-verified)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
 app.include_router(pipeline_gauge.router)                                                 # Twenty CRM dashboard gauge (own HTTP Basic Auth, not require_module)
