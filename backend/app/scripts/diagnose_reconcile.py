@@ -147,6 +147,30 @@ async def diagnose(org_id_str: str, player_id_str: str) -> None:
                 print(f"\nget_batting_leaderboard_extended(grade_name={grade!r}) row for this player: {mine}")
                 print(f"(leaderboard returned {len(board)} players total for this grade)")
 
+                # The exact qualifying-CTE shape the leaderboard uses (inline
+                # _GRADE_MATCH, not a precomputed grade-id list), filtered to
+                # this player only, to catch any inline-vs-precomputed drift.
+                inline = (
+                    await session.execute(
+                        text(f"""
+                            SELECT bi.player_id, bi.game_id, bi.runs
+                            FROM v_effective_batting_innings bi
+                            JOIN v_effective_games g ON g.id = bi.game_id
+                            JOIN grades gr ON gr.id = g.grade_id
+                            WHERE {_GRADE_MATCH}
+                              AND NOT COALESCE(bi.did_not_bat, FALSE)
+                              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                              AND bi.player_id = CAST(:pid AS UUID)
+                        """),
+                        {"org_id": str(org_uuid), "grade_name": grade, "pid": str(player_uuid)},
+                    )
+                ).mappings().all()
+                fifties_inline = sum(1 for r in inline if 50 <= r["runs"] < 100)
+                hundreds_inline = sum(1 for r in inline if r["runs"] >= 100)
+                distinct_games = len({r["game_id"] for r in inline})
+                print(f"inline-_GRADE_MATCH qualifying CTE (leaderboard's exact shape, filtered to this player): "
+                      f"innings={len(inline)} distinct_games={distinct_games} fifties={fifties_inline} hundreds={hundreds_inline}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
