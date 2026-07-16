@@ -2695,6 +2695,20 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as _rate_session:
         await _ps.warm_send_rate_cache(_rate_session)
 
+    # One-off repair for clubs stuck with a dangling stripe_subscription_id
+    # from before cancel paths cleared it themselves (see
+    # stripe_billing.sweep_dangling_stripe_subscriptions). Idempotent — a
+    # no-op on every boot after the first that finds nothing left to fix.
+    from app.services import stripe_billing as _stripe_billing
+    async with AsyncSessionLocal() as _stripe_sweep_session:
+        try:
+            _fixed = await _stripe_billing.sweep_dangling_stripe_subscriptions(_stripe_sweep_session)
+            if _fixed:
+                logger.info(f"Stripe subscription sweep: repaired {len(_fixed)} club(s)")
+        except Exception as e:
+            await _stripe_sweep_session.rollback()
+            logger.error(f"Stripe subscription sweep failed: {e}")
+
     start_scheduler()
     logger.info("BetterStats API started")
     yield
