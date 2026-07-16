@@ -19,7 +19,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text, func
+from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -95,10 +95,49 @@ async def ensure_team_grades(db: AsyncSession, club_id) -> int:
     return linked
 
 
+_ORDINAL_WORDS = {
+    "1st": 1, "first": 1, "firsts": 1,
+    "2nd": 2, "second": 2, "seconds": 2,
+    "3rd": 3, "third": 3, "thirds": 3,
+    "4th": 4, "fourth": 4, "fourths": 4,
+    "5th": 5, "fifth": 5, "fifths": 5,
+    "6th": 6, "sixth": 6, "sixths": 6,
+    "7th": 7, "seventh": 7, "sevenths": 7,
+    "8th": 8, "eighth": 8, "eighths": 8,
+    "9th": 9, "ninth": 9, "ninths": 9,
+    "10th": 10, "tenth": 10, "tenths": 10,
+}
+_ORDINAL_RE = re.compile(r"\b(" + "|".join(_ORDINAL_WORDS) + r")\b", re.IGNORECASE)
+_AGE_GROUP_RE = re.compile(r"\bu\s?(\d{1,2})\b", re.IGNORECASE)
+_GRADE_LETTER_RE = re.compile(r"\b([a-h])\s*grade\b", re.IGNORECASE)
+UNRANKED_SEQUENCE = 50  # default for names with no recognisable hierarchy marker
+
+
 def _guess_sequence(name: str) -> int:
-    """Pull a hierarchy rank from a team name ('Applecross 2nd XI' -> 2)."""
-    m = re.search(r"(\d+)", name or "")
-    return int(m.group(1)) if m else 0
+    """Best-effort hierarchy rank for ordering squad columns, from a team or
+    grade name: 'Club 2nd XI' -> 2, 'Seconds' -> 2, 'A Grade' -> 1, 'U13 Boys'
+    -> 113 (colts sort after every senior XI, in age order).
+
+    Real-world team/grade names carry all sorts of numbers unrelated to XI
+    rank — age brackets ('U13'), cup/shield names, grade codes — so a naive
+    "first digit anywhere in the string" grab (the old behaviour) picked those
+    up as if they were the 1st/2nd/3rd order, producing a nonsensical column
+    order. Only an explicit ordinal word ('1st', 'seconds'...), an age group,
+    or a grade letter is trusted; anything else (cup names, ungraded women's/
+    social sides) falls back to a fixed middle value so it sorts after the
+    numbered senior XIs instead of colliding at 0 or a stray digit.
+    """
+    text = (name or "").lower()
+    m = _ORDINAL_RE.search(text)
+    if m:
+        return _ORDINAL_WORDS[m.group(1).lower()]
+    m = _AGE_GROUP_RE.search(text)
+    if m:
+        return 100 + min(int(m.group(1)), 99)
+    m = _GRADE_LETTER_RE.search(text)
+    if m:
+        return ord(m.group(1).upper()) - ord("A") + 1
+    return UNRANKED_SEQUENCE
 
 
 async def _assert_grade_in_club(db: AsyncSession, grade_id: Optional[uuid.UUID], club_id) -> None:
@@ -246,8 +285,115 @@ async def delete_team(
     await db.commit()
 
 
+@router.post("/resequence")
+async def resequence_teams(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Re-guess the column order for auto-seeded squads with the current
+    _guess_sequence heuristic. Only touches source='auto' squads — a manual
+    squad's Order is always an explicit admin choice (the create/edit form
+    always sends a sequence, even a default 0) and is never overwritten.
+
+    Exists so a club whose squads were auto-seeded under an older/naive guess
+    (or just look wrong today) can re-sort them without deleting and
+    re-seeding everything.
+    """
+    teams = (await db.execute(
+        select(Team).where(Team.organisation_id == club.id, Team.source == "auto")
+    )).scalars().all()
+    updated = 0
+    for t in teams:
+        guessed = _guess_sequence(t.name)
+        if t.sequence != guessed:
+            t.sequence = guessed
+            updated += 1
+    if updated:
+        await db.commit()
+    return {"updated": updated, "total_auto": len(teams)}
+
+
+class SeedTeamsBody(BaseModel):
+    # When provided (even as an empty list), only these exact names are
+    # created as squads — powers the "tick which teams to bring in" auto-seed
+    # modal, which sources the list from GET /teams/seed-candidates. When
+    # omitted entirely (no body sent), falls back to the original
+    # single-season auto-discovery below, for backward compatibility.
+    names: Optional[list[str]] = None
+
+
+@router.get("/seed-candidates")
+async def seed_candidates(
+    seasons: int = 3,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Distinct team names our players appeared for over the last `seasons`
+    seasons (default 3) — the picker behind the auto-seed modal, so an admin
+    can tick which ones should become squads before anything is created.
+
+    Each candidate reports how many of our players and games it covers, and
+    whether a squad with that name already exists (so the UI can skip it).
+    """
+    seasons = max(1, min(int(seasons or 3), 60))
+
+    season_rows = (await db.execute(
+        select(Season.id, Season.name)
+        .where(Season.organisation_id == club.id)
+        .order_by(Season.year.desc().nullslast(), Season.name.desc())
+        .limit(seasons)
+    )).all()
+    season_ids = [r[0] for r in season_rows]
+    season_names = [r[1] for r in season_rows]
+    if not season_ids:
+        return {"seasons_considered": [], "candidates": []}
+
+    rows = (await db.execute(
+        select(
+            GameAppearance.team_name,
+            func.count(distinct(GameAppearance.player_id)).label("players"),
+            func.count().label("games"),
+            func.max(Game.played_at).label("last_played"),
+        )
+        .join(Game, Game.id == GameAppearance.game_id)
+        .join(Grade, Grade.id == Game.grade_id)
+        .join(Player, Player.id == GameAppearance.player_id)
+        .where(
+            Player.organisation_id == club.id,
+            Grade.season_id.in_(season_ids),
+            GameAppearance.team_name.isnot(None),
+            GameAppearance.team_name != "",
+        )
+        .group_by(GameAppearance.team_name)
+        .order_by(func.count(distinct(GameAppearance.player_id)).desc(), func.count().desc())
+    )).all()
+
+    existing_res = await db.execute(
+        select(Team.name).where(Team.organisation_id == club.id)
+    )
+    existing = {(n or "").strip().lower() for n in existing_res.scalars().all()}
+
+    candidates = []
+    for name, players_n, games_n, last_played in rows:
+        clean = (name or "").strip()
+        if not clean:
+            continue
+        candidates.append({
+            "name": clean,
+            "players": int(players_n),
+            "games": int(games_n),
+            "last_played": last_played.isoformat() if last_played else None,
+            "exists": clean.lower() in existing,
+        })
+
+    return {"seasons_considered": season_names, "candidates": candidates}
+
+
 @router.post("/seed")
 async def seed_teams(
+    body: Optional[SeedTeamsBody] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
@@ -259,11 +405,35 @@ async def seed_teams(
     the list. Picks the latest season (by year, then name) that actually has
     appearances. Idempotent: only names not already present (case-insensitive)
     are added, as source='auto'. Existing teams are left untouched.
+
+    If `names` is supplied in the body (the auto-seed modal's tick-box flow),
+    that exact list is created instead of re-discovering a season — the
+    caller has already picked which candidates from GET /teams/seed-candidates
+    it wants brought in.
     """
     existing_res = await db.execute(
         select(Team.name).where(Team.organisation_id == club.id)
     )
     existing = {(n or "").strip().lower() for n in existing_res.scalars().all()}
+
+    if body is not None and body.names is not None:
+        created = 0
+        for name in body.names:
+            clean = (name or "").strip()
+            if not clean or clean.lower() in existing:
+                continue
+            db.add(Team(
+                id=uuid.uuid4(),
+                organisation_id=club.id,
+                name=clean,
+                sequence=_guess_sequence(clean),
+                source="auto",
+                is_active=True,
+            ))
+            existing.add(clean.lower())
+            created += 1
+        await db.commit()
+        return {"created": created, "total_discovered": len(body.names), "season": None}
 
     # Most recent season this club has team-name appearances in.
     season_row = (await db.execute(

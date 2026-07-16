@@ -199,6 +199,81 @@ Each release lives in its own file under **`frontend/src/data/changelog/`** — 
 
 See "Feature Changelog" below for the file format.
 
+## Club Setup Wizard (v8.70.0, Jul 2026)
+
+The Phase-15 checklist modal (`OnboardingWizardModal.jsx`, deleted) grew into a
+full-page, whole-platform **Setup Wizard** at `/admin/setup(/:stepKey)`
+(`frontend/src/pages/admin/setup/` — `SetupWizard.jsx` + `SetupInlineSteps.jsx`
++ `SetupModuleSteps.jsx` + `setupUi.jsx`). 28 steps in 7 groups (data in →
+data tools → BetterSelect → BetterSocials → BetterAdmin → BetterIQ →
+BetterFantasy), same table/flag/router as before:
+
+- **Entry points (v8.70.1)**: a permanent **"Setup Wizard" sidebar item** (top
+  unheaded section, beside Dashboard, every role) plus the header SETUP GUIDE
+  shortcut (any role whose `/state` fetch succeeds — a super admin needs an
+  acting-as club). The `onboarding_wizard_enabled` platform-flag gate was
+  REMOVED from the router (the flag + `require_onboarding_wizard_enabled` in
+  `auth.py` still exist but gate nothing — the General Settings toggle is
+  inert for the wizard now). Sidebar sections (and Better HQ links, after
+  Platform Overview) are kept in ALPHABETICAL order by label — keep it that
+  way when adding links.
+- **Auto-open is conservative** (because the gate is gone): fresh-login
+  navigation to `/admin/setup` fires only for (a) a brand-new club — no
+  successful full sync — that hasn't dismissed it, or (b) the one-shot
+  Decision-11 reopen-after-sync, only if stored progress exists (`engaged`),
+  so long-established clubs are never yanked into setup. Super admins are
+  never auto-navigated.
+- **Backend** `routers/onboarding_wizard.py`, club-admin auth. `GET /flow` is the wizard:
+  step registry (`GROUPS`) filtered to the club's entitlements, per-step
+  auto-detection (`_detect_steps` — cheap org-scoped EXISTS: logo set, sponsor
+  rows, merge_logs, fee_schedules, fantasy season/pool, a `ready` dossier…),
+  and it **persists newly-detected completion into `completed_steps`** so the
+  cheap `GET /state` summary (AdminLayout polls it every mount) reads stored
+  state only. `POST /steps/{key}` takes `{done?, skipped?}` (mutually
+  exclusive; detection beats a skip). `skipped_steps` column = migration 157
+  (+ lifespan mirror). Steps the DB can't see (socials palette → localStorage,
+  the review-only fantasy steps) are manual-mark only.
+- **Sync gating**: the "Tidy your data" group locks until a successful full
+  pull. `_sync_ready` now accepts `org_full` **or** `org_hard_refresh` — the
+  old checklist only looked for `org_full`, so a club whose first complete
+  pull was a Full Rebuild never unlocked those steps (fixed here).
+- **Hybrid steps**: simple actions run inline through their EXISTING endpoints
+  (hard-refresh + sync-log polling, branding, sponsor create, fixture
+  sync, squad seed/auto-assign, availability self-serve, website enable, comms
+  sender settings, Square/Xero connect [live status + the OAuth connect-url,
+  stamping the return flag before redirecting], fantasy season/pool); complex
+  tools are link-out steps. Link-outs stamp `sessionStorage.bs_setup_return`
+  and `SetupReturnBar.jsx` (a **floating bottom pill**, gradient-ringed,
+  mounted in `ProtectedRoute` beside `TrialBanner` so it covers module
+  layouts and OAuth round-trips too) offers "back to setup". Vital steps
+  (full_rebuild, merge_players, merge_grades) get a concrete-consequences
+  confirm before skipping. **The branding step edits `theme_config`
+  (accent/accent2, merged over the stored config), NOT the legacy
+  `primary_color`/`accent_color` columns** — theme_config is what actually
+  themes the site (v8.70.2 fix); logo upload goes through `ImageEditorModal`
+  (crop + background removal) before saving.
+- **IQ pre-warm** (`services/iq_prewarm.py`; `GET/POST /iq/opposition/prewarm*`):
+  builds every known opponent's dossier for chosen grades **one at a time** in
+  a detached task (in-process progress dict, ≤40 opponents, 5-min per-build
+  timeout), reusing `iq_opponent.get_or_start_dossier` — a fresh dossier is a
+  cache hit, so re-runs are cheap. Grade options come from the latest season
+  year with per-grade distinct-opponent counts; busiest 3 pre-ticked.
+- Old `explore_*` step keys may linger in stored `completed_steps` —
+  harmless, ignored by the registry.
+
+### Secondary accent, luminance-guarded (v8.70.2)
+
+`theme.js::safeAccent2(accent2, accent, mode)`: many clubs' second colour is
+black or white, which vanishes against the matching theme background.
+`buildThemeCss` now emits per-theme `--pb-accent-2-safe`, a per-theme
+`--pb-gradient`, and a per-theme `--pb-chart-wickets` (all guarded: near-black
+falls back to the PRIMARY accent on dark, near-white on light; the raw
+`--pb-accent-2` stays available). Consumers of the pairing: Navbar active-tab
+underline, `StatCard`'s accent variant (small gradient bar), the wizard
+progress bar + return pill, plus the pre-existing `.pb-gradient` utilities /
+presskit. **Paint club colour pairs with `var(--pb-gradient)` or
+`--pb-accent-2-safe`, never raw `--pb-accent-2`, unless you know the surface.**
+
 ## Awards — default templates (v8.28.0, Jun 2026)
 
 Award catalogue lives in two tables (created in `main.py` lifespan, not Alembic):

@@ -22,6 +22,7 @@ from app.services import iq_ask
 from app.services import iq_opponent
 from app.services import iq_phases
 from app.services import iq_players
+from app.services import iq_prewarm
 from app.services import iq_radar
 from app.services import iq_review
 from app.services import iq_scout
@@ -135,6 +136,34 @@ async def refresh_opposition_dossier(
     return await iq_opponent.get_or_start_dossier(
         db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team, force=True
     )
+
+
+@router.get("/opposition/prewarm/options")
+async def prewarm_options(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Grade picker for the Setup Wizard's pre-build step: the latest season's
+    grades with opponent counts, a suggested top-3 default, and any live
+    prewarm progress."""
+    return await iq_prewarm.options(db, str(club.id))
+
+
+@router.post("/opposition/prewarm")
+async def start_prewarm(
+    grade_ids: list[str] = Body(..., embed=True, description="grade ids whose known opponents to pre-build"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Build every known opponent's dossier for the chosen grades, one at a
+    time in the background. Returns live progress; poll the status route."""
+    return await iq_prewarm.start(db, str(club.id), grade_ids)
+
+
+@router.get("/opposition/prewarm/status")
+async def prewarm_status(club: Organisation = Depends(get_current_club)):
+    """Progress of this club's running (or last) prewarm."""
+    return iq_prewarm.status(str(club.id))
 
 
 @router.post("/opposition/match")

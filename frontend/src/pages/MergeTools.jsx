@@ -248,14 +248,16 @@ function ManualMerge({ orgId, onMerged }) {
   )
 }
 
+function pickKeep(pair) {
+  const a = pair.player_a
+  const b = pair.player_b
+  if (a.playhq_id && !b.playhq_id) return a.id
+  if (b.playhq_id && !a.playhq_id) return b.id
+  return a.seasons_count >= b.seasons_count ? a.id : b.id
+}
+
 function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored }) {
-  const [keepId, setKeepId] = useState(() => {
-    const a = pair.player_a
-    const b = pair.player_b
-    if (a.playhq_id && !b.playhq_id) return a.id
-    if (b.playhq_id && !a.playhq_id) return b.id
-    return a.seasons_count >= b.seasons_count ? a.id : b.id
-  })
+  const [keepId, setKeepId] = useState(() => pickKeep(pair))
   const [merging, setMerging] = useState(false)
   const [ignoring, setIgnoring] = useState(false)
   const [error, setError] = useState(null)
@@ -291,6 +293,15 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored }) {
       <div className="flex items-center gap-2 mb-4">
         <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">POSSIBLE DUPLICATE</span>
         <span className="font-mono text-[10px] text-pb-faintest">"{pair.normalised_name}"</span>
+        {pair.redacted && (
+          <span
+            className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
+            style={{ borderColor: 'var(--pb-amber)' }}
+            title="A CA-redacted name (********) — this pair is excluded from Bulk Approve"
+          >
+            Manual review only
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -454,6 +465,8 @@ export default function MergeTools({ embeddedOrgId }) {
   const [error, setError] = useState(null)
   const [mergedCount, setMergedCount] = useState(0)
   const [historyKey, setHistoryKey] = useState(0)
+  const [bulkMerging, setBulkMerging] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)
 
   function load() {
     setLoading(true)
@@ -467,6 +480,40 @@ export default function MergeTools({ embeddedOrgId }) {
   useEffect(() => { load() }, [orgId])
 
   const visible = candidates?.filter(c => !skipped.has(`${c.player_a.id}:${c.player_b.id}`)) ?? []
+  const bulkEligible = visible.filter(c => !c.redacted)
+  const bulkRedactedCount = visible.length - bulkEligible.length
+
+  async function handleBulkApprove() {
+    if (bulkEligible.length === 0) return
+    const redactedNote = bulkRedactedCount > 0
+      ? ` ${bulkRedactedCount} redacted-name pair${bulkRedactedCount !== 1 ? 's' : ''} will be left for manual review.`
+      : ''
+    if (!window.confirm(
+      `Bulk merge ${bulkEligible.length} exact-name-match pair${bulkEligible.length !== 1 ? 's' : ''}?${redactedNote}`
+    )) return
+
+    setBulkMerging(true)
+    setBulkResult(null)
+    setError(null)
+    try {
+      const pairs = bulkEligible.map(pair => {
+        const keepPlayerId = pickKeep(pair)
+        const removePlayerId = keepPlayerId === pair.player_a.id ? pair.player_b.id : pair.player_a.id
+        return { keep_player_id: keepPlayerId, remove_player_id: removePlayerId }
+      })
+      const result = await api.bulkMergePlayers(orgId, pairs)
+      setBulkResult(result)
+      if (result.merged > 0) {
+        setMergedCount(c => c + result.merged)
+        setHistoryKey(k => k + 1)
+      }
+      load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBulkMerging(false)
+    }
+  }
 
   if (loading) return <PbSpinner message="Scanning for duplicates…" />
 
@@ -491,6 +538,32 @@ export default function MergeTools({ embeddedOrgId }) {
         </div>
       )}
 
+      {bulkResult && (
+        <div className="mb-4 font-mono text-[11px] border pb-hairline rounded px-4 py-3 text-pb-dim">
+          Bulk approve: {bulkResult.merged} merged
+          {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} skipped (redacted names)` : ''}
+          {bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}.
+        </div>
+      )}
+
+      {visible.length > 0 && (
+        <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+          <p className="font-mono text-[11px] text-pb-faint">
+            {visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found
+            {bulkRedactedCount > 0 ? ` (${bulkRedactedCount} need manual review)` : ''}.
+          </p>
+          <button
+            onClick={handleBulkApprove}
+            disabled={bulkMerging || bulkEligible.length === 0}
+            title="Merges every exact-name-match pair below except redacted (********) names"
+            className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
+          >
+            {bulkMerging ? 'Bulk merging…' : `Bulk Approve (${bulkEligible.length})`}
+          </button>
+        </div>
+      )}
+
       {visible.length === 0 ? (
         <div className="text-center py-16 text-pb-faint">
           <div className="text-5xl mb-4" style={{ color: 'var(--pb-accent)' }}>✓</div>
@@ -509,7 +582,6 @@ export default function MergeTools({ embeddedOrgId }) {
         </div>
       ) : (
         <>
-          <p className="font-mono text-[11px] text-pb-faint mb-5">{visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found.</p>
           <div className="flex flex-col gap-5">
             {visible.map(pair => (
               <MergePair

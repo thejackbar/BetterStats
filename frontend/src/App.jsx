@@ -55,6 +55,7 @@ import Login from './pages/Login'
 
 // Admin — lazy loaded (behind auth, not needed on first paint)
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
+const SetupWizard = lazy(() => import('./pages/admin/setup/SetupWizard'))
 const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
 const AdminSeasons = lazy(() => import('./pages/admin/AdminSeasons'))
@@ -236,6 +237,8 @@ export default function App() {
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
           <Route path="/admin/players/import" element={<ProtectedRoute><AdminPlayerImport /></ProtectedRoute>} />
           <Route path="/admin/games" element={<ProtectedRoute><AdminGames /></ProtectedRoute>} />
