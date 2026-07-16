@@ -50,7 +50,7 @@ const EMPTY_FORM = {
   duration_mode: 'once',
   duration_renewals: '',
   stackable_with_bundle: false,
-  max_redemptions: '',
+  max_redemptions: '1',
 }
 
 function toFormValue(coupon) {
