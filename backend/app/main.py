@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -22,6 +23,23 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+async def _run_stripe_subscription_sweep():
+    """Background counterpart to lifespan's boot sequence — see the comment
+    at its one call site for why this must never be awaited inline there."""
+    from app.models.db import async_session_maker as AsyncSessionLocal
+    from app.services import stripe_billing as _stripe_billing
+    async with AsyncSessionLocal() as session:
+        try:
+            fixed = await asyncio.wait_for(
+                _stripe_billing.sweep_dangling_stripe_subscriptions(session), timeout=30,
+            )
+            if fixed:
+                logger.info(f"Stripe subscription sweep: repaired {len(fixed)} club(s)")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Stripe subscription sweep failed or timed out: {e}")
 
 
 @asynccontextmanager
@@ -2703,15 +2721,21 @@ async def lifespan(app: FastAPI):
     # from before cancel paths cleared it themselves (see
     # stripe_billing.sweep_dangling_stripe_subscriptions). Idempotent — a
     # no-op on every boot after the first that finds nothing left to fix.
-    from app.services import stripe_billing as _stripe_billing
-    async with AsyncSessionLocal() as _stripe_sweep_session:
-        try:
-            _fixed = await _stripe_billing.sweep_dangling_stripe_subscriptions(_stripe_sweep_session)
-            if _fixed:
-                logger.info(f"Stripe subscription sweep: repaired {len(_fixed)} club(s)")
-        except Exception as e:
-            await _stripe_sweep_session.rollback()
-            logger.error(f"Stripe subscription sweep failed: {e}")
+    #
+    # Fired as a background task, NOT awaited — this makes a real outbound
+    # call to Stripe's API for every dangling row it finds, and an app boot
+    # step must never be allowed to depend on an external network call
+    # succeeding (or even responding) at all. A prior version of this awaited
+    # the sweep inline, and the very first time it had a real row to act on
+    # (after live Stripe checkout testing) it hung "Waiting for application
+    # startup" indefinitely with no crash and no further log line — a
+    # timeout on the await would have capped the damage, but still delays
+    # every boot and can still eat into deploy.sh's own health-check window
+    # on a merely slow Stripe response. Running in the background means boot
+    # never waits on Stripe at all; the 30s internal timeout is just so a
+    # stuck attempt doesn't hold a DB session open forever, and on failure
+    # or timeout the repair simply retries next boot (idempotent either way).
+    asyncio.create_task(_run_stripe_subscription_sweep())
 
     start_scheduler()
     logger.info("BetterStats API started")
