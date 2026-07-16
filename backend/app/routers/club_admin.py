@@ -35,6 +35,8 @@ from app.auth.modules import (
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
+from app.services import stripe_client
+from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
 from app.services import playhq_client
 from app.services.name_format import name_sort_key
@@ -2231,6 +2233,33 @@ async def start_own_module_trial(
     return {"ok": True}
 
 
+async def _cancel_stripe_subscription_if_nothing_held(club) -> None:
+    """Call after removing a club's last held module — mod_subs.remove_billing
+    is DB-only (no Stripe call), so left alone club.stripe_subscription_id
+    dangles: Stripe keeps billing a subscription the app no longer shows
+    anything held on, AND the Account page's checkout stays routed into the
+    "add modules to an already-live subscription" branch (no coupon support)
+    instead of falling back to a normal new-signup checkout. Shared by the
+    self-service cancel and the super-admin cancel-request approval — both are
+    real "cancel a paid subscription" actions."""
+    from app.auth.modules import account_plan_status
+    if any(r["status"] == "subscribed" for r in account_plan_status(club)):
+        return
+    if not club.stripe_subscription_id:
+        return
+    try:
+        await stripe_client.cancel_subscription(club.stripe_subscription_id)
+    except (stripe_client.StripeNotConfigured, stripe_error.InvalidRequestError):
+        club.stripe_subscription_id = None  # nothing configured, or Stripe already considers it gone
+    except stripe_error.StripeError:
+        _logging.getLogger(__name__).exception(
+            "Could not cancel Stripe subscription %s for org %s — leaving it in place for manual follow-up",
+            club.stripe_subscription_id, club.id,
+        )
+    else:
+        club.stripe_subscription_id = None
+
+
 class ModuleCancelIn(BaseModel):
     confirm: str = ""
 
@@ -2274,6 +2303,7 @@ async def cancel_own_module(
         targets = [r["module"] for r in account_plan_status(club) if r["status"] == "subscribed"]
     for key in targets:
         mod_subs.remove_billing(club, key, now=now)
+    await _cancel_stripe_subscription_if_nothing_held(club)
 
     from app.services.audit_log import log_activity
     await log_activity(
@@ -2522,6 +2552,7 @@ async def approve_module_request(
         result_sub = subs[0] if subs else None
     elif req.kind == "cancel":
         mod_subs.remove_billing(org, req.module_key, now=now)
+        await _cancel_stripe_subscription_if_nothing_held(org)
     await db.flush()
     req.status = "completed"
     req.completed_by = current_user.id
