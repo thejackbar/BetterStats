@@ -22,8 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, STATUS_PAST_DUE
-from app.models.db import BillingInvoice, ModuleActionRequest, Organisation
-from app.services import discount_coupons, module_subscriptions, stripe_client
+from app.config.settings import settings
+from app.models.db import BillingInvoice, ClubMembership, ModuleActionRequest, Organisation, User
+from app.services import discount_coupons, email_service, module_subscriptions, stripe_client
 from app.services.stripe_client import epoch_to_date, epoch_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,100 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
     await _upsert_invoice(db, org, invoice, now)
     await db.commit()
+
+    # Best-effort receipt to the club's primary admin — covers the first
+    # invoice on a brand new subscribe, an add-on purchase, and every
+    # renewal alike, since they all land here. Never allowed to fail the
+    # webhook itself (entitlement above has already committed): a
+    # deliverability hiccup should show up in logs, not roll back a payment
+    # Stripe has already collected.
+    try:
+        await _send_invoice_receipt(db, org, invoice)
+    except Exception:
+        logger.exception("Stripe invoice.paid: receipt email failed for org %s, invoice %s", org.id, invoice.get("id"))
+
+
+async def _primary_admin(db: AsyncSession, org_id) -> User | None:
+    return (await db.execute(
+        select(User)
+        .join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(
+            ClubMembership.club_id == org_id,
+            ClubMembership.role == "club_admin",
+            ClubMembership.is_primary_admin.is_(True),
+        )
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+def _receipt_email_body(club_name: str, amount: str, currency: str,
+                         line_descriptions: list[str], hosted_invoice_url: str | None) -> tuple[str, str]:
+    """Plain inline-styled HTML (matches trial_lifecycle.py's _shell pattern —
+    a system-level transactional send, not a BetterComms campaign, so no
+    club-shell/unsubscribe wrapper)."""
+    items_html = "".join(f'<li style="margin:0 0 4px">{d}</li>' for d in line_descriptions) or ""
+    items_block = (
+        f'<ul style="font-size:14px;line-height:1.5;margin:0 0 14px;padding-left:18px">{items_html}</ul>'
+        if items_html else ""
+    )
+    cta = (
+        f'<p style="margin:24px 0"><a href="{hosted_invoice_url}" '
+        'style="display:inline-block;background:#16c784;color:#fff;text-decoration:none;'
+        'padding:10px 20px;border-radius:6px;font-size:14px;font-weight:bold">View invoice</a></p>'
+        if hosted_invoice_url else ""
+    )
+    html = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1a1a1a">
+      <p style="font-size:14px;color:#555">BetterCricket</p>
+      <p style="font-size:14px;line-height:1.5;margin:0 0 14px">
+        Payment received for {club_name} — <strong>{currency} ${amount}</strong>.
+      </p>
+      {items_block}
+      {cta}
+      <p style="font-size:12px;color:#888;margin-top:24px">
+        You're getting this as {club_name}'s primary admin. Your full billing history is always
+        available on the Account page in BetterCricket.
+      </p>
+    </div>
+    """
+    text_lines = [f"Payment received for {club_name} — {currency} ${amount}.", *line_descriptions]
+    if hosted_invoice_url:
+        text_lines.append(f"View invoice: {hosted_invoice_url}")
+    return html, "\n\n".join(text_lines)
+
+
+async def _send_invoice_receipt(db: AsyncSession, org: Organisation, invoice: dict) -> None:
+    """Emails the club's primary admin a receipt for a Stripe invoice that
+    was just paid — the only feedback a club gets for the add-on-to-
+    existing-subscription flow, which charges synchronously with no Stripe
+    redirect at all (routers/billing.py), and a welcome confirmation for a
+    brand new subscribe or a routine renewal alike. Silently no-ops when the
+    club has no primary admin on record (shouldn't happen in practice —
+    every club gets one at registration — but this is a best-effort extra,
+    not something to error out over)."""
+    admin = await _primary_admin(db, org.id)
+    if not admin or not admin.email:
+        return
+    amount_paid = (invoice.get("amount_paid") or 0) / 100
+    currency = (invoice.get("currency") or "aud").upper()
+    hosted_url = invoice.get("hosted_invoice_url")
+    lines = (invoice.get("lines") or {}).get("data") or []
+    descriptions = [ln.get("description") for ln in lines if ln.get("description")]
+    html, text_body = _receipt_email_body(org.name, f"{amount_paid:.2f}", currency, descriptions, hosted_url)
+    msg = email_service.EmailMessage(
+        to_email=admin.email,
+        to_name=admin.display_name or admin.username,
+        subject=f"Payment received — {currency} ${amount_paid:.2f}",
+        html=html,
+        text=text_body,
+        from_email=settings.email_from_address,
+        from_name=settings.email_from_name,
+        reply_to=settings.email_reply_to,
+        configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+    )
+    result = await email_service.get_email_provider().send(msg)
+    if not result.ok:
+        logger.warning("Stripe billing: receipt email failed for org %s: %s", org.id, result.error)
 
 
 async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None:

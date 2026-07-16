@@ -88,7 +88,10 @@ export default function AdminAccount() {
         setMsg('Payment method saved — finishing your purchase…')
         retryAddonPurchase(JSON.parse(retryModules))
       } else {
-        setMsg("Payment received — you're subscribed. It can take a few seconds to show below.")
+        setMsg(
+          "Payment received — you're subscribed. It can take a few seconds to show below. "
+          + "You'll receive an email confirming the subscription and payment."
+        )
         setTimeout(load, 3000)
       }
     } else if (checkout === 'cancelled') {
@@ -275,7 +278,10 @@ export default function AdminAccount() {
         window.location.href = res.url
         return
       }
-      setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
+      setMsg(
+        `Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription. ` +
+        "You'll receive an email confirming the subscription and payment."
+      )
       setSelected(new Set())
       setQuote(null)
       clearCoupon()
@@ -301,7 +307,10 @@ export default function AdminAccount() {
         window.location.href = res.url
         return
       }
-      setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
+      setMsg(
+        `Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription. ` +
+        "You'll receive an email confirming the subscription and payment."
+      )
       setSelected(new Set())
       setQuote(null)
       await load()
