@@ -1,7 +1,7 @@
 export default {
   version: 'v8.70.0',
   date: '2026-07-16',
-  sortKey: '2026-07-16T15:00:00Z',
+  sortKey: '2026-07-16T21:00:00Z',
   title: 'Club Setup Wizard',
   items: [
     'New step-by-step Setup Wizard at Admin → Setup guide: a guided walk through getting a club fully set up across the whole platform — first full sync, branding, sponsors, the data-tidying tools (player and grade merging, imports), then each module the club holds (BetterSelect squads and availability, the club website, fees and comms, BetterIQ scouting, BetterFantasy).',
