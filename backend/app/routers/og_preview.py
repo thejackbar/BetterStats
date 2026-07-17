@@ -244,10 +244,10 @@ MARKETING_FAQ: list[tuple[str, str]] = [
      "discount applies, which brings BetterStats plus every module to $949 a "
      "year. Every price is a flat rate per club, the same for one team or fifty."),
     ("How far back does the historical data go?",
-     "As far back as the records exist. For many clubs that means decades of "
-     "match history, confirmed back to 1975 in some cases. BetterCricket brings "
-     "across whatever is available on first sync, and you can layer manually "
-     "imported records on top."),
+     "As far back as Australian cricket records go. There is no limit: "
+     "BetterCricket brings across everything Cricket Australia holds on first "
+     "sync, and if your club has old spreadsheets, those can be imported on "
+     "top."),
     ("Who is BetterCricket for?",
      "Australian cricket clubs of any size, from premier grade to country and "
      "association clubs, plus the stats volunteers, captains, coaches, "

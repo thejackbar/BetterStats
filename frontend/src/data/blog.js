@@ -608,7 +608,7 @@ export const POSTS = [
       { type: 'p', text: 'BetterCricket puts all of that on a public profile page that updates after every game. Players check their own stats. They compare themselves to teammates. They notice when they\'re climbing the leaderboards. That engagement with the data is a form of investment in the club.' },
       { type: 'h2', text: 'The history is already there, it just isn\'t visible' },
       { type: 'p', text: 'Most clubs don\'t realise how much of their own history already exists in some form. Decades of scorecards (batting innings, bowling spells, fielding stats, fall of wickets) captured over the years but scattered and out of sight. BetterCricket surfaces all of that and turns it into something people can actually read and share.' },
-      { type: 'p', text: 'For many clubs connected to BetterCricket, the historical data goes back to the 1970s. Players who retired years ago suddenly have public profile pages showing everything they ever contributed to the club.' },
+      { type: 'p', text: 'The historical data goes back as far as the records exist, with no limit. Players who retired years ago suddenly have public profile pages showing everything they ever contributed to the club.' },
       { type: 'h2', text: 'Parents and families become part of the story' },
       { type: 'p', text: 'Junior players moving into seniors often bring families who are deeply invested in their progress. A public stats page with career totals, recent form, and a shareable stat card gives those families something to engage with and send to the group chat.' },
       { type: 'p', text: '"My son just hit his 500 career runs" is a much better story when there\'s a milestone badge and a one-tap shareable card to go with it.' },
@@ -819,7 +819,7 @@ export const POSTS = [
       { type: 'h2', text: '5. Player duplication splits the record' },
       { type: 'p', text: 'Scoring platforms sometimes create a new account for a player who already exists, because their name was entered slightly differently, they changed their email, or they were re-registered after a gap. The result: one physical player, two data records, half the career stats on each.' },
       { type: 'p', text: 'Without a merge tool that combines both records cleanly (preserving every innings, spell, and catch from both), those splits become permanent parts of the historical record.' },
-      { type: 'callout', text: 'BetterCricket recovers your club\'s full digital history, going back to the 1970s for many clubs, and keeps it automatically updated after every match.' },
+      { type: 'callout', text: 'BetterCricket recovers your club\'s full digital history, as far back as the records go, and keeps it automatically updated after every match.' },
     ],
   },
   {

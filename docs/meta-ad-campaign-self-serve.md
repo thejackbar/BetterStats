@@ -18,8 +18,8 @@ The July traffic campaign (`BC_AU_Traffic_ClubHistory_Jul2026`) taught us:
 - Traffic-objective ads bought cheap landing-page views but conversion
   depended on a human follow-up. The Contact form was the only conversion
   event, and a form enquiry still needed us to onboard the club by hand.
-- The club-history angle (decades of stats, "your 1975 premiership is in
-  there") is the hook that got clicks. Keep it.
+- The club-history angle (the full club history, "every season your club
+  has ever played is in there") is the hook that got clicks. Keep it.
 - Meta's own lead count needed manual +/- correction (the adjustment buttons
   exist because of this). Our own site-tracked attribution was the more
   trustworthy number, which is why signups now write their attribution into
@@ -101,7 +101,7 @@ The strongest screens to capture (a normal browser on the production site,
 1920x1080, light or dark to taste):
 
 1. A long-established club's public home page (e.g. `betterat.cricket/applecross`)
-   showing the decades-deep season list.
+   showing the full season list, as deep as the records go.
 2. A veteran player's profile: career runs, season-by-season table going
    back to the 1980s-90s.
 3. Club records / leaderboard page (all-time records with names and years).
@@ -111,7 +111,7 @@ The strongest screens to capture (a normal browser on the production site,
 
 **Concept 1 — "It already knows your club" (15s video or GIF, expected
 winner).** Screen-record scrolling a real club's history: season list flying
-past 2026 → 1975, cut to a player profile, cut to the records page. Text
+from 2026 to the very first recorded season, cut to a player profile, cut to the records page. Text
 overlay beats: "Your club's entire history" → "already in here" → "Free
 trial. No credit card. 3 minutes." CTA: Sign Up. This is the proven hook
 from the last campaign, now with a self-serve payoff.
