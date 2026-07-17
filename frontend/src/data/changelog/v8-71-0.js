@@ -1,7 +1,7 @@
 export default {
   version: 'v8.71.0',
   date: '2026-07-17',
-  sortKey: '2026-07-17T06:00:00Z',
+  sortKey: '2026-07-17T07:00:00Z',
   title: 'Billing: payment method management, discount reporting, clearer invoices',
   items: [
     "Added a note to the add-on purchase screen confirming the payment goes on the card already on file for the club's account.",
