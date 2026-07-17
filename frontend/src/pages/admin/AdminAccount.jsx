@@ -34,6 +34,11 @@ const fmtDate = (d) =>
 // Survives the full-page redirect out to Stripe's setup-mode Checkout and
 // back — see submitSubscribe's needs_payment_method branch.
 const ADDON_RETRY_KEY = 'bs_addon_retry_modules'
+// Set right before redirecting to the standalone "add a payment method"
+// setup session (the Payment Methods panel's own ADD button, not the
+// add-on-purchase recovery flow above) — tells the checkout=success handler
+// this round trip added a card, not a subscription or a module purchase.
+const PM_SETUP_KEY = 'bs_pm_setup_pending'
 
 export default function AdminAccount() {
   const [plan, setPlan] = useState(null)
@@ -65,11 +70,20 @@ export default function AdminAccount() {
   const [redeemBusy, setRedeemBusy] = useState(false)
   const [redeemMsg, setRedeemMsg] = useState('')
   const [redeemError, setRedeemError] = useState('')
+  // Payment method management — the club's saved Stripe payment methods, own
+  // panel below Billing History. { default_payment_method_id, payment_methods }
+  const [paymentMethods, setPaymentMethods] = useState(null)
+  const [pmBusy, setPmBusy] = useState('') // pm id currently being acted on, or 'add'
+  const [pmError, setPmError] = useState('')
 
   const load = () =>
     api.accountGetPlan().then(setPlan).catch((e) => setError(e.message || 'Could not load your plan'))
 
+  const loadPaymentMethods = () =>
+    api.billingListPaymentMethods().then(setPaymentMethods).catch(() => {})
+
   useEffect(() => { load() }, [])
+  useEffect(() => { loadPaymentMethods() }, [])
 
   // Returning from a real Stripe Checkout Session — the redirect is UX only
   // (the webhook is what actually grants entitlement, see
@@ -80,6 +94,16 @@ export default function AdminAccount() {
     const checkout = searchParams.get('checkout')
     if (!checkout) return
     if (checkout === 'success') {
+      if (sessionStorage.getItem(PM_SETUP_KEY)) {
+        sessionStorage.removeItem(PM_SETUP_KEY)
+        setMsg('Payment method added.')
+        loadPaymentMethods()
+        const next = new URLSearchParams(searchParams)
+        next.delete('checkout')
+        next.delete('session_id')
+        setSearchParams(next, { replace: true })
+        return
+      }
       const retryModules = sessionStorage.getItem(ADDON_RETRY_KEY)
       if (retryModules) {
         // That "success" was the setup-mode session adding a card, not a
@@ -88,10 +112,7 @@ export default function AdminAccount() {
         setMsg('Payment method saved — finishing your purchase…')
         retryAddonPurchase(JSON.parse(retryModules))
       } else {
-        setMsg(
-          "Payment received — you're subscribed. It can take a few seconds to show below. "
-          + "You'll receive an email confirming the subscription and payment."
-        )
+        setMsg("Payment received — you're subscribed. It can take a few seconds to show below.")
         setTimeout(load, 3000)
       }
     } else if (checkout === 'cancelled') {
@@ -278,10 +299,7 @@ export default function AdminAccount() {
         window.location.href = res.url
         return
       }
-      setMsg(
-        `Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription. ` +
-        "You'll receive an email confirming the subscription and payment."
-      )
+      setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
       setSelected(new Set())
       setQuote(null)
       clearCoupon()
@@ -307,10 +325,7 @@ export default function AdminAccount() {
         window.location.href = res.url
         return
       }
-      setMsg(
-        `Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription. ` +
-        "You'll receive an email confirming the subscription and payment."
-      )
+      setMsg(`Added ${res.modules.length} module${res.modules.length === 1 ? '' : 's'} to your subscription.`)
       setSelected(new Set())
       setQuote(null)
       await load()
@@ -318,6 +333,49 @@ export default function AdminAccount() {
       setError(e.message || 'Could not finish adding the module(s) — your card was saved, try again below.')
     } finally {
       setCheckoutBusy(false)
+    }
+  }
+
+  // Payment method management — the club's own panel, not tied to any
+  // module purchase. addPaymentMethod bounces out to a Stripe-hosted
+  // setup-mode Checkout Session (no charge) and back; PM_SETUP_KEY is what
+  // tells the checkout=success handler above this round trip was that, not
+  // a subscription or add-on purchase.
+  const addPaymentMethod = async () => {
+    setPmBusy('add')
+    setPmError('')
+    try {
+      const res = await api.billingCreatePaymentMethodSetupSession()
+      sessionStorage.setItem(PM_SETUP_KEY, '1')
+      window.location.href = res.url
+    } catch (e) {
+      setPmError(e.message || 'Could not start adding a payment method')
+      setPmBusy('')
+    }
+  }
+
+  const setDefaultPaymentMethod = async (pmId) => {
+    setPmBusy(pmId)
+    setPmError('')
+    try {
+      setPaymentMethods(await api.billingSetDefaultPaymentMethod(pmId))
+    } catch (e) {
+      setPmError(e.message || 'Could not set this as the default payment method')
+    } finally {
+      setPmBusy('')
+    }
+  }
+
+  const removePaymentMethod = async (pmId) => {
+    if (!window.confirm('Remove this payment method?')) return
+    setPmBusy(pmId)
+    setPmError('')
+    try {
+      setPaymentMethods(await api.billingRemovePaymentMethod(pmId))
+    } catch (e) {
+      setPmError(e.message || 'Could not remove this payment method')
+    } finally {
+      setPmBusy('')
     }
   }
 
@@ -484,26 +542,104 @@ export default function AdminAccount() {
               <div className="pb-card p-4 mt-6">
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">Billing history</p>
                 <div className="space-y-2">
-                  {invoices.map((inv) => (
-                    <div key={inv.id} className="flex items-center gap-3 font-mono text-[11px]">
-                      <span className="text-pb-faint w-24 shrink-0">{fmtDate(inv.period_end || inv.created_at)}</span>
-                      <span className="text-pb-text w-20 shrink-0">${(inv.amount_paid / 100).toFixed(2)}</span>
-                      <span className={`w-16 shrink-0 uppercase ${inv.status === 'paid' ? 'text-emerald-400' : 'text-amber-300'}`}>
-                        {inv.status}
-                      </span>
-                      {inv.hosted_invoice_url && (
-                        <a
-                          href={inv.hosted_invoice_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-pb-faint hover:text-pb-text underline"
-                        >
-                          View invoice
-                        </a>
-                      )}
-                    </div>
-                  ))}
+                  {invoices.map((inv) => {
+                    const modules = (inv.line_items || [])
+                      .map((li) => (li.name || '').replace(/^BetterCricket\s*—\s*/, ''))
+                      .filter(Boolean)
+                      .join(', ')
+                    const discountNote = [
+                      inv.bundle_discount_cents > 0 ? `Bundle -$${(inv.bundle_discount_cents / 100).toFixed(2)}` : null,
+                      inv.coupon_discount_cents > 0 ? `${inv.coupon_code || 'Coupon'} -$${(inv.coupon_discount_cents / 100).toFixed(2)}` : null,
+                    ].filter(Boolean).join(' · ')
+                    return (
+                      <div key={inv.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] py-1.5 border-b pb-hairline last:border-0">
+                        <span className="text-pb-faint w-24 shrink-0">{fmtDate(inv.period_end || inv.created_at)}</span>
+                        <span className="text-pb-text flex-1 min-w-[140px]">{modules || '—'}</span>
+                        <span className="text-pb-text w-20 shrink-0">${(inv.amount_paid / 100).toFixed(2)}</span>
+                        <span className={`w-16 shrink-0 uppercase ${inv.status === 'paid' ? 'text-emerald-400' : 'text-amber-300'}`}>
+                          {inv.status}
+                        </span>
+                        <span className="text-pb-faint w-44 shrink-0">{inv.payment_method_summary || '—'}</span>
+                        {inv.hosted_invoice_url && (
+                          <a
+                            href={inv.hosted_invoice_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-pb-faint hover:text-pb-text underline shrink-0"
+                          >
+                            View invoice
+                          </a>
+                        )}
+                        {discountNote && (
+                          <span className="w-full font-mono text-[10px] text-emerald-400/80">{discountNote}</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
+              </div>
+            )}
+
+            {plan.stripe_customer_id && (
+              <div className="pb-card p-4 mt-6">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">Payment methods</p>
+                  {plan.is_primary_admin && (
+                    <button
+                      type="button"
+                      onClick={addPaymentMethod}
+                      disabled={pmBusy === 'add'}
+                      className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50 shrink-0"
+                    >
+                      {pmBusy === 'add' ? 'REDIRECTING…' : '+ ADD'}
+                    </button>
+                  )}
+                </div>
+                {pmError && <p className="font-mono text-[11px] text-pb-red mb-2">{pmError}</p>}
+                {!paymentMethods ? (
+                  <p className="font-mono text-[11px] text-pb-faint">Loading…</p>
+                ) : paymentMethods.payment_methods.length === 0 ? (
+                  <p className="font-mono text-[11px] text-pb-faint">No payment methods on file yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {paymentMethods.payment_methods.map((pm) => (
+                      <div key={pm.id} className="flex items-center justify-between gap-2 font-mono text-[11px] py-1.5 border-b pb-hairline last:border-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-pb-text truncate">{pm.summary}</span>
+                          {pm.is_default && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[9px] uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                        {plan.is_primary_admin && (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {!pm.is_default && (
+                              <button
+                                type="button"
+                                onClick={() => setDefaultPaymentMethod(pm.id)}
+                                disabled={pmBusy === pm.id}
+                                className="font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-50"
+                              >
+                                {pmBusy === pm.id ? '…' : 'SET DEFAULT'}
+                              </button>
+                            )}
+                            {paymentMethods.payment_methods.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removePaymentMethod(pm.id)}
+                                disabled={pmBusy === pm.id}
+                                className="font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border border-pb-red/40 text-pb-red hover:bg-pb-red/10 disabled:opacity-50"
+                              >
+                                {pmBusy === pm.id ? '…' : 'REMOVE'}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -606,7 +742,8 @@ export default function AdminAccount() {
                     <p className="font-mono text-[10px] text-pb-faintest pt-1">
                       The price due is prorated to your account's current renewal date. Each added
                       module then renews at its full annual price from there, in step with your
-                      account renewal date.
+                      account renewal date. Note that we will use the current payment method
+                      associated with your account to process the payment.
                     </p>
                   </div>
                 )}

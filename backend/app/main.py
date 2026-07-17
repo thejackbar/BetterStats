@@ -2560,6 +2560,22 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_billing_invoices_org "
             "ON billing_invoices(organisation_id, created_at DESC)"
         ))
+        # Discount breakdown + payment method on billing_invoices (migration
+        # 159) — see services/stripe_billing.py::_upsert_invoice and
+        # routers/billing.py::discount_report (the Super Admin rollup).
+        await conn.execute(text(
+            "ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS bundle_discount_cents INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS coupon_code TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS coupon_discount_cents INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS payment_method_type TEXT"))
+        await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS payment_method_summary TEXT"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_billing_invoices_coupon_code ON billing_invoices(coupon_code) "
+            "WHERE coupon_code IS NOT NULL"
+        ))
         # Per-club override of billing_checkout_enabled (migration 151) — see
         # services/platform_settings.billing_checkout_enabled_for_org.
         await conn.execute(text(

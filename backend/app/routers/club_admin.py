@@ -2193,6 +2193,10 @@ async def get_account_plan(
         # Drives the "redeem a discount code ahead of your renewal" box on
         # the Account page — see routers/discount_coupons.py's /redeem.
         "stripe_subscription_active": bool(club.stripe_subscription_id),
+        # Drives the Payment Methods panel — a club with no Stripe Customer
+        # yet (never checked out) has nothing to manage there. Just a
+        # presence flag, never the raw id itself.
+        "stripe_customer_id": bool(club.stripe_customer_id),
     }
 
 

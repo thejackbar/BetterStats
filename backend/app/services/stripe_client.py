@@ -82,6 +82,7 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
                                    customer_address: dict | None = None,
                                    discount_schedule: dict | None = None,
                                    extra_coupon_id: str | None = None, extra_stackable: bool = False,
+                                   extra_coupon_code: str | None = None,
                                    extra_coupon_off_dollars: float | None = None,
                                    coupon_redemption_id: str | None = None):
     """A Stripe Checkout Session in subscription mode, priced from
@@ -109,15 +110,26 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     elements" (found live, not documented up front; the SDK's param typing
     allows a list but the API enforces the cap). So a stacking coupon is
     instead pre-combined with the bundle discount into ONE ad-hoc amount_off
-    coupon: ``extra_coupon_off_dollars`` is the coupon's own dollar
-    contribution (computed by the caller with routers/billing.py's
-    _apply_coupon_to_quote — the SAME math the /quote preview uses, so the
-    real charge matches what was previewed), added to the bundle discount
-    and passed through _ensure_bundle_coupon as a single combined figure.
-    ``extra_coupon_id`` itself is unused in this branch — the coupon's own
-    Stripe Coupon object (which may carry a module restriction via
-    applies_to.products) is bypassed in favour of the pre-computed flat
-    dollar amount, which already accounts for that scoping.
+    coupon (_ensure_combined_discount_coupon): ``extra_coupon_off_dollars``
+    is the coupon's own dollar contribution (computed by the caller with
+    routers/billing.py's _apply_coupon_to_quote — the SAME math the /quote
+    preview uses, so the real charge matches what was previewed), added to
+    the bundle discount. ``extra_coupon_id`` itself (the coupon's own real
+    Stripe Coupon object, which may carry a module restriction via
+    applies_to.products) is used ONLY in the non-stacking branch — the
+    stacking branch bypasses it in favour of the pre-computed flat dollar
+    amount, which already accounts for that scoping. Since Stripe genuinely
+    can't show two separate discount lines within this one-slot limit, the
+    combined coupon's ``name`` spells out both components (e.g. "Bundle
+    discount ($48.00) + EARLYBIRD-JUL26 ($162.25 off)") — the best available
+    approximation of itemisation on the Stripe invoice itself.
+    ``extra_coupon_code`` (the human-entered code, not the Stripe id) drives
+    that name and is also stamped into metadata as ``coupon_code`` /
+    ``coupon_discount_cents`` alongside ``bundle_discount_cents`` when
+    either applies — BetterCricket's OWN billing_invoices row is where the
+    true separate breakdown lives for our own reporting (see
+    stripe_billing._upsert_invoice), independent of how Stripe's invoice
+    can display it.
 
     org_id + the selected billing_keys are round-tripped through BOTH the
     session's own metadata/client_reference_id AND the subscription's metadata
@@ -175,17 +187,33 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     if extra_coupon_id and not extra_stackable:
         # A non-stackable discount-coupon wins outright — the bundle
         # discount is suppressed for this checkout, never combined. Exactly
-        # one discount, so no combining needed.
+        # one discount, so no combining needed, and Stripe already shows
+        # this coupon under its own real name/code.
         discounts = [{"coupon": extra_coupon_id}]
+        if extra_coupon_code:
+            metadata["coupon_code"] = extra_coupon_code
+            metadata["coupon_discount_cents"] = str(round((extra_coupon_off_dollars or 0) * 100))
     else:
         # Checkout Session allows at most one discounts entry — a stacking
         # coupon and the bundle discount are folded into a single ad-hoc
         # coupon (see the docstring above) rather than passed as two.
+        if quote["discount"] > 0:
+            metadata["bundle_discount_cents"] = str(round(quote["discount"] * 100))
         combined = quote["discount"]
         if extra_coupon_id:
             combined += extra_coupon_off_dollars or 0
+            if extra_coupon_code:
+                metadata["coupon_code"] = extra_coupon_code
+                metadata["coupon_discount_cents"] = str(round((extra_coupon_off_dollars or 0) * 100))
         if combined > 0:
-            discounts.append({"coupon": await _ensure_bundle_coupon(db, combined)})
+            if extra_coupon_id and extra_coupon_code:
+                coupon_id = await _ensure_combined_discount_coupon(
+                    bundle_dollars=quote["discount"], coupon_code=extra_coupon_code,
+                    coupon_dollars=extra_coupon_off_dollars or 0,
+                )
+            else:
+                coupon_id = await _ensure_bundle_coupon(db, combined)
+            discounts.append({"coupon": coupon_id})
 
     if discounts:
         params["discounts"] = discounts
@@ -266,6 +294,74 @@ async def retrieve_subscription(subscription_id: str):
     return await stripe.Subscription.retrieve_async(subscription_id)
 
 
+async def retrieve_payment_intent(payment_intent_id: str):
+    _require_configured()
+    return await stripe.PaymentIntent.retrieve_async(payment_intent_id, expand=["payment_method"])
+
+
+def invoice_payment_intent_id(invoice: dict) -> str | None:
+    """The PaymentIntent an invoice was paid with. Mirrors
+    stripe_billing._invoice_subscription_id's defensive both-shapes read —
+    this account's Stripe API version has already been found (live) to nest
+    invoice.subscription somewhere this SDK doesn't expect
+    (parent.subscription_details.subscription instead of the flat field),
+    so the same restructuring plausibly reaches payment_intent too even
+    though that specific move hasn't been directly observed — cheap to
+    guard against regardless."""
+    direct = invoice.get("payment_intent")
+    if direct:
+        return direct if isinstance(direct, str) else direct.get("id")
+    parent = invoice.get("parent") or {}
+    nested = (parent.get("subscription_details") or {}).get("payment_intent")
+    if nested:
+        return nested if isinstance(nested, str) else nested.get("id")
+    return None
+
+
+def describe_payment_method(pm: dict) -> tuple[str, str]:
+    """(type, human-readable summary) for a Stripe PaymentMethod object, for
+    Billing History display — e.g. ('card', 'Visa Debit •••• 4242'),
+    ('card', 'Apple Pay •••• 4242'), ('au_becs_debit', 'BECS (BSB 123-456,
+    Account •••• 6789)'). Defensive about every type: an unrecognised or
+    partially-shaped payment method falls back to a generic label rather
+    than raising, since this is cosmetic Billing History detail, never
+    something that should be allowed to break recording a payment.
+    ``payto`` specifically isn't in this SDK's own type stubs at all (AU
+    PayTo is confirmed live on this account's Checkout page — a real
+    payment method — but stripe-python 10.12.0 doesn't model it yet), so
+    its field shape here is a best-effort guess pending live verification,
+    not confirmed against real PayTo payment method data."""
+    pm_type = pm.get("type") or "unknown"
+    if pm_type == "card":
+        card = pm.get("card") or {}
+        last4 = card.get("last4") or "????"
+        wallet = (card.get("wallet") or {}).get("type")
+        if wallet == "apple_pay":
+            return pm_type, f"Apple Pay •••• {last4}"
+        if wallet == "google_pay":
+            return pm_type, f"Google Pay •••• {last4}"
+        funding = (card.get("funding") or "").lower()
+        brand = (card.get("brand") or "Card").capitalize()
+        label = f"{brand} {funding.capitalize()}" if funding and funding != "unknown" else brand
+        return pm_type, f"{label} •••• {last4}"
+    if pm_type == "au_becs_debit":
+        becs = pm.get("au_becs_debit") or {}
+        bsb = becs.get("bsb_number") or "???-???"
+        last4 = becs.get("last4") or "????"
+        return pm_type, f"BECS (BSB {bsb}, Account •••• {last4})"
+    if pm_type == "payto":
+        # Best-effort — see docstring. Tries the field names a mobile-number
+        # or BSB/account identifier would plausibly use; falls back to a
+        # bare label rather than guessing wrong.
+        payto = pm.get("payto") or {}
+        identifier = (
+            payto.get("mobile_number") or payto.get("phone") or payto.get("pan")
+            or payto.get("bsb_number") and f"BSB {payto['bsb_number']}"
+        )
+        return pm_type, f"PayTo ({identifier})" if identifier else "PayTo"
+    return pm_type, pm_type.replace("_", " ").title()
+
+
 async def cancel_subscription(subscription_id: str) -> None:
     """Cancels a subscription immediately (not at period end) — used when a
     club's self-service cancel leaves it with zero held modules, so Stripe
@@ -285,10 +381,11 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> st
     stripe_coupons (migration 153), keyed on the dollar amount alone since
     duration is fixed at 'once' for every bundle coupon today (if duration
     ever becomes independently configurable, key on (amount, duration)
-    instead). Mirrors _ensure_product below. discount_dollars can carry
-    cents (e.g. a stacking discount-coupon combined with the bundle
-    discount, see create_checkout_session below) — rounded to the nearest
-    cent, since Stripe's amount_off is cents-integer, not a float."""
+    instead). Mirrors _ensure_product below. Only ever called for the PURE
+    bundle-discount case (no coupon code involved) — a bundle discount
+    combined with a coupon code goes through _ensure_combined_discount_coupon
+    instead, which needs a descriptive per-redemption name and so isn't
+    cached the same way."""
     cents = round(discount_dollars * 100)
     row = (await db.execute(
         text("SELECT stripe_coupon_id FROM stripe_coupons WHERE discount_cents = :c"),
@@ -301,7 +398,7 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> st
         amount_off=cents,
         currency=settings.stripe_currency,
         duration="once",
-        name=f"Discount (${discount_dollars:.2f} off first payment)",
+        name=f"Bundle discount (${discount_dollars:.2f} off first payment)",
     )
     # Same race-tolerance note as _ensure_product — a concurrent duplicate
     # is harmless Dashboard clutter, not worth locking for.
@@ -314,6 +411,64 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> st
     )
     await db.commit()
     return coupon["id"]
+
+
+async def _ensure_combined_discount_coupon(*, bundle_dollars: float, coupon_code: str, coupon_dollars: float) -> str:
+    """A one-off Stripe Coupon combining the bundle discount and a stacking
+    discount-coupon into the single slot Checkout Session's ``discounts``
+    allows (see create_checkout_session's docstring for why they can't be
+    two list entries). NOT cached like _ensure_bundle_coupon — this exact
+    combination (bundle amount + specific code + that code's own dollar
+    contribution, which itself depends on the module selection) is unlikely
+    to repeat, so a fresh Coupon per redemption is simpler than a cache key
+    that would rarely hit. Its ``name`` spells out both components, since
+    that's the only way Stripe shows any breakdown at all within the
+    one-discount limit — BetterCricket's own billing_invoices row carries
+    the real separate amounts for our own reporting regardless."""
+    _require_configured()
+    total_cents = round((bundle_dollars + coupon_dollars) * 100)
+    name = f"Bundle discount (${bundle_dollars:.2f}) + {coupon_code} (${coupon_dollars:.2f} off)"
+    coupon = await stripe.Coupon.create_async(
+        amount_off=total_cents,
+        currency=settings.stripe_currency,
+        duration="once",
+        name=name,
+    )
+    return coupon["id"]
+
+
+# ─── Payment method management (Primary Admin's Account page + Super Admin) ─
+# A club's Stripe Customer can hold several saved payment methods (add a
+# backup card, switch which one bills the renewal). Customer.list_payment_
+# methods (not the older PaymentMethod.list, which requires a `type` filter
+# per call) returns every type registered on the account in one call.
+
+async def list_payment_methods(customer_id: str) -> dict:
+    """Every saved payment method for a club's Stripe Customer, plus which
+    one (if any) is its default for future invoices/renewals."""
+    _require_configured()
+    customer = await stripe.Customer.retrieve_async(customer_id)
+    default_id = (customer.get("invoice_settings") or {}).get("default_payment_method")
+    if isinstance(default_id, dict):
+        default_id = default_id.get("id")
+    methods = await stripe.Customer.list_payment_methods_async(customer_id)
+    return {"default_payment_method_id": default_id, "payment_methods": methods.get("data", [])}
+
+
+async def set_default_payment_method(customer_id: str, payment_method_id: str) -> None:
+    _require_configured()
+    await stripe.Customer.modify_async(
+        customer_id, invoice_settings={"default_payment_method": payment_method_id},
+    )
+
+
+async def detach_payment_method(payment_method_id: str) -> None:
+    """Removes a payment method from the customer entirely — callers must
+    have already confirmed it's not the club's only one on file (see
+    routers/billing.py's _remove_payment_method_for, which enforces that
+    rule before this is ever reached)."""
+    _require_configured()
+    await stripe.PaymentMethod.detach_async(payment_method_id)
 
 
 def construct_webhook_event(payload: bytes, sig_header: str):

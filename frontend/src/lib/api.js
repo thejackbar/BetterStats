@@ -1006,6 +1006,33 @@ export const api = {
       body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
     }),
   billingListInvoices: () => request('/club-admin/billing/invoices'),
+  // Payment method management — routers/billing.py. Primary-admin self-serve
+  // (current club) and Super Admin (any club by org_id) share the same
+  // response shape ({default_payment_method_id, payment_methods}).
+  billingListPaymentMethods: () => request('/club-admin/billing/payment-methods'),
+  billingCreatePaymentMethodSetupSession: () =>
+    request('/club-admin/billing/payment-methods/setup-session', { method: 'POST' }),
+  billingSetDefaultPaymentMethod: (pmId) =>
+    request(`/club-admin/billing/payment-methods/${pmId}/default`, { method: 'POST' }),
+  billingRemovePaymentMethod: (pmId) =>
+    request(`/club-admin/billing/payment-methods/${pmId}`, { method: 'DELETE' }),
+  superListPaymentMethods: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/payment-methods`),
+  superCreatePaymentMethodSetupSession: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/payment-methods/setup-session`, { method: 'POST' }),
+  superSetDefaultPaymentMethod: (orgId, pmId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/payment-methods/${pmId}/default`, { method: 'POST' }),
+  superRemovePaymentMethod: (orgId, pmId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/payment-methods/${pmId}`, { method: 'DELETE' }),
+  // Super-Admin-only rollup of every discount actually paid out, sourced from
+  // billing_invoices — see routers/billing.py::discount_report.
+  superDiscountReport: (dateFrom, dateTo) => {
+    const params = new URLSearchParams()
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
+    const qs = params.toString()
+    return request(`/club-admin/billing/discount-report${qs ? `?${qs}` : ''}`)
+  },
   // BetterCricket-managed discount coupons (migration 154) —
   // routers/discount_coupons.py. couponRedeem is the club-facing "apply a
   // code to my already-live subscription ahead of renewal" action; the rest
