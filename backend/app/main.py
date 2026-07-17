@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, onboarding_wizard, billing, public_stripe, discount_coupons
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, billing, public_stripe, discount_coupons
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2591,6 +2591,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS state TEXT"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS postcode TEXT"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS country TEXT"))
+        # First-touch signup attribution (migration 161) — set only by the
+        # public self-serve registration (routers/public_self_serve.py) so ad
+        # performance can be joined against trial usage / Twenty engagement
+        # in the meta_ads ad-signups report.
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_source TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_attribution JSONB"))
         # Stripe Product id cache for add-on subscription items (migration
         # 152) — see services/stripe_client.py::_ensure_product.
         await conn.execute(text("""
@@ -2920,6 +2926,7 @@ app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
 app.include_router(self_serve_trial.router)  # Self-serve club trial registration (internal, flag-gated — see docs/self-serve-trial-onboarding-plan.md)
+app.include_router(public_self_serve.router)  # Public self-serve trial registration (unauthenticated, same flag — the /trial ad-campaign landing page)
 app.include_router(onboarding_wizard.router)  # Club onboarding wizard (flag-gated — see docs/self-serve-trial-onboarding-plan.md Phase 15)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402

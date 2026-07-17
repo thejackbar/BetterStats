@@ -29,6 +29,9 @@ STATIC_PAGES: list[tuple[str, str, str]] = [
     ("/features", "0.9", "monthly"),
     ("/modules",  "0.9", "monthly"),
     ("/pricing",  "0.9", "monthly"),
+    # ("/trial",  "0.9", "monthly"),  # hidden until campaign launch — the page
+    # redirects home while self_serve_registration_enabled is off; uncomment
+    # when the flag is flipped on (docs/meta-ad-campaign-self-serve.md §7).
     ("/compare",  "0.8", "monthly"),
     ("/faq",      "0.8", "monthly"),
     ("/blog",     "0.8", "weekly"),

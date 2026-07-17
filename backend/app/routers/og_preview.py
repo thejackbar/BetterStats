@@ -68,6 +68,12 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "$399 a year, add modules from $149, and bundle for a discount. One "
         "price per club.",
     ),
+    "/trial": (
+        "Start your club's free trial | BetterCricket",
+        "Register your cricket club yourself and start a free trial of every "
+        "BetterCricket module. No credit card and no sales call. Pick your club "
+        "from the Cricket Australia register and you're in.",
+    ),
     "/overview": (
         "Overview — Everything BetterCricket does",
         "A one-page tour of BetterCricket: automatic stats and a public club "

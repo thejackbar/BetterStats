@@ -100,6 +100,7 @@ export default function SuperMetaAds() {
   const [showAdjLog, setShowAdjLog] = useState(false)
 
   const [attribution, setAttribution] = useState(null)
+  const [adSignups, setAdSignups] = useState(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -109,6 +110,7 @@ export default function SuperMetaAds() {
       .finally(() => setLoading(false))
     api.metaAdsLeadAdjustments().then((d) => setAdjustments(d.adjustments || [])).catch(() => {})
     api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
+    api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -474,6 +476,106 @@ export default function SuperMetaAds() {
                   went anywhere on the site. Full breakdown on the{' '}
                   <a href="/admin/usage" className="text-accent hover:underline">Usage</a> page.
                 </p>
+              </div>
+            )}
+
+            {/* Ad-driven self-serve signups joined to their Twenty engagement
+                score — which ads produced clubs that actually use the thing. */}
+            {adSignups && (
+              <div className="pb-card p-4 mb-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+                    Self-serve trial signups &rarr; lead score
+                  </div>
+                  {adSignups.rows.length > 0 && campaign?.spend > 0 && (
+                    <span className="font-mono text-[10px] text-pb-faintest">
+                      {fmtMoney(campaign.spend / Math.max(1, adSignups.rows.filter((r) => r.signup_source === 'self_serve_ad').length))} per ad-driven signup at current spend
+                    </span>
+                  )}
+                </div>
+
+                {adSignups.rows.length === 0 ? (
+                  <p className="text-xs text-pb-faint">
+                    No self-serve signups yet. Once the /trial page is live and the campaign is running,
+                    every club that registers itself lands here with its ad attribution and Twenty
+                    engagement score.
+                  </p>
+                ) : (
+                  <>
+                    {adSignups.campaigns.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {adSignups.campaigns.map((c) => (
+                          <span key={c.campaign} className="px-2 py-1 rounded border pb-hairline font-mono text-[10px] text-pb-dim">
+                            <span className="text-pb-text">{c.campaign || '(untagged)'}</span>
+                            {' '}&middot; {fmtNum(c.signups)} signup{c.signups === 1 ? '' : 's'}
+                            {c.converted > 0 && <span className="text-emerald-400"> &middot; {c.converted} paid</span>}
+                            {c.avg_engagement != null && <> &middot; avg score {c.avg_engagement}</>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
+                            <th className="px-2 py-2">Club</th>
+                            <th className="px-2 py-2">Signed up</th>
+                            <th className="px-2 py-2">Source</th>
+                            <th className="px-2 py-2">Campaign / creative</th>
+                            <th className="px-2 py-2">Modules</th>
+                            <th className="px-2 py-2 text-right">Lead score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {adSignups.rows.map((r) => (
+                            <tr key={r.org_id} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
+                              <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
+                                {r.slug ? <a href={`/${r.slug}`} className="hover:underline">{r.name}</a> : r.name}
+                                {r.archived && <span className="text-pb-faintest font-mono text-[9px] ml-1">ARCHIVED</span>}
+                              </td>
+                              <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{r.signed_up_at ? fmtTime(r.signed_up_at) : '–'}</td>
+                              <td className="px-2 py-2">
+                                <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+                                  r.signup_source === 'self_serve_ad'
+                                    ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
+                                    : 'border-pb-hairline text-pb-faint'
+                                }`}>
+                                  {r.signup_source === 'self_serve_ad' ? (r.click_source || 'ad') : 'organic'}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2 text-pb-dim">
+                                {[r.utm_campaign, r.utm_content].filter(Boolean).join(' / ') || '–'}
+                              </td>
+                              <td className="px-2 py-2 text-pb-dim">
+                                {r.converted_to_paid
+                                  ? <span className="text-emerald-400">{r.paid_modules.length} paid</span>
+                                  : `${r.trial_modules.length} on trial`}
+                              </td>
+                              <td className="px-2 py-2 text-right">
+                                {r.engagement_score == null ? (
+                                  <span className="font-mono text-[10px] text-pb-faintest">not yet scored</span>
+                                ) : (
+                                  <span className={`font-display font-bold ${
+                                    r.engagement_score >= 70 ? 'text-red-400'
+                                      : r.engagement_score >= 40 ? 'text-amber-400'
+                                      : 'text-pb-dim'
+                                  }`}>
+                                    {r.engagement_score}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="font-mono text-[9px] text-pb-faintest mt-3">
+                      Lead score is the cached Twenty engagement score (refreshed daily / via the Club
+                      Directory&rsquo;s refresh buttons). A club that registered before Twenty was configured
+                      shows &ldquo;not yet scored&rdquo; until it&rsquo;s exported.
+                    </p>
+                  </>
+                )}
               </div>
             )}
 

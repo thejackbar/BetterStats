@@ -280,6 +280,16 @@ class Organisation(Base):
     state = Column(Text, nullable=True)
     postcode = Column(Text, nullable=True)
     country = Column(Text, nullable=True)
+    # ─── Signup attribution (migration 161) ───────────────────────────────────
+    # Set only by the PUBLIC self-serve registration (routers/public_self_serve.py):
+    # signup_source is the coarse bucket ('self_serve_ad' when the browser's
+    # first-touch attribution carried a campaign/click signal, else
+    # 'self_serve_organic'); signup_attribution is the raw getAttribution()
+    # payload from frontend/src/lib/visitor.js (UTM tags, click id, landing
+    # path/referrer), stored verbatim for the ad-signups report in
+    # routers/meta_ads.py. NULL for every org onboarded any other way.
+    signup_source = Column(Text, nullable=True)
+    signup_attribution = Column(JSONB, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only
@@ -1869,14 +1879,14 @@ class SyncRun(Base):
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
     kind = Column(Text, nullable=False)
     # 'running' | 'success' | 'error' | 'paused' | 'cancelled' — unconstrained
-    # Text column, same as always; 'paused'/'cancelled' added by migration 160.
+    # Text column, same as always; 'paused'/'cancelled' added by migration 161.
     status = Column(Text, nullable=False, server_default="running")
     started_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     stats = Column(JSON, nullable=False, default=dict)
     error = Column(Text, nullable=True)
-    # Pending pause/cancel signal (migration 160): NULL | 'pause' | 'cancel'.
+    # Pending pause/cancel signal (migration 161): NULL | 'pause' | 'cancel'.
     # Set by an operator action, cleared once the run's own loop checkpoint
     # (services/sync.py::_check_sync_control) notices and finalizes it.
     control = Column(Text, nullable=True)

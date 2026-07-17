@@ -1846,6 +1846,85 @@ judged valid.
   "already redeemed" check treats as used; a Super Admin can manually revoke
   it via the Redemptions modal as the recovery path today).
 
+## Public self-serve trial signup + ad attribution (v8.72.0, Jul 2026)
+
+The Meta ad campaign's destination: the internal self-serve trial registration
+(`routers/self_serve_trial.py`, previously Super-Admin-only) went public.
+**`routers/public_self_serve.py`** (`/public/self-serve/*`, unauthenticated)
+re-registers the SAME step handlers (they're plain coroutines; the auth gates
+live on the internal router's constructor) via `add_api_route` for identical
+steps, and hand-wraps only `status` / `verify-email/send` / `prepare` /
+`verify-email/check` / `submit` where public behaviour differs. Still behind
+the `self_serve_registration_enabled` platform flag (the whole router 404s
+while it's off — merge-safe ahead of campaign launch). The internal
+`/self-serve-trial/*` router is untouched.
+
+- **Light guardrails (per direct instruction — auto-approve, no review
+  queue)**: per-IP `rate_limit.enforce` caps on search/prepare/send/check/
+  submit layered over the shared per-email limits (the email-only lockout was
+  otherwise a public DoS vector on a victim's email); a honeypot `website`
+  field on prepare+submit (non-empty → plausible fake success, nothing
+  created); a minimum-fill-time check (`form_started_at`, <4s ⇒ generic 422,
+  negative deltas ignored so clock skew can't false-reject). CAPTCHA
+  deliberately NOT added (needs an account to provision; fast-follow if abuse
+  appears). The OTP email step is the real gate.
+- **Error tightening**: the public `verify-email/send` wrapper swallows the
+  raw provider error (the internal route's "TIGHTEN BEFORE PUBLIC LAUNCH"
+  note) → generic message; real error still logged. Known accepted public
+  surfaces (documented in the router docstring): `verify-email/status` is an
+  is-this-email-mid-verification oracle (low value); submit's 500 carries the
+  org/user support reference on purpose.
+- **Auto-login**: public submit mints the session cookie itself
+  (`create_session_token`/`set_session_cookie` — the primitive the internal
+  `login-as` endpoint documented as "what a future public flow will call") and
+  returns `redirect: "/admin"`; replays re-login the same registrant. Sets
+  `bs_pending_fresh_login` client-side so the setup wizard auto-open fires.
+- **Attribution (migration 161)**: `organisations.signup_source`
+  (`self_serve_ad` when the browser's first-touch had a campaign/click signal,
+  else `self_serve_organic`; NULL for every non-public onboarding) +
+  `organisations.signup_attribution` JSONB (the `visitor.js getAttribution()`
+  payload, key-allowlisted + clipped server-side). Written best-effort AFTER
+  the shared submit commits — an attribution hiccup never fails a
+  registration. Signup timestamps come from `self_serve_idempotency_keys`
+  (orgs have no created_at).
+- **Meta Pixel / CAPI**: `meta_capi.py` refactored — generic `_send_event`,
+  `send_lead_event` re-expressed on it, new `send_complete_registration_event`
+  ($399/AUD, `self_serve_trial` category). Public `prepare` fires a
+  server-side Lead (browser fires the matching pixel Lead with the shared
+  eventId — a picked club is a lead even if they stall); public `submit`
+  fires CompleteRegistration browser+server (the campaign's optimisation
+  event) + GA4 `sign_up` + a `conversion` usage-event breadcrumb.
+- **Frontend**: `/trial` (`pages/marketing/Trial.jsx`, in the OG map; its
+  sitemap entry in `seo.py` stays COMMENTED OUT until full launch). The
+  page is PUBLIC even while the flag is off (per direct request, Jul 2026:
+  "page on, self-serve button off") — flag off swaps the hero's wizard
+  button for a "leave your details" Contact CTA; flipping the flag on makes
+  the real self-serve button live with no deploy —
+  hero-first single-CTA landing page opening `SelfServeTrialModal` with the
+  new **`publicMode` prop** (NOT `public` — reserved word when destructured):
+  switches the api.js family to `publicSelfServe*`, sends honeypot/
+  fill-time/attribution/visitorId/meta on the wire, skips the admin-only
+  sync-log polling + login-as button, success screen → redirect to `/admin`
+  after ~1.2s (lets pixel beacons out). ViewContent fires ref-guarded (once
+  per visit, StrictMode-proof).
+- **Ad → lead-score report**: `GET /club-admin/meta-ads/ad-signups`
+  (routers/meta_ads.py) — every org with `signup_source`, its attribution,
+  trial/paid modules (via `twenty_sync._module_split`), and the CACHED
+  `marketing_clubs.engagement_score` via LEFT JOIN on `existing_org_id`
+  (never a live `_engagement()` per row; an org registered while Twenty was
+  unconfigured has NO MarketingClub row → "not yet scored" in the UI). Panel
+  on `SuperMetaAds.jsx` with per-campaign rollup + cost-per-signup.
+- **Launch preconditions (config, not code)**: flip
+  `self_serve_registration_enabled` ON; set a real `email_provider` (defaults
+  to `console` — OTP never sends!) + the SPF/DKIM/DMARC DNS still pending per
+  the Public Domain note; Twenty configured so `push_self_serve_registration`
+  lands the Hot-100 Lead. Rate limiter is in-memory single-process (fine for
+  the single-uvicorn deploy).
+- **Local-dev quirk** (not prod): `Base.metadata.create_all` doesn't add the
+  `gen_random_uuid()` server defaults some raw-SQL migrations set (e.g.
+  `org_module_subscriptions.id`), so a fresh ORM-created DB needs those
+  defaults added by hand before the lifespan module backfill runs.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.
