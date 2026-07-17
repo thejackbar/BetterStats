@@ -21,6 +21,7 @@ import json
 import logging
 
 from app.config.settings import settings
+from app.services.llm_text import strip_em_dashes
 
 logger = logging.getLogger(__name__)
 
@@ -347,7 +348,11 @@ def _normalise(data: dict) -> dict:
             "winning_team": match.get("winning_team") or None,
         },
         "innings": out_innings,
-        "read_notes": data.get("read_notes") or None,
+        # read_notes is the one field here that's genuinely the model's own
+        # composed prose (everything else is verbatim transcription of what's
+        # on the card) — run it through the same dash-stripping backstop as
+        # the yearbook narrative / BetterIQ Ask, for consistency.
+        "read_notes": strip_em_dashes(data.get("read_notes")) or None,
     }
 
 
