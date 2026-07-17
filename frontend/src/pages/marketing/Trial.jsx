@@ -7,6 +7,8 @@ import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { MODULES_MARKETING } from '../../data/modules-marketing'
+import { ModuleWordmark } from '../../components/ModuleLockup'
 
 // The ad-campaign landing page: one job, one CTA. Paid traffic lands here and
 // either starts the self-serve trial wizard (SelfServeTrialModal in
@@ -27,9 +29,9 @@ const TRIAL_JSONLD = {
 }
 
 const STEPS = [
-  ['Find Your Club', 'Search the Cricket Australia register and pick your club. If it’s on PlayHQ, we know it.'],
-  ['Enter Your Details', 'Your name, email and mobile, plus a quick email verification. That’s the whole identity check.'],
-  ['Complete Setup Wizard', 'At the end it’s as simple as saying you’re on board, and you can start customising BetterCricket for your club while your playing history imports.'],
+  ['Find Your Club', 'Simple search to ensure you sync the correct Australian cricket club.'],
+  ['Enter Your Details', 'Set up your admin profile.'],
+  ['Complete Setup Wizard', 'We take you through your initial set up step-by-step to customise BetterCricket to your club and clean up your data.'],
 ]
 
 const FAQS = [
@@ -82,14 +84,13 @@ export default function Trial() {
   const trialDays = status?.default_trial_days || 14
   const available = !!status?.enabled
 
-  // Hidden until launch (per direct request, reinstated Jul 17): while the
-  // self_serve_registration_enabled flag is off (the status call 404s),
-  // anyone landing here is sent to the homepage — we're not ready to put
-  // this in front of users, even in its contact-fallback state. Flipping
-  // the flag on makes the page AND the signup live with no deploy. Note:
-  // Meta's ad-review crawler hits this URL from its data centres whenever
-  // ads are created; the redirect handles those fine.
-  if (status === false) return <Navigate to="/" replace />
+  // While the self_serve_registration_enabled flag is off (the status call
+  // 404s), anyone landing here is redirected straight to the Contact page —
+  // the flag is the single switch, no in-between teaser state. Flipping it
+  // on makes the page AND the signup live with no deploy. Note: Meta's
+  // ad-review crawler hits this URL from its data centres whenever ads are
+  // created; the redirect handles those fine.
+  if (status === false) return <Navigate to="/contact" replace />
 
   const openWizard = () => {
     if (available) setWizardOpen(true)
@@ -124,21 +125,7 @@ export default function Trial() {
               >
                 Start your free trial
               </button>
-            ) : (
-              <div className="max-w-md mx-auto">
-                <p className="text-pb-dim mb-4">
-                  Self-serve registration isn&rsquo;t open just yet. Leave your details and
-                  we&rsquo;ll set your club up personally.
-                </p>
-                <Link
-                  to="/contact"
-                  className="inline-flex items-center px-8 py-4 rounded-lg font-display font-bold text-lg text-pb-bg transition hover:opacity-90"
-                  style={{ background: 'var(--pb-accent)' }}
-                >
-                  Get your club on BetterCricket
-                </Link>
-              </div>
-            )}
+            ) : null}
             <p className="font-mono text-[11px] text-pb-faintest mt-5">
               Quick and Easy Setup · Every Module Included · No Obligation
             </p>
@@ -160,19 +147,27 @@ export default function Trial() {
           </div>
         </section>
 
-        {/* What you get */}
+        {/* Modules — same cards as the homepage, each clicking through */}
         <section className="px-4 sm:px-6 lg:px-10 pb-16">
-          <div className="max-w-[1000px] mx-auto pb-card p-8">
-            <h2 className="font-display font-bold text-2xl mb-4">The whole platform, switched on</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm text-pb-dim">
-              <p><span className="text-pb-text font-semibold">BetterStats</span>: your full playing history as a live public club site: profiles, records, leaderboards, yearbooks.</p>
-              <p><span className="text-pb-text font-semibold">BetterSelect</span>: player availability with no app, and a selection board that suggests a balanced XI.</p>
-              <p><span className="text-pb-text font-semibold">BetterSocials</span>: match-day graphics and your club website, generated from real scorecards.</p>
-              <p><span className="text-pb-text font-semibold">BetterAdmin</span>: fees that reconcile themselves, bulk club email, merch and stock tracking.</p>
-              <p><span className="text-pb-text font-semibold">BetterIQ</span>: opposition scouting dossiers and team analytics built from your own scorecards.</p>
-              <p><span className="text-pb-text font-semibold">BetterFantasy</span>: a club fantasy comp scored off your real games. Pre-season fundraiser sorted.</p>
+          <div className="max-w-[1200px] mx-auto">
+            <h2 className="font-display font-bold text-2xl mb-6 text-center">
+              Then you&rsquo;re free to explore everything BetterCricket has to offer
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {MODULES_MARKETING.map((m, i) => (
+                <Reveal key={m.slug} delay={(i % 4) * 70} className="h-full">
+                  <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">
+                    <div className="flex items-center justify-between mb-4">
+                      <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
+                    </div>
+                    <h3 className="text-lg font-semibold mb-1.5"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
+                    <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>
+                    <span className="text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>Explore <span className="group-hover:translate-x-0.5 transition-transform">→</span></span>
+                  </Link>
+                </Reveal>
+              ))}
             </div>
-            <p className="font-mono text-[11px] text-pb-faintest mt-6">
+            <p className="font-mono text-[11px] text-pb-faintest mt-6 text-center">
               After the trial, keep only what your club wants, from $399/yr for BetterStats.{' '}
               <Link to="/pricing" className="underline hover:text-pb-text">See pricing</Link>.
             </p>
@@ -182,7 +177,7 @@ export default function Trial() {
         {/* Mini FAQ */}
         <section className="px-4 sm:px-6 lg:px-10 pb-20">
           <div className="max-w-[800px] mx-auto">
-            <h2 className="font-display font-bold text-2xl mb-6 text-center">Fair questions</h2>
+            <h2 className="font-display font-bold text-2xl mb-6 text-center">Free Trial FAQs</h2>
             <div className="space-y-3">
               {FAQS.map(([q, a]) => (
                 <details key={q} className="pb-card p-5 group">
