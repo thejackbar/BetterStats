@@ -329,8 +329,6 @@ export default function SuperClubs() {
     return sub?.renewal_date || ''
   }
 
-  const grantModule = (clubId, key) =>
-    runModuleAction(key, () => api.superPatchModule(clubId, key, { status: 'active' }))
   const removeModule = (clubId, key) =>
     runModuleAction(key, () => { clearTrialEdit(key); return api.superRemoveModule(clubId, key) })
   const setModuleRenewal = (clubId, key, date) =>
@@ -348,6 +346,13 @@ export default function SuperClubs() {
       clearTrialEdit(key)
     })
   }
+  // Granting a module (the "+ ModuleName" chip, only reachable while the module has
+  // no subscription row at all — un-granting/Reset deletes the row outright, which is
+  // what actually clears trial history, so "ungranted" always means genuinely never
+  // trialled or subscribed) starts a trial instead of jumping straight to Active. A
+  // super admin who really means to grant a live paid module bumps it from the status
+  // dropdown right after — that still applies immediately (see onModuleStatus below).
+  const grantModule = (clubId, key) => applyTrial(clubId, key, trialDraft({ module: key }))
   // Status select applies immediately for every choice, including 'trial' — it's
   // persisted straight away with the seeded start/end (now → now + the default
   // trial length), and those dates stay editable afterwards via the "Update"
