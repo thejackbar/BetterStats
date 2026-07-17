@@ -4,6 +4,8 @@ import { SUPPORT_EMAIL } from '../../data/marketing'
 import { MODULE_TOGGLES } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import { ProgressBar } from '../ProgressBar'
+import { getAttribution, getVisitorId } from '../../lib/visitor'
+import { getMetaEventContext } from '../../lib/metaPixel'
 
 // BetterStats (core) is mandatory, not a selectable trial — same reasoning as
 // the Super Admin per-club module editor this list is shared with.
@@ -26,19 +28,47 @@ const orgName = (org) => org.name || org.shortName || org.organisationName || or
 const FIELD_CLS = 'w-full bg-pb-surface2 text-pb-text border pb-hairline rounded px-3 py-2 text-sm outline-none focus:border-pb-accent'
 
 /**
- * The self-serve club trial registration modal shell. Internal-only for now —
- * opened from the Super Admin "Self-Serve Trial (Internal)" page, never from a
- * public surface. Closes on backdrop click, the close button, or Escape;
- * restores focus to whatever triggered it, matching the convention in
- * components/marketing/Lightbox.jsx.
+ * The self-serve club trial registration modal shell. Two callers, one wizard:
+ * the Super Admin "Self-Serve Trial (Internal)" page (default), and — with
+ * `publicMode` — the public /trial ad-campaign landing page. Public mode
+ * targets the unauthenticated /public/self-serve endpoints, carries the
+ * visitor's first-touch ad attribution + Meta Pixel dedup context, skips the
+ * admin-only sync-log polling and login-as button (the public submit sets the
+ * new admin's session cookie itself), and finishes by redirecting into the
+ * brand-new club's own dashboard. Closes on backdrop click, the close button,
+ * or Escape; restores focus to whatever triggered it, matching the convention
+ * in components/marketing/Lightbox.jsx.
  *
  * Controlled — render only while open:
  *   {open && <SelfServeTrialModal defaultTrialDays={14} onClose={() => setOpen(false)} />}
  */
-export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
+export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicMode = false }) {
   const closeBtnRef = useRef(null)
   const previouslyFocused = useRef(null)
   const [step, setStep] = useState('club')
+
+  // Public-mode plumbing, all inert for the internal caller: which API family
+  // each step hits, when the wizard opened (the backend's minimum-fill-time
+  // bot check), and a honeypot field bots fill but people never see.
+  const calls = publicMode ? {
+    search: api.publicSelfServeSearch,
+    prepare: api.publicSelfServePrepare,
+    validateAdmin: api.publicSelfServeValidateAdmin,
+    sendCode: api.publicSelfServeSendCode,
+    checkCode: api.publicSelfServeCheckCode,
+    acknowledge: api.publicSelfServeAcknowledge,
+    submit: api.publicSelfServeSubmit,
+  } : {
+    search: api.selfServeTrialSearch,
+    prepare: api.selfServeTrialPrepare,
+    validateAdmin: api.selfServeTrialValidateAdmin,
+    sendCode: api.selfServeTrialSendCode,
+    checkCode: api.selfServeTrialCheckCode,
+    acknowledge: api.selfServeTrialAcknowledge,
+    submit: api.selfServeTrialSubmit,
+  }
+  const formStartedAtRef = useRef(Date.now())
+  const [honeypot, setHoneypot] = useState('')
 
   useEffect(() => {
     previouslyFocused.current = document.activeElement
@@ -83,15 +113,32 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     let alive = true
     setPreparing(true)
     setPrepareError('')
-    api.selfServeTrialPrepare({
+    // Public mode: one event_id shared between the browser pixel (fired on
+    // success below) and the backend's server-side Conversions API Lead, so
+    // Meta dedupes the pair — same pattern as QuickEnquiryModal.
+    const meta = publicMode ? getMetaEventContext() : undefined
+    calls.prepare({
       org_id: selectedClub.id,
       name: orgName(selectedClub),
       short_name: selectedClub.shortName || '',
+      ...(publicMode ? { website: honeypot, meta } : {}),
     })
-      .then((prepared) => { if (alive) setPreparedClub(prepared) })
+      .then((prepared) => {
+        if (!alive) return
+        setPreparedClub(prepared)
+        if (publicMode && typeof window !== 'undefined' && typeof window.fbq === 'function') {
+          window.fbq('track', 'Lead', {
+            content_name: 'Self-serve trial started',
+            content_category: 'self_serve_trial',
+            value: 399,
+            currency: 'AUD',
+          }, { eventID: meta.eventId })
+        }
+      })
       .catch((e) => { if (alive) setPrepareError(e?.message || 'Could not prepare this club.') })
       .finally(() => { if (alive) setPreparing(false) })
     return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClub])
 
   useEffect(() => {
@@ -106,7 +153,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
       setSearching(true)
       setSearchError('')
       try {
-        const data = await api.selfServeTrialSearch(query.trim())
+        const data = await calls.search(query.trim())
         setResults(Array.isArray(data) ? data : [])
         setShowResults(true)
       } catch (e) {
@@ -191,7 +238,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     adminDebounceRef.current = setTimeout(async () => {
       setAdminValidating(true)
       try {
-        const result = await api.selfServeTrialValidateAdmin(adminForm)
+        const result = await calls.validateAdmin(adminForm)
         setAdminErrors(result?.errors || {})
         setAdminValid(!!result?.valid)
       } catch {
@@ -227,7 +274,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     setSending(true)
     setSendError('')
     try {
-      await api.selfServeTrialSendCode(adminForm.email)
+      await calls.sendCode(adminForm.email)
       setCodeSent(true)
     } catch (e) {
       setSendError(e?.message || 'Could not send the verification email.')
@@ -240,7 +287,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     setChecking(true)
     setVerifyError('')
     try {
-      await api.selfServeTrialCheckCode(adminForm.email, verifyCode.trim())
+      await calls.checkCode(adminForm.email, verifyCode.trim())
       setVerified(true)
     } catch (e) {
       setVerifyError(e?.message || 'Incorrect code.')
@@ -263,7 +310,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
     setAckSubmitting(true)
     setAckError('')
     try {
-      await api.selfServeTrialAcknowledge({
+      await calls.acknowledge({
         email: adminForm.email,
         club_name: preparedClub?.name || '',
         accept_terms: ackTerms,
@@ -321,8 +368,12 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   const submitRegistration = async () => {
     setSubmitting(true)
     setSubmitError('')
+    // Public mode: one event_id shared between the browser pixel's
+    // CompleteRegistration (fired on success below) and the backend's
+    // server-side copy, so Meta dedupes the pair.
+    const meta = publicMode ? getMetaEventContext() : undefined
     try {
-      const result = await api.selfServeTrialSubmit({
+      const result = await calls.submit({
         idempotency_key: idempotencyKeyRef.current,
         org_id: preparedClub.org_id,
         name: preparedClub.name,
@@ -335,10 +386,40 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
         password,
         confirm_password: confirmPassword,
         modules: SELECTABLE_MODULES.map((m) => m.key),
+        ...(publicMode ? {
+          website: honeypot,
+          form_started_at: formStartedAtRef.current,
+          attribution: getAttribution(),
+          visitorId: getVisitorId(),
+          meta,
+        } : {}),
       })
       if (result?.status === 'completed') {
         setSubmitResult(result)
         setSubmitted(true)
+        if (publicMode) {
+          // The registration IS the campaign conversion — browser pixel +
+          // GA4, then straight into the new club's own dashboard (the public
+          // submit already set this browser's session cookie for the new
+          // admin). Small delay so the pixel beacons get out before the
+          // navigation tears the page down.
+          if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+            window.fbq('track', 'CompleteRegistration', {
+              content_name: 'Self-serve trial registration',
+              content_category: 'self_serve_trial',
+              value: 399,
+              currency: 'AUD',
+            }, { eventID: meta.eventId })
+          }
+          if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+            window.gtag('event', 'sign_up', { method: 'self_serve_trial' })
+          }
+          // Same fresh-login marker the internal login-as flow sets — makes
+          // the post-redirect fetchMe() count as a genuine first login so
+          // the bell and setup-wizard auto-open fire for the new admin.
+          try { sessionStorage.setItem('bs_pending_fresh_login', '1') } catch { /* skip */ }
+          setTimeout(() => window.location.assign(result.redirect || '/admin'), 1200)
+        }
       }
     } catch (e) {
       setSubmitError(e?.message || 'Could not submit registration.')
@@ -352,7 +433,10 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
   // club) to see it land. Same 4s cadence as AdminSync.jsx's own polling;
   // stops once the run is no longer 'running'.
   useEffect(() => {
-    if (!submitted || !submitResult?.org_id) return undefined
+    // Public mode never polls sync logs — that endpoint needs an admin
+    // session this browser only just acquired, and the visitor is being
+    // redirected into their dashboard anyway.
+    if (publicMode || !submitted || !submitResult?.org_id) return undefined
     let cancelled = false
     let intervalId = null
     const poll = async () => {
@@ -450,6 +534,23 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
 
           {step === 'club' && (
             <>
+              {publicMode && (
+                // Honeypot: never visible or focusable for a person; a
+                // form-filler bot that autocompletes every field trips it and
+                // the backend quietly no-ops the whole registration.
+                <div aria-hidden="true" style={{ position: 'absolute', left: '-9999px', top: 0, height: 0, overflow: 'hidden' }}>
+                  <label htmlFor="ss-website">Website</label>
+                  <input
+                    id="ss-website"
+                    type="text"
+                    name="website"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={honeypot}
+                    onChange={(e) => setHoneypot(e.target.value)}
+                  />
+                </div>
+              )}
               <div className="relative">
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Search for your club</label>
                 <input
@@ -747,7 +848,19 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
 
           {step === 'submit' && (
             <div className="space-y-3">
-              {submitted ? (
+              {submitted && publicMode ? (
+                <div className="pb-card p-4 bg-pb-surface2">
+                  <p className="font-mono text-[11px] text-emerald-400">
+                    ✓ Your club is set up — taking you to your dashboard…
+                  </p>
+                  <p className="font-mono text-[10px] text-pb-faint mt-2">
+                    We've started importing your club's playing history from
+                    Cricket Australia in the background. It can take a little
+                    while for a club with a long history — feel free to look
+                    around while it lands.
+                  </p>
+                </div>
+              ) : submitted ? (
                 <div className="pb-card p-4 bg-pb-surface2">
                   <p className="font-mono text-[11px] text-emerald-400">
                     ✓ Club and admin account created — sync started

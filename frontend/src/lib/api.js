@@ -921,6 +921,7 @@ export const api = {
   metaAdsAdjustLeads: (delta, note = '') =>
     request('/club-admin/meta-ads/leads/adjust', { method: 'POST', body: JSON.stringify({ delta, note }) }),
   metaAdsLeadAdjustments: () => request('/club-admin/meta-ads/leads/adjustments'),
+  metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>
@@ -950,6 +951,24 @@ export const api = {
     request('/self-serve-trial/submit', { method: 'POST', body: JSON.stringify(data) }),
   selfServeTrialLoginAs: (userId) =>
     request(`/self-serve-trial/login-as/${userId}`, { method: 'POST' }),
+
+  // Public self-serve trial registration (the /trial ad-campaign landing page)
+  // — unauthenticated mirrors of the selfServeTrial* endpoints above, same
+  // wizard, no super-admin session. 404s while the platform flag is off.
+  publicSelfServeStatus: () => request('/public/self-serve/status'),
+  publicSelfServeSearch: (q) => request(`/public/self-serve/search?q=${encodeURIComponent(q)}`),
+  publicSelfServePrepare: (data) =>
+    request('/public/self-serve/prepare', { method: 'POST', body: JSON.stringify(data) }),
+  publicSelfServeValidateAdmin: (data) =>
+    request('/public/self-serve/validate-admin', { method: 'POST', body: JSON.stringify(data) }),
+  publicSelfServeSendCode: (email) =>
+    request('/public/self-serve/verify-email/send', { method: 'POST', body: JSON.stringify({ email }) }),
+  publicSelfServeCheckCode: (email, code) =>
+    request('/public/self-serve/verify-email/check', { method: 'POST', body: JSON.stringify({ email, code }) }),
+  publicSelfServeAcknowledge: (data) =>
+    request('/public/self-serve/acknowledge', { method: 'POST', body: JSON.stringify(data) }),
+  publicSelfServeSubmit: (data) =>
+    request('/public/self-serve/submit', { method: 'POST', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

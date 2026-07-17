@@ -44,6 +44,7 @@ import Modules from './pages/marketing/Modules'
 import ModuleDetail from './pages/marketing/ModuleDetail'
 import About from './pages/marketing/About'
 import Contact from './pages/marketing/Contact'
+import Trial from './pages/marketing/Trial'
 import Terms from './pages/marketing/Terms'
 import Privacy from './pages/marketing/Privacy'
 import FAQ from './pages/marketing/FAQ'
@@ -222,6 +223,7 @@ export default function App() {
           <Route path="/modules/:slug" element={<ModuleDetail />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/trial" element={<Trial />} />
           <Route path="/faq" element={<FAQ />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />

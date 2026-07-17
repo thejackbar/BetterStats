@@ -65,7 +65,8 @@ def _configured() -> bool:
     return bool(settings.meta_dataset_id and settings.meta_capi_access_token)
 
 
-async def send_lead_event(
+async def _send_event(
+    event_name: str,
     *,
     event_id: Optional[str],
     event_source_url: Optional[str] = None,
@@ -76,19 +77,22 @@ async def send_lead_event(
     user_agent: Optional[str] = None,
     fbp: Optional[str] = None,
     fbc: Optional[str] = None,
-    value: float = 399,
+    value: float = 0,
     currency: str = "AUD",
-    content_name: str = "Request access",
-    content_category: str = "club_enquiry",
+    content_name: str = "",
+    content_category: str = "",
 ) -> None:
-    """Send a server-side `Lead` event. Best-effort — logs, never raises."""
+    """Send one server-side event. Best-effort — logs, never raises."""
     if not _configured():
-        logger.info("Meta CAPI not configured — skipping server-side Lead event.")
+        logger.info("Meta CAPI not configured — skipping server-side %s event.", event_name)
         return
     if not event_id:
         # Without a shared event_id Meta can't dedupe this against the browser
-        # pixel's Lead, so sending it would double-count the lead. Skip instead.
-        logger.warning("Meta CAPI: submission had no event_id — skipping Lead event to avoid double counting.")
+        # pixel's copy, so sending it would double-count. Skip instead.
+        logger.warning(
+            "Meta CAPI: submission had no event_id — skipping %s event to avoid double counting.",
+            event_name,
+        )
         return
 
     user_data: dict = {}
@@ -116,7 +120,7 @@ async def send_lead_event(
         user_data["fbc"] = fbc
 
     event: dict = {
-        "event_name": "Lead",
+        "event_name": event_name,
         "event_time": int(time.time()),
         "event_id": event_id,
         "action_source": "website",
@@ -143,7 +147,7 @@ async def send_lead_event(
                 json=body,
             )
     except httpx.HTTPError as e:
-        logger.error("Meta CAPI Lead event request failed: %s", e)
+        logger.error("Meta CAPI %s event request failed: %s", event_name, e)
         return
 
     data: dict = {}
@@ -155,12 +159,69 @@ async def send_lead_event(
     if resp.status_code != 200 or "error" in data:
         err = data.get("error", {})
         logger.error(
-            "Meta CAPI Lead event failed (status=%s): %s",
-            resp.status_code, err.get("message") or data or resp.text[:300],
+            "Meta CAPI %s event failed (status=%s): %s",
+            event_name, resp.status_code, err.get("message") or data or resp.text[:300],
         )
         return
 
     logger.info(
-        "Meta CAPI Lead event sent: events_received=%s fbtrace_id=%s",
-        data.get("events_received"), data.get("fbtrace_id"),
+        "Meta CAPI %s event sent: events_received=%s fbtrace_id=%s",
+        event_name, data.get("events_received"), data.get("fbtrace_id"),
+    )
+
+
+async def send_lead_event(
+    *,
+    event_id: Optional[str],
+    event_source_url: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    name: Optional[str] = None,
+    client_ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    fbp: Optional[str] = None,
+    fbc: Optional[str] = None,
+    value: float = 399,
+    currency: str = "AUD",
+    content_name: str = "Request access",
+    content_category: str = "club_enquiry",
+) -> None:
+    """Send a server-side `Lead` event (the Contact-form enquiry conversion).
+    Best-effort — logs, never raises."""
+    await _send_event(
+        "Lead",
+        event_id=event_id, event_source_url=event_source_url,
+        email=email, phone=phone, name=name,
+        client_ip=client_ip, user_agent=user_agent, fbp=fbp, fbc=fbc,
+        value=value, currency=currency,
+        content_name=content_name, content_category=content_category,
+    )
+
+
+async def send_complete_registration_event(
+    *,
+    event_id: Optional[str],
+    event_source_url: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    name: Optional[str] = None,
+    client_ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    fbp: Optional[str] = None,
+    fbc: Optional[str] = None,
+) -> None:
+    """Send a server-side `CompleteRegistration` event — a finished public
+    self-serve trial registration (routers/public_self_serve.py). This is the
+    conversion the ad campaign optimises toward, one step deeper in the funnel
+    than the Contact-form Lead. Value mirrors the Core annual price the trial
+    leads to, same basis as the Lead event's 399. Best-effort — logs, never
+    raises."""
+    await _send_event(
+        "CompleteRegistration",
+        event_id=event_id, event_source_url=event_source_url,
+        email=email, phone=phone, name=name,
+        client_ip=client_ip, user_agent=user_agent, fbp=fbp, fbc=fbc,
+        value=399, currency="AUD",
+        content_name="Self-serve trial registration",
+        content_category="self_serve_trial",
     )

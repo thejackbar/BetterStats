@@ -29,6 +29,7 @@ STATIC_PAGES: list[tuple[str, str, str]] = [
     ("/features", "0.9", "monthly"),
     ("/modules",  "0.9", "monthly"),
     ("/pricing",  "0.9", "monthly"),
+    ("/trial",    "0.9", "monthly"),
     ("/compare",  "0.8", "monthly"),
     ("/faq",      "0.8", "monthly"),
     ("/blog",     "0.8", "weekly"),

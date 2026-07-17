@@ -535,30 +535,36 @@ public" checklist below, not built now.
 
 **Phase 24 — E2E regression tests** for the in-scope (trial-only, internal) journeys.
 
-## Deferred: "go public" checklist (not built in this effort)
+## "Go public" checklist — status (public launch built Jul 2026)
 
-Captured now so nothing is forgotten later, not actioned here:
+The public flow now exists: `routers/public_self_serve.py` (`/public/self-serve/*`,
+unauthenticated, same `self_serve_registration_enabled` kill-switch) reuses this
+plan's step handlers untouched and fronts them with the `/trial` landing page
+(`frontend/src/pages/marketing/Trial.jsx` + `SelfServeTrialModal` in
+`publicMode`). Where each checklist item landed:
 
-- CAPTCHA / bot protection (none exists anywhere in the stack today).
-- Public rate limiting on the registration endpoints (`services/rate_limit.py`
-  primitives exist and are proven elsewhere, but nothing currently protects a public
-  endpoint that creates real `Organisation`/`User`/trial rows).
-- A public, unauthenticated wrapper around the club-search endpoint (today's
-  `GET /organisations/search` requires auth).
-- Marketing page wiring on `betterat.cricket` (buttons pointing at the now-complete
-  OTP-backed flow).
-- Re-running the Phase 23 security review against the public threat model
-  specifically (club enumeration, username/email enumeration, abuse economics).
-- Updating `docs/onboarding-runbook.md` and `docs/invoicing-runbook.md`, both of
-  which still describe the retired tier model and manual-only onboarding.
-- `POST /self-serve-trial/verify-email/send` currently returns the *real*
-  provider error on a delivery failure (added for live diagnosis during
-  internal testing, since the caller is already a super admin) — swap back
-  to a generic message before this is reachable by anyone else.
-- Associations aren't shown in club search results (not available from this
-  search endpoint; a separate per-club GraphQL call would be needed — see
-  `services/playhq_directory_client.discover_associations`). Deliberately
-  skipped for now (extra latency/dependency on a live per-keystroke search).
+- ~~Public rate limiting~~ **Done** — per-IP `rate_limit.enforce` caps on
+  search/prepare/OTP-send/OTP-check/submit in the public router, layered on the
+  per-email limits the shared handlers already had. Plus a honeypot field and a
+  minimum-fill-time check on submit.
+- ~~A public, unauthenticated wrapper around the club-search endpoint~~
+  **Done** — `GET /public/self-serve/search`.
+- ~~Marketing page wiring~~ **Done** — the `/trial` landing page.
+- ~~verify-email/send returning the real provider error~~ **Done** — the
+  public wrapper catches it and returns a generic message; the internal
+  super-admin route keeps the diagnostic detail on purpose.
+- CAPTCHA / third-party bot protection — **still open, deliberate**. Needs an
+  account/site key to provision; the OTP email requirement + rate limits +
+  honeypot are the agreed "light guardrails" posture. Revisit if abuse shows up.
+- Re-running the Phase 23 security review against the public threat model —
+  **still open.** Reviewed informally when the public router was built (the
+  verify-email/status oracle and the submit 500's org/user support reference
+  are known, accepted trade-offs, noted in the router docstring), but a full
+  pass hasn't been done.
+- Updating `docs/onboarding-runbook.md` and `docs/invoicing-runbook.md` —
+  **still open** (both still describe the retired tier model).
+- Associations in club search results — **still open** (unchanged: needs a
+  separate per-club GraphQL call, skipped for latency).
 
 ## Related docs
 
