@@ -596,16 +596,19 @@ export default function SuperClubs() {
 
               <div className="pt-3 border-t pb-hairline space-y-2">
                 <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
-                  Self-serve trial onboarding (internal)
+                  Self-Serve Trials
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  Not public yet — only exposes the flow from the Super Admin menu, for
-                  internal testing.
+                  Today this only exposes the registration flow from the Super Admin menu, for
+                  internal testing — it isn't reachable from betterat.cricket yet. This is the
+                  flag that will gate the real thing once "Get your club on BetterCricket" and
+                  "Request access" are wired straight into it. Until then, and whenever this is
+                  off, those buttons keep sending people to the contact form instead.
                 </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
                   <input type="checkbox" checked={!!settingsForm.self_serve_registration_enabled}
                     onChange={e => setSettingsForm(f => ({ ...f, self_serve_registration_enabled: e.target.checked }))} />
-                  Self-serve club registration enabled
+                  Self-serve trials enabled
                 </label>
               </div>
 
