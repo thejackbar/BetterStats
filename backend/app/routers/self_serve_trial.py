@@ -613,7 +613,9 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     # (see the atomicity caveat above) — this also durably commits the user
     # row created just above.
     from app.routers.organisations import _onboard_club_core
-    org, run_id, name = await _onboard_club_core(db, background_tasks, str(org_id), data.name)
+    org, run_id, name = await _onboard_club_core(
+        db, background_tasks, str(org_id), data.name, auto_yearbooks=True,
+    )
 
     # That internal commit leaves module_subscriptions unloaded on this now-
     # persistent org — the exact trap club_admin.py's create_club comment

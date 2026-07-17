@@ -72,6 +72,7 @@ async def search_organisations(q: str = "", _: User = Depends(get_current_user))
 
 async def _onboard_club_core(
     db: AsyncSession, background_tasks: BackgroundTasks, org_id: str, org_name: str = "",
+    auto_yearbooks: bool = False,
 ) -> tuple[Organisation, uuid.UUID, str]:
     """Create/upsert the club, kick off its first full sync, and best-effort
     link + push its Marketing Directory row — the part of onboarding that's
@@ -81,6 +82,11 @@ async def _onboard_club_core(
     routers/self_serve_trial.py). Deliberately does NOT touch club membership
     — callers attach the user themselves, since that part genuinely differs
     (an existing user vs. a new one; a super admin is never attached at all).
+
+    `auto_yearbooks=True` (self-serve trial registration only — see that
+    router) builds, narrates and publishes every past season's yearbook once
+    this first sync succeeds; the ordinary authenticated-onboard path leaves
+    yearbooks untouched, same as it always has.
 
     NOTE on atomicity: upsert_organisation commits internally (pre-existing
     behaviour, out of scope to change here — it's used elsewhere too). That
@@ -103,7 +109,7 @@ async def _onboard_club_core(
     # Now" on this club while its own first sync is still running gets
     # "already_running" instead of a second sync racing the first.
     _org_sync_running.add(org_id)
-    background_tasks.add_task(_sync_safe, org_id, run_id, "org_full")
+    background_tasks.add_task(_sync_safe, org_id, run_id, "org_full", auto_yearbooks)
 
     # Link this now-synced org back to its Marketing Directory row immediately —
     # otherwise the link only happens the next time the directory crawler
@@ -375,12 +381,28 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
     return upcoming[:20]
 
 
-async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full"):
+async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False):
     from app.services.sync import finish_sync_run, pause_sync_run, cancel_sync_run, SyncControlSignal
     import logging
     try:
         stats = await sync_organisation(org_id, run_id=run_id, kind=kind)
         await finish_sync_run(run_id, stats if isinstance(stats, dict) else {})
+
+        # Self-serve registration's first full sync: build, narrate and publish
+        # every past season's yearbook once the club's data is actually in, so
+        # a brand-new club gets a full yearbook archive with no admin action
+        # needed. Isolated try/except with its own session — a yearbook
+        # failure must never look like a sync failure (finish_sync_run has
+        # already recorded success above).
+        if auto_yearbooks:
+            try:
+                from app.models.db import async_session_maker
+                from app.routers.yearbooks import auto_generate_and_publish_all_yearbooks
+                async with async_session_maker() as s:
+                    yb_result = await auto_generate_and_publish_all_yearbooks(s, org_id)
+                logging.getLogger(__name__).info(f"Self-serve yearbook auto-generate for {org_id}: {yb_result}")
+            except Exception as ye:
+                logging.getLogger(__name__).warning(f"Self-serve yearbook auto-generate failed for {org_id}: {ye}")
     except SyncControlSignal as sig:
         # Pause/Cancel from the Super Admin All Clubs page — not a crash.
         if sig.action == "pause":
