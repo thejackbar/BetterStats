@@ -1511,6 +1511,7 @@ def _club_payload(
     org,
     association_name: str | None = None,
     primary_admin_name: str | None = None,
+    state: str | None = None,
     seasons_count: int = 0,
     players_count: int = 0,
     grades_count: int = 0,
@@ -1528,7 +1529,11 @@ def _club_payload(
         "is_active": org.is_active,
         "archived_at": org.archived_at.isoformat() if org.archived_at else None,
         "contact_email": org.contact_email,
-        "state": org.state,
+        # Organisation.state is only ever populated by the self-serve registration
+        # flow (migration 158) — every club onboarded the older way (the "New Club"
+        # search on this page) has it NULL. Fall back to the Club Directory's own
+        # marketing_clubs row (crawled address, far more complete) when known.
+        "state": state or org.state,
         # From the Club Directory's marketing_clubs row this org was onboarded
         # from, when known (see MarketingClub.existing_org_id) — Organisation
         # itself has no association column of its own.
@@ -1585,21 +1590,26 @@ async def list_all_clubs(
     org_ids = [o.id for o in orgs]
 
     assoc_by_org: dict = {}
+    club_state_by_org: dict = {}
     admin_by_org: dict = {}
     seasons_by_org: dict = {}
     players_by_org: dict = {}
     grades_by_org: dict = {}
-    state_by_org: dict = {}
+    wizard_state_by_org: dict = {}
     last_active_by_org: dict = {}
     last_sync_by_org: dict = {}
     running_by_org: set = set()
 
     if org_ids:
         assoc_rows = await db.execute(
-            select(MarketingClub.existing_org_id, MarketingClub.association_name)
-            .where(MarketingClub.existing_org_id.in_(org_ids), MarketingClub.association_name.isnot(None))
+            select(MarketingClub.existing_org_id, MarketingClub.association_name, MarketingClub.state)
+            .where(MarketingClub.existing_org_id.in_(org_ids))
         )
-        assoc_by_org = {row[0]: row[1] for row in assoc_rows.all()}
+        for org_id, assoc_name, mc_state in assoc_rows.all():
+            if assoc_name:
+                assoc_by_org[org_id] = assoc_name
+            if mc_state:
+                club_state_by_org[org_id] = mc_state
 
         admin_rows = await db.execute(
             select(ClubMembership.club_id, User.display_name, User.username)
@@ -1631,10 +1641,10 @@ async def list_all_clubs(
         )
         grades_by_org = {row[0]: row[1] for row in grades_rows.all()}
 
-        state_rows = await db.execute(
+        wizard_state_rows = await db.execute(
             select(OnboardingWizardState).where(OnboardingWizardState.organisation_id.in_(org_ids))
         )
-        state_by_org = {s.organisation_id: s for s in state_rows.scalars().all()}
+        wizard_state_by_org = {s.organisation_id: s for s in wizard_state_rows.scalars().all()}
 
         sync_agg_rows = await db.execute(
             select(
@@ -1666,13 +1676,14 @@ async def list_all_clubs(
     for o in orgs:
         entitled = org_entitled_modules(o)
         keys = [s["key"] for g in _applicable_groups(entitled) for s in g["steps"]]
-        state = state_by_org.get(o.id)
-        completed = set((state.completed_steps or []) if state else [])
+        wiz_state = wizard_state_by_org.get(o.id)
+        completed = set((wiz_state.completed_steps or []) if wiz_state else [])
         done_n = sum(1 for k in keys if k in completed)
         payloads.append(_club_payload(
             o,
             association_name=assoc_by_org.get(o.id),
             primary_admin_name=admin_by_org.get(o.id),
+            state=club_state_by_org.get(o.id),
             seasons_count=seasons_by_org.get(o.id, 0),
             players_count=players_by_org.get(o.id, 0),
             grades_count=grades_by_org.get(o.id, 0),
