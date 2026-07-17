@@ -1569,42 +1569,38 @@ async def trigger_stub_generation(org_id: str, db: AsyncSession = Depends(get_db
     return {"created": created}
 
 
-# ─── Auto-generate + auto-publish after a Full Rebuild ────────────────────────
+# ─── Auto-generate + auto-publish after a Full Rebuild / self-serve first sync ─
 
-async def _last_n_seasons_with_stats(db: AsyncSession, org_id: str, n: int) -> list[str]:
-    """The org's `n` most recent seasons that actually have synced stats —
-    same recency ordering as `_season_sort_key` (organisations.py), just
-    restricted to seasons worth building a yearbook for."""
-    rows = await db.execute(
-        text("""
-            SELECT DISTINCT s.id, s.display_order, s.year, s.name
-            FROM seasons s
-            WHERE s.organisation_id = :o
-              AND EXISTS (SELECT 1 FROM player_season_stats pss WHERE pss.season_id = s.id)
-            ORDER BY s.display_order ASC NULLS LAST, s.year DESC NULLS LAST, s.name DESC
-            LIMIT :n
-        """),
-        {"o": org_id, "n": n},
-    )
+async def _seasons_with_stats(db: AsyncSession, org_id: str, limit: int | None = None) -> list[str]:
+    """The org's seasons that actually have synced stats, most-recent-first —
+    same recency ordering as `_season_sort_key` (organisations.py). `limit=None`
+    returns every such season (used for a brand-new self-serve club's whole
+    history); a positive `limit` restricts to the most recent N (used after an
+    already-onboarded club's Full Rebuild, to stay cheap)."""
+    query = """
+        SELECT DISTINCT s.id, s.display_order, s.year, s.name
+        FROM seasons s
+        WHERE s.organisation_id = :o
+          AND EXISTS (SELECT 1 FROM player_season_stats pss WHERE pss.season_id = s.id)
+        ORDER BY s.display_order ASC NULLS LAST, s.year DESC NULLS LAST, s.name DESC
+    """
+    params = {"o": org_id}
+    if limit is not None:
+        query += " LIMIT :n"
+        params["n"] = limit
+    rows = await db.execute(text(query), params)
     return [str(r["id"]) for r in rows.mappings().all()]
 
 
-async def auto_generate_and_publish_recent_yearbooks(db: AsyncSession, org_id: str, count: int = 3) -> dict:
-    """Auto-generate the AI narrative and auto-publish the last `count` seasons'
-    yearbooks. Called after a successful Full Rebuild — a rebuild is the
-    signal that a club's data (and so any narrative built from it) is
-    actually current.
-
-    Never overwrites a season that already has narrative content (an admin
-    may have hand-edited it since); never un-publishes anything. A season
-    whose narrative call fails (no Anthropic key configured, rate-limited,
-    transient API error) is still published with whatever content exists —
-    per the accepted "auto-publish, no draft gate" decision — rather than
-    blocking the rest of the batch.
-    """
-    await generate_stubs_for_org(db, org_id)
-    season_ids = await _last_n_seasons_with_stats(db, org_id, count)
-
+async def _auto_generate_and_publish(db: AsyncSession, org_id: str, season_ids: list[str]) -> dict:
+    """Shared worker: for each given season, ensure a yearbook stub exists,
+    generate + save its AI narrative (skipped if content already exists), then
+    publish it. Never overwrites a season that already has narrative content
+    (an admin may have hand-edited it since); never un-publishes anything. A
+    season whose narrative call fails (no Anthropic key configured,
+    rate-limited, transient API error) is still published with whatever
+    content exists — per the accepted "auto-publish, no draft gate" decision —
+    rather than blocking the rest of the batch."""
     narrated, published, skipped, errors = [], [], [], []
     for season_id in season_ids:
         try:
@@ -1652,6 +1648,31 @@ async def auto_generate_and_publish_recent_yearbooks(db: AsyncSession, org_id: s
         "skipped_existing": skipped,
         "errors": errors,
     }
+
+
+async def auto_generate_and_publish_recent_yearbooks(db: AsyncSession, org_id: str, count: int = 3) -> dict:
+    """Auto-generate the AI narrative and auto-publish the last `count` seasons'
+    yearbooks. Called after a successful Full Rebuild — a rebuild is the
+    signal that an already-onboarded club's data (and so any narrative built
+    from it) is actually current."""
+    await generate_stubs_for_org(db, org_id)
+    season_ids = await _seasons_with_stats(db, org_id, limit=count)
+    return await _auto_generate_and_publish(db, org_id, season_ids)
+
+
+async def auto_generate_and_publish_all_yearbooks(db: AsyncSession, org_id: str) -> dict:
+    """Auto-generate the AI narrative and auto-publish EVERY past season's
+    yearbook that has synced stats. Called once, after a self-serve club's
+    first full sync completes successfully — a brand-new club has no existing
+    yearbooks to protect and no admin who's seen the place yet, so unlike the
+    Full Rebuild path above (deliberately capped to the last few seasons to
+    stay cheap on a club that's been running for years) this walks the whole
+    history. Safe to call again by hand later (e.g. a retry after a partial
+    failure) — it never overwrites existing narrative content or re-publishes
+    an already-published season."""
+    await generate_stubs_for_org(db, org_id)
+    season_ids = await _seasons_with_stats(db, org_id, limit=None)
+    return await _auto_generate_and_publish(db, org_id, season_ids)
 
 
 # ─── AI narrative generation ──────────────────────────────────────────────────
