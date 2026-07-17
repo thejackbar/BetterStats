@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -82,11 +82,15 @@ export default function Trial() {
   const trialDays = status?.default_trial_days || 14
   const available = !!status?.enabled
 
-  // The page is public; only the SIGNUP is gated. While the
-  // self_serve_registration_enabled flag is off (the status call 404s), the
-  // hero swaps the wizard button for the "leave your details" Contact CTA —
-  // flipping the flag on makes the real self-serve button live with no
-  // deploy. (Per direct request: page on, self-serve button off for now.)
+  // Hidden until launch (per direct request, reinstated Jul 17): while the
+  // self_serve_registration_enabled flag is off (the status call 404s),
+  // anyone landing here is sent to the homepage — we're not ready to put
+  // this in front of users, even in its contact-fallback state. Flipping
+  // the flag on makes the page AND the signup live with no deploy. Note:
+  // Meta's ad-review crawler hits this URL from its data centres whenever
+  // ads are created; the redirect handles those fine.
+  if (status === false) return <Navigate to="/" replace />
+
   const openWizard = () => {
     if (available) setWizardOpen(true)
   }

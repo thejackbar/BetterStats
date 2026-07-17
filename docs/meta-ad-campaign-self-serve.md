@@ -169,9 +169,9 @@ Config, not code. The feature ships inert until these are done.
    with `META_TEST_EVENT_CODE` in Events Manager's Test Events tab.
 4. Deploy, run migration 161 (or let the lifespan mirror apply it), then
    flip **`self_serve_registration_enabled` ON** (Super Admin → General
-   Settings). While the flag is off the /trial page is public but shows a
-   "leave your details" Contact CTA instead of the signup button; flipping
-   the flag swaps in the real self-serve wizard with no deploy. Also
+   Settings). While the flag is off the /trial page redirects to the
+   homepage (hidden by request); flipping the flag makes the page and the
+   signup live with no deploy. Also
    uncomment the `/trial` sitemap entry in `backend/app/routers/seo.py` at
    launch so the page gets indexed.
 5. Register a real test club end-to-end in production (a small club we can
