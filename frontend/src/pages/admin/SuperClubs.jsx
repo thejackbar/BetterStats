@@ -4,6 +4,7 @@ import { MODULE_TOGGLES, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, sta
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
+import ClubPaymentMethodsModal from '../../components/admin/ClubPaymentMethodsModal'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
@@ -42,6 +43,7 @@ export default function SuperClubs() {
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
+  const [pmModalClub, setPmModalClub] = useState(null) // club object | null
   // In-progress "Renews" date edits per module key, before blur — keeps the native
   // date input's own mid-typing state from being clobbered by an autosave+reload
   // on every keystroke (see setModuleRenewal).
@@ -816,6 +818,13 @@ export default function SuperClubs() {
                         {editId === club.id ? 'Close' : 'Edit'}
                       </button>
                       <button
+                        onClick={() => setPmModalClub(club)}
+                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
+                        title="Manage this club's saved payment methods"
+                      >
+                        Billing
+                      </button>
+                      <button
                         onClick={() => { setConfirmDelete(club.id); setArchiveConfirmText(''); setEditId(null) }}
                         className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
                       >
@@ -1077,6 +1086,9 @@ export default function SuperClubs() {
           ))}
         </div>
       </div>
+      {pmModalClub && (
+        <ClubPaymentMethodsModal club={pmModalClub} onClose={() => setPmModalClub(null)} />
+      )}
     </AdminLayout>
   )
 }

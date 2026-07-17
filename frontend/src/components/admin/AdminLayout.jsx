@@ -93,6 +93,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/marketing', label: 'Club Directory' },
   { to: '/admin/super/comms-limits', label: 'Comms Limits', badge: 'commsRequests' },
   { to: '/admin/super/coupons', label: 'Discount Coupons' },
+  { to: '/admin/super/discount-report', label: 'Discount Report' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
   { to: '/admin/super/login-attempts', label: 'Login Attempts' },
   { to: '/admin/super/meta-ads', label: 'Meta Ads' },

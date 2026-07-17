@@ -651,6 +651,18 @@ class BillingInvoice(Base):
     hosted_invoice_url = Column(Text, nullable=True)
     invoice_pdf = Column(Text, nullable=True)
     line_items = Column(JSONB, nullable=True)
+    # Discount breakdown (migration 159) — Stripe's own invoice can only show
+    # ONE combined discount line (Checkout Session's one-discount cap, see
+    # stripe_client.create_checkout_session), so this is the TRUE separate
+    # amounts, computed locally at checkout time and round-tripped through
+    # the session's metadata. 0 = that discount didn't apply to this invoice.
+    bundle_discount_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    coupon_code = Column(Text, nullable=True)
+    coupon_discount_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    # Which payment method actually paid this invoice, e.g. "Visa Debit
+    # •••• 4242", "PayTo (...0400)" — see stripe_client.describe_payment_method.
+    payment_method_type = Column(Text, nullable=True)
+    payment_method_summary = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

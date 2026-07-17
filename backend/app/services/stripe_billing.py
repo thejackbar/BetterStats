@@ -23,9 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, STATUS_PAST_DUE
-from app.config.settings import settings
-from app.models.db import BillingInvoice, ClubMembership, ModuleActionRequest, Organisation, User
-from app.services import discount_coupons, email_service, module_subscriptions, stripe_client
+from app.models.db import BillingInvoice, ModuleActionRequest, Organisation
+from app.services import discount_coupons, module_subscriptions, stripe_client
 from app.services.stripe_client import epoch_to_date, epoch_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -199,7 +198,7 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
-    await _upsert_invoice(db, org, invoice, now)
+    await _upsert_invoice(db, org, invoice, now, sub=sub)
     try:
         await db.commit()
     except IntegrityError:
@@ -220,102 +219,8 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
         org = await _load_org(db, org_id)
         if org is None:
             return
-        await _upsert_invoice(db, org, invoice, now)
+        await _upsert_invoice(db, org, invoice, now, sub=sub)
         await db.commit()
-
-    # Best-effort receipt to the club's primary admin — covers the first
-    # invoice on a brand new subscribe, an add-on purchase, and every
-    # renewal alike, since they all land here. Never allowed to fail the
-    # webhook itself (entitlement above has already committed): a
-    # deliverability hiccup should show up in logs, not roll back a payment
-    # Stripe has already collected.
-    try:
-        await _send_invoice_receipt(db, org, invoice)
-    except Exception:
-        logger.exception("Stripe invoice.paid: receipt email failed for org %s, invoice %s", org.id, invoice.get("id"))
-
-
-async def _primary_admin(db: AsyncSession, org_id) -> User | None:
-    return (await db.execute(
-        select(User)
-        .join(ClubMembership, ClubMembership.user_id == User.id)
-        .where(
-            ClubMembership.club_id == org_id,
-            ClubMembership.role == "club_admin",
-            ClubMembership.is_primary_admin.is_(True),
-        )
-        .limit(1)
-    )).scalar_one_or_none()
-
-
-def _receipt_email_body(club_name: str, amount: str, currency: str,
-                         line_descriptions: list[str], hosted_invoice_url: str | None) -> tuple[str, str]:
-    """Plain inline-styled HTML (matches trial_lifecycle.py's _shell pattern —
-    a system-level transactional send, not a BetterComms campaign, so no
-    club-shell/unsubscribe wrapper)."""
-    items_html = "".join(f'<li style="margin:0 0 4px">{d}</li>' for d in line_descriptions) or ""
-    items_block = (
-        f'<ul style="font-size:14px;line-height:1.5;margin:0 0 14px;padding-left:18px">{items_html}</ul>'
-        if items_html else ""
-    )
-    cta = (
-        f'<p style="margin:24px 0"><a href="{hosted_invoice_url}" '
-        'style="display:inline-block;background:#16c784;color:#fff;text-decoration:none;'
-        'padding:10px 20px;border-radius:6px;font-size:14px;font-weight:bold">View invoice</a></p>'
-        if hosted_invoice_url else ""
-    )
-    html = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1a1a1a">
-      <p style="font-size:14px;color:#555">BetterCricket</p>
-      <p style="font-size:14px;line-height:1.5;margin:0 0 14px">
-        Payment received for {club_name} — <strong>{currency} ${amount}</strong>.
-      </p>
-      {items_block}
-      {cta}
-      <p style="font-size:12px;color:#888;margin-top:24px">
-        You're getting this as {club_name}'s primary admin. Your full billing history is always
-        available on the Account page in BetterCricket.
-      </p>
-    </div>
-    """
-    text_lines = [f"Payment received for {club_name} — {currency} ${amount}.", *line_descriptions]
-    if hosted_invoice_url:
-        text_lines.append(f"View invoice: {hosted_invoice_url}")
-    return html, "\n\n".join(text_lines)
-
-
-async def _send_invoice_receipt(db: AsyncSession, org: Organisation, invoice: dict) -> None:
-    """Emails the club's primary admin a receipt for a Stripe invoice that
-    was just paid — the only feedback a club gets for the add-on-to-
-    existing-subscription flow, which charges synchronously with no Stripe
-    redirect at all (routers/billing.py), and a welcome confirmation for a
-    brand new subscribe or a routine renewal alike. Silently no-ops when the
-    club has no primary admin on record (shouldn't happen in practice —
-    every club gets one at registration — but this is a best-effort extra,
-    not something to error out over)."""
-    admin = await _primary_admin(db, org.id)
-    if not admin or not admin.email:
-        return
-    amount_paid = (invoice.get("amount_paid") or 0) / 100
-    currency = (invoice.get("currency") or "aud").upper()
-    hosted_url = invoice.get("hosted_invoice_url")
-    lines = (invoice.get("lines") or {}).get("data") or []
-    descriptions = [ln.get("description") for ln in lines if ln.get("description")]
-    html, text_body = _receipt_email_body(org.name, f"{amount_paid:.2f}", currency, descriptions, hosted_url)
-    msg = email_service.EmailMessage(
-        to_email=admin.email,
-        to_name=admin.display_name or admin.username,
-        subject=f"Payment received — {currency} ${amount_paid:.2f}",
-        html=html,
-        text=text_body,
-        from_email=settings.email_from_address,
-        from_name=settings.email_from_name,
-        reply_to=settings.email_reply_to,
-        configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
-    )
-    result = await email_service.get_email_provider().send(msg)
-    if not result.ok:
-        logger.warning("Stripe billing: receipt email failed for org %s: %s", org.id, result.error)
 
 
 async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None:
@@ -342,7 +247,7 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_PAST_DUE, now=now)
-    await _upsert_invoice(db, org, invoice, now)
+    await _upsert_invoice(db, org, invoice, now, sub=sub)
     await db.commit()
     _push_to_twenty(org.id)
 
@@ -407,7 +312,8 @@ async def sweep_dangling_stripe_subscriptions(db: AsyncSession) -> list[str]:
     return affected
 
 
-async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, now: datetime) -> None:
+async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, now: datetime,
+                           sub: dict | None = None) -> None:
     """Records ONE Stripe invoice event for the club's Billing History.
     line_items is read straight off Stripe's own invoice lines, not
     recomputed from our pricing tables — a renewal invoice bills every
@@ -415,7 +321,16 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
     already-live subscription, see stripe_client.add_modules_to_subscription)
     only bills the newly-added one(s), so re-deriving "what's on this
     invoice" from the subscription's full held-module set would misrepresent
-    a partial invoice as a full one."""
+    a partial invoice as a full one.
+
+    ``sub`` (the subscription dict, when the caller already has it) is
+    where the discount breakdown lives — stripe_client.create_checkout_session
+    stamps bundle_discount_cents/coupon_code/coupon_discount_cents onto the
+    subscription's metadata at checkout time. Only copied onto THIS invoice
+    when total_discount_amounts shows it actually had a discount applied —
+    the bundle discount and a duration=once coupon only ever apply to the
+    first invoice, and the subscription's metadata still mentioning them
+    doesn't mean a later renewal invoice got them too."""
     stripe_invoice_id = invoice.get("id")
     if not stripe_invoice_id:
         return
@@ -440,4 +355,28 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
             {"name": ln.get("description") or "", "price": (ln.get("amount") or 0) / 100}
             for ln in lines
         ]
+
+    if invoice.get("total_discount_amounts") and sub:
+        meta = sub.get("metadata") or {}
+        try:
+            row.bundle_discount_cents = int(meta.get("bundle_discount_cents") or 0)
+        except (TypeError, ValueError):
+            row.bundle_discount_cents = 0
+        row.coupon_code = meta.get("coupon_code") or None
+        try:
+            row.coupon_discount_cents = int(meta.get("coupon_discount_cents") or 0)
+        except (TypeError, ValueError):
+            row.coupon_discount_cents = 0
+
+    # Best-effort — never allowed to block recording the invoice itself.
+    pi_id = stripe_client.invoice_payment_intent_id(invoice)
+    if pi_id:
+        try:
+            pi = await stripe_client.retrieve_payment_intent(pi_id)
+            pm = pi.get("payment_method")
+            if isinstance(pm, dict):
+                row.payment_method_type, row.payment_method_summary = stripe_client.describe_payment_method(pm)
+        except Exception:
+            logger.exception("Stripe billing: could not fetch payment method for invoice %s", stripe_invoice_id)
+
     row.updated_at = now

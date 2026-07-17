@@ -31,19 +31,19 @@ subscription (``club.stripe_subscription_id``):
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from stripe import error as stripe_error
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
-from app.routers.auth import get_current_user, get_current_club
+from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.services import billing_pricing, discount_coupons, module_subscriptions, platform_settings, stripe_client
 from app.services.platform_settings import require_billing_checkout_enabled
 
@@ -142,6 +142,17 @@ def _addon_keys(keys: list[str]) -> list[str]:
     # included it), and the frontend stops showing its checkbox once
     # subscribed anyway. Filtered defensively here too.
     return [k for k in keys if k != "core"]
+
+
+async def _require_primary_or_super_admin(db: AsyncSession, current_user: User, club: Organisation) -> None:
+    """Same gate /checkout-session already enforces inline — factored out
+    here since payment-method management needs it across three routes."""
+    m = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    is_super = bool(m and m.role == "super_admin")
+    if not is_super and not (m and m.club_id == club.id and m.role == "club_admin" and m.is_primary_admin):
+        raise HTTPException(status_code=403, detail="Only the club's primary admin can manage payment methods")
 
 
 def _with_core(keys: list[str]) -> list[str]:
@@ -266,6 +277,7 @@ async def create_checkout_session(
     redemption_id = None
     extra_coupon_id = None
     extra_stackable = False
+    extra_coupon_code = None
     extra_coupon_off = None
     if body.coupon_code:
         try:
@@ -277,15 +289,15 @@ async def create_checkout_session(
         redemption_id = redeemed["redemption_id"]
         extra_coupon_id = redeemed["stripe_coupon_id"]
         extra_stackable = redeemed["stackable_with_bundle"]
-        if extra_stackable:
-            # Checkout Session can carry at most one discount, so a stacking
-            # coupon can't ride alongside the bundle coupon — stripe_client
-            # combines them into a single ad-hoc coupon instead, and needs
-            # the coupon's own dollar contribution to do that. Computed with
-            # the SAME math /quote's preview uses (_apply_coupon_to_quote),
-            # so what gets charged matches what was previewed.
-            preview_quote = billing_pricing.price_for(keys, schedule=schedule)
-            extra_coupon_off = _apply_coupon_to_quote(preview_quote, redeemed["coupon"])["coupon"]["amount_off"]
+        extra_coupon_code = redeemed["coupon"].code
+        # Always computed (not just when stacking) — needed to combine with
+        # the bundle discount when stacking, and either way it's what gets
+        # recorded on our own billing_invoices row for reporting (see
+        # stripe_billing._upsert_invoice). Same math /quote's preview uses
+        # (_apply_coupon_to_quote), so what gets charged matches what was
+        # previewed.
+        preview_quote = billing_pricing.price_for(keys, schedule=schedule)
+        extra_coupon_off = _apply_coupon_to_quote(preview_quote, redeemed["coupon"])["coupon"]["amount_off"]
 
     try:
         session = await stripe_client.create_checkout_session(
@@ -304,6 +316,7 @@ async def create_checkout_session(
             discount_schedule=schedule,
             extra_coupon_id=extra_coupon_id,
             extra_stackable=extra_stackable,
+            extra_coupon_code=extra_coupon_code,
             extra_coupon_off_dollars=extra_coupon_off,
             coupon_redemption_id=redemption_id,
         )
@@ -347,7 +360,268 @@ async def list_invoices(
             "hosted_invoice_url": r.hosted_invoice_url,
             "invoice_pdf": r.invoice_pdf,
             "line_items": r.line_items,
+            "bundle_discount_cents": r.bundle_discount_cents,
+            "coupon_code": r.coupon_code,
+            "coupon_discount_cents": r.coupon_discount_cents,
+            "payment_method_type": r.payment_method_type,
+            "payment_method_summary": r.payment_method_summary,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows
     ]
+
+
+async def _get_club_or_404(db: AsyncSession, org_id: str) -> Organisation:
+    club = await db.get(Organisation, org_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return club
+
+
+def _serialize_payment_methods(data: dict) -> dict:
+    default_id = data["default_payment_method_id"]
+    return {
+        "default_payment_method_id": default_id,
+        "payment_methods": [
+            {
+                "id": pm["id"],
+                "type": pm.get("type"),
+                "summary": stripe_client.describe_payment_method(pm)[1],
+                "is_default": pm["id"] == default_id,
+            }
+            for pm in data["payment_methods"]
+        ],
+    }
+
+
+async def _load_payment_methods(club: Organisation) -> dict:
+    if not club.stripe_customer_id:
+        return {"default_payment_method_id": None, "payment_methods": []}
+    try:
+        data = await stripe_client.list_payment_methods(club.stripe_customer_id)
+    except stripe_client.StripeNotConfigured:
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e) or "Could not load payment methods")
+    return _serialize_payment_methods(data)
+
+
+def _require_customer_id(club: Organisation) -> str:
+    if not club.stripe_customer_id:
+        raise HTTPException(status_code=422, detail="This club has no billing account yet — subscribe to a module first.")
+    return club.stripe_customer_id
+
+
+async def _setup_session_for(club: Organisation) -> dict:
+    customer_id = _require_customer_id(club)
+    try:
+        session = await stripe_client.create_setup_session(customer_id)
+    except stripe_client.StripeNotConfigured:
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e) or "Could not start the payment method setup")
+    return {"url": session["url"]}
+
+
+async def _set_default_payment_method_for(club: Organisation, pm_id: str) -> dict:
+    customer_id = _require_customer_id(club)
+    try:
+        await stripe_client.set_default_payment_method(customer_id, pm_id)
+    except stripe_client.StripeNotConfigured:
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e) or "Could not set the default payment method")
+    return await _load_payment_methods(club)
+
+
+async def _remove_payment_method_for(club: Organisation, pm_id: str) -> dict:
+    """Detaches a payment method — refuses when it's the only one on file
+    (per direct instruction), and if it happened to be the default,
+    auto-promotes another remaining one so the club is never left without a
+    default payment method for its next renewal or add-on charge."""
+    customer_id = _require_customer_id(club)
+    current = await _load_payment_methods(club)
+    if len(current["payment_methods"]) <= 1:
+        raise HTTPException(status_code=422, detail="Can't remove the only payment method on file — add another one first.")
+    was_default = pm_id == current["default_payment_method_id"]
+    try:
+        await stripe_client.detach_payment_method(pm_id)
+        if was_default:
+            remaining = [pm for pm in current["payment_methods"] if pm["id"] != pm_id]
+            if remaining:
+                await stripe_client.set_default_payment_method(customer_id, remaining[0]["id"])
+    except stripe_client.StripeNotConfigured:
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e) or "Could not remove this payment method")
+    return await _load_payment_methods(club)
+
+
+@router.get("/payment-methods")
+async def list_payment_methods(
+    club: Organisation = Depends(get_current_club),
+):
+    """Any club member can view (matches /invoices — Billing History is
+    already visible to the whole admin team); only the primary admin (or a
+    super admin) can add/change/remove one, enforced on the three routes
+    below."""
+    return await _load_payment_methods(club)
+
+
+@router.post("/payment-methods/setup-session")
+async def create_payment_method_setup_session(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns a Stripe-hosted setup-mode Checkout Session URL to add a new
+    card (or other saved payment method) — no charge involved. Reuses the
+    same create_setup_session Stripe already calls for the add-on
+    no-payment-method recovery flow; this is just a direct entry point to it
+    from the Account page's own payment-methods panel."""
+    await _require_primary_or_super_admin(db, current_user, club)
+    return await _setup_session_for(club)
+
+
+@router.post("/payment-methods/{pm_id}/default")
+async def set_default_payment_method(
+    pm_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_primary_or_super_admin(db, current_user, club)
+    return await _set_default_payment_method_for(club, pm_id)
+
+
+@router.delete("/payment-methods/{pm_id}")
+async def remove_payment_method(
+    pm_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_primary_or_super_admin(db, current_user, club)
+    return await _remove_payment_method_for(club, pm_id)
+
+
+# ─── Super Admin equivalents — any club by id, no "acting as" needed ────────
+
+@router.get("/super/clubs/{org_id}/payment-methods", dependencies=[Depends(require_super_admin)])
+async def super_list_payment_methods(org_id: str, db: AsyncSession = Depends(get_db)):
+    club = await _get_club_or_404(db, org_id)
+    return await _load_payment_methods(club)
+
+
+@router.post("/super/clubs/{org_id}/payment-methods/setup-session", dependencies=[Depends(require_super_admin)])
+async def super_create_payment_method_setup_session(org_id: str, db: AsyncSession = Depends(get_db)):
+    club = await _get_club_or_404(db, org_id)
+    return await _setup_session_for(club)
+
+
+@router.post("/super/clubs/{org_id}/payment-methods/{pm_id}/default", dependencies=[Depends(require_super_admin)])
+async def super_set_default_payment_method(org_id: str, pm_id: str, db: AsyncSession = Depends(get_db)):
+    club = await _get_club_or_404(db, org_id)
+    return await _set_default_payment_method_for(club, pm_id)
+
+
+@router.delete("/super/clubs/{org_id}/payment-methods/{pm_id}", dependencies=[Depends(require_super_admin)])
+async def super_remove_payment_method(org_id: str, pm_id: str, db: AsyncSession = Depends(get_db)):
+    club = await _get_club_or_404(db, org_id)
+    return await _remove_payment_method_for(club, pm_id)
+
+
+@router.get("/discount-report", dependencies=[Depends(require_super_admin)])
+async def discount_report(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Super-Admin-only rollup of every discount actually paid out, sourced
+    from billing_invoices (the amount that really landed on a Stripe invoice)
+    rather than discount_coupons_redemptions (which records that a code was
+    *applied*, not what it was worth in dollars on any given invoice — a
+    club can hold one live redemption across several renewal invoices under
+    a repeating coupon). Bundle and coupon discounts are reported separately
+    since they're independent, optionally-stacking things: (a)/(b) per-club
+    and platform-wide bundle discount totals, (c)/(d) per-club-per-code and
+    per-code-across-all-clubs coupon totals, both filterable by the invoice's
+    created_at date."""
+    clauses = []
+    if date_from:
+        clauses.append(BillingInvoice.created_at >= datetime.combine(date_from, time.min))
+    if date_to:
+        clauses.append(BillingInvoice.created_at < datetime.combine(date_to + timedelta(days=1), time.min))
+
+    bundle_rows = (await db.execute(
+        select(
+            BillingInvoice.organisation_id,
+            Organisation.name,
+            func.sum(BillingInvoice.bundle_discount_cents).label("total_cents"),
+            func.count(BillingInvoice.id).label("count"),
+        )
+        .join(Organisation, Organisation.id == BillingInvoice.organisation_id)
+        .where(BillingInvoice.bundle_discount_cents > 0, *clauses)
+        .group_by(BillingInvoice.organisation_id, Organisation.name)
+        .order_by(func.sum(BillingInvoice.bundle_discount_cents).desc())
+    )).all()
+    bundle_by_club = [
+        {"organisation_id": str(r.organisation_id), "organisation_name": r.name, "total_cents": int(r.total_cents), "count": r.count}
+        for r in bundle_rows
+    ]
+
+    coupon_club_rows = (await db.execute(
+        select(
+            BillingInvoice.organisation_id,
+            Organisation.name,
+            BillingInvoice.coupon_code,
+            func.sum(BillingInvoice.coupon_discount_cents).label("total_cents"),
+            func.count(BillingInvoice.id).label("count"),
+        )
+        .join(Organisation, Organisation.id == BillingInvoice.organisation_id)
+        .where(BillingInvoice.coupon_discount_cents > 0, BillingInvoice.coupon_code.isnot(None), *clauses)
+        .group_by(BillingInvoice.organisation_id, Organisation.name, BillingInvoice.coupon_code)
+        .order_by(func.sum(BillingInvoice.coupon_discount_cents).desc())
+    )).all()
+    coupon_by_club = [
+        {
+            "organisation_id": str(r.organisation_id),
+            "organisation_name": r.name,
+            "coupon_code": r.coupon_code,
+            "total_cents": int(r.total_cents),
+            "count": r.count,
+        }
+        for r in coupon_club_rows
+    ]
+
+    coupon_code_rows = (await db.execute(
+        select(
+            BillingInvoice.coupon_code,
+            func.sum(BillingInvoice.coupon_discount_cents).label("total_cents"),
+            func.count(BillingInvoice.id).label("count"),
+            func.count(func.distinct(BillingInvoice.organisation_id)).label("club_count"),
+        )
+        .where(BillingInvoice.coupon_discount_cents > 0, BillingInvoice.coupon_code.isnot(None), *clauses)
+        .group_by(BillingInvoice.coupon_code)
+        .order_by(func.sum(BillingInvoice.coupon_discount_cents).desc())
+    )).all()
+    coupon_by_code = [
+        {"coupon_code": r.coupon_code, "total_cents": int(r.total_cents), "count": r.count, "club_count": r.club_count}
+        for r in coupon_code_rows
+    ]
+
+    return {
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "bundle": {
+            "by_club": bundle_by_club,
+            "total_cents": sum(r["total_cents"] for r in bundle_by_club),
+            "total_count": sum(r["count"] for r in bundle_by_club),
+        },
+        "coupons": {
+            "by_club": coupon_by_club,
+            "by_code": coupon_by_code,
+            "total_cents": sum(r["total_cents"] for r in coupon_by_code),
+            "total_count": sum(r["count"] for r in coupon_by_code),
+        },
+    }
