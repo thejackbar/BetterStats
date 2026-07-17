@@ -7,6 +7,14 @@ import Dropdown from '../../components/Dropdown'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
+// Mirrors SuperMarketing.jsx's own STATES list (Club Directory).
+const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+const norm = (s) => (s || '').toString().toLowerCase()
+// "On trial/subscribed" = the module's subscription row is currently trial or active
+// (mirrors SUBSCRIPTION_STATUSES' own `live` statuses, minus past_due/paused/cancelled).
+const clubHasLiveModule = (club, key) =>
+  (club.module_subscriptions || []).some((s) => s.module === key && (s.status === 'trial' || s.status === 'active'))
+
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-AU') : '—')
 
 // datetime-local helpers (local wall-clock, "YYYY-MM-DDTHH:mm").
@@ -66,6 +74,20 @@ export default function SuperClubs() {
   const [showArchived, setShowArchived] = useState(false)
   // Phase 21 — trial view filter: all / trialing / ending soon (<=7d) / expired.
   const [trialFilter, setTrialFilter] = useState('all')
+
+  // Club Directory-style search + filters (client-side — the full club list is
+  // already fetched, same as the existing trialFilter above).
+  const [search, setSearch] = useState('')
+  const [filterState, setFilterState] = useState('')
+  const [filterAssociation, setFilterAssociation] = useState('')
+  const [filterPrimaryAdmin, setFilterPrimaryAdmin] = useState('')
+  const [filterModules, setFilterModules] = useState([])
+  const toggleFilterModule = (key) =>
+    setFilterModules((m) => (m.includes(key) ? m.filter((k) => k !== key) : [...m, key]))
+  const clearFilters = () => {
+    setSearch(''); setFilterState(''); setFilterAssociation(''); setFilterPrimaryAdmin(''); setFilterModules([])
+  }
+  const filtersActive = !!(search || filterState || filterAssociation || filterPrimaryAdmin || filterModules.length)
 
   // Club search (same source as the public onboarding flow)
   const [query, setQuery] = useState('')
@@ -417,10 +439,22 @@ export default function SuperClubs() {
   }, { trialing: 0, endingSoon: 0, expired: 0 })
 
   const visibleClubs = clubs.filter((c) => {
-    if (trialFilter === 'all') return true
-    const info = clubTrialInfo(c)
-    if (trialFilter === 'trialing') return info?.kind === 'trialing' || info?.kind === 'ending_soon'
-    return info?.kind === trialFilter
+    if (trialFilter !== 'all') {
+      const info = clubTrialInfo(c)
+      const matchesTrial = trialFilter === 'trialing'
+        ? (info?.kind === 'trialing' || info?.kind === 'ending_soon')
+        : info?.kind === trialFilter
+      if (!matchesTrial) return false
+    }
+    if (search) {
+      const hay = `${c.name} ${c.short_name || ''} ${c.slug || ''}`
+      if (!norm(hay).includes(norm(search))) return false
+    }
+    if (filterState && norm(c.state) !== norm(filterState)) return false
+    if (filterAssociation && !norm(c.association_name).includes(norm(filterAssociation))) return false
+    if (filterPrimaryAdmin && !norm(c.primary_admin_name).includes(norm(filterPrimaryAdmin))) return false
+    if (filterModules.length && !filterModules.some((k) => clubHasLiveModule(c, k))) return false
+    return true
   })
 
   return (
@@ -697,6 +731,55 @@ export default function SuperClubs() {
           </form>
         )}
 
+        <div className="pb-card p-3 mb-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Search</label>
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Club name…" className={INPUT_CLS} />
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">State</label>
+              <select value={filterState} onChange={(e) => setFilterState(e.target.value)} className={INPUT_CLS}>
+                <option value="">All states</option>
+                {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Association</label>
+              <input type="text" value={filterAssociation} onChange={(e) => setFilterAssociation(e.target.value)}
+                placeholder="Name or short code…" className={INPUT_CLS} />
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Primary admin</label>
+              <input type="text" value={filterPrimaryAdmin} onChange={(e) => setFilterPrimaryAdmin(e.target.value)}
+                placeholder="Admin name…" className={INPUT_CLS} />
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="font-mono text-[10px] text-pb-faint block mb-1">On trial / subscribed to</label>
+            <div className="flex flex-wrap gap-1.5">
+              {MODULE_TOGGLES.filter((t) => t.key !== 'core').map((tog) => {
+                const active = filterModules.includes(tog.key)
+                return (
+                  <button key={tog.key} type="button" onClick={() => toggleFilterModule(tog.key)}
+                    className={`px-2 py-1 rounded font-mono text-[10px] border transition-colors ${
+                      active ? 'border-pb-accent text-pb-text' : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+                    }`}>
+                    {tog.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {filtersActive && (
+            <button type="button" onClick={clearFilters}
+              className="mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text underline">
+              Clear filters
+            </button>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2 mb-3">
           {[
             { key: 'all', label: `All (${clubs.length})` },
@@ -727,7 +810,7 @@ export default function SuperClubs() {
           </div>
           {visibleClubs.length === 0 && (
             <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">
-              {clubs.length === 0 ? 'No clubs yet' : 'No clubs match this filter'}
+              {clubs.length === 0 ? 'No clubs yet' : 'No clubs match these filters'}
             </div>
           )}
           {visibleClubs.map((club, i) => (
@@ -775,6 +858,15 @@ export default function SuperClubs() {
                       statusLabel(club.subscription_status),
                     ].filter(Boolean).join(' · ')}
                   </div>
+                  {(club.state || club.association_name || club.primary_admin_name) && (
+                    <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
+                      {[
+                        club.state,
+                        club.association_name,
+                        club.primary_admin_name && `admin: ${club.primary_admin_name}`,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => toggleActive(club)}

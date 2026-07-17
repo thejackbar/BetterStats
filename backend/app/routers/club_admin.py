@@ -16,7 +16,7 @@ from pathlib import Path
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
     PlayerSyncRequest, Sponsor, ClubOnboardingRequest, OrgModuleSubscription,
-    ModuleActionRequest, CommsLimitRequest, get_db
+    ModuleActionRequest, CommsLimitRequest, MarketingClub, get_db
 )
 from sqlalchemy import text as _text
 from sqlalchemy.orm import selectinload, aliased as _orm_aliased
@@ -1507,7 +1507,7 @@ def _module_subs_payload(org) -> list[dict]:
     return sorted(out, key=lambda d: d["module"])
 
 
-def _club_payload(org) -> dict:
+def _club_payload(org, association_name: str | None = None, primary_admin_name: str | None = None) -> dict:
     return {
         "id": str(org.id),
         "slug": org.slug,
@@ -1516,6 +1516,12 @@ def _club_payload(org) -> dict:
         "is_active": org.is_active,
         "archived_at": org.archived_at.isoformat() if org.archived_at else None,
         "contact_email": org.contact_email,
+        "state": org.state,
+        # From the Club Directory's marketing_clubs row this org was onboarded
+        # from, when known (see MarketingClub.existing_org_id) — Organisation
+        # itself has no association column of its own.
+        "association_name": association_name,
+        "primary_admin_name": primary_admin_name,
         "module_overrides": list(org.module_overrides or []),
         "modules": sorted(org_entitled_modules(org)),
         "module_subscriptions": _module_subs_payload(org),
@@ -1544,7 +1550,29 @@ async def list_all_clubs(
     if not include_archived:
         q = q.where(Organisation.archived_at.is_(None))
     result = await db.execute(q.order_by(Organisation.name))
-    return [_club_payload(o) for o in result.scalars().all()]
+    orgs = result.scalars().all()
+    org_ids = [o.id for o in orgs]
+
+    assoc_by_org: dict = {}
+    admin_by_org: dict = {}
+    if org_ids:
+        assoc_rows = await db.execute(
+            select(MarketingClub.existing_org_id, MarketingClub.association_name)
+            .where(MarketingClub.existing_org_id.in_(org_ids), MarketingClub.association_name.isnot(None))
+        )
+        assoc_by_org = {row[0]: row[1] for row in assoc_rows.all()}
+
+        admin_rows = await db.execute(
+            select(ClubMembership.club_id, User.display_name, User.username)
+            .join(User, User.id == ClubMembership.user_id)
+            .where(ClubMembership.club_id.in_(org_ids), ClubMembership.is_primary_admin.is_(True))
+        )
+        admin_by_org = {row[0]: (row[1] or row[2]) for row in admin_rows.all()}
+
+    return [
+        _club_payload(o, association_name=assoc_by_org.get(o.id), primary_admin_name=admin_by_org.get(o.id))
+        for o in orgs
+    ]
 
 
 # ─── Global platform settings (super-admin General Settings) ──────────────────
@@ -2723,6 +2751,7 @@ async def list_users(
             "role": r.ClubMembership.role if r.ClubMembership else None,
             "club_name": r.Organisation.name if r.Organisation else None,
             "club_id": str(r.ClubMembership.club_id) if r.ClubMembership else None,
+            "is_primary_admin": bool(r.ClubMembership.is_primary_admin) if r.ClubMembership else False,
             "last_login_at": r.User.last_login_at.isoformat() if r.User.last_login_at else None,
             "locked": r.User.locked_until is not None,
         }
