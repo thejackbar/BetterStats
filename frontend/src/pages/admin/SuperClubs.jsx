@@ -59,7 +59,7 @@ export default function SuperClubs() {
   const [editId, setEditId] = useState(null)
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
-    subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    subscription_status: 'active', renewal_date: '',
     billing_checkout_override: '',
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
@@ -270,7 +270,6 @@ export default function SuperClubs() {
       contact_email: club.contact_email || '',
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
-      billing_cycle: club.billing_cycle || '',
       billing_checkout_override:
         club.billing_checkout_override === true ? 'true'
         : club.billing_checkout_override === false ? 'false'
@@ -398,11 +397,13 @@ export default function SuperClubs() {
     setSaving(true)
     setMsg('')
     try {
-      // Empty date / cycle must go as null, not '' (the API validates them).
+      // Empty date must go as null, not '' (the API validates it). Annual is the only
+      // billing cycle BetterCricket supports, so it's always sent as-is rather than
+      // read from an editable field.
       const payload = {
         ...editForm,
         renewal_date: editForm.renewal_date || null,
-        billing_cycle: editForm.billing_cycle || null,
+        billing_cycle: 'annual',
         billing_checkout_override:
           editForm.billing_checkout_override === 'true' ? true
           : editForm.billing_checkout_override === 'false' ? false
@@ -1146,13 +1147,10 @@ export default function SuperClubs() {
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Billing cycle</label>
-                      <select value={editForm.billing_cycle}
-                        onChange={e => setEditForm(f => ({ ...f, billing_cycle: e.target.value }))}
-                        className={INPUT_CLS}>
-                        {BILLING_CYCLES.map(c => (
-                          <option key={c.key} value={c.key}>{c.label}</option>
-                        ))}
-                      </select>
+                      <div className={`${INPUT_CLS} text-pb-faint cursor-default`}>Annual</div>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                        The only billing cycle BetterCricket supports, so it isn't editable.
+                      </p>
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Renewal date (default)</label>
