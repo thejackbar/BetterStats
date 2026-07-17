@@ -169,8 +169,10 @@ Config, not code. The feature ships inert until these are done.
    with `META_TEST_EVENT_CODE` in Events Manager's Test Events tab.
 4. Deploy, run migration 160 (or let the lifespan mirror apply it), then
    flip **`self_serve_registration_enabled` ON** (Super Admin → General
-   Settings). The /trial page switches from its Contact fallback to the
-   live wizard the moment the flag is on.
+   Settings). While the flag is off the /trial page redirects to the
+   homepage (hidden by request); flipping the flag makes it live with no
+   deploy. Also uncomment the `/trial` sitemap entry in
+   `backend/app/routers/seo.py` at launch so the page gets indexed.
 5. Register a real test club end-to-end in production (a small club we can
    archive after, or use the archive/restore flow). Confirm: the org exists
    with trials, the session lands in /admin, `signup_attribution` is

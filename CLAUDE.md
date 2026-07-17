@@ -1894,7 +1894,10 @@ while it's off — merge-safe ahead of campaign launch). The internal
   eventId — a picked club is a lead even if they stall); public `submit`
   fires CompleteRegistration browser+server (the campaign's optimisation
   event) + GA4 `sign_up` + a `conversion` usage-event breadcrumb.
-- **Frontend**: `/trial` (`pages/marketing/Trial.jsx`, in sitemap + OG map) —
+- **Frontend**: `/trial` (`pages/marketing/Trial.jsx`, in the OG map; its
+  sitemap entry in `seo.py` is COMMENTED OUT until launch, and the page
+  itself `Navigate`s to `/` while the flag is off — hidden per direct
+  request, no teaser shown) —
   hero-first single-CTA landing page opening `SelfServeTrialModal` with the
   new **`publicMode` prop** (NOT `public` — reserved word when destructured):
   switches the api.js family to `publicSelfServe*`, sends honeypot/
