@@ -958,6 +958,10 @@ export const api = {
     request(`/club-admin/super/clubs/${clubId}/archive`, { method: 'POST' }),
   superRestoreClub: (clubId) =>
     request(`/club-admin/super/clubs/${clubId}/restore`, { method: 'POST' }),
+  // Pause Sync / Cancel Sync / Continue Sync for a club's current Full Sync
+  // (migration 160) — All Clubs row actions.
+  superClubSyncControl: (clubId, action) =>
+    request(`/club-admin/super/clubs/${clubId}/sync-control`, { method: 'POST', body: JSON.stringify({ action }) }),
   // Per-module subscriptions (migration 118).
   superStartModuleTrial: (clubId, moduleKey, body = {}) =>
     request(`/club-admin/super/clubs/${clubId}/modules/${moduleKey}/trial`, { method: 'POST', body: JSON.stringify(body) }),

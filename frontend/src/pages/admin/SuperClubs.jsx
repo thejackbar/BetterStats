@@ -38,6 +38,15 @@ const isoToLocalInput = (iso) => (iso ? toLocalInput(new Date(iso)) : '')
 
 const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
 
+// Pause Sync / Cancel Sync / Continue Sync (migration 160) response status -> toast text.
+const SYNC_CONTROL_MSG = {
+  pause_requested: (club) => `Pause requested for ${club.name}. It'll stop at the next safe checkpoint.`,
+  cancel_requested: (club) => `Cancel requested for ${club.name}. It'll stop at the next safe checkpoint.`,
+  cancelled: (club) => `Sync cancelled for ${club.name}`,
+  sync_started: (club) => `Sync continued for ${club.name}`,
+  already_running: (club) => `${club.name} already has a sync running`,
+}
+
 // Rows shown in the General Settings bundle-discount editor. Only 1-4 have a
 // live effect today (there are 4 priced bolt-on modules); 5/6 are pre-wired
 // so a future 5th/6th priced module needs no code change here, just a value
@@ -86,6 +95,8 @@ export default function SuperClubs() {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [archiveConfirmText, setArchiveConfirmText] = useState('')
   const [syncing, setSyncing] = useState(null)
+  // Club id currently mid-request for Pause/Cancel/Continue Sync (migration 160).
+  const [syncControlBusy, setSyncControlBusy] = useState(null)
   const [showArchived, setShowArchived] = useState(false)
   // Phase 21 — trial view filter: all / trialing / ending soon (<=7d) / expired.
   const [trialFilter, setTrialFilter] = useState('all')
@@ -390,6 +401,25 @@ export default function SuperClubs() {
       setMsg(err.message)
     } finally {
       setSyncing(null)
+    }
+  }
+
+  // Pause Sync / Cancel Sync / Continue Sync (migration 160) — a running
+  // Full Sync is stopped cooperatively at its own next checkpoint (a season
+  // or a few dozen games), not instantly; Continue starts a fresh
+  // incremental sync from wherever the paused one left off.
+  const syncControl = async (club, action) => {
+    setSyncControlBusy(club.id)
+    setMsg('')
+    try {
+      const res = await api.superClubSyncControl(club.id, action)
+      const describe = SYNC_CONTROL_MSG[res?.status]
+      setMsg(describe ? describe(club) : `Sync ${action} for ${club.name}`)
+      await load()
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setSyncControlBusy(null)
     }
   }
 
@@ -918,6 +948,14 @@ export default function SuperClubs() {
                         Syncing
                       </span>
                     )}
+                    {club.full_sync_paused && (
+                      <span
+                        className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300"
+                        title="A full sync was paused. Continue Sync resumes it as a fresh incremental sync."
+                      >
+                        Sync paused
+                      </span>
+                    )}
                     {(() => {
                       const info = clubTrialInfo(club)
                       if (!info) return null
@@ -957,7 +995,7 @@ export default function SuperClubs() {
                       `${club.grades_count ?? 0} grade${(club.grades_count ?? 0) === 1 ? '' : 's'}`,
                       `${club.players_count ?? 0} player${(club.players_count ?? 0) === 1 ? '' : 's'}`,
                       club.onboarding_total > 0 && `setup ${club.onboarding_done}/${club.onboarding_total}`,
-                      !club.full_sync_running && club.last_full_sync_at
+                      !club.full_sync_running && !club.full_sync_paused && club.last_full_sync_at
                         && `last synced ${new Date(club.last_full_sync_at).toLocaleDateString('en-AU')}`,
                       club.last_active_at
                         ? `active ${new Date(club.last_active_at).toLocaleDateString('en-AU')}`
@@ -990,14 +1028,54 @@ export default function SuperClubs() {
                     </button>
                   ) : (
                     <>
-                      <button
-                        onClick={() => syncClub(club)}
-                        disabled={syncing === club.id}
-                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
-                        title="Pull latest games & stats"
-                      >
-                        {syncing === club.id ? 'Syncing…' : 'Sync'}
-                      </button>
+                      {club.full_sync_running ? (
+                        <>
+                          <button
+                            onClick={() => syncControl(club, 'pause')}
+                            disabled={syncControlBusy === club.id}
+                            className="font-mono text-[10px] text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
+                            title="Stop this sync at its next safe checkpoint. Continue Sync picks up from there."
+                          >
+                            Pause Sync
+                          </button>
+                          <button
+                            onClick={() => syncControl(club, 'cancel')}
+                            disabled={syncControlBusy === club.id}
+                            className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors disabled:opacity-50"
+                            title="Stop this sync for good at its next safe checkpoint"
+                          >
+                            Cancel Sync
+                          </button>
+                        </>
+                      ) : club.full_sync_paused ? (
+                        <>
+                          <button
+                            onClick={() => syncControl(club, 'continue')}
+                            disabled={syncControlBusy === club.id}
+                            className="font-mono text-[10px] text-pb-accent hover:underline transition-colors disabled:opacity-50"
+                            title="Resume with a fresh incremental sync, safe even after a paused Full Rebuild"
+                          >
+                            Continue Sync
+                          </button>
+                          <button
+                            onClick={() => syncControl(club, 'cancel')}
+                            disabled={syncControlBusy === club.id}
+                            className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors disabled:opacity-50"
+                            title="Abandon this paused sync"
+                          >
+                            Cancel Sync
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => syncClub(club)}
+                          disabled={syncing === club.id}
+                          className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+                          title="Pull latest games & stats"
+                        >
+                          {syncing === club.id ? 'Syncing…' : 'Sync'}
+                        </button>
+                      )}
                       <button
                         onClick={() => (editId === club.id ? setEditId(null) : startEdit(club))}
                         className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"

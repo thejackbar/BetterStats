@@ -376,11 +376,18 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
 
 
 async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full"):
-    from app.services.sync import finish_sync_run
+    from app.services.sync import finish_sync_run, pause_sync_run, cancel_sync_run, SyncControlSignal
     import logging
     try:
         stats = await sync_organisation(org_id, run_id=run_id, kind=kind)
         await finish_sync_run(run_id, stats if isinstance(stats, dict) else {})
+    except SyncControlSignal as sig:
+        # Pause/Cancel from the Super Admin All Clubs page — not a crash.
+        if sig.action == "pause":
+            await pause_sync_run(run_id, {})
+        else:
+            await cancel_sync_run(run_id, {})
+        logging.getLogger(__name__).info(f"Sync {sig.action} for {org_id}")
     except Exception as exc:
         import traceback
         logging.getLogger(__name__).error(f"Sync crashed for {org_id}: {exc}\n{traceback.format_exc()}")

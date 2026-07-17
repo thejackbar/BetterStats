@@ -47,12 +47,19 @@ export default function SyncRunCard({ entry, isLatest = false }) {
   const dur = fmtDuration(entry.started_at, entry.completed_at)
   const isRunning = entry.status === 'running'
   const isError = entry.status === 'error' || !!entry.error
+  // Pause Sync / Cancel Sync (migration 160) — a paused run isn't finished
+  // (no completed_at, resumable via Continue Sync) and a cancelled one is a
+  // deliberate stop, not a failure — neither should read as ERROR or a plain
+  // OK success.
+  const isPaused = entry.status === 'paused'
+  const isCancelled = entry.status === 'cancelled'
 
   return (
     <div
       className={`pb-card p-4 ${
         isError ? 'border-pb-red/40'
-          : isRunning ? 'border-pb-amber/40'
+          : isRunning || isPaused ? 'border-pb-amber/40'
+          : isCancelled ? 'border-pb-hairline'
           : isLatest ? 'border-pb-accent/30'
           : ''
       }`}
@@ -67,17 +74,20 @@ export default function SyncRunCard({ entry, isLatest = false }) {
               </span>
             )}
           </div>
-          {dur && !isRunning && <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Completed in {dur}</p>}
+          {dur && !isRunning && !isPaused && <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Completed in {dur}</p>}
           {isRunning && <p className="font-mono text-[10px] text-pb-amber mt-0.5">Running…</p>}
+          {isPaused && <p className="font-mono text-[10px] text-pb-amber mt-0.5">Paused, use Continue Sync on All Clubs to resume</p>}
         </div>
         <span className={`font-mono text-[10px] px-2 py-0.5 rounded border shrink-0 ${
           isError
             ? 'border-pb-red/30 text-pb-red'
-            : isRunning
+            : isRunning || isPaused
             ? 'border-pb-amber/30 text-pb-amber'
+            : isCancelled
+            ? 'border-pb-hairline text-pb-faint'
             : 'border-pb-accent/30 text-pb-accent'
         }`}>
-          {isError ? 'ERROR' : isRunning ? 'RUNNING' : 'OK'}
+          {isError ? 'ERROR' : isRunning ? 'RUNNING' : isPaused ? 'PAUSED' : isCancelled ? 'CANCELLED' : 'OK'}
         </span>
       </div>
 
