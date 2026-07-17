@@ -335,26 +335,6 @@ export default function SuperClubs() {
     runModuleAction(key, () => { clearTrialEdit(key); return api.superRemoveModule(clubId, key) })
   const setModuleRenewal = (clubId, key, date) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { renewal_date: date || null }))
-  // Status select: 'trial' opens the inline date editor (persisted on Apply) seeded
-  // from the row's draft; 'reset' isn't a real persisted status — it wipes the
-  // module's subscription row(s) entirely (same as un-granting via the chip
-  // button), which is what actually clears trial_started_at and makes the
-  // module trial_eligible again for the club's own self-service Start Trial /
-  // Subscribe (account_plan_status reads "never held a row" as never_trialed).
-  // Any other status applies immediately.
-  const onModuleStatus = (clubId, key, status, seedDraft) => {
-    if (status === 'trial') {
-      setTrialEdit(t => ({ ...t, [key]: seedDraft }))
-      return
-    }
-    if (status === 'reset') {
-      clearTrialEdit(key)
-      removeModule(clubId, key)
-      return
-    }
-    clearTrialEdit(key)
-    runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
-  }
   const applyTrial = (clubId, key, draft) => {
     if (draft.start && draft.end && new Date(draft.end) <= new Date(draft.start)) {
       setMsg('Trial end must be after the start')
@@ -367,6 +347,32 @@ export default function SuperClubs() {
       })
       clearTrialEdit(key)
     })
+  }
+  // Status select applies immediately for every choice, including 'trial' — it's
+  // persisted straight away with the seeded start/end (now → now + the default
+  // trial length), and those dates stay editable afterwards via the "Update"
+  // control. Previously 'trial' only opened the inline date editor without saving,
+  // requiring a separate "Apply trial" click to actually persist it — an easy step
+  // to miss that left the module's stored status unchanged (still "active") while
+  // a super admin believed they'd moved it to Trial, so the club's own Account page
+  // kept reading the module as Subscribed with no way to tick it for the real
+  // Stripe checkout flow. 'reset' isn't a real persisted status — it wipes the
+  // module's subscription row(s) entirely (same as un-granting via the chip
+  // button), which is what actually clears trial_started_at and makes the
+  // module trial_eligible again for the club's own self-service Start Trial /
+  // Subscribe (account_plan_status reads "never held a row" as never_trialed).
+  const onModuleStatus = (clubId, key, status, seedDraft) => {
+    if (status === 'trial') {
+      applyTrial(clubId, key, seedDraft)
+      return
+    }
+    if (status === 'reset') {
+      clearTrialEdit(key)
+      removeModule(clubId, key)
+      return
+    }
+    clearTrialEdit(key)
+    runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
   }
 
   const syncClub = async (club) => {
@@ -1041,8 +1047,9 @@ export default function SuperClubs() {
                     <div className="col-span-2">
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Modules (entitlements)</label>
                       <p className="font-mono text-[10px] text-pb-faintest mb-2">
-                        Add a module to grant it, then set its status. Choosing Trial lets you set the start
-                        and end date &amp; time — prefilled from now and the default trial length. Changes apply immediately.
+                        Add a module to grant it, then set its status. Every choice applies immediately,
+                        including Trial — it starts a trial prefilled from now and the default trial length,
+                        which you can then adjust with the Start/End fields and Update.
                       </p>
                       <div className="space-y-1.5">
                         {MODULE_TOGGLES.map(tog => {

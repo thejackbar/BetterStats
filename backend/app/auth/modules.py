@@ -247,7 +247,16 @@ def _module_details(org, now: datetime | None = None) -> list[dict]:
     return sorted(out, key=lambda d: d["module"])
 
 
-_STATUS_PRIORITY = {STATUS_ACTIVE: 0, STATUS_PAST_DUE: 1, STATUS_TRIAL: 2, STATUS_PAUSED: 3, STATUS_CANCELLED: 4}
+# The single canonical tie-break order for picking a "representative" status out of
+# a billable module's member rows (BetterAdmin's fees/comms/merch) when they disagree.
+# Every write path moves the whole group together (see module_subscriptions.py's
+# ``_billing`` wrappers), so divergence should only happen on legacy/manually-seeded
+# data — but when it does, prefer the LEAST-committed status (trial ahead of active)
+# so a club never reads as a paid "Subscribed" off the strength of one out-of-sync
+# member row. This must stay the ONE definition — `club_admin.py`'s super-admin club
+# editor imports it rather than keeping its own copy, so the editor and the club's own
+# Account page can never disagree about which status a mixed group represents.
+STATUS_PRIORITY = {STATUS_TRIAL: 0, STATUS_ACTIVE: 1, STATUS_PAST_DUE: 2, STATUS_PAUSED: 3, STATUS_CANCELLED: 4}
 
 
 def _billing_module_summary(org, now: datetime | None = None) -> list[dict]:
@@ -270,7 +279,7 @@ def _billing_module_summary(org, now: datetime | None = None) -> list[dict]:
         rows = [by_key[m] for m in expand_billing_module(billing_key) if m in by_key]
         if not rows:
             continue
-        best = min(rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 99))
+        best = min(rows, key=lambda s: STATUS_PRIORITY.get(s.status, 99))
         if best.status not in HELD_STATUSES:
             continue
         out.append({
@@ -315,7 +324,7 @@ def account_plan_status(org, now: datetime | None = None) -> list[dict]:
     out = []
     for billing_key in BILLABLE_MODULES:
         member_rows = [by_key[m] for m in expand_billing_module(billing_key) if m in by_key]
-        best = min(member_rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 99)) if member_rows else None
+        best = min(member_rows, key=lambda s: STATUS_PRIORITY.get(s.status, 99)) if member_rows else None
         ever_trialled = any(s.trial_started_at is not None for s in member_rows)
 
         trial_ends_at = best.trial_ends_at if best else None

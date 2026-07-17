@@ -30,7 +30,7 @@ from app.auth.capabilities import (
 from app.auth.modules import (
     ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
     STATUS_TRIAL, org_default_trial_days,
-    BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for,
+    BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
@@ -1479,9 +1479,6 @@ async def super_overview(
         raise HTTPException(status_code=500, detail=f"Overview failed: {type(e).__name__}: {e}")
 
 
-_STATUS_PRIORITY = {"trial": 0, "active": 1, "past_due": 2, "paused": 3, "cancelled": 4}
-
-
 def _module_subs_payload(org) -> list[dict]:
     """Per-billable-module subscription rows for a club (super-admin view). The
     BetterAdmin members (fees/comms/merch) collapse into one row — they always move
@@ -1493,8 +1490,10 @@ def _module_subs_payload(org) -> list[dict]:
             groups.setdefault(billing_key_for(s.module_key), []).append(s)
     out = []
     for bk, rows in groups.items():
-        # Representative = the most-live member (they're kept in sync, but be safe).
-        rep = sorted(rows, key=lambda s: _STATUS_PRIORITY.get(s.status, 9))[0]
+        # Representative = the least-committed member — same STATUS_PRIORITY the
+        # Account page's account_plan_status() uses, so this editor and a club's own
+        # Account page always agree on what a mixed group displays as.
+        rep = sorted(rows, key=lambda s: STATUS_PRIORITY.get(s.status, 9))[0]
         out.append({
             "module": bk,
             "name": BILLABLE_MODULE_NAMES.get(bk, bk),
