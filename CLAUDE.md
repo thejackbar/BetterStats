@@ -261,6 +261,23 @@ BetterFantasy), same table/flag/router as before:
 - Old `explore_*` step keys may linger in stored `completed_steps` —
   harmless, ignored by the registry.
 
+### Periodic setup reminder (v8.70.3)
+
+A permanently-dismissed `SetupReturnBar` pill (see above) shouldn't mean a
+half-finished club setup is forgotten forever. `SetupProgressReminder.jsx` —
+a small bottom-RIGHT toast (distinct corner from the pill, which is
+bottom-centre) — fires on **every 5th landing on the bare `/admin` dashboard**
+while any step is still neither done nor skipped, **regardless of the
+wizard's own `dismissed_at`** (dismissing the pill/wizard only stops the
+should_auto_open navigation, not this nudge). Counted client-side
+(`localStorage['bs_setup_reminder_visits_<user.id>']`, since `AdminLayout`
+remounts on every navigation and this is a UX nicety, not real progress
+state) inside the same effect that already fetches `GET .../state` on every
+mount — no extra request. Auto-hides after ~12s or on its own ✕; dismissing
+it only clears this one instance, it reappears on the next 5th-visit tick.
+`GET .../state` now also returns `addressed` (done+skipped) alongside `done`/
+`total`, so the toast can say how many steps are left.
+
 ### Secondary accent, luminance-guarded (v8.70.2)
 
 `theme.js::safeAccent2(accent2, accent, mode)`: many clubs' second colour is

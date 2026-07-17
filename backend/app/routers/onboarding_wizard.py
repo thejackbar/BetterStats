@@ -563,7 +563,7 @@ async def get_state(club: Organisation = Depends(get_current_club), db: AsyncSes
         or (sync_ready and state.sync_steps_shown_at is None and engaged)
     )
     return {
-        "done": done_n, "total": len(keys), "all_done": all_addressed,
+        "done": done_n, "addressed": addressed, "total": len(keys), "all_done": all_addressed,
         "sync_ready": sync_ready,
         "should_auto_open": bool(should_auto_open),
         "dismissed": state.dismissed_at is not None,
