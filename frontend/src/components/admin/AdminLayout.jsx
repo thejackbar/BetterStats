@@ -89,10 +89,10 @@ const NAV_SECTIONS = [
 const SUPER_LINKS = [
   { to: '/admin/super', label: 'Platform Overview', exact: true },
   { to: '/admin/super/clubs', label: 'All Clubs' },
+  { to: '/admin/super/comms-limits', label: 'BetterComms Limits', badge: 'commsRequests' },
   { to: '/admin/changelog', label: 'Changelog' },
   { to: '/admin/super/announce', label: 'Club Announcements' },
   { to: '/admin/super/marketing', label: 'Club Directory' },
-  { to: '/admin/super/comms-limits', label: 'Comms Limits', badge: 'commsRequests' },
   { to: '/admin/super/coupons', label: 'Discount Coupons' },
   { to: '/admin/super/discount-report', label: 'Discount Report' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
