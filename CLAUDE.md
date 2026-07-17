@@ -1895,9 +1895,11 @@ while it's off — merge-safe ahead of campaign launch). The internal
   fires CompleteRegistration browser+server (the campaign's optimisation
   event) + GA4 `sign_up` + a `conversion` usage-event breadcrumb.
 - **Frontend**: `/trial` (`pages/marketing/Trial.jsx`, in the OG map; its
-  sitemap entry in `seo.py` is COMMENTED OUT until launch, and the page
-  itself `Navigate`s to `/` while the flag is off — hidden per direct
-  request, no teaser shown) —
+  sitemap entry in `seo.py` stays COMMENTED OUT until full launch). The
+  page is PUBLIC even while the flag is off (per direct request, Jul 2026:
+  "page on, self-serve button off") — flag off swaps the hero's wizard
+  button for a "leave your details" Contact CTA; flipping the flag on makes
+  the real self-serve button live with no deploy —
   hero-first single-CTA landing page opening `SelfServeTrialModal` with the
   new **`publicMode` prop** (NOT `public` — reserved word when destructured):
   switches the api.js family to `publicSelfServe*`, sends honeypot/
