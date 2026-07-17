@@ -23,6 +23,7 @@ from app.models.db import async_session_maker
 from app.services import iq_players, iq_team, iq_trends
 from app.services.aggregations import get_player_by_opposition
 from app.services.bowling_style import bowling_class, bowling_label
+from app.services.llm_text import strip_em_dashes
 
 logger = logging.getLogger(__name__)
 
@@ -412,8 +413,8 @@ async def answer(
                 messages=messages,
             )
             if resp.stop_reason != "tool_use":
-                text = "".join(b.text for b in resp.content if b.type == "text").strip()
-                return {"available": True, "answer": text or "I couldn't put an answer together — try rephrasing."}
+                text = strip_em_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
+                return {"available": True, "answer": text or "I couldn't put an answer together, try rephrasing."}
 
             messages.append({"role": "assistant", "content": resp.content})
             results = []
@@ -427,8 +428,8 @@ async def answer(
         final = await client.messages.create(
             model=MODEL, max_tokens=MAX_TOKENS, system=_SYSTEM, messages=messages,
         )
-        text = "".join(b.text for b in final.content if b.type == "text").strip()
-        return {"available": True, "answer": text or "That one took too many steps — try a more specific question."}
+        text = strip_em_dashes("".join(b.text for b in final.content if b.type == "text").strip())
+        return {"available": True, "answer": text or "That one took too many steps, try a more specific question."}
     except Exception as e:
         logger.exception("iq_ask: model call failed")
         return {"available": False, "message": f"Couldn't get an answer just now ({str(e)[:120]}). Try again shortly."}

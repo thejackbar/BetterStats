@@ -1898,7 +1898,8 @@ async def _generate_narrative_core(db: AsyncSession, org_id: str, season_id: str
         max_tokens=800,
         messages=[{"role": "user", "content": prompt}],
     )
-    narrative_text = message.content[0].text.strip()
+    from app.services.llm_text import strip_em_dashes
+    narrative_text = strip_em_dashes(message.content[0].text.strip())
 
     # Upsert the narrative section
     existing = await db.execute(
