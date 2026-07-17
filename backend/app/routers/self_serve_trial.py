@@ -63,6 +63,37 @@ async def get_status(db: AsyncSession = Depends(get_db)):
     }
 
 
+def _duplicate_club_message(name: str, admin_label: str | None) -> str:
+    """Shared wording for the "already registered" 409 — matches the search
+    step's own duplicate message in SelfServeTrialModal.jsx so the same
+    condition reads the same way wherever it's surfaced."""
+    by = f" by {admin_label}" if admin_label else ""
+    return (
+        f"{name} has already been registered in BetterCricket{by}. "
+        "Please either (a) contact your club's administrator; or (b) email us at "
+        "support@bettersports.com.au if you think your club has been incorrectly registered."
+    )
+
+
+async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:
+    """First name + last-initial for the club's Primary Club Admin (falling
+    back to the longest-standing club admin if no primary is set), so the
+    "already registered" message can point at a real person to contact
+    without exposing a full name or any contact details."""
+    row = (await db.execute(
+        select(User.first_name, User.last_name)
+        .join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(ClubMembership.club_id == club_id)
+        .order_by(ClubMembership.is_primary_admin.desc(), ClubMembership.created_at.asc())
+        .limit(1)
+    )).first()
+    if row is None or not (row.first_name or "").strip():
+        return None
+    first = row.first_name.strip()
+    last = (row.last_name or "").strip()
+    return f"{first} {last[0]}." if last else first
+
+
 @router.get("/search")
 async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     """Club search for step 1 of the registration modal. Reuses the same
@@ -73,8 +104,10 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     Each result is annotated with ``already_registered``, using the same
     three-layer id/playhq_id/name match already used to guard club creation
     against duplicates (find_matching_organisation), so an operator can see a
-    club is taken before attempting to register it — without exposing anything
-    about the existing club beyond that fact (no admin/contact details)."""
+    club is taken before attempting to register it. A registered club also
+    carries ``already_registered_by`` — the Primary Club Admin's first name +
+    last initial only (e.g. "Jack B.") — so the duplicate message can point at
+    a real person without exposing a full name or any contact details."""
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
@@ -82,7 +115,8 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     for org in results:
         org_id = _parse_uuid(str(org.get("id") or ""))
         existing = await find_matching_organisation(db, org_id, org.get("name") or "", include_archived=False)
-        out.append({**org, "already_registered": existing is not None})
+        admin_label = await _primary_admin_label(db, existing.id) if existing else None
+        out.append({**org, "already_registered": existing is not None, "already_registered_by": admin_label})
     return out
 
 
@@ -188,7 +222,8 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
     name = (data.name or "").strip()
     existing = await find_matching_organisation(db, org_id, name, include_archived=False)
     if existing:
-        raise HTTPException(status_code=409, detail="This club has already been registered in BetterCricket.")
+        admin_label = await _primary_admin_label(db, existing.id)
+        raise HTTPException(status_code=409, detail=_duplicate_club_message(name, admin_label))
 
     org_data = await playhq_client.get_organisation(str(org_id))
     if not org_data:
@@ -522,8 +557,10 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     org_id = _parse_uuid(data.org_id)
     if not org_id:
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
-    if await find_matching_organisation(db, org_id, data.name, include_archived=False):
-        raise HTTPException(status_code=409, detail="This club has already been registered in BetterCricket.")
+    dup = await find_matching_organisation(db, org_id, data.name, include_archived=False)
+    if dup:
+        admin_label = await _primary_admin_label(db, dup.id)
+        raise HTTPException(status_code=409, detail=_duplicate_club_message((data.name or "").strip(), admin_label))
     if not await playhq_client.get_organisation(str(org_id)):
         raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
 
