@@ -1747,6 +1747,7 @@ Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
 - Tone: casual and warm, like a club member who cares about the team wrote it — not corporate
 - Do NOT use nicknames unless they appear in the data
 - Do NOT use bullet points or headings — flowing prose only
+- Do NOT use the "—" (em dash) character anywhere in your output — use a comma, full stop, or parentheses instead
 - Aim for 450–500 words — enough to fill a full page of the yearbook"""
 
 
