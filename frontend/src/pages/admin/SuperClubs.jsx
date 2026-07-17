@@ -1327,16 +1327,16 @@ export default function SuperClubs() {
                 <div className="px-5 py-4 bg-pb-red/5 border-t border-pb-red/30 space-y-2">
                   <p className="font-mono text-[11px] text-pb-red">
                     Archive <strong>{club.name}</strong>? It disappears from this list (unless
-                    "Show archived" is on) and its data is left untouched — restore it any time.
+                    "Show archived" is on) and its data is left untouched, restore it any time.
                   </p>
                   <label className="block">
-                    <span className="font-mono text-[10px] text-pb-faint">
+                    <span className="block mb-2 font-mono text-[10px] text-pb-faint">
                       Type <strong className="text-pb-red">confirm</strong> to continue
                     </span>
                     <input type="text" value={archiveConfirmText}
                       onChange={e => setArchiveConfirmText(e.target.value)}
                       autoComplete="off"
-                      className="mt-1 w-full max-w-xs bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-red" />
+                      className="w-full max-w-xs bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-red" />
                   </label>
                   <div className="flex gap-2">
                     <button onClick={() => archiveClub(club)}
