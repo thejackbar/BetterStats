@@ -16,7 +16,7 @@ from pathlib import Path
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
     PlayerSyncRequest, Sponsor, ClubOnboardingRequest, OrgModuleSubscription,
-    ModuleActionRequest, CommsLimitRequest, MarketingClub, get_db
+    ModuleActionRequest, CommsLimitRequest, MarketingClub, SyncRun, OnboardingWizardState, get_db
 )
 from sqlalchemy import text as _text
 from sqlalchemy.orm import selectinload, aliased as _orm_aliased
@@ -1507,7 +1507,19 @@ def _module_subs_payload(org) -> list[dict]:
     return sorted(out, key=lambda d: d["module"])
 
 
-def _club_payload(org, association_name: str | None = None, primary_admin_name: str | None = None) -> dict:
+def _club_payload(
+    org,
+    association_name: str | None = None,
+    primary_admin_name: str | None = None,
+    seasons_count: int = 0,
+    players_count: int = 0,
+    grades_count: int = 0,
+    onboarding_done: int = 0,
+    onboarding_total: int = 0,
+    last_active_at=None,
+    last_full_sync_at=None,
+    full_sync_running: bool = False,
+) -> dict:
     return {
         "id": str(org.id),
         "slug": org.slug,
@@ -1537,7 +1549,26 @@ def _club_payload(org, association_name: str | None = None, primary_admin_name: 
         "comms_production_cap": getattr(org, "comms_production_cap", None),
         "comms_monthly_cap": getattr(org, "comms_monthly_cap", None),
         "created_at": org.created_at.isoformat() if org.created_at else None,
+        "seasons_count": seasons_count,
+        "players_count": players_count,
+        "grades_count": grades_count,
+        # Setup Wizard progress — stored completion only (no live re-detection),
+        # same cheap read the onboarding_wizard router's own GET /state uses.
+        "onboarding_done": onboarding_done,
+        "onboarding_total": onboarding_total,
+        # Most recent admin-app activity recorded against this club (usage_events),
+        # last 180 days only — a proxy for "actively used", not a per-module log.
+        "last_active_at": last_active_at.isoformat() if last_active_at else None,
+        # Most recent Sync Now / Full Rebuild run, and whether one is live right now.
+        "last_full_sync_at": last_full_sync_at.isoformat() if last_full_sync_at else None,
+        "full_sync_running": full_sync_running,
     }
+
+
+# Sync run kinds that count as "a full sync" for the All Clubs newly-registered
+# / sync-activity filters — the weekly/on-demand Sync Now and Full Rebuild, not
+# the low-value per-player deep sync.
+_FULL_SYNC_KINDS = ("org_full", "org_hard_refresh")
 
 
 @router.get("/super/clubs")
@@ -1555,6 +1586,14 @@ async def list_all_clubs(
 
     assoc_by_org: dict = {}
     admin_by_org: dict = {}
+    seasons_by_org: dict = {}
+    players_by_org: dict = {}
+    grades_by_org: dict = {}
+    state_by_org: dict = {}
+    last_active_by_org: dict = {}
+    last_sync_by_org: dict = {}
+    running_by_org: set = set()
+
     if org_ids:
         assoc_rows = await db.execute(
             select(MarketingClub.existing_org_id, MarketingClub.association_name)
@@ -1569,10 +1608,81 @@ async def list_all_clubs(
         )
         admin_by_org = {row[0]: (row[1] or row[2]) for row in admin_rows.all()}
 
-    return [
-        _club_payload(o, association_name=assoc_by_org.get(o.id), primary_admin_name=admin_by_org.get(o.id))
-        for o in orgs
-    ]
+        seasons_rows = await db.execute(
+            select(Season.organisation_id, func.count(Season.id))
+            .where(Season.organisation_id.in_(org_ids))
+            .group_by(Season.organisation_id)
+        )
+        seasons_by_org = {row[0]: row[1] for row in seasons_rows.all()}
+
+        players_rows = await db.execute(
+            select(Player.organisation_id, func.count(Player.id))
+            .where(Player.organisation_id.in_(org_ids))
+            .group_by(Player.organisation_id)
+        )
+        players_by_org = {row[0]: row[1] for row in players_rows.all()}
+
+        grades_rows = await db.execute(
+            select(Season.organisation_id, func.count(Grade.id))
+            .select_from(Grade)
+            .join(Season, Season.id == Grade.season_id)
+            .where(Season.organisation_id.in_(org_ids))
+            .group_by(Season.organisation_id)
+        )
+        grades_by_org = {row[0]: row[1] for row in grades_rows.all()}
+
+        state_rows = await db.execute(
+            select(OnboardingWizardState).where(OnboardingWizardState.organisation_id.in_(org_ids))
+        )
+        state_by_org = {s.organisation_id: s for s in state_rows.scalars().all()}
+
+        sync_agg_rows = await db.execute(
+            select(
+                SyncRun.org_id,
+                func.max(SyncRun.started_at).label("last_started"),
+                func.bool_or(SyncRun.status == "running").label("running"),
+            )
+            .where(SyncRun.org_id.in_(org_ids), SyncRun.kind.in_(_FULL_SYNC_KINDS))
+            .group_by(SyncRun.org_id)
+        )
+        for row in sync_agg_rows.all():
+            last_sync_by_org[row.org_id] = row.last_started
+            if row.running:
+                running_by_org.add(row.org_id)
+
+        usage_rows = await db.execute(
+            _text(
+                "SELECT org_id, MAX(created_at) AS last_at FROM usage_events "
+                "WHERE org_id = ANY(:ids) AND created_at >= NOW() - INTERVAL '180 days' "
+                "GROUP BY org_id"
+            ),
+            {"ids": org_ids},
+        )
+        last_active_by_org = {row.org_id: row.last_at for row in usage_rows.mappings().all()}
+
+    from app.routers.onboarding_wizard import _applicable_groups
+
+    payloads = []
+    for o in orgs:
+        entitled = org_entitled_modules(o)
+        keys = [s["key"] for g in _applicable_groups(entitled) for s in g["steps"]]
+        state = state_by_org.get(o.id)
+        completed = set((state.completed_steps or []) if state else [])
+        done_n = sum(1 for k in keys if k in completed)
+        payloads.append(_club_payload(
+            o,
+            association_name=assoc_by_org.get(o.id),
+            primary_admin_name=admin_by_org.get(o.id),
+            seasons_count=seasons_by_org.get(o.id, 0),
+            players_count=players_by_org.get(o.id, 0),
+            grades_count=grades_by_org.get(o.id, 0),
+            onboarding_done=done_n,
+            onboarding_total=len(keys),
+            last_active_at=last_active_by_org.get(o.id),
+            last_full_sync_at=last_sync_by_org.get(o.id),
+            full_sync_running=o.id in running_by_org,
+        ))
+    return payloads
 
 
 # ─── Global platform settings (super-admin General Settings) ──────────────────

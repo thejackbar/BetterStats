@@ -16,6 +16,19 @@ const norm = (s) => (s || '').toString().toLowerCase()
 const clubHasLiveModule = (club, key) =>
   (club.module_subscriptions || []).some((s) => s.module === key && (s.status === 'trial' || s.status === 'active'))
 
+// Local (browser) calendar-day comparisons for the "newly registered" / "full
+// sync activity" date filters — coarse day granularity, so a local slice is fine.
+const dateOnly = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA') : null)
+const todayStr = () => new Date().toLocaleDateString('en-CA')
+const isToday = (iso) => dateOnly(iso) === todayStr()
+const inDateRange = (iso, from, to) => {
+  const d = dateOnly(iso)
+  if (!d) return false
+  if (from && d < from) return false
+  if (to && d > to) return false
+  return true
+}
+
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-AU') : '—')
 
 // datetime-local helpers (local wall-clock, "YYYY-MM-DDTHH:mm").
@@ -84,12 +97,26 @@ export default function SuperClubs() {
   const [filterAssociation, setFilterAssociation] = useState('')
   const [filterPrimaryAdmin, setFilterPrimaryAdmin] = useState('')
   const [filterModules, setFilterModules] = useState([])
+  // "Newly registered" (organisations.created_at) and "full sync activity"
+  // (sync_runs, kind org_full/org_hard_refresh) — each a quick mode plus an
+  // optional custom date range.
+  const [registeredMode, setRegisteredMode] = useState('any')
+  const [registeredFrom, setRegisteredFrom] = useState('')
+  const [registeredTo, setRegisteredTo] = useState('')
+  const [syncMode, setSyncMode] = useState('any')
+  const [syncFrom, setSyncFrom] = useState('')
+  const [syncTo, setSyncTo] = useState('')
   const toggleFilterModule = (key) =>
     setFilterModules((m) => (m.includes(key) ? m.filter((k) => k !== key) : [...m, key]))
   const clearFilters = () => {
     setSearch(''); setFilterState(''); setFilterAssociation(''); setFilterPrimaryAdmin(''); setFilterModules([])
+    setRegisteredMode('any'); setRegisteredFrom(''); setRegisteredTo('')
+    setSyncMode('any'); setSyncFrom(''); setSyncTo('')
   }
-  const filtersActive = !!(search || filterState || filterAssociation || filterPrimaryAdmin || filterModules.length)
+  const filtersActive = !!(
+    search || filterState || filterAssociation || filterPrimaryAdmin || filterModules.length
+    || registeredMode !== 'any' || syncMode !== 'any'
+  )
 
   // Club search (same source as the public onboarding flow)
   const [query, setQuery] = useState('')
@@ -456,6 +483,11 @@ export default function SuperClubs() {
     if (filterAssociation && !norm(c.association_name).includes(norm(filterAssociation))) return false
     if (filterPrimaryAdmin && !norm(c.primary_admin_name).includes(norm(filterPrimaryAdmin))) return false
     if (filterModules.length && !filterModules.some((k) => clubHasLiveModule(c, k))) return false
+    if (registeredMode === 'today' && !isToday(c.created_at)) return false
+    if (registeredMode === 'range' && !inDateRange(c.created_at, registeredFrom, registeredTo)) return false
+    if (syncMode === 'running' && !c.full_sync_running) return false
+    if (syncMode === 'today' && !isToday(c.last_full_sync_at)) return false
+    if (syncMode === 'range' && !inDateRange(c.last_full_sync_at, syncFrom, syncTo)) return false
     return true
   })
 
@@ -758,6 +790,37 @@ export default function SuperClubs() {
                 placeholder="Admin name…" className={INPUT_CLS} />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Newly registered</label>
+              <select value={registeredMode} onChange={(e) => setRegisteredMode(e.target.value)} className={INPUT_CLS}>
+                <option value="any">Any time</option>
+                <option value="today">Today</option>
+                <option value="range">Date range…</option>
+              </select>
+              {registeredMode === 'range' && (
+                <div className="flex gap-2 mt-1.5">
+                  <input type="date" value={registeredFrom} onChange={(e) => setRegisteredFrom(e.target.value)} className={INPUT_CLS} />
+                  <input type="date" value={registeredTo} onChange={(e) => setRegisteredTo(e.target.value)} className={INPUT_CLS} />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Full sync activity</label>
+              <select value={syncMode} onChange={(e) => setSyncMode(e.target.value)} className={INPUT_CLS}>
+                <option value="any">Any time</option>
+                <option value="running">Running now</option>
+                <option value="today">Ran today</option>
+                <option value="range">Date range…</option>
+              </select>
+              {syncMode === 'range' && (
+                <div className="flex gap-2 mt-1.5">
+                  <input type="date" value={syncFrom} onChange={(e) => setSyncFrom(e.target.value)} className={INPUT_CLS} />
+                  <input type="date" value={syncTo} onChange={(e) => setSyncTo(e.target.value)} className={INPUT_CLS} />
+                </div>
+              )}
+            </div>
+          </div>
           <div className="mt-3">
             <label className="font-mono text-[10px] text-pb-faint block mb-1">On trial / subscribed to</label>
             <div className="flex flex-wrap gap-1.5">
@@ -836,6 +899,14 @@ export default function SuperClubs() {
                         Archived
                       </span>
                     )}
+                    {club.full_sync_running && (
+                      <span
+                        className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-300"
+                        title="A full sync (Sync Now / Full Rebuild) is running right now"
+                      >
+                        Syncing
+                      </span>
+                    )}
                     {(() => {
                       const info = clubTrialInfo(club)
                       if (!info) return null
@@ -869,6 +940,19 @@ export default function SuperClubs() {
                       ].filter(Boolean).join(' · ')}
                     </div>
                   )}
+                  <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
+                    {[
+                      `${club.seasons_count ?? 0} season${(club.seasons_count ?? 0) === 1 ? '' : 's'}`,
+                      `${club.grades_count ?? 0} grade${(club.grades_count ?? 0) === 1 ? '' : 's'}`,
+                      `${club.players_count ?? 0} player${(club.players_count ?? 0) === 1 ? '' : 's'}`,
+                      club.onboarding_total > 0 && `setup ${club.onboarding_done}/${club.onboarding_total}`,
+                      !club.full_sync_running && club.last_full_sync_at
+                        && `last synced ${new Date(club.last_full_sync_at).toLocaleDateString('en-AU')}`,
+                      club.last_active_at
+                        ? `active ${new Date(club.last_active_at).toLocaleDateString('en-AU')}`
+                        : 'no recent activity',
+                    ].filter(Boolean).join(' · ')}
+                  </div>
                 </div>
                 <button
                   onClick={() => toggleActive(club)}
