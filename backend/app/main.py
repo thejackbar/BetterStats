@@ -2609,6 +2609,11 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Pending pause/cancel signal for a running sync (migration 160) — see
+        # services/sync.py's SyncControlSignal / _check_sync_control. NULL =
+        # no request pending; 'pause' | 'cancel' while an operator's request
+        # hasn't yet been noticed by the run's own loop checkpoint.
+        await conn.execute(text("ALTER TABLE sync_runs ADD COLUMN IF NOT EXISTS control TEXT"))
         # CREATE OR REPLACE VIEW only allows appending new columns at the END
         # of the SELECT list — inserting one in the middle shifts every later
         # column's position, which Postgres treats as renaming that column

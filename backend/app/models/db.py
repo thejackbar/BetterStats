@@ -1868,12 +1868,18 @@ class SyncRun(Base):
     org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
     kind = Column(Text, nullable=False)
+    # 'running' | 'success' | 'error' | 'paused' | 'cancelled' — unconstrained
+    # Text column, same as always; 'paused'/'cancelled' added by migration 160.
     status = Column(Text, nullable=False, server_default="running")
     started_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     stats = Column(JSON, nullable=False, default=dict)
     error = Column(Text, nullable=True)
+    # Pending pause/cancel signal (migration 160): NULL | 'pause' | 'cancel'.
+    # Set by an operator action, cleared once the run's own loop checkpoint
+    # (services/sync.py::_check_sync_control) notices and finalizes it.
+    control = Column(Text, nullable=True)
 
 
 class OppositionDossier(Base):

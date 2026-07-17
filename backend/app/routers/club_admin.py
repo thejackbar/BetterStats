@@ -1519,6 +1519,8 @@ def _club_payload(
     last_active_at=None,
     last_full_sync_at=None,
     full_sync_running: bool = False,
+    full_sync_paused: bool = False,
+    full_sync_kind: str | None = None,
 ) -> dict:
     return {
         "id": str(org.id),
@@ -1566,6 +1568,12 @@ def _club_payload(
         # Most recent Sync Now / Full Rebuild run, and whether one is live right now.
         "last_full_sync_at": last_full_sync_at.isoformat() if last_full_sync_at else None,
         "full_sync_running": full_sync_running,
+        # Paused via the All Clubs Pause Sync button (services/sync.py's
+        # SyncControlSignal / pause_sync_run) — Continue Sync starts a fresh
+        # incremental sync_organisation() call, safe even after a paused
+        # Full Rebuild (its wipe already committed before the pause).
+        "full_sync_paused": full_sync_paused,
+        "full_sync_kind": full_sync_kind,
     }
 
 
@@ -1598,6 +1606,8 @@ async def list_all_clubs(
     last_active_by_org: dict = {}
     last_sync_by_org: dict = {}
     running_by_org: set = set()
+    paused_by_org: dict = {}  # org_id -> kind, for the run currently paused
+    active_kind_by_org: dict = {}  # org_id -> kind, for the run currently running or paused
 
     if org_ids:
         assoc_rows = await db.execute(
@@ -1659,6 +1669,28 @@ async def list_all_clubs(
             if row.running:
                 running_by_org.add(row.org_id)
 
+        # Most recent RUNNING-or-PAUSED full-sync run per org, if any —
+        # separate from the aggregate above (which only computes last_started
+        # / bool_or across every status), so the page can show Pause/Cancel
+        # for a live run, or Continue Sync for a paused one, and label either
+        # with the right kind (Sync Now vs Full Rebuild). Small result set
+        # (at most one live+one paused row per org, given the per-org run
+        # locks), so resolving "most recent per org" in Python is simpler
+        # than a window function.
+        active_rows = await db.execute(
+            select(SyncRun.org_id, SyncRun.kind, SyncRun.status, SyncRun.started_at)
+            .where(
+                SyncRun.org_id.in_(org_ids),
+                SyncRun.kind.in_(_FULL_SYNC_KINDS),
+                SyncRun.status.in_(("running", "paused")),
+            )
+            .order_by(SyncRun.started_at.desc())
+        )
+        for row in active_rows.all():
+            active_kind_by_org.setdefault(row.org_id, row.kind)
+            if row.status == "paused":
+                paused_by_org.setdefault(row.org_id, row.kind)
+
         usage_rows = await db.execute(
             _text(
                 "SELECT org_id, MAX(created_at) AS last_at FROM usage_events "
@@ -1691,8 +1723,87 @@ async def list_all_clubs(
             last_active_at=last_active_by_org.get(o.id),
             last_full_sync_at=last_sync_by_org.get(o.id),
             full_sync_running=o.id in running_by_org,
+            full_sync_paused=o.id in paused_by_org,
+            full_sync_kind=active_kind_by_org.get(o.id),
         ))
     return payloads
+
+
+class SyncControlRequest(BaseModel):
+    action: str  # "pause" | "cancel" | "continue"
+
+
+@router.post("/super/clubs/{club_id}/sync-control")
+async def super_club_sync_control(
+    club_id: str,
+    body: SyncControlRequest,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pause Sync / Cancel Sync / Continue Sync for a club's current Full
+    Sync — the All Clubs "Full sync activity" row actions. The target run is
+    resolved server-side from the club's most recent running-or-paused
+    org_full/org_hard_refresh row (the per-org run locks mean there's never
+    more than one), so the client only ever needs to say which club + which
+    action, not track a run id itself.
+
+    Pause/Cancel a RUNNING sync are cooperative — they set sync_runs.control
+    and wait for the run's own loop checkpoint (services/sync.py's
+    _check_sync_control) to notice, typically within a season or a few dozen
+    games. Cancelling an already-PAUSED sync is immediate (nothing is
+    running to signal). Continue starts a brand new incremental sync — safe
+    even for a paused Full Rebuild, since its wipe phase already committed
+    before the pause took effect; see pause_sync_run's docstring."""
+    from app.services.sync import (
+        request_sync_control, cancel_sync_run, start_sync_run,
+    )
+
+    action = (body.action or "").strip().lower()
+    if action not in ("pause", "cancel", "continue"):
+        raise HTTPException(status_code=422, detail="action must be 'pause', 'cancel' or 'continue'")
+
+    club = await db.get(Organisation, uuid.UUID(club_id))
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+
+    run = (await db.execute(
+        select(SyncRun)
+        .where(
+            SyncRun.org_id == club.id,
+            SyncRun.kind.in_(_FULL_SYNC_KINDS),
+            SyncRun.status.in_(("running", "paused")),
+        )
+        .order_by(SyncRun.started_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if action == "pause":
+        if not run or run.status != "running":
+            raise HTTPException(status_code=409, detail="No running sync to pause")
+        await request_sync_control(run.id, "pause")
+        return {"status": "pause_requested", "run_id": str(run.id)}
+
+    if action == "cancel":
+        if not run:
+            raise HTTPException(status_code=409, detail="No running or paused sync to cancel")
+        if run.status == "running":
+            await request_sync_control(run.id, "cancel")
+            return {"status": "cancel_requested", "run_id": str(run.id)}
+        await cancel_sync_run(run.id, {})
+        return {"status": "cancelled", "run_id": str(run.id)}
+
+    # continue
+    if not run or run.status != "paused":
+        raise HTTPException(status_code=409, detail="No paused sync to continue")
+    from app.routers.organisations import _org_sync_running, _sync_safe
+    if club_id in _org_sync_running or club_id in _hard_refresh_running:
+        return {"status": "already_running", "org_id": club_id}
+    new_run_id = await start_sync_run(club.id, "org_full")
+    _org_sync_running.add(club_id)
+    task = asyncio.create_task(_sync_safe(club_id, new_run_id, "org_full"))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return {"status": "sync_started", "org_id": club_id, "run_id": str(new_run_id)}
 
 
 # ─── Global platform settings (super-admin General Settings) ──────────────────
@@ -3315,7 +3426,10 @@ async def hard_refresh_org(
     rows anyway so the WHERE filter is a no-op for them. Runs in the
     background; poll GET /club-admin/sync-runs/{run_id} for progress.
     """
-    from app.services.sync import sync_organisation, start_sync_run, finish_sync_run, update_sync_run
+    from app.services.sync import (
+        sync_organisation, start_sync_run, finish_sync_run, update_sync_run,
+        pause_sync_run, cancel_sync_run, SyncControlSignal,
+    )
     from app.services.rate_limit import enforce
     org_id_str = str(club.id)
 
@@ -3481,6 +3595,17 @@ async def hard_refresh_org(
                 _logger.info(f"HardRefresh: ANALYZE complete for org {org_id_str}")
             except Exception as ae:
                 _logger.warning(f"HardRefresh: post-sync ANALYZE failed for {org_id_str}: {ae}")
+        except SyncControlSignal as sig:
+            # Pause/Cancel from the Super Admin All Clubs page — not a crash.
+            # The pre-sync wipe (if it ran) already committed, so a paused
+            # run is safe to Continue later as a plain incremental sync (see
+            # pause_sync_run's docstring) — never re-wipe on Continue.
+            wiped_so_far = locals().get("wiped", 0)
+            if sig.action == "pause":
+                await pause_sync_run(run_id, {"games_wiped_pre_sync": wiped_so_far})
+            else:
+                await cancel_sync_run(run_id, {"games_wiped_pre_sync": wiped_so_far})
+            _logger.info(f"HardRefresh: {sig.action} for {org_id_str}")
         except Exception as e:
             _logger.error(f"HardRefresh: failed for {org_id_str}: {e}", exc_info=True)
             await finish_sync_run(run_id, {}, f"Unexpected error: {e}")

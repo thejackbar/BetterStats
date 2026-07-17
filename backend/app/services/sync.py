@@ -313,6 +313,120 @@ async def finish_sync_run(run_id: uuid.UUID, stats: dict, error: str = "") -> No
         flag_modified(run, "stats")
         run.status = "error" if error else "success"
         run.error = error or None
+        # A pause/cancel request that arrived too late to be noticed (the run
+        # finished on its own first) shouldn't leave a stale pending flag on
+        # an otherwise-terminal row.
+        run.control = None
+        now = datetime.now(timezone.utc)
+        run.completed_at = now
+        run.updated_at = now
+        await session.commit()
+
+
+class SyncControlSignal(Exception):
+    """Raised from inside a long-running sync loop's cooperative checkpoint
+    (_check_sync_control) when an operator has requested a pause or cancel
+    via request_sync_control — the Super Admin All Clubs page's Pause Sync /
+    Cancel Sync buttons. Callers that own finishing the run (organisations.py
+    ::_sync_safe, club_admin.py::hard_refresh_org's _run) must catch this
+    ahead of their generic error handler and finalize via pause_sync_run /
+    cancel_sync_run instead of finish_sync_run, so a pause doesn't read as a
+    crash."""
+    def __init__(self, action: str):
+        self.action = action
+        super().__init__(f"Sync {action} requested")
+
+
+async def _check_sync_control(run_id: Optional[uuid.UUID], stats: Optional[dict] = None) -> None:
+    """Cooperative checkpoint for a long-running sync loop — call
+    periodically (per season, per few dozen games) from anywhere inside
+    sync_organisation's call graph, passing whatever stats dict is already
+    being threaded through that loop's own progress updates.
+
+    A no-op when run_id is None (e.g. the self-serve trial registration's
+    own inline sync, which has nothing to pause) or no control is pending.
+    When a pause/cancel IS pending, finalizes the run right here (with
+    whatever's in `stats` so far) before raising SyncControlSignal — this is
+    the one place every sync call site funnels through, so it's what makes a
+    pause/cancel land even for a run whose caller has no bespoke
+    SyncControlSignal handling of its own (e.g. the weekly cron's
+    sync_all_organisations, which owns its run_id internally and only wraps
+    the call in a generic except-and-log). A caller that DOES catch
+    SyncControlSignal (organisations.py's _sync_safe, club_admin.py's hard
+    refresh) may still call pause_sync_run/cancel_sync_run again itself to
+    merge in extra context (e.g. games_wiped_pre_sync) — safe, since both are
+    idempotent status flips."""
+    if not run_id:
+        return
+    async with async_session_maker() as session:
+        control = await session.scalar(select(SyncRun.control).where(SyncRun.id == run_id))
+    if control == "pause":
+        await pause_sync_run(run_id, dict(stats or {}))
+        raise SyncControlSignal("pause")
+    if control == "cancel":
+        await cancel_sync_run(run_id, dict(stats or {}))
+        raise SyncControlSignal("cancel")
+
+
+async def request_sync_control(run_id: uuid.UUID, action: str) -> bool:
+    """Operator-initiated pause/cancel of a RUNNING sync — sets the flag the
+    loop's own _check_sync_control checkpoints will notice within a season or
+    a few dozen games. Returns False if the run isn't currently 'running'
+    (nothing to signal — e.g. it already finished, or is already paused)."""
+    async with async_session_maker() as session:
+        run = await session.get(SyncRun, run_id)
+        if not run or run.status != "running":
+            return False
+        run.control = action
+        run.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return True
+
+
+async def pause_sync_run(run_id: uuid.UUID, stats: dict) -> None:
+    """Finalize a run as 'paused' once its loop has honoured a pause request
+    and exited cleanly. Deliberately leaves completed_at unset — the run
+    isn't actually finished, just stopped at a safe checkpoint. Continue Sync
+    starts a fresh sync_organisation() call rather than resuming this
+    coroutine (there's nothing left alive to resume): sync's own per-game and
+    per-season writes are already idempotent on "does this row exist", so a
+    fresh incremental sync picks up exactly where the pause left off."""
+    from sqlalchemy.orm.attributes import flag_modified
+    async with async_session_maker() as session:
+        run = await session.get(SyncRun, run_id)
+        if not run:
+            return
+        merged = dict(run.stats or {})
+        merged.update(stats)
+        for k in ("progress_phase", "progress_pct", "progress_done", "progress_total"):
+            merged.pop(k, None)
+        run.stats = merged
+        flag_modified(run, "stats")
+        run.status = "paused"
+        run.control = None
+        run.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+
+async def cancel_sync_run(run_id: uuid.UUID, stats: dict) -> None:
+    """Finalize a run as 'cancelled' — a true terminal state (unlike
+    'paused'), completed_at is stamped. Used both for a running run whose
+    loop has just honoured a cancel signal, and directly (no live coroutine
+    to signal — nothing is polling control) for a run that was already
+    'paused' when an operator cancels it outright."""
+    from sqlalchemy.orm.attributes import flag_modified
+    async with async_session_maker() as session:
+        run = await session.get(SyncRun, run_id)
+        if not run:
+            return
+        merged = dict(run.stats or {})
+        merged.update(stats)
+        for k in ("progress_phase", "progress_pct", "progress_done", "progress_total"):
+            merged.pop(k, None)
+        run.stats = merged
+        flag_modified(run, "stats")
+        run.status = "cancelled"
+        run.control = None
         now = datetime.now(timezone.utc)
         run.completed_at = now
         run.updated_at = now
@@ -612,6 +726,7 @@ async def _sync_organisation_impl(
                 org_grade_map[str(_ggid)] = _grid
 
         for season_idx, season_data in enumerate(seasons, start=1):
+            await _check_sync_control(run_id, stats)
             raw_season_id = (season_data.get("id") or "").strip()
             if not _parse_uuid(raw_season_id):
                 continue
@@ -939,6 +1054,13 @@ async def _sync_organisation_impl(
         try:
             gr_stats = await sync_grassroots_game_level_data(org_id_str, run_id=run_id)
             stats.update(gr_stats)
+        except SyncControlSignal:
+            # A pause/cancel checkpoint fired inside the game-level loop —
+            # propagate past this phase's own error handling so the run's
+            # owner (organisations.py::_sync_safe, club_admin.py's hard
+            # refresh _run) can finalize it as paused/cancelled instead of
+            # this looking like an ordinary sync failure.
+            raise
         except Exception as e:
             import traceback as _tb2
             logger.error(f"Grassroots game-level sync failed for {org_id_str}: {e}\n{_tb2.format_exc()}")
@@ -1635,6 +1757,12 @@ async def sync_grassroots_game_level_data(
     processed = 0
     for match_id_str in seen_match_ids:
         processed += 1
+        # Cooperative pause/cancel checkpoint — same cadence as the progress
+        # update below, and deliberately placed outside any try/except in
+        # this loop so a raised SyncControlSignal isn't swallowed as a
+        # per-game error.
+        if run_id and processed % 25 == 0:
+            await _check_sync_control(run_id, stats)
         try:
             match_uuid = uuid.UUID(match_id_str)
         except ValueError:
