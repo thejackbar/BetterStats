@@ -515,8 +515,9 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose }) {
               {duplicateClub && (
                 <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
                   <p className="font-mono text-[11px] text-pb-text">
-                    {orgName(duplicateClub)} has already been registered in BetterCricket.
-                    Please contact your club's administrator or email{' '}
+                    {orgName(duplicateClub)} has already been registered in BetterCricket
+                    {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}.
+                    Please either (a) contact your club's administrator; or (b) email us at{' '}
                     <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
                     if you think your club has been incorrectly registered.
                   </p>
