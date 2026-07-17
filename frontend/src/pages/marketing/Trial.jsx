@@ -22,22 +22,22 @@ const TRIAL_JSONLD = {
   url: 'https://betterat.cricket/trial',
   description:
     'Register your cricket club yourself and start a free trial of every '
-    + 'BetterCricket module. No credit card, no sales call — pick your club '
+    + 'BetterCricket module. No credit card and no sales call. Pick your club '
     + 'from the Cricket Australia register and you’re in.',
 }
 
 const STEPS = [
   ['Find your club', 'Search the Cricket Australia register and pick your club. If it’s on PlayHQ, we know it.'],
   ['Verify your email', 'A 4-digit code proves you’re a real person at a real mailbox. That’s the whole identity check.'],
-  ['You’re in', 'Your club site goes live and we start importing your full playing history — often decades of it — automatically.'],
+  ['You’re in', 'Your club site goes live and we start importing your full playing history automatically, often decades of it.'],
 ]
 
 const FAQS = [
-  ['Do I need a credit card?', 'No. The trial needs your name, email and mobile number — payment only comes up if you decide to subscribe after seeing your club’s data.'],
-  ['What’s included in the trial?', 'Everything. BetterStats plus every add-on module — BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasy — all on at once, so your committee can judge the whole platform.'],
+  ['Do I need a credit card?', 'No. The trial needs your name, email and mobile number. Payment only comes up if you decide to subscribe after seeing your club’s data.'],
+  ['What’s included in the trial?', 'Everything. BetterStats plus every add-on module (BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasy), all on at once, so your committee can judge the whole platform.'],
   ['What happens when the trial ends?', 'Nothing dramatic. Your data stays put and you choose which modules (if any) your club wants to keep. Nothing is charged automatically.'],
-  ['How much history do you import?', 'Everything Cricket Australia holds for your club — for many clubs that’s every scorecard back to the 1970s or earlier, imported automatically in the background.'],
-  ['Who should register the club?', 'Someone with the authority to evaluate software for the club — typically a committee member, secretary or captain. You’ll confirm that during signup.'],
+  ['How much history do you import?', 'Everything Cricket Australia holds for your club. For many clubs that’s every scorecard back to the 1970s or earlier, imported automatically in the background.'],
+  ['Who should register the club?', 'Someone with the authority to evaluate software for the club, typically a committee member, secretary or captain. You’ll confirm that during signup.'],
 ]
 
 export default function Trial() {
@@ -45,7 +45,7 @@ export default function Trial() {
     title: 'Start your club’s free trial | BetterCricket',
     description:
       'Register your cricket club yourself and start a free trial of every '
-      + 'BetterCricket module. No credit card, no sales call — pick your club '
+      + 'BetterCricket module. No credit card and no sales call. Pick your club '
       + 'from the Cricket Australia register and you’re in.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/trial',
@@ -101,7 +101,7 @@ export default function Trial() {
             </h1>
             <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed mb-10">
               Register your club yourself and start a {trialDays}-day free trial of the whole
-              BetterCricket platform — stats, selection, club website, admin and analytics.
+              BetterCricket platform: stats, selection, club website, admin and analytics.
               Pick your club from the Cricket Australia register and you&rsquo;re in.
             </p>
             {status === null ? (
@@ -118,7 +118,7 @@ export default function Trial() {
             ) : (
               <div className="max-w-md mx-auto">
                 <p className="text-pb-dim mb-4">
-                  Self-serve registration isn&rsquo;t open just yet — leave your details and
+                  Self-serve registration isn&rsquo;t open just yet. Leave your details and
                   we&rsquo;ll set your club up personally.
                 </p>
                 <Link
@@ -156,15 +156,15 @@ export default function Trial() {
           <div className="max-w-[1000px] mx-auto pb-card p-8">
             <h2 className="font-display font-bold text-2xl mb-4">The whole platform, switched on</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm text-pb-dim">
-              <p><span className="text-pb-text font-semibold">BetterStats</span> — your full playing history as a live public club site: profiles, records, leaderboards, yearbooks.</p>
-              <p><span className="text-pb-text font-semibold">BetterSelect</span> — player availability with no app, and a selection board that suggests a balanced XI.</p>
-              <p><span className="text-pb-text font-semibold">BetterSocials</span> — match-day graphics and your club website, generated from real scorecards.</p>
-              <p><span className="text-pb-text font-semibold">BetterAdmin</span> — fees that reconcile themselves, bulk club email, merch and stock tracking.</p>
-              <p><span className="text-pb-text font-semibold">BetterIQ</span> — opposition scouting dossiers and team analytics built from your own scorecards.</p>
-              <p><span className="text-pb-text font-semibold">BetterFantasy</span> — a club fantasy comp scored off your real games. Pre-season fundraiser sorted.</p>
+              <p><span className="text-pb-text font-semibold">BetterStats</span>: your full playing history as a live public club site: profiles, records, leaderboards, yearbooks.</p>
+              <p><span className="text-pb-text font-semibold">BetterSelect</span>: player availability with no app, and a selection board that suggests a balanced XI.</p>
+              <p><span className="text-pb-text font-semibold">BetterSocials</span>: match-day graphics and your club website, generated from real scorecards.</p>
+              <p><span className="text-pb-text font-semibold">BetterAdmin</span>: fees that reconcile themselves, bulk club email, merch and stock tracking.</p>
+              <p><span className="text-pb-text font-semibold">BetterIQ</span>: opposition scouting dossiers and team analytics built from your own scorecards.</p>
+              <p><span className="text-pb-text font-semibold">BetterFantasy</span>: a club fantasy comp scored off your real games. Pre-season fundraiser sorted.</p>
             </div>
             <p className="font-mono text-[11px] text-pb-faintest mt-6">
-              After the trial, keep only what your club wants — from $399/yr for BetterStats.{' '}
+              After the trial, keep only what your club wants, from $399/yr for BetterStats.{' '}
               <Link to="/pricing" className="underline hover:text-pb-text">See pricing</Link>.
             </p>
           </div>

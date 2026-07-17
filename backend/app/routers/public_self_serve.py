@@ -99,7 +99,7 @@ async def search_clubs(q: str = "", request: Request = None, db: AsyncSession = 
     IP because every call hits the Cricket Australia search API."""
     rate_limit.enforce(
         f"pubss:search:{client_ip(request)}", SEARCH_LIMIT, SEARCH_WINDOW,
-        detail="Too many searches — slow down and try again shortly.",
+        detail="Too many searches. Slow down and try again shortly.",
     )
     return await sst.search_clubs(q=q, db=db)
 
@@ -179,7 +179,7 @@ async def send_verification_code(data: sst.SendCodeRequest, request: Request, db
             logger.error("public self-serve: verification email send failed: %s", e.detail)
             raise HTTPException(
                 status_code=502,
-                detail="We couldn't send the verification email just now — please try again in a minute.",
+                detail="We couldn't send the verification email just now. Please try again in a minute.",
             )
         raise
 
@@ -263,7 +263,7 @@ async def submit(
         # false-rejecting a real registrant over clock skew. A human can't
         # finish five steps plus an email OTP round trip in under 4 seconds.
         if 0 <= elapsed_ms < MIN_FILL_MS:
-            raise HTTPException(status_code=422, detail="Something went wrong — please try again.")
+            raise HTTPException(status_code=422, detail="Something went wrong. Please try again.")
 
     result = await sst.submit(data=data, background_tasks=background_tasks, db=db)
 

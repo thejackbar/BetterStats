@@ -851,12 +851,12 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
               {submitted && publicMode ? (
                 <div className="pb-card p-4 bg-pb-surface2">
                   <p className="font-mono text-[11px] text-emerald-400">
-                    ✓ Your club is set up — taking you to your dashboard…
+                    ✓ Your club is set up. Taking you to your dashboard…
                   </p>
                   <p className="font-mono text-[10px] text-pb-faint mt-2">
                     We've started importing your club's playing history from
-                    Cricket Australia in the background. It can take a little
-                    while for a club with a long history — feel free to look
+                    Cricket Australia in the background. A club with a long
+                    history can take a little while, so feel free to look
                     around while it lands.
                   </p>
                 </div>

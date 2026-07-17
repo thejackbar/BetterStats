@@ -71,7 +71,7 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
     "/trial": (
         "Start your club's free trial | BetterCricket",
         "Register your cricket club yourself and start a free trial of every "
-        "BetterCricket module. No credit card, no sales call — pick your club "
+        "BetterCricket module. No credit card and no sales call. Pick your club "
         "from the Cricket Australia register and you're in.",
     ),
     "/overview": (
