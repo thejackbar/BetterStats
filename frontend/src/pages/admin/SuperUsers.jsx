@@ -1,9 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { MODULE_TOGGLES } from '../../lib/modules'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+
+// Mirrors SuperMarketing.jsx's own STATES list (Club Directory).
+const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+const norm = (s) => (s || '').toString().toLowerCase()
+// "On trial/subscribed" = the module's subscription row is currently trial or active.
+const clubHasLiveModule = (club, key) =>
+  (club?.module_subscriptions || []).some((s) => s.module === key && (s.status === 'trial' || s.status === 'active'))
 
 // Mirrors backend/app/routers/club_admin.py's _INVITE_EMAIL_RE / _MOBILE_DIGITS_RE.
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
@@ -30,11 +38,45 @@ export default function SuperUsers() {
   const [editForm, setEditForm] = useState({ username: '', display_name: '', email: '', mobile_number: '', role: 'club_admin', club_id: '' })
   const [confirmDelete, setConfirmDelete] = useState(null)
 
+  // Club Directory-style search + filters (client-side — both lists are already
+  // fetched in full below, same pattern as All Clubs).
+  const [search, setSearch] = useState('')
+  const [filterRole, setFilterRole] = useState('')
+  const [filterClub, setFilterClub] = useState('')
+  const [filterAssociation, setFilterAssociation] = useState('')
+  const [filterState, setFilterState] = useState('')
+  const [filterPrimaryOnly, setFilterPrimaryOnly] = useState(false)
+  const [filterModules, setFilterModules] = useState([])
+  const toggleFilterModule = (key) =>
+    setFilterModules((m) => (m.includes(key) ? m.filter((k) => k !== key) : [...m, key]))
+  const clearFilters = () => {
+    setSearch(''); setFilterRole(''); setFilterClub(''); setFilterAssociation('')
+    setFilterState(''); setFilterPrimaryOnly(false); setFilterModules([])
+  }
+  const filtersActive = !!(search || filterRole || filterClub || filterAssociation || filterState || filterPrimaryOnly || filterModules.length)
+
   const load = () => {
     api.superListUsers().then(setUsers).catch(() => {})
     api.superListClubs().then(setClubs).catch(() => {})
   }
   useEffect(() => { load() }, [])
+
+  const clubById = useMemo(() => Object.fromEntries(clubs.map((c) => [c.id, c])), [clubs])
+
+  const visibleUsers = users.filter((u) => {
+    const club = u.club_id ? clubById[u.club_id] : null
+    if (search) {
+      const hay = `${u.username} ${u.display_name || ''} ${u.email || ''} ${u.mobile_number || ''}`
+      if (!norm(hay).includes(norm(search))) return false
+    }
+    if (filterRole && u.role !== filterRole) return false
+    if (filterClub && !norm(u.club_name).includes(norm(filterClub))) return false
+    if (filterState && norm(club?.state) !== norm(filterState)) return false
+    if (filterAssociation && !norm(club?.association_name).includes(norm(filterAssociation))) return false
+    if (filterPrimaryOnly && !u.is_primary_admin) return false
+    if (filterModules.length && !filterModules.some((k) => clubHasLiveModule(club, k))) return false
+    return true
+  })
 
   const createUser = async (e) => {
     e.preventDefault()
@@ -219,11 +261,76 @@ export default function SuperUsers() {
           </div>
         )}
 
-        <div className="pb-card overflow-hidden">
-          {users.length === 0 && (
-            <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">No users yet</div>
+        <div className="pb-card p-3 mb-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Search</label>
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Name, email, mobile…" className={INPUT_CLS} />
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Role</label>
+              <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)} className={INPUT_CLS}>
+                <option value="">All roles</option>
+                <option value="club_admin">Club Admin</option>
+                <option value="super_admin">Super Admin</option>
+              </select>
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Club</label>
+              <input type="text" value={filterClub} onChange={(e) => setFilterClub(e.target.value)}
+                placeholder="Club name…" className={INPUT_CLS} />
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Association</label>
+              <input type="text" value={filterAssociation} onChange={(e) => setFilterAssociation(e.target.value)}
+                placeholder="Name or short code…" className={INPUT_CLS} />
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">State</label>
+              <select value={filterState} onChange={(e) => setFilterState(e.target.value)} className={INPUT_CLS}>
+                <option value="">All states</option>
+                {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="flex items-end pb-1.5">
+              <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                <input type="checkbox" checked={filterPrimaryOnly} onChange={(e) => setFilterPrimaryOnly(e.target.checked)} />
+                Primary club admins only
+              </label>
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="font-mono text-[10px] text-pb-faint block mb-1">Club on trial / subscribed to</label>
+            <div className="flex flex-wrap gap-1.5">
+              {MODULE_TOGGLES.filter((t) => t.key !== 'core').map((tog) => {
+                const active = filterModules.includes(tog.key)
+                return (
+                  <button key={tog.key} type="button" onClick={() => toggleFilterModule(tog.key)}
+                    className={`px-2 py-1 rounded font-mono text-[10px] border transition-colors ${
+                      active ? 'border-pb-accent text-pb-text' : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+                    }`}>
+                    {tog.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {filtersActive && (
+            <button type="button" onClick={clearFilters}
+              className="mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text underline">
+              Clear filters
+            </button>
           )}
-          {users.map((u, i) => {
+        </div>
+
+        <div className="pb-card overflow-hidden">
+          {visibleUsers.length === 0 && (
+            <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">
+              {users.length === 0 ? 'No users yet' : 'No users match these filters'}
+            </div>
+          )}
+          {visibleUsers.map((u, i) => {
             const isSelf = currentUser?.id === u.id
             return (
               <div key={u.id} className={i > 0 ? 'pb-hairline-t' : ''}>
@@ -232,6 +339,7 @@ export default function SuperUsers() {
                     <span className="text-pb-text text-sm font-mono">{u.username}</span>
                     {u.display_name && <span className="text-pb-faint text-xs ml-2">{u.display_name}</span>}
                     {isSelf && <span className="font-mono text-[9px] ml-2" style={{ color: 'var(--pb-accent)' }}>YOU</span>}
+                    {u.is_primary_admin && <span className="font-mono text-[9px] ml-2 text-pb-faint">PRIMARY</span>}
                     <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
                       {u.club_name || 'No club'} · {u.role}
                       {u.locked && <span className="ml-2 text-pb-red">Locked</span>}
