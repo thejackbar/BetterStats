@@ -27,9 +27,9 @@ const TRIAL_JSONLD = {
 }
 
 const STEPS = [
-  ['Find your club', 'Search the Cricket Australia register and pick your club. If it’s on PlayHQ, we know it.'],
-  ['Verify your email', 'A 4-digit code proves you’re a real person at a real mailbox. That’s the whole identity check.'],
-  ['You’re in', 'Your club site goes live and we start importing your full playing history automatically, often decades of it.'],
+  ['Find Your Club', 'Search the Cricket Australia register and pick your club. If it’s on PlayHQ, we know it.'],
+  ['Enter Your Details', 'Your name, email and mobile, plus a quick email verification. That’s the whole identity check.'],
+  ['Complete Setup Wizard', 'At the end it’s as simple as saying you’re on board, and you can start customising BetterCricket for your club while your playing history imports.'],
 ]
 
 const FAQS = [
@@ -140,7 +140,7 @@ export default function Trial() {
               </div>
             )}
             <p className="font-mono text-[11px] text-pb-faintest mt-5">
-              Takes about 3 minutes · Every module included · Cancel nothing, because nothing is charged
+              Quick and Easy Setup · Every Module Included · No Obligation
             </p>
           </div>
         </section>
