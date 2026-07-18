@@ -31,6 +31,21 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
   const [vars, setVars] = useState({ is_marketing: false, variables: [] })
   const [justInserted, setJustInserted] = useState('')
 
+  // Our own undo/redo stack for Design mode. The browser's native
+  // designMode undo (Cmd/Ctrl+Z) is unreliable inside an iframe — it loses
+  // history across focus changes (e.g. every window.prompt() from Link/
+  // Image/Button) and doesn't cover our own scripted DOM edits (table row
+  // insert/delete, link-URL editing) at all, since those never go through
+  // execCommand. Snapshots are the editable body's innerHTML only — the
+  // wrapper <head>/<style> never changes during editing.
+  const historyRef = useRef([])
+  const historyIndexRef = useRef(-1)
+  const [historyFlags, setHistoryFlags] = useState({ canUndo: false, canRedo: false })
+  const syncHistoryFlags = () => setHistoryFlags({
+    canUndo: historyIndexRef.current > 0,
+    canRedo: historyIndexRef.current < historyRef.current.length - 1,
+  })
+
   useEffect(() => { api.commsMergeVariables().then(setVars).catch(() => {}) }, [])
 
   // Design mode defaults to open on mount, but designSrcDoc is otherwise only
@@ -56,6 +71,35 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     const doc = frame.contentDocument
     return designIsFullDoc ? serializeIframeDocument(doc) : (doc.body ? doc.body.innerHTML : html)
   }
+
+  // Captures the editable body as a new undo step. Consecutive duplicate
+  // snapshots are skipped (typing that produces no net change) and any
+  // undone "redo" branch is discarded, matching normal undo-stack behaviour.
+  const pushHistory = () => {
+    const doc = designFrameRef.current?.contentDocument
+    if (!doc?.body) return
+    const snapshot = doc.body.innerHTML
+    const trimmed = historyRef.current.slice(0, historyIndexRef.current + 1)
+    if (trimmed[trimmed.length - 1] === snapshot) { historyRef.current = trimmed; return }
+    trimmed.push(snapshot)
+    if (trimmed.length > 100) trimmed.shift()
+    historyRef.current = trimmed
+    historyIndexRef.current = trimmed.length - 1
+    syncHistoryFlags()
+  }
+
+  const restoreHistory = (index) => {
+    const doc = designFrameRef.current?.contentDocument
+    const snapshot = historyRef.current[index]
+    if (!doc?.body || snapshot === undefined) return
+    doc.body.innerHTML = snapshot
+    historyIndexRef.current = index
+    syncHistoryFlags()
+    onChange(readDesign())
+  }
+
+  const undo = () => { if (historyIndexRef.current > 0) restoreHistory(historyIndexRef.current - 1) }
+  const redo = () => { if (historyIndexRef.current < historyRef.current.length - 1) restoreHistory(historyIndexRef.current + 1) }
 
   const flushDesign = () => (mode === 'design' ? tidyHtml(readDesign()) : html)
 
@@ -135,12 +179,24 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     const doc = designFrameRef.current?.contentDocument
     if (!doc) return
     try { doc.designMode = 'on' } catch { /* not editable in this browser */ }
+    historyRef.current = [doc.body ? doc.body.innerHTML : '']
+    historyIndexRef.current = 0
+    syncHistoryFlags()
     // Debounced, untidied sync back to parent state while typing — keeps
     // Send-button enablement and unknown-variable warnings live without
-    // touching designSrcDoc (which would disrupt the iframe/cursor).
+    // touching designSrcDoc (which would disrupt the iframe/cursor). Also
+    // where typing gets coalesced into an undo step, on the same pause.
     doc.addEventListener('input', () => {
       clearTimeout(liveSyncTimerRef.current)
-      liveSyncTimerRef.current = setTimeout(() => onChange(readDesign()), 400)
+      liveSyncTimerRef.current = setTimeout(() => { onChange(readDesign()); pushHistory() }, 400)
+    })
+    // Our own undo/redo — see historyRef's comment for why the native
+    // designMode undo stack isn't trusted here.
+    doc.addEventListener('keydown', (e) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      else if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); redo() }
     })
   }
 
@@ -150,6 +206,7 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     if (!doc) return
     frame.contentWindow?.focus()
     doc.execCommand(cmd, false, val)
+    pushHistory()
   }
 
   const escapeHtml = (s) =>
@@ -180,10 +237,12 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     if (existing) {
       existing.setAttribute('href', url)
       onChange(readDesign())
+      pushHistory()
     } else if (doc.getSelection().isCollapsed) {
       window.alert('Select some text first, then click Link to turn it into a link.')
     } else {
       doc.execCommand('createLink', false, url)
+      pushHistory()
     }
   }
   const insertImage = () => {
@@ -208,6 +267,45 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     const el = node.nodeType === 3 ? node.parentElement : node
     return el?.closest ? el.closest('tr') : null
   }
+
+  const BORDER_BOTTOM_RE = /(?:^|;)\s*border-bottom\s*:\s*([^;]+)/i
+
+  // Our email templates commonly divide table rows with a border-bottom on
+  // every row EXCEPT the last (avoids doubling up with the table's own
+  // border/radius) — e.g. the newsletter's Results table. Cloning a row to
+  // insert a new one naively copies whichever row it was cloned from
+  // verbatim, so inserting after what used to be the last (borderless) row
+  // left both it and the new row without a divider between them. This
+  // re-derives the convention from whatever border style already appears
+  // anywhere in the table, then re-applies it to every row but the true
+  // last one — a no-op on tables that don't use a divider border at all.
+  const reflowRowBorders = (table) => {
+    const rows = Array.from(table.rows)
+    if (rows.length < 2) return
+    let dividerValue = null
+    for (const row of rows) {
+      const style = row.querySelector('td, th')?.getAttribute('style') || ''
+      const m = style.match(BORDER_BOTTOM_RE)
+      if (m) { dividerValue = m[1].trim(); break }
+    }
+    if (!dividerValue) return
+    rows.forEach((row, i) => {
+      const isLast = i === rows.length - 1
+      row.querySelectorAll('td, th').forEach(cell => {
+        let style = cell.getAttribute('style') || ''
+        const hasBorder = BORDER_BOTTOM_RE.test(style)
+        if (isLast && hasBorder) {
+          style = style.replace(BORDER_BOTTOM_RE, '').replace(/;\s*;/g, ';').trim()
+        } else if (!isLast && !hasBorder) {
+          style = style.trim()
+          if (style && !style.endsWith(';')) style += ';'
+          style += ` border-bottom:${dividerValue};`
+        }
+        cell.setAttribute('style', style)
+      })
+    })
+  }
+
   const insertTableRow = (after) => {
     const row = rowAtSelection()
     if (!row) { window.alert('Click inside a table cell first, then Row +.'); return }
@@ -215,18 +313,23 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     clone.querySelectorAll('td, th').forEach(cell => { cell.innerHTML = '&nbsp;' })
     if (after) row.after(clone)
     else row.before(clone)
+    const table = row.closest('table')
+    if (table) reflowRowBorders(table)
     onChange(readDesign())
+    pushHistory()
   }
   const deleteTableRow = () => {
     const row = rowAtSelection()
     if (!row) { window.alert('Click inside a table row first, then Row −.'); return }
     const table = row.closest('table')
-    if (table && table.querySelectorAll('tr').length <= 1) {
+    if (table && table.rows.length <= 1) {
       window.alert("Can't delete the only row in this table.")
       return
     }
     row.remove()
+    if (table) reflowRowBorders(table)
     onChange(readDesign())
+    pushHistory()
   }
 
   const varList = (vars.variables || []).filter(v => !v.marketing_only || vars.is_marketing)
@@ -290,6 +393,9 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
       {mode === 'design' && (
         <div>
           <div className="flex flex-wrap items-center gap-1 mb-2 pb-card p-1.5">
+            <ToolbarBtn onClick={undo} disabled={!historyFlags.canUndo} title="Undo (Cmd/Ctrl+Z)">↶ Undo</ToolbarBtn>
+            <ToolbarBtn onClick={redo} disabled={!historyFlags.canRedo} title="Redo (Cmd/Ctrl+Shift+Z)">↷ Redo</ToolbarBtn>
+            <Divider />
             <ToolbarBtn onClick={() => exec('bold')} title="Bold"><b>B</b></ToolbarBtn>
             <ToolbarBtn onClick={() => exec('italic')} title="Italic"><i>I</i></ToolbarBtn>
             <ToolbarBtn onClick={() => exec('underline')} title="Underline"><u>U</u></ToolbarBtn>
@@ -341,10 +447,10 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
   )
 })
 
-function ToolbarBtn({ onClick, title, children }) {
+function ToolbarBtn({ onClick, title, disabled, children }) {
   return (
-    <button type="button" onClick={onClick} title={title}
-      className="px-2 py-1 rounded text-xs text-pb-text hover:bg-pb-surface2 border pb-hairline">
+    <button type="button" onClick={onClick} title={title} disabled={disabled}
+      className="px-2 py-1 rounded text-xs text-pb-text hover:bg-pb-surface2 border pb-hairline disabled:opacity-40 disabled:hover:bg-transparent">
       {children}
     </button>
   )
