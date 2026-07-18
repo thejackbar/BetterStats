@@ -688,7 +688,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ app_version: appVersion || null }),
     }),
-  // Club Setup Wizard (flag-gated — 404s when onboarding_wizard_enabled is off)
+  // Club Setup Wizard (always available; /state fails only without a club context)
   getOnboardingWizardState: () => request('/club-admin/onboarding-wizard/state'),
   getSetupFlow: () => request('/club-admin/onboarding-wizard/flow'),
   markOnboardingWizardOpened: () => request('/club-admin/onboarding-wizard/opened', { method: 'POST' }),

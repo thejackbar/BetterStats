@@ -23,7 +23,9 @@ export default function SetupProgressReminder({ progress, onDone }) {
     return () => clearTimeout(id)
   }, [closing, onDone])
 
-  const left = progress?.total ? progress.total - progress.addressed : null
+  // Skipped steps count as still-to-do here — skipping parks a step, it
+  // doesn't complete it.
+  const left = progress?.total ? progress.total - progress.done : null
 
   return (
     <div

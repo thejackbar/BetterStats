@@ -83,6 +83,15 @@ export default function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Link-out steps open in a new tab, so the work happens away from this
+  // page. Re-run the flow (and its auto-detection) whenever this tab regains
+  // focus, so steps tick themselves off the moment the admin comes back.
+  useEffect(() => {
+    const onFocus = () => { load() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [load])
+
   // Flat step list in display order, each carrying its group.
   const steps = useMemo(() => {
     if (!flow) return []
@@ -142,8 +151,11 @@ export default function SetupWizard() {
   }
 
   const openTool = (s) => {
-    try { sessionStorage.setItem('bs_setup_return', s.key) } catch { /* private mode */ }
-    navigate(s.route)
+    // New tab, so the wizard keeps its place here. No bs_setup_return stamp —
+    // that pill exists to bring an admin back from a same-tab redirect (the
+    // Square/Xero OAuth round trips still use it); with the wizard still open
+    // in this tab there's nothing to come back from.
+    window.open(s.route, '_blank', 'noopener')
   }
 
   const exitWizard = async () => {
@@ -153,7 +165,9 @@ export default function SetupWizard() {
   }
 
   const progress = flow?.progress
-  const pct = progress?.total ? Math.round((progress.addressed / progress.total) * 100) : 0
+  // Progress is DONE steps only — a skipped step is parked, not completed,
+  // so it must never move the bar or the counts.
+  const pct = progress?.total ? Math.round((progress.done / progress.total) * 100) : 0
 
   return (
     <AdminLayout>
@@ -199,7 +213,11 @@ export default function SetupWizard() {
               {/* Group rail */}
               <div className="flex flex-wrap gap-1.5">
                 {flow.groups.map((g) => {
-                  const gDone = g.steps.filter((s) => s.done || s.skipped).length
+                  // Done only — skipped steps stay out of the count, so a
+                  // "skip for now" never reads as progress. A group whose
+                  // remaining steps are all skips goes amber, not green.
+                  const gDone = g.steps.filter((s) => s.done).length
+                  const gAddressed = g.steps.filter((s) => s.done || s.skipped).length
                   const active = step && step.group.key === g.key
                   const firstIdx = steps.findIndex((s) => s.group.key === g.key)
                   return (
@@ -211,7 +229,9 @@ export default function SetupWizard() {
                           ? 'text-white border-transparent'
                           : gDone === g.steps.length
                             ? 'text-pb-positive border-pb-positive/40'
-                            : 'text-pb-faint pb-hairline hover:text-pb-text'
+                            : gAddressed === g.steps.length
+                              ? 'text-pb-amber border-pb-amber/40'
+                              : 'text-pb-faint pb-hairline hover:text-pb-text'
                       }`}
                       style={active ? { background: 'var(--pb-accent)' } : undefined}
                     >
@@ -315,12 +335,12 @@ function StepBody({ step, onRefresh, onOpenTool }) {
   return (
     <div className="space-y-3">
       <WizardButton onClick={() => onOpenTool(step)}>
-        OPEN {step.title.toUpperCase()} →
+        OPEN {step.title.toUpperCase()} ↗
       </WizardButton>
       <p className="font-mono text-[11px] text-pb-faintest">
         {step.auto
-          ? 'A "back to setup" bar will bring you home, and this step ticks itself off once it can see the result.'
-          : 'A "back to setup" bar will bring you home. Mark the step done here once you\'re happy.'}
+          ? 'Opens in a new tab so you keep your place here. The step ticks itself off once it can see the result — just come back to this tab.'
+          : 'Opens in a new tab so you keep your place here. Mark the step done once you\'re happy with it.'}
       </p>
     </div>
   )
