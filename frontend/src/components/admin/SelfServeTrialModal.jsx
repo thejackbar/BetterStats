@@ -495,14 +495,14 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       style={{ backdropFilter: 'blur(2px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="self-serve-trial-modal-title"
     >
-      <div className="pb-card bg-pb-surface w-full max-w-lg mt-6 mb-6 max-h-[92vh] overflow-hidden flex flex-col">
+      <div className="pb-card bg-pb-surface w-full max-w-lg max-h-[92vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-b pb-hairline shrink-0">
           <h2 id="self-serve-trial-modal-title" className="font-display font-bold text-base text-pb-text">
             Start your club's {defaultTrialDays} Day Free Trial
