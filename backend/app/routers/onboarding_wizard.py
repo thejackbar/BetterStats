@@ -18,7 +18,10 @@ Completion is a blend of two signals, resolved in ``GET /flow``:
   AdminLayout on every admin page mount) never has to re-run the detectors.
 - **manual marks** — every step can also be ticked done (or explicitly
   skipped) by the admin; steps whose effect we can't see in the DB
-  (e.g. the Socials palette, which lives in localStorage) are manual-only.
+  (the review-only fantasy steps) are manual-only. Steps flagged
+  ``optional`` additionally offer "doesn't apply" (``na_steps``), which
+  drops the step out of the progress counts entirely — unlike a skip,
+  which parks a step but still counts it as to-do.
 
 Always available (the old ``onboarding_wizard_enabled`` flag gate was
 dropped when the wizard became a permanent menu item — it only orchestrates
@@ -92,7 +95,7 @@ GROUPS = [
             },
             {
                 "key": "branding", "title": "Logo, colours and player names",
-                "kind": "inline", "vital": False, "modules": None,
+                "kind": "inline", "vital": False, "modules": None, "minutes": 3,
                 "blurb": (
                     "Upload your club logo, pick your primary and secondary "
                     "colours, and choose how player names read across the site "
@@ -101,7 +104,7 @@ GROUPS = [
             },
             {
                 "key": "invite_admin", "title": "Invite another admin",
-                "kind": "link", "route": "/admin/users", "vital": False, "modules": None,
+                "kind": "link", "route": "/admin/users", "vital": False, "modules": None, "minutes": 2,
                 "blurb": (
                     "Add a second committee member so the club isn't relying on "
                     "one login. Invited admins get an email to set their own "
@@ -110,7 +113,7 @@ GROUPS = [
             },
             {
                 "key": "sponsors", "title": "Add your sponsors",
-                "kind": "inline", "vital": False, "modules": None,
+                "kind": "inline", "vital": False, "modules": None, "minutes": 3,
                 "blurb": (
                     "Sponsors appear on your public pages. Add each one's name, "
                     "website and logo — you can reorder them later from the "
@@ -130,7 +133,7 @@ GROUPS = [
         "steps": [
             {
                 "key": "merge_players", "title": "Merge duplicate players",
-                "kind": "link", "route": "/admin/merge", "vital": True, "modules": None,
+                "kind": "link", "route": "/admin/merge", "vital": True, "modules": None, "minutes": 10,
                 "blurb": (
                     "The same person often exists twice in PlayHQ history (name "
                     "changes, junior and senior records, typos). Merging combines "
@@ -141,7 +144,7 @@ GROUPS = [
             },
             {
                 "key": "merge_grades", "title": "Merge duplicate grades",
-                "kind": "link", "route": "/admin/grades", "vital": True, "modules": None,
+                "kind": "link", "route": "/admin/grades", "vital": True, "modules": None, "minutes": 5,
                 "blurb": (
                     "Competitions rename grades over the years (\"2nd Grade\" vs "
                     "\"2s\" vs \"B Grade\"). Merging them keeps season-by-season "
@@ -150,7 +153,7 @@ GROUPS = [
             },
             {
                 "key": "player_details", "title": "Import player details",
-                "kind": "link", "route": "/admin/players/import", "vital": False, "modules": None,
+                "kind": "link", "route": "/admin/players/import", "vital": False, "modules": None, "minutes": 10,
                 "blurb": (
                     "Bulk-fill emails, phone numbers, roles and batting/bowling "
                     "styles from a spreadsheet. Download the template, fill in "
@@ -159,7 +162,7 @@ GROUPS = [
             },
             {
                 "key": "import_stats", "title": "Import historical stats",
-                "kind": "link", "route": "/admin/import", "vital": False, "modules": None,
+                "kind": "link", "route": "/admin/import", "vital": False, "modules": None, "minutes": 15, "optional": True,
                 "blurb": (
                     "If your club has records from before PlayHQ (old scorebooks, "
                     "a previous website), import them here so careers read "
@@ -168,7 +171,7 @@ GROUPS = [
             },
             {
                 "key": "import_honours", "title": "Upload awards and honours",
-                "kind": "link", "route": "/admin/awards", "vital": False, "modules": None,
+                "kind": "link", "route": "/admin/awards", "vital": False, "modules": None, "minutes": 10,
                 "blurb": (
                     "Club champions, fairest and best, premierships, life members. "
                     "Add them one by one or import a spreadsheet — they power the "
@@ -177,7 +180,7 @@ GROUPS = [
             },
             {
                 "key": "partnerships", "title": "Upload partnership records",
-                "kind": "link", "route": "/admin/partnerships", "vital": False, "modules": None,
+                "kind": "link", "route": "/admin/partnerships", "vital": False, "modules": None, "minutes": 5, "optional": True,
                 "blurb": (
                     "Record partnership records (highest stands per wicket) that "
                     "pre-date the synced scorecards, so the record boards show "
@@ -192,7 +195,7 @@ GROUPS = [
         "steps": [
             {
                 "key": "fixtures", "title": "Sync your fixtures",
-                "kind": "inline", "vital": False, "modules": {"select"},
+                "kind": "inline", "vital": False, "modules": {"select"}, "minutes": 1,
                 "blurb": (
                     "Pull your upcoming fixtures from PlayHQ. If your association "
                     "hasn't published fixtures yet, nothing will come through — "
@@ -201,7 +204,7 @@ GROUPS = [
             },
             {
                 "key": "squads", "title": "Set up your squads",
-                "kind": "inline", "vital": False, "modules": {"select"},
+                "kind": "inline", "vital": False, "modules": {"select"}, "minutes": 2,
                 "blurb": (
                     "Squads mirror the sides you actually field (1st XI, 2nd XI and "
                     "so on). We suggest them from the teams your players appeared "
@@ -210,7 +213,7 @@ GROUPS = [
             },
             {
                 "key": "assign_players", "title": "Assign players to squads",
-                "kind": "inline", "vital": False, "modules": {"select"},
+                "kind": "inline", "vital": False, "modules": {"select"}, "minutes": 2,
                 "blurb": (
                     "Put each player in the squad they mostly play for, based on "
                     "where they actually played. You can drag players between "
@@ -219,7 +222,7 @@ GROUPS = [
             },
             {
                 "key": "self_serve", "title": "Turn on the availability link",
-                "kind": "inline", "vital": False, "modules": {"select"},
+                "kind": "inline", "vital": False, "modules": {"select"}, "minutes": 1,
                 "blurb": (
                     "One link (or QR code) your players use to set their own "
                     "availability — no accounts, no app, just their name and the "
@@ -228,7 +231,7 @@ GROUPS = [
             },
             {
                 "key": "nets", "title": "Set up Net Manager",
-                "kind": "link", "route": "/admin/betterselect/nets", "vital": False, "modules": {"select"},
+                "kind": "link", "route": "/admin/betterselect/nets", "vital": False, "modules": {"select"}, "minutes": 3,
                 "blurb": (
                     "Timed batting rotations and attendance for training nights. "
                     "Open it, set your net count and timings, and it's ready for "
@@ -243,7 +246,7 @@ GROUPS = [
         "steps": [
             {
                 "key": "website", "title": "Turn on your club website",
-                "kind": "inline", "vital": False, "modules": {"socials"},
+                "kind": "inline", "vital": False, "modules": {"socials"}, "minutes": 2,
                 "blurb": (
                     "A full public club site — news, honour boards, committee, "
                     "photo galleries — at your club's own page. Switch it on and "
@@ -252,12 +255,13 @@ GROUPS = [
             },
             {
                 "key": "socials_palette", "title": "Set your socials colours",
-                "kind": "link", "route": "/admin/social-post", "vital": False, "modules": {"socials"},
+                "kind": "link", "route": "/admin/social-post", "vital": False, "modules": {"socials"}, "minutes": 3,
                 "blurb": (
-                    "The post generator ships with ready-made palettes. Open it, "
-                    "pick or build the one that matches your club colours, and "
-                    "every match-day graphic comes out on-brand. Mark this done "
-                    "once you've saved a palette you like."
+                    "Match-day graphics come out in your club colours from the "
+                    "start — the Club palette is built from your primary colour. "
+                    "Open the post generator to pick a different palette, font or "
+                    "background if you want your own look; this step ticks itself "
+                    "off once you've saved a style."
                 ),
             },
         ],
@@ -268,7 +272,7 @@ GROUPS = [
         "steps": [
             {
                 "key": "square", "title": "Connect Square",
-                "kind": "link", "route": "/admin/fees/square", "vital": False,
+                "kind": "link", "route": "/admin/fees/square", "vital": False, "minutes": 3, "optional": True,
                 "modules": {"fees", "merch"},
                 "blurb": (
                     "If the club takes payments through Square, connect it once "
@@ -278,7 +282,7 @@ GROUPS = [
             },
             {
                 "key": "xero", "title": "Connect Xero",
-                "kind": "link", "route": "/admin/fees/xero", "vital": False, "modules": {"fees"},
+                "kind": "link", "route": "/admin/fees/xero", "vital": False, "modules": {"fees"}, "minutes": 3, "optional": True,
                 "blurb": (
                     "If the club's books live in Xero, connect it to reconcile "
                     "fee payments against your bank feed. Skip this if you don't "
@@ -287,7 +291,7 @@ GROUPS = [
             },
             {
                 "key": "fee_schedule", "title": "Set your fee schedule",
-                "kind": "link", "route": "/admin/fees/schedule", "vital": False, "modules": {"fees"},
+                "kind": "link", "route": "/admin/fees/schedule", "vital": False, "modules": {"fees"}, "minutes": 5,
                 "blurb": (
                     "Your membership categories and match fees for the season — "
                     "seniors, juniors, family caps, per-game rates. There's a "
@@ -295,17 +299,8 @@ GROUPS = [
                 ),
             },
             {
-                "key": "rollover", "title": "Roll members over from last season",
-                "kind": "link", "route": "/admin/fees", "vital": False, "modules": {"fees"},
-                "blurb": (
-                    "Carry last season's members into the new season in one go, "
-                    "keeping their fee categories. Only relevant from your second "
-                    "season on BetterCricket — skip it in year one."
-                ),
-            },
-            {
                 "key": "comms", "title": "Set your email sender details",
-                "kind": "inline", "vital": False, "modules": {"comms"},
+                "kind": "inline", "vital": False, "modules": {"comms"}, "minutes": 2,
                 "blurb": (
                     "The reply-to address members answer to, and the footer line "
                     "(club name, ABN or contact) that goes on every email the "
@@ -314,7 +309,7 @@ GROUPS = [
             },
             {
                 "key": "merch_stock", "title": "Add your stock and equipment",
-                "kind": "link", "route": "/admin/merch/stock", "vital": False, "modules": {"merch"},
+                "kind": "link", "route": "/admin/merch/stock", "vital": False, "modules": {"merch"}, "minutes": 10,
                 "blurb": (
                     "Playing kit, balls, canteen stock, training gear. Add items "
                     "by hand, or if you sell through Square, import your whole "
@@ -329,7 +324,7 @@ GROUPS = [
         "steps": [
             {
                 "key": "iq_prewarm", "title": "Pre-build opposition analysis",
-                "kind": "inline", "vital": False, "modules": {"iq"},
+                "kind": "inline", "vital": False, "modules": {"iq"}, "minutes": 2,
                 "blurb": (
                     "Opposition dossiers normally build the first time you open "
                     "one (up to a minute each). Pick your top grades and we'll "
@@ -345,7 +340,7 @@ GROUPS = [
         "steps": [
             {
                 "key": "fantasy_season", "title": "Create this season's competition",
-                "kind": "inline", "vital": False, "modules": {"fantasy"},
+                "kind": "inline", "vital": False, "modules": {"fantasy"}, "minutes": 1,
                 "blurb": (
                     "Creates the fantasy season, the club-wide ladder and your "
                     "public sign-up link in one go."
@@ -353,7 +348,7 @@ GROUPS = [
             },
             {
                 "key": "fantasy_pool", "title": "Build the player pool",
-                "kind": "inline", "vital": False, "modules": {"fantasy"},
+                "kind": "inline", "vital": False, "modules": {"fantasy"}, "minutes": 1,
                 "blurb": (
                     "Prices every eligible player from their real stats so "
                     "managers can pick their squads. Re-run it any time — prices "
@@ -362,7 +357,7 @@ GROUPS = [
             },
             {
                 "key": "fantasy_rules", "title": "Review team rules and budget",
-                "kind": "link", "route": "/admin/fantasy/settings", "vital": False, "modules": {"fantasy"},
+                "kind": "link", "route": "/admin/fantasy/settings", "vital": False, "modules": {"fantasy"}, "minutes": 3,
                 "blurb": (
                     "Salary cap, squad size and trade limits start on sensible "
                     "defaults — look them over and tweak anything that doesn't "
@@ -371,7 +366,7 @@ GROUPS = [
             },
             {
                 "key": "fantasy_scoring", "title": "Review scoring",
-                "kind": "link", "route": "/admin/fantasy/scoring", "vital": False, "modules": {"fantasy"},
+                "kind": "link", "route": "/admin/fantasy/scoring", "vital": False, "modules": {"fantasy"}, "minutes": 2,
                 "blurb": (
                     "Points per run, wicket, catch and the rest. The defaults are "
                     "balanced for club cricket — mark this done once you're happy "
@@ -385,7 +380,8 @@ GROUPS = [
 async def _get_or_create_state(db: AsyncSession, org_id) -> OnboardingWizardState:
     state = await db.get(OnboardingWizardState, org_id)
     if state is None:
-        state = OnboardingWizardState(organisation_id=org_id, completed_steps=[], skipped_steps=[])
+        state = OnboardingWizardState(
+            organisation_id=org_id, completed_steps=[], skipped_steps=[], na_steps=[])
         db.add(state)
         await db.flush()
     return state
@@ -425,6 +421,9 @@ async def _detect_steps(db: AsyncSession, club: Organisation, sync_ready: bool) 
         "website": bool(club.website_enabled),
         "comms": bool(club.comms_reply_to or club.comms_sender_footer),
         "nets": bool(club.net_settings),
+        # The post generator's Style choices persist per club now (migration
+        # 162) — a saved style means the palette step is done.
+        "socials_palette": bool(club.socials_style),
     }
     detected["invite_admin"] = (await db.execute(
         select(func.count()).select_from(ClubMembership).where(ClubMembership.club_id == org_id)
@@ -480,6 +479,7 @@ def _applicable_groups(entitled: set) -> list:
 class StepUpdate(BaseModel):
     done: bool | None = None
     skipped: bool | None = None
+    not_applicable: bool | None = None
 
 
 @router.get("/flow")
@@ -495,14 +495,18 @@ async def get_flow(club: Organisation = Depends(get_current_club), db: AsyncSess
 
     completed = set(state.completed_steps or [])
     skipped = set(state.skipped_steps or [])
+    na = set(state.na_steps or [])
     newly = {k for k, v in detected.items() if v} - completed
     if newly:
         completed |= newly
         skipped -= newly  # doing the thing beats having skipped it
+        na -= newly       # …and beats having said it doesn't apply
         state.completed_steps = sorted(completed)
         state.skipped_steps = sorted(skipped)
+        state.na_steps = sorted(na)
         flag_modified(state, "completed_steps")
         flag_modified(state, "skipped_steps")
+        flag_modified(state, "na_steps")
     await db.commit()
 
     entitled = org_entitled_modules(club)
@@ -512,14 +516,20 @@ async def get_flow(club: Organisation = Depends(get_current_club), db: AsyncSess
         steps = []
         for s in g["steps"]:
             done = s["key"] in completed
-            skip = (not done) and s["key"] in skipped
-            total_n += 1
-            done_n += 1 if done else 0
-            addressed_n += 1 if (done or skip) else 0
+            step_na = (not done) and s["key"] in na
+            skip = (not done) and (not step_na) and s["key"] in skipped
+            # Not-applicable steps drop out of progress entirely — they're
+            # neither done nor to-do, they just aren't this club's steps.
+            if not step_na:
+                total_n += 1
+                done_n += 1 if done else 0
+                addressed_n += 1 if (done or skip) else 0
             steps.append({
                 "key": s["key"], "title": s["title"], "blurb": s["blurb"],
                 "kind": s["kind"], "route": s.get("route"), "vital": s["vital"],
-                "done": done, "skipped": skip, "auto": s["key"] in detected,
+                "optional": bool(s.get("optional")), "minutes": s.get("minutes"),
+                "done": done, "skipped": skip, "na": step_na,
+                "auto": s["key"] in detected,
             })
         groups.append({
             "key": g["key"], "title": g["title"], "blurb": g["blurb"],
@@ -546,7 +556,13 @@ async def get_state(club: Organisation = Depends(get_current_club), db: AsyncSes
     entitled = org_entitled_modules(club)
     completed = set(state.completed_steps or [])
     skipped = set(state.skipped_steps or [])
-    keys = [s["key"] for g in _applicable_groups(entitled) for s in g["steps"]]
+    na = set(state.na_steps or [])
+    # Not-applicable steps are excluded from the counts entirely, matching
+    # /flow's progress semantics (done still beats a stored NA mark).
+    keys = [
+        s["key"] for g in _applicable_groups(entitled) for s in g["steps"]
+        if s["key"] in completed or s["key"] not in na
+    ]
     done_n = sum(1 for k in keys if k in completed)
     addressed = sum(1 for k in keys if k in completed or k in skipped)
     all_addressed = bool(keys) and addressed == len(keys)
@@ -559,7 +575,7 @@ async def get_state(club: Organisation = Depends(get_current_club), db: AsyncSes
     # old flag gate would auto-navigate every long-established club's admin
     # into setup on their next login. The Setup Wizard menu item is the
     # any-time entry point; auto-open is only for genuine onboarding.
-    engaged = bool(completed or skipped)
+    engaged = bool(completed or skipped or na)
     should_auto_open = (not all_addressed) and (
         (not sync_ready and state.dismissed_at is None)
         or (sync_ready and state.sync_steps_shown_at is None and engaged)
@@ -597,13 +613,14 @@ async def dismiss(club: Organisation = Depends(get_current_club), db: AsyncSessi
 async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends(get_current_club),
                    db: AsyncSession = Depends(get_db),
                    current_user: User = Depends(get_current_user)):
-    """Mark a step done / not done, or skipped / unskipped. Done and skipped
-    are mutually exclusive — setting one clears the other. Unknown keys are
-    accepted (old checklist keys like explore_select may still be stored) but
-    only registry keys affect progress."""
+    """Mark a step done / not done, skipped / unskipped, or not-applicable.
+    The three states are mutually exclusive — setting one clears the others.
+    Unknown keys are accepted (old checklist keys like explore_select may
+    still be stored) but only registry keys affect progress."""
     state = await _get_or_create_state(db, club.id)
     completed = set(state.completed_steps or [])
     skipped = set(state.skipped_steps or [])
+    na = set(state.na_steps or [])
     if data.done is not None:
         if data.done:
             # Actor trail for services/trial_engagement.py's Super-Admin-vs-
@@ -618,17 +635,31 @@ async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends
                 )
             completed.add(step_key)
             skipped.discard(step_key)
+            na.discard(step_key)
         else:
             completed.discard(step_key)
     if data.skipped is not None:
         if data.skipped:
             skipped.add(step_key)
             completed.discard(step_key)
+            na.discard(step_key)
         else:
             skipped.discard(step_key)
+    if data.not_applicable is not None:
+        if data.not_applicable:
+            na.add(step_key)
+            completed.discard(step_key)
+            skipped.discard(step_key)
+        else:
+            na.discard(step_key)
     state.completed_steps = sorted(completed)
     state.skipped_steps = sorted(skipped)
+    state.na_steps = sorted(na)
     flag_modified(state, "completed_steps")
     flag_modified(state, "skipped_steps")
+    flag_modified(state, "na_steps")
     await db.commit()
-    return {"ok": True, "completed_steps": state.completed_steps, "skipped_steps": state.skipped_steps}
+    return {
+        "ok": True, "completed_steps": state.completed_steps,
+        "skipped_steps": state.skipped_steps, "na_steps": state.na_steps,
+    }

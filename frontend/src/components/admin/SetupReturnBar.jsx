@@ -3,10 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 
 /* A floating "back to setup" pill shown on any admin page reached from a
-   Setup Wizard link-out (the wizard stamps sessionStorage.bs_setup_return
-   with the step it left from — including across a Square/Xero OAuth round
-   trip). Mounted in ProtectedRoute beside TrialBanner so it covers every
-   admin surface, module layouts included.
+   Setup Wizard same-tab redirect (the step stamps
+   sessionStorage.bs_setup_return before leaving — today that's the
+   Square/Xero OAuth round trips; ordinary link-out steps open in a new tab
+   and don't stamp it, since the wizard stays open in its own tab). Mounted
+   in ProtectedRoute beside TrialBanner so it covers every admin surface,
+   module layouts included.
 
    Fixed to the bottom of the viewport rather than a top bar: it can never
    be lost behind the sticky page headers, survives scrolling, and doesn't

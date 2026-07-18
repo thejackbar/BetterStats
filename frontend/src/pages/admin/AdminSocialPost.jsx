@@ -594,6 +594,14 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
+// The untouched Style defaults, in the exact key order the style snapshot is
+// built with — used to tell "changed something" from "just visited the page"
+// before any style has ever been stored server-side.
+const DEFAULT_STYLE_JSON = JSON.stringify({
+  palette: 'club', dark: true, font: 'barlow', bg: 'none',
+  bg_colors: {}, palettes: [], designs: [],
+})
+
 export default function AdminSocialPost() {
   const location = useLocation()
   const [settings, setSettings] = useState(null)
@@ -744,10 +752,58 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
 
+  // Server persistence of the Style choices (organisations.socials_style,
+  // migration 162) — the club's look survives browser changes and second
+  // admins, and the Setup Wizard's socials_palette step auto-detects off it.
+  // The server copy wins over localStorage on load; saves are debounced and
+  // only fire once something differs from the last-synced (or default)
+  // style, so merely visiting the page never claims a saved style.
+  const styleServerRef = useRef(null) // JSON of the last server-synced style; null = nothing stored yet
+  const styleSaveTimer = useRef(null)
+  const styleSnapshot = JSON.stringify({
+    palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle,
+    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns,
+  })
+  useEffect(() => {
+    if (!settings) return undefined
+    if (styleSnapshot === styleServerRef.current) return undefined
+    if (styleServerRef.current === null && styleSnapshot === DEFAULT_STYLE_JSON) return undefined
+    clearTimeout(styleSaveTimer.current)
+    styleSaveTimer.current = setTimeout(() => {
+      api.adminPatchSettings({ socials_style: JSON.parse(styleSnapshot) })
+        .then(() => { styleServerRef.current = styleSnapshot })
+        .catch(() => { /* best-effort — localStorage still has it */ })
+    }, 1200)
+    return () => clearTimeout(styleSaveTimer.current)
+  }, [styleSnapshot, settings])
+
   useEffect(() => {
     Promise.all([api.adminGetSettings(), api.adminListPlayers(), api.adminListSponsors()])
       .then(([s, p, sp]) => {
         setSettings(s)
+        // Apply the club's stored style (server wins over this browser's
+        // localStorage). Normalised into the same snapshot shape the save
+        // effect builds, so the ref comparison suppresses a save-back.
+        const st = s?.socials_style
+        if (st && typeof st === 'object') {
+          const applied = {
+            palette: typeof st.palette === 'string' ? st.palette : 'club',
+            dark: typeof st.dark === 'boolean' ? st.dark : true,
+            font: typeof st.font === 'string' ? st.font : 'barlow',
+            bg: typeof st.bg === 'string' ? st.bg : 'none',
+            bg_colors: st.bg_colors && typeof st.bg_colors === 'object' ? st.bg_colors : {},
+            palettes: Array.isArray(st.palettes) ? st.palettes : [],
+            designs: Array.isArray(st.designs) ? st.designs : [],
+          }
+          setPaletteKey(applied.palette)
+          setDarkMode(applied.dark)
+          setFontKey(applied.font)
+          setBgStyle(applied.bg)
+          setBgColors(applied.bg_colors)
+          setSavedPalettes(applied.palettes)
+          setSavedDesigns(applied.designs)
+          styleServerRef.current = JSON.stringify(applied)
+        }
         setAllPlayers(p)
         const sponsors = sp || []
         setAdminSponsors(sponsors)

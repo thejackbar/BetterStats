@@ -131,6 +131,67 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, request
   )
 }
 
+/* Club-setup progress card — sits in the modules grid so a half-set-up club
+   sees what's outstanding right on the dashboard (same list style as the
+   wizard's wrap-up screen). Skipped steps are listed too: skipping parks a
+   step, it doesn't complete it. Steps marked "doesn't apply" stay off the
+   list entirely. Hidden once every remaining step is genuinely done. */
+function SetupCard({ flow }) {
+  const steps = flow.groups.flatMap((g) => g.steps)
+  const open = steps.filter((s) => !s.done && !s.skipped && !s.na)
+  const skipped = steps.filter((s) => !s.done && s.skipped)
+  const outstanding = [...open, ...skipped]
+  if (!outstanding.length) return null
+  const shown = outstanding.slice(0, 6)
+  const more = outstanding.length - shown.length
+  const done = flow.progress?.done ?? 0
+  const total = flow.progress?.total ?? steps.length
+  return (
+    <div className="pb-card p-5 flex flex-col">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">🏏</span>
+          <span className="font-display font-bold text-lg text-pb-text">Finish setting up</span>
+        </div>
+        <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 shrink-0">
+          {done}/{total} DONE
+        </span>
+      </div>
+      <div className="text-pb-faint text-sm mt-1 mb-3">
+        A few setup steps are still waiting — knock them over and your club is fully set up.
+      </div>
+      <div className="space-y-1">
+        {shown.map((s) => (
+          <Link
+            key={s.key}
+            to={`/admin/setup/${s.key}`}
+            className="flex items-center justify-between font-mono text-[11px] border pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition-colors"
+          >
+            <span className="truncate">{s.title}</span>
+            <span className={`shrink-0 ml-3 ${s.skipped ? 'text-pb-amber' : 'text-pb-faintest'}`}>
+              {s.skipped ? 'SKIPPED' : 'NOT DONE'}
+            </span>
+          </Link>
+        ))}
+      </div>
+      {more > 0 && (
+        <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+          …and {more} more in the wizard.
+        </p>
+      )}
+      <div className="mt-3 pt-1">
+        <Link
+          to="/admin/setup"
+          className="inline-flex items-center gap-2 font-mono text-[10px] tracking-wide2 rounded px-3.5 py-2 text-white"
+          style={{ background: 'var(--pb-accent)' }}
+        >
+          CONTINUE SETUP →
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const { user, hasModule, refetch } = useAuth()
   const [settings, setSettings] = useState(null)
@@ -142,6 +203,11 @@ export default function AdminDashboard() {
   // Per-module status/dates (Subscribed · renews X / Trial · ends X) and
   // trial_eligible, the same data the Account page shows — GET /account/plan.
   const [plan, setPlan] = useState([])
+  // Setup Wizard flow (steps + done/skipped) for the setup card in the
+  // modules grid. /flow also runs the auto-detectors and persists any
+  // newly-detected completion, so the card stays truthful about what's left.
+  // A failed fetch (e.g. a super admin with no acting-as club) hides it.
+  const [setupFlow, setSetupFlow] = useState(null)
 
   const loadPlan = () =>
     api.accountGetPlan().then(d => setPlan(Array.isArray(d?.modules) ? d.modules : [])).catch(() => {})
@@ -150,6 +216,7 @@ export default function AdminDashboard() {
     api.adminGetSettings().then(setSettings).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
     api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
+    api.getSetupFlow().then(setSetupFlow).catch(() => {})
     loadPlan()
   }, [])
 
@@ -307,6 +374,7 @@ export default function AdminDashboard() {
               />
             )
           })}
+          {setupFlow && <SetupCard flow={setupFlow} />}
         </div>
 
         {/* Data sync — the club's own most recent sync run, live while running.

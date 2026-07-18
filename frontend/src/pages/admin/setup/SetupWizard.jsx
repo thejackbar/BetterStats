@@ -9,7 +9,7 @@
    Navigation: Back / Skip / Continue, a group rail with per-group progress,
    and every step addressable by URL so a link-out and return lands you back
    where you were. Vital steps warn before they can be skipped. */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -83,6 +83,15 @@ export default function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Link-out steps open in a new tab, so the work happens away from this
+  // page. Re-run the flow (and its auto-detection) whenever this tab regains
+  // focus, so steps tick themselves off the moment the admin comes back.
+  useEffect(() => {
+    const onFocus = () => { load() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [load])
+
   // Flat step list in display order, each carrying its group.
   const steps = useMemo(() => {
     if (!flow) return []
@@ -95,7 +104,7 @@ export default function SetupWizard() {
     const idx = steps.findIndex((s) => s.key === stepKey)
     if (idx >= 0) return idx
     // No (or unknown) step in the URL — resume at the first unaddressed step.
-    const firstOpen = steps.findIndex((s) => !s.done && !s.skipped && !s.group.locked)
+    const firstOpen = steps.findIndex((s) => !s.done && !s.skipped && !s.na && !s.group.locked)
     return firstOpen >= 0 ? firstOpen : 0
   }, [steps, stepKey])
 
@@ -141,9 +150,20 @@ export default function SetupWizard() {
     goTo(currentIndex + 1)
   }
 
+  // "Doesn't apply" — only offered on steps flagged optional (Connect
+  // Square for a club with no Square, and so on). Unlike a skip, this drops
+  // the step out of the counts entirely; it's reversible from the step card.
+  const markNa = async (s, na = true) => {
+    await setStep(s.key, { not_applicable: na })
+    if (na) goTo(currentIndex + 1)
+  }
+
   const openTool = (s) => {
-    try { sessionStorage.setItem('bs_setup_return', s.key) } catch { /* private mode */ }
-    navigate(s.route)
+    // New tab, so the wizard keeps its place here. No bs_setup_return stamp —
+    // that pill exists to bring an admin back from a same-tab redirect (the
+    // Square/Xero OAuth round trips still use it); with the wizard still open
+    // in this tab there's nothing to come back from.
+    window.open(s.route, '_blank', 'noopener')
   }
 
   const exitWizard = async () => {
@@ -153,7 +173,9 @@ export default function SetupWizard() {
   }
 
   const progress = flow?.progress
-  const pct = progress?.total ? Math.round((progress.addressed / progress.total) * 100) : 0
+  // Progress is DONE steps only — a skipped step is parked, not completed,
+  // so it must never move the bar or the counts.
+  const pct = progress?.total ? Math.round((progress.done / progress.total) * 100) : 0
 
   return (
     <AdminLayout>
@@ -199,7 +221,13 @@ export default function SetupWizard() {
               {/* Group rail */}
               <div className="flex flex-wrap gap-1.5">
                 {flow.groups.map((g) => {
-                  const gDone = g.steps.filter((s) => s.done || s.skipped).length
+                  // Done only — skipped steps stay out of the count, so a
+                  // "skip for now" never reads as progress; a group whose
+                  // remaining steps are all skips goes amber, not green.
+                  // Not-applicable steps leave the denominator entirely.
+                  const counted = g.steps.filter((s) => !s.na)
+                  const gDone = counted.filter((s) => s.done).length
+                  const gAddressed = counted.filter((s) => s.done || s.skipped).length
                   const active = step && step.group.key === g.key
                   const firstIdx = steps.findIndex((s) => s.group.key === g.key)
                   return (
@@ -209,13 +237,15 @@ export default function SetupWizard() {
                       className={`font-mono text-[10px] tracking-wide2 rounded px-2.5 py-1 border transition-colors ${
                         active
                           ? 'text-white border-transparent'
-                          : gDone === g.steps.length
+                          : gDone === counted.length
                             ? 'text-pb-positive border-pb-positive/40'
-                            : 'text-pb-faint pb-hairline hover:text-pb-text'
+                            : gAddressed === counted.length
+                              ? 'text-pb-amber border-pb-amber/40'
+                              : 'text-pb-faint pb-hairline hover:text-pb-text'
                       }`}
                       style={active ? { background: 'var(--pb-accent)' } : undefined}
                     >
-                      {g.title.toUpperCase()} {gDone}/{g.steps.length}{g.locked ? ' 🔒' : ''}
+                      {g.title.toUpperCase()} {gDone}/{counted.length}{g.locked ? ' 🔒' : ''}
                     </button>
                   )
                 })}
@@ -229,6 +259,7 @@ export default function SetupWizard() {
                   <div>
                     <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">
                       {step.group.title} · Step {currentIndex + 1} of {steps.length}
+                      {step.minutes ? ` · ≈ ${step.minutes} min` : ''}
                     </p>
                     <h2 className="font-display font-bold text-lg text-pb-text mt-0.5">{step.title}</h2>
                   </div>
@@ -238,44 +269,72 @@ export default function SetupWizard() {
                   {step.skipped && (
                     <span className="font-mono text-[10px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-2 py-1 shrink-0">SKIPPED</span>
                   )}
+                  {step.na && (
+                    <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-1 shrink-0">DOESN'T APPLY</span>
+                  )}
                 </div>
 
                 <p className="text-sm text-pb-dim leading-relaxed">{step.blurb}</p>
 
                 {step.group.locked ? (
-                  <Notice tone="warn">
-                    This step needs your first full sync to finish before it has anything to work
-                    with.{' '}
-                    <button className="underline" onClick={() => goTo(steps.findIndex((s) => s.key === 'full_rebuild'))}>
-                      Go to the sync step
-                    </button>
-                  </Notice>
+                  <LockedSyncNotice
+                    onRefresh={load}
+                    goToSync={() => goTo(steps.findIndex((s) => s.key === 'full_rebuild'))}
+                  />
                 ) : (
                   <StepBody step={step} onRefresh={load} onOpenTool={openTool} />
                 )}
 
-                {/* Footer nav */}
-                <div className="flex items-center justify-between pt-3 border-t pb-hairline">
+                {/* Footer nav. Auto-detected steps deliberately have no
+                    manual "mark done" — do the thing and the step ticks
+                    itself; NEXT just moves on. Manual steps get both a plain
+                    NEXT and MARK DONE & NEXT. Optional steps add DOESN'T
+                    APPLY, which is reversible from this same card. */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t pb-hairline">
                   <WizardButton variant="secondary" onClick={() => goTo(currentIndex - 1)} disabled={currentIndex === 0}>
                     ← BACK
                   </WizardButton>
-                  <div className="flex items-center gap-2">
-                    {!step.done && !step.group.locked && (
-                      <WizardButton variant="secondary" onClick={requestSkip} disabled={busy}>
-                        {step.skipped ? 'SKIP AGAIN' : 'SKIP FOR NOW'}
-                      </WizardButton>
-                    )}
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     {step.group.locked ? (
                       <WizardButton onClick={() => goTo(currentIndex + 1)}>NEXT →</WizardButton>
                     ) : step.done ? (
                       <WizardButton onClick={() => goTo(currentIndex + 1)}>CONTINUE →</WizardButton>
+                    ) : step.na ? (
+                      <>
+                        <WizardButton variant="secondary" onClick={() => markNa(step, false)} disabled={busy}>
+                          ACTUALLY, THIS APPLIES
+                        </WizardButton>
+                        <WizardButton onClick={() => goTo(currentIndex + 1)}>NEXT →</WizardButton>
+                      </>
                     ) : (
-                      <WizardButton onClick={markDoneAndContinue} disabled={busy}>
-                        MARK DONE & CONTINUE →
-                      </WizardButton>
+                      <>
+                        <WizardButton variant="secondary" onClick={requestSkip} disabled={busy}>
+                          {step.skipped ? 'SKIP AGAIN' : 'SKIP FOR NOW'}
+                        </WizardButton>
+                        {step.optional && (
+                          <WizardButton variant="secondary" onClick={() => markNa(step)} disabled={busy}>
+                            DOESN'T APPLY TO US
+                          </WizardButton>
+                        )}
+                        {step.auto ? (
+                          <WizardButton onClick={() => goTo(currentIndex + 1)}>NEXT STEP →</WizardButton>
+                        ) : (
+                          <>
+                            <WizardButton variant="secondary" onClick={() => goTo(currentIndex + 1)}>NEXT →</WizardButton>
+                            <WizardButton onClick={markDoneAndContinue} disabled={busy}>
+                              MARK DONE & NEXT →
+                            </WizardButton>
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
+                {step.auto && !step.done && !step.na && !step.group.locked && (
+                  <p className="font-mono text-[10px] text-pb-faintest text-right -mt-2">
+                    This step ticks itself off once the work's done — no need to mark anything.
+                  </p>
+                )}
               </div>
             ) : (
               <FinishScreen flow={flow} onExit={exitWizard} goTo={goTo} steps={steps} />
@@ -308,6 +367,64 @@ export default function SetupWizard() {
   )
 }
 
+/* Locked "Tidy your data" steps used to dead-end at "needs your first full
+   sync". If that sync is actually running right now, show its live progress
+   here instead, and refresh the flow the moment it finishes so the locks
+   lift without the admin doing anything. Same poll shape as FullRebuildStep. */
+function LockedSyncNotice({ onRefresh, goToSync }) {
+  const { user } = useAuth()
+  const [run, setRun] = useState(null)
+  const wasRunning = useRef(false)
+
+  useEffect(() => {
+    if (!user?.club_id) return undefined
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const logs = await api.getSyncLogs(user.club_id)
+        if (cancelled) return
+        const latest = (logs || [])[0]
+        const running = latest && latest.status === 'running' ? latest : null
+        setRun(running)
+        if (wasRunning.current && !running) {
+          wasRunning.current = false
+          onRefresh() // the sync just finished — the group lock may lift now
+        }
+        if (running) wasRunning.current = true
+      } catch { /* silent — the notice just stays static */ }
+    }
+    poll()
+    const id = setInterval(poll, 4000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [user?.club_id, onRefresh])
+
+  return (
+    <div className="space-y-3">
+      <Notice tone="warn">
+        This step needs your first full sync to finish before it has anything to work
+        with.{' '}
+        {!run && (
+          <button className="underline" onClick={goToSync}>
+            Go to the sync step
+          </button>
+        )}
+      </Notice>
+      {run && (
+        <div className="space-y-1">
+          <ProgressBar
+            pct={run?.stats?.progress_pct ?? 0}
+            label={run?.stats?.progress_phase || 'Your first full sync is running…'}
+          />
+          <p className="font-mono text-[10px] text-pb-faintest">
+            These steps unlock on their own the moment it finishes — feel free to keep
+            moving through the others.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StepBody({ step, onRefresh, onOpenTool }) {
   const Inline = INLINE_STEPS[step.key]
   if (Inline) return <Inline step={step} onRefresh={onRefresh} onOpenTool={onOpenTool} />
@@ -315,21 +432,41 @@ function StepBody({ step, onRefresh, onOpenTool }) {
   return (
     <div className="space-y-3">
       <WizardButton onClick={() => onOpenTool(step)}>
-        OPEN {step.title.toUpperCase()} →
+        OPEN {step.title.toUpperCase()} ↗
       </WizardButton>
       <p className="font-mono text-[11px] text-pb-faintest">
         {step.auto
-          ? 'A "back to setup" bar will bring you home, and this step ticks itself off once it can see the result.'
-          : 'A "back to setup" bar will bring you home. Mark the step done here once you\'re happy.'}
+          ? 'Opens in a new tab so you keep your place here. The step ticks itself off once it can see the result — just come back to this tab.'
+          : 'Opens in a new tab so you keep your place here. Mark the step done once you\'re happy with it.'}
       </p>
     </div>
   )
 }
 
 function FinishScreen({ flow, onExit, goTo, steps }) {
+  const [copied, setCopied] = useState(false)
+  // Not-applicable steps aren't outstanding — they're off the club's list.
   const skippedSteps = steps.filter((s) => s.skipped)
-  const openSteps = steps.filter((s) => !s.done && !s.skipped)
+  const openSteps = steps.filter((s) => !s.done && !s.skipped && !s.na)
   const allDone = openSteps.length === 0 && skippedSteps.length === 0
+
+  // A plain-text rundown of where setup landed, for pasting into a committee
+  // group chat or handover email.
+  const copySummary = async () => {
+    const line = (s) => `- ${s.title}`
+    const sections = [
+      [`${flow?.club?.name || 'Club'} — BetterCricket setup (${flow?.progress?.done ?? 0}/${flow?.progress?.total ?? steps.length} steps done)`],
+      ...(openSteps.length ? [['Still to do:', ...openSteps.map(line)]] : []),
+      ...(skippedSteps.length ? [['Skipped for now:', ...skippedSteps.map(line)]] : []),
+      [(allDone ? 'Everything else is done.' : 'Everything else is done or marked not applicable.')],
+    ]
+    try {
+      await navigator.clipboard.writeText(sections.map((sec) => sec.join('\n')).join('\n\n'))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard unavailable */ }
+  }
+
   return (
     <div className="pb-card bg-pb-surface p-6 space-y-4 text-center">
       <div className="text-4xl">🏏</div>
@@ -339,7 +476,7 @@ function FinishScreen({ flow, onExit, goTo, steps }) {
       <p className="text-sm text-pb-dim max-w-md mx-auto">
         {allDone
           ? `${flow?.club?.name || 'Your club'} is ready to go across the whole platform. Nice work.`
-          : 'You can pick up anything you skipped from the Setup guide button in the header, any time.'}
+          : 'You can pick up anything you skipped from the Setup Wizard in the side menu, any time.'}
       </p>
       {(skippedSteps.length > 0 || openSteps.length > 0) && (
         <div className="max-w-md mx-auto text-left space-y-1">
@@ -356,6 +493,9 @@ function FinishScreen({ flow, onExit, goTo, steps }) {
         </div>
       )}
       <div className="flex items-center justify-center gap-2 pt-2">
+        <WizardButton variant="secondary" onClick={copySummary}>
+          {copied ? 'COPIED ✓' : 'COPY SUMMARY'}
+        </WizardButton>
         <WizardButton onClick={onExit}>GO TO YOUR DASHBOARD →</WizardButton>
       </div>
     </div>

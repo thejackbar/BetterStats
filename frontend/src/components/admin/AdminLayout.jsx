@@ -13,7 +13,6 @@ import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import BrandLogo from '../BrandLogo'
-import SetupProgressReminder from './SetupProgressReminder'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -37,7 +36,7 @@ const NAV_SECTIONS = [
   {
     items: [
       { to: '/admin', label: 'Dashboard', exact: true, cap: null },
-      { to: '/admin/setup', label: 'Setup Wizard', cap: null },
+      { to: '/admin/setup', label: 'Setup Wizard', cap: null, badge: 'setupLeft' },
     ],
   },
   {
@@ -141,9 +140,11 @@ export default function AdminLayout({ children }) {
   // state fetch succeeds (the endpoint 404s outright when the platform flag
   // is off, same "doesn't exist" convention as the self-serve flag).
   const [wizardAvailable, setWizardAvailable] = useState(false)
-  // Periodic bottom-right nudge back to setup — fires even if the wizard
-  // itself was dismissed, so a half-finished setup isn't forgotten forever.
-  const [setupReminder, setSetupReminder] = useState(null)
+  // Setup steps still to do (total - done from /state, skipped included) —
+  // the little count badge on the sidebar's Setup Wizard item. Replaced the
+  // old every-5th-dashboard-visit toast: a steady, quiet signal beats a
+  // pop-over now that the dashboard carries its own setup card.
+  const [setupLeft, setSetupLeft] = useState(0)
 
   // Filter nav: drop links the user lacks the cap for. Empty sections are
   // dropped too so a heading never renders with nothing under it. (Club admins
@@ -263,31 +264,16 @@ export default function AdminLayout({ children }) {
         const s = await api.getOnboardingWizardState()
         if (cancelled) return
         setWizardAvailable(true)
+        setSetupLeft(Math.max(0, (s.total || 0) - (s.done || 0)))
         const willAutoOpen = justLoggedIn && s.should_auto_open && user.role !== 'super_admin'
           && !location.pathname.startsWith('/admin/setup')
         if (willAutoOpen) {
           navigate('/admin/setup')
           return
         }
-        // Periodic reminder: every 5th landing on the bare dashboard while
-        // anything's still outstanding — regardless of should_auto_open or
-        // whether the wizard/pill were dismissed, per direct instruction
-        // that a dismissed reminder shouldn't mean "forgotten forever".
-        // Counted client-side (per user, since it's a UX nicety not real
-        // state) because every dashboard visit remounts this component.
-        if (location.pathname === '/admin' && !s.all_done) {
-          try {
-            const key = `bs_setup_reminder_visits_${user.id}`
-            const n = parseInt(localStorage.getItem(key) || '0', 10) + 1
-            localStorage.setItem(key, String(n))
-            if (n % 5 === 0) {
-              setSetupReminder({ done: s.done, addressed: s.addressed, total: s.total })
-            }
-          } catch { /* localStorage unavailable (private mode) — skip the nudge */ }
-        }
       } catch {
         // No club context (or any other failure) — just hide the shortcut
-        if (!cancelled) setWizardAvailable(false)
+        if (!cancelled) { setWizardAvailable(false); setSetupLeft(0) }
       }
     })()
     return () => { cancelled = true }
@@ -528,14 +514,26 @@ export default function AdminLayout({ children }) {
                     key={link.to}
                     to={link.to}
                     onClick={() => setMobileOpen(false)}
-                    className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
+                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
                       isActive(link.to, link.exact)
                         ? 'bg-pb-surface2 text-pb-text'
                         : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
                     }`}
                     style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
                   >
-                    {link.label.toUpperCase()}
+                    <span>{link.label.toUpperCase()}</span>
+                    {link.badge === 'setupLeft' && setupLeft > 0 && (
+                      <span
+                        className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-semibold"
+                        style={{
+                          background: 'color-mix(in srgb, var(--pb-accent) 20%, transparent)',
+                          color: 'var(--pb-accent)',
+                        }}
+                        title={`${setupLeft} setup step${setupLeft === 1 ? '' : 's'} still to do`}
+                      >
+                        {setupLeft}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </div>
@@ -551,9 +549,6 @@ export default function AdminLayout({ children }) {
 
       {user?.role === 'super_admin' && (
         <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
-      )}
-      {setupReminder && (
-        <SetupProgressReminder progress={setupReminder} onDone={() => setSetupReminder(null)} />
       )}
     </div>
   )
