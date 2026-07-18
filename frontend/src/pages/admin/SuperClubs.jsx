@@ -926,18 +926,18 @@ export default function SuperClubs() {
             <div key={club.id} className={i > 0 ? 'pb-hairline-t' : ''}>
               <div className="grid grid-cols-[1fr_auto_auto_auto] items-center px-5 py-3 hover:bg-pb-surface2">
                 <div>
-                  <div>
-                    <span className="text-pb-text text-sm">{club.name}</span>
-                    <span className="font-mono text-[10px] text-pb-faintest ml-2">/{club.slug}</span>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-pb-text text-sm whitespace-nowrap">{club.name}</span>
+                    <span className="font-mono text-[10px] text-pb-faintest whitespace-nowrap">/{club.slug}</span>
                     <span
-                      className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint"
+                      className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint whitespace-nowrap"
                       title={club.modules?.length ? `Modules: ${club.modules.join(', ')}` : 'Core only'}
                     >
                       {club.modules?.length ? `Core +${club.modules.length}` : 'Core'}
                     </span>
                     {club.archived_at && (
                       <span
-                        className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border border-pb-red/30 text-pb-red"
+                        className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border border-pb-red/30 text-pb-red whitespace-nowrap"
                         title={`Archived ${new Date(club.archived_at).toLocaleDateString('en-AU')}`}
                       >
                         Archived
@@ -945,7 +945,7 @@ export default function SuperClubs() {
                     )}
                     {club.full_sync_running && (
                       <span
-                        className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-300"
+                        className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-300 whitespace-nowrap"
                         title="A full sync (Sync Now / Full Rebuild) is running right now"
                       >
                         Syncing
@@ -953,7 +953,7 @@ export default function SuperClubs() {
                     )}
                     {club.full_sync_paused && (
                       <span
-                        className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300"
+                        className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300 whitespace-nowrap"
                         title="A full sync was paused. Continue Sync resumes it as a fresh incremental sync."
                       >
                         Sync paused
@@ -965,7 +965,7 @@ export default function SuperClubs() {
                       const urgent = info.kind === 'ending_soon' || info.kind === 'expired'
                       return (
                         <span
-                          className={`font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border ${
+                          className={`font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border whitespace-nowrap ${
                             urgent ? 'border-amber-500/40 text-amber-300' : 'border-pb-hairline text-pb-faint'
                           }`}
                         >
