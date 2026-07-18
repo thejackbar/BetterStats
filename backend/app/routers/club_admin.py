@@ -1521,6 +1521,10 @@ def _club_payload(
     full_sync_running: bool = False,
     full_sync_paused: bool = False,
     full_sync_kind: str | None = None,
+    engagement_score: int | None = None,
+    engagement_tier: str | None = None,
+    engagement_scored_at=None,
+    engagement_actions: dict | None = None,
 ) -> dict:
     return {
         "id": str(org.id),
@@ -1574,6 +1578,18 @@ def _club_payload(
         # Full Rebuild (its wipe already committed before the pause).
         "full_sync_paused": full_sync_paused,
         "full_sync_kind": full_sync_kind,
+        # Cached Twenty engagement score from the club's linked marketing_clubs
+        # row (see MarketingClub.engagement_score — written by every
+        # twenty_sync._engagement() call). NULL = never scored, which the All
+        # Clubs page shows as "not yet scored" rather than 0.
+        "engagement_score": engagement_score,
+        "engagement_tier": engagement_tier,
+        "engagement_scored_at": engagement_scored_at.isoformat() if engagement_scored_at else None,
+        # Per-signal counts of the recorded actions that feed the engagement
+        # score (web visits, email opens/clicks, direct onboarding enquiries,
+        # trial activity) — cheap bulk approximations of _engagement()'s own
+        # attribution, for the All Clubs action sub-filter.
+        "engagement_actions": engagement_actions or {},
     }
 
 
@@ -1609,16 +1625,32 @@ async def list_all_clubs(
     paused_by_org: dict = {}  # org_id -> kind, for the run currently paused
     active_kind_by_org: dict = {}  # org_id -> kind, for the run currently running or paused
 
+    engagement_by_org: dict = {}       # org_id -> (score, tier, scored_at)
+    mc_trial_signal_by_org: dict = {}  # org_id -> True when the marketing row carries trial interest
+    web_count_by_org: dict = {}
+    email_count_by_org: dict = {}
+    enquiry_count_by_org: dict = {}
+
     if org_ids:
         assoc_rows = await db.execute(
-            select(MarketingClub.existing_org_id, MarketingClub.association_name, MarketingClub.state)
+            select(MarketingClub.existing_org_id, MarketingClub.association_name,
+                   MarketingClub.state, MarketingClub.engagement_score,
+                   MarketingClub.engagement_tier, MarketingClub.engagement_scored_at,
+                   MarketingClub.requested_trial_modules, MarketingClub.trial_modules,
+                   MarketingClub.demo_status)
             .where(MarketingClub.existing_org_id.in_(org_ids))
         )
-        for org_id, assoc_name, mc_state in assoc_rows.all():
+        for org_id, assoc_name, mc_state, eng_score, eng_tier, eng_at, req_mods, tri_mods, demo in assoc_rows.all():
             if assoc_name:
                 assoc_by_org[org_id] = assoc_name
             if mc_state:
                 club_state_by_org[org_id] = mc_state
+            # More than one marketing row can point at the same org; keep the
+            # first row that actually holds a cached score.
+            if eng_score is not None and org_id not in engagement_by_org:
+                engagement_by_org[org_id] = (eng_score, eng_tier, eng_at)
+            if (req_mods or tri_mods or (demo or "") == "in_trial"):
+                mc_trial_signal_by_org[org_id] = True
 
         admin_rows = await db.execute(
             select(ClubMembership.club_id, User.display_name, User.username)
@@ -1693,13 +1725,74 @@ async def list_all_clubs(
 
         usage_rows = await db.execute(
             _text(
-                "SELECT org_id, MAX(created_at) AS last_at FROM usage_events "
+                "SELECT org_id, MAX(created_at) AS last_at, COUNT(*) AS cnt FROM usage_events "
                 "WHERE org_id = ANY(:ids) AND created_at >= NOW() - INTERVAL '180 days' "
                 "GROUP BY org_id"
             ),
             {"ids": org_ids},
         )
-        last_active_by_org = {row.org_id: row.last_at for row in usage_rows.mappings().all()}
+        for row in usage_rows.all():
+            last_active_by_org[row.org_id] = row.last_at
+            web_count_by_org[row.org_id] = row.cnt
+
+        # The three engagement-action counts below are cheap bulk versions of
+        # the per-club signals twenty_sync._engagement() attributes when it
+        # computes the (cached) score this page also returns — org-keyed web
+        # activity above, email opens/clicks, and direct "onboard my club"
+        # enquiries. They drive the All Clubs "actions recorded" sub-filter,
+        # so has/hasn't matters more than exact parity with the score's own
+        # (heavier, UTM-aware) attribution.
+        email_rows = await db.execute(
+            _text("""
+                SELECT org_id, SUM(cnt) AS cnt FROM (
+                    SELECT organisation_id AS org_id, COUNT(*) AS cnt
+                    FROM email_events
+                    WHERE organisation_id = ANY(:ids) AND event_type IN ('open', 'click')
+                    GROUP BY organisation_id
+                    UNION ALL
+                    SELECT mc.existing_org_id AS org_id, COUNT(*) AS cnt
+                    FROM email_events ee
+                    JOIN marketing_club_contacts mcc
+                      ON mcc.email IS NOT NULL AND mcc.email <> ''
+                     AND ee.email IS NOT NULL AND lower(mcc.email) = lower(ee.email)
+                    JOIN marketing_clubs mc ON mc.id = mcc.marketing_club_id
+                    WHERE mc.existing_org_id = ANY(:ids) AND ee.event_type IN ('open', 'click')
+                    GROUP BY mc.existing_org_id
+                ) t GROUP BY org_id
+            """),
+            {"ids": org_ids},
+        )
+        email_count_by_org = {row.org_id: int(row.cnt or 0) for row in email_rows.all()}
+
+        # Direct enquiries (club_onboarding_requests) attributed the same two
+        # ways _onboarding_signal() leads with: the submitter's email matching a
+        # known officer of the linked marketing club, or an exact club-name
+        # match (against the marketing club's or the org's own name). The inner
+        # UNION dedupes on (org, enquiry) so a name that matches both branches
+        # counts once.
+        enquiry_rows = await db.execute(
+            _text("""
+                SELECT org_id, COUNT(*) AS cnt FROM (
+                    SELECT mc.existing_org_id AS org_id, cor.id AS enquiry_id
+                    FROM club_onboarding_requests cor
+                    JOIN marketing_clubs mc
+                      ON mc.existing_org_id = ANY(:ids)
+                     AND (lower(cor.club) = lower(mc.name)
+                          OR (cor.email IS NOT NULL AND cor.email <> '' AND EXISTS (
+                                SELECT 1 FROM marketing_club_contacts mcc
+                                WHERE mcc.marketing_club_id = mc.id
+                                  AND mcc.email IS NOT NULL AND mcc.email <> ''
+                                  AND lower(mcc.email) = lower(cor.email))))
+                    UNION
+                    SELECT o.id AS org_id, cor.id AS enquiry_id
+                    FROM club_onboarding_requests cor
+                    JOIN organisations o
+                      ON o.id = ANY(:ids) AND lower(cor.club) = lower(o.name)
+                ) t GROUP BY org_id
+            """),
+            {"ids": org_ids},
+        )
+        enquiry_count_by_org = {row.org_id: int(row.cnt or 0) for row in enquiry_rows.all()}
 
     from app.routers.onboarding_wizard import _applicable_groups
 
@@ -1710,6 +1803,15 @@ async def list_all_clubs(
         wiz_state = wizard_state_by_org.get(o.id)
         completed = set((wiz_state.completed_steps or []) if wiz_state else [])
         done_n = sum(1 for k in keys if k in completed)
+        eng = engagement_by_org.get(o.id)
+        # Trial activity: real per-module trial subscriptions (current or past —
+        # trial_started_at survives a conversion), else the marketing row's
+        # trial-interest flags count as one recorded action.
+        trial_subs = sum(
+            1 for s in (o.module_subscriptions or [])
+            if s.status == "trial" or s.trial_started_at is not None
+        )
+        trial_activity = trial_subs or (1 if mc_trial_signal_by_org.get(o.id) else 0)
         payloads.append(_club_payload(
             o,
             association_name=assoc_by_org.get(o.id),
@@ -1725,6 +1827,15 @@ async def list_all_clubs(
             full_sync_running=o.id in running_by_org,
             full_sync_paused=o.id in paused_by_org,
             full_sync_kind=active_kind_by_org.get(o.id),
+            engagement_score=eng[0] if eng else None,
+            engagement_tier=eng[1] if eng else None,
+            engagement_scored_at=eng[2] if eng else None,
+            engagement_actions={
+                "web_visits": int(web_count_by_org.get(o.id, 0)),
+                "email_engagement": email_count_by_org.get(o.id, 0),
+                "direct_enquiry": enquiry_count_by_org.get(o.id, 0),
+                "trial_activity": trial_activity,
+            },
         ))
     return payloads
 

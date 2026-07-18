@@ -10,6 +10,30 @@ const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 
 
 // Mirrors SuperMarketing.jsx's own STATES list (Club Directory).
 const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+
+// The recorded action types behind a club's engagement score (see
+// engagement_actions on GET /club-admin/super/clubs) — the sub-filter chips.
+const ENGAGEMENT_ACTIONS = [
+  { key: 'web_visits', label: 'Web visits' },
+  { key: 'email_engagement', label: 'Email opens/clicks' },
+  { key: 'direct_enquiry', label: 'Direct enquiry' },
+  { key: 'trial_activity', label: 'Trial activity' },
+]
+
+// Result-set orderings for the club list. Score sorts put unscored clubs last
+// either direction, then fall back to name so the order is stable.
+const SORT_OPTIONS = [
+  { key: 'name_asc', label: 'Club name A→Z' },
+  { key: 'name_desc', label: 'Club name Z→A' },
+  { key: 'score_desc', label: 'Engagement score high→low' },
+  { key: 'score_asc', label: 'Engagement score low→high' },
+]
+
+// Same tier colouring the Club Directory's engagement badge uses.
+const tierBadgeCls = (tier) =>
+  tier === 'HOT' ? 'text-red-300 border-red-500/40 bg-red-500/10'
+  : tier === 'WARM' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+  : 'text-sky-300 border-sky-500/40 bg-sky-500/10'
 const norm = (s) => (s || '').toString().toLowerCase()
 // "On trial/subscribed" = the module's subscription row is currently trial or active
 // (mirrors SUBSCRIPTION_STATUSES' own `live` statuses, minus past_due/paused/cancelled).
@@ -117,16 +141,26 @@ export default function SuperClubs() {
   const [syncMode, setSyncMode] = useState('any')
   const [syncFrom, setSyncFrom] = useState('')
   const [syncTo, setSyncTo] = useState('')
+  // Engagement score range (cached Twenty score, mirrors the Club Directory's
+  // own >=/<= filter) + a sub-filter on which recorded action types feed it.
+  const [engFrom, setEngFrom] = useState('')
+  const [engTo, setEngTo] = useState('')
+  const [engActions, setEngActions] = useState([])
+  const [sortBy, setSortBy] = useState('name_asc')
   const toggleFilterModule = (key) =>
     setFilterModules((m) => (m.includes(key) ? m.filter((k) => k !== key) : [...m, key]))
+  const toggleEngAction = (key) =>
+    setEngActions((a) => (a.includes(key) ? a.filter((k) => k !== key) : [...a, key]))
   const clearFilters = () => {
     setSearch(''); setFilterState(''); setFilterAssociation(''); setFilterPrimaryAdmin(''); setFilterModules([])
     setRegisteredMode('any'); setRegisteredFrom(''); setRegisteredTo('')
     setSyncMode('any'); setSyncFrom(''); setSyncTo('')
+    setEngFrom(''); setEngTo(''); setEngActions([])
   }
   const filtersActive = !!(
     search || filterState || filterAssociation || filterPrimaryAdmin || filterModules.length
     || registeredMode !== 'any' || syncMode !== 'any'
+    || engFrom !== '' || engTo !== '' || engActions.length
   )
 
   // Club search (same source as the public onboarding flow)
@@ -500,6 +534,19 @@ export default function SuperClubs() {
     return null
   }
 
+  // Tooltip for the row's engagement badge: when the cached score was last
+  // computed, plus which recorded action types feed it.
+  const engagementTitle = (club) => {
+    const acts = ENGAGEMENT_ACTIONS
+      .map((a) => ({ ...a, n: club.engagement_actions?.[a.key] || 0 }))
+      .filter((a) => a.n > 0)
+    const when = club.engagement_scored_at
+      ? new Date(club.engagement_scored_at).toLocaleDateString('en-AU') : 'unknown'
+    return `Engagement score (cached ${when})` + (acts.length
+      ? ` — actions recorded: ${acts.map((a) => `${a.label} ×${a.n}`).join(', ')}`
+      : ' — no actions recorded')
+  }
+
   const trialStats = clubs.reduce((acc, c) => {
     const info = clubTrialInfo(c)
     if (info?.kind === 'trialing') acc.trialing++
@@ -529,8 +576,35 @@ export default function SuperClubs() {
     if (syncMode === 'running' && !c.full_sync_running) return false
     if (syncMode === 'today' && !isToday(c.last_full_sync_at)) return false
     if (syncMode === 'range' && !inDateRange(c.last_full_sync_at, syncFrom, syncTo)) return false
+    // Engagement score range — a bound excludes never-scored clubs (no cached
+    // score to compare), same as the Club Directory's own >=/<= filter.
+    if (engFrom !== '' && !(c.engagement_score != null && c.engagement_score >= Number(engFrom))) return false
+    if (engTo !== '' && !(c.engagement_score != null && c.engagement_score <= Number(engTo))) return false
+    // Action sub-filter: every ticked action type must have been recorded.
+    if (engActions.length && !engActions.every((k) => (c.engagement_actions?.[k] || 0) > 0)) return false
     return true
   })
+
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '')
+  const byScore = (a, b) => {
+    const as = a.engagement_score, bs = b.engagement_score
+    if (as == null && bs == null) return byName(a, b)
+    if (as == null) return 1   // unscored clubs last, either direction
+    if (bs == null) return -1
+    return bs === as ? byName(a, b) : bs - as
+  }
+  const sortedClubs = [...visibleClubs].sort(
+    sortBy === 'name_desc' ? (a, b) => byName(b, a)
+    : sortBy === 'score_desc' ? byScore
+    : sortBy === 'score_asc' ? (a, b) => {
+        const as = a.engagement_score, bs = b.engagement_score
+        if (as == null && bs == null) return byName(a, b)
+        if (as == null) return 1
+        if (bs == null) return -1
+        return as === bs ? byName(a, b) : as - bs
+      }
+    : byName
+  )
 
   return (
     <AdminLayout>
@@ -881,6 +955,45 @@ export default function SuperClubs() {
               })}
             </div>
           </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Engagement score from</label>
+              <input type="number" min="0" max="100" value={engFrom}
+                onChange={(e) => setEngFrom(e.target.value)}
+                placeholder="e.g. 30" className={INPUT_CLS} />
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Engagement score to</label>
+              <input type="number" min="0" max="100" value={engTo}
+                onChange={(e) => setEngTo(e.target.value)}
+                placeholder="e.g. 100" className={INPUT_CLS} />
+            </div>
+            <div className="col-span-2">
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Sort by</label>
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={INPUT_CLS}>
+                {SORT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="font-mono text-[10px] text-pb-faint block mb-1"
+              title="Only show clubs with the ticked action types recorded — the signals that feed the engagement score">
+              Engagement actions recorded
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {ENGAGEMENT_ACTIONS.map((act) => {
+                const active = engActions.includes(act.key)
+                return (
+                  <button key={act.key} type="button" onClick={() => toggleEngAction(act.key)}
+                    className={`px-2 py-1 rounded font-mono text-[10px] border transition-colors ${
+                      active ? 'border-pb-accent text-pb-text' : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+                    }`}>
+                    {act.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           {filtersActive && (
             <button type="button" onClick={clearFilters}
               className="mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text underline">
@@ -917,12 +1030,12 @@ export default function SuperClubs() {
             <span className="mr-8">CREATED</span>
             <span>ACTIONS</span>
           </div>
-          {visibleClubs.length === 0 && (
+          {sortedClubs.length === 0 && (
             <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">
               {clubs.length === 0 ? 'No clubs yet' : 'No clubs match these filters'}
             </div>
           )}
-          {visibleClubs.map((club, i) => (
+          {sortedClubs.map((club, i) => (
             <div key={club.id} className={i > 0 ? 'pb-hairline-t' : ''}>
               <div className="grid grid-cols-[1fr_auto_auto_auto] items-center px-5 py-3 hover:bg-pb-surface2">
                 <div>
@@ -975,6 +1088,14 @@ export default function SuperClubs() {
                         </span>
                       )
                     })()}
+                    {club.engagement_score != null && (
+                      <span
+                        className={`font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border whitespace-nowrap ${tierBadgeCls(club.engagement_tier)}`}
+                        title={engagementTitle(club)}
+                      >
+                        {club.engagement_score} {club.engagement_tier?.toLowerCase()}
+                      </span>
+                    )}
                   </div>
                   <div className={`font-mono text-[10px] mt-0.5 ${statusIsLive(club.subscription_status) ? 'text-pb-faintest' : 'text-pb-red'}`}>
                     {[
