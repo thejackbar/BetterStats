@@ -134,7 +134,7 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
         Paste your own HTML, or import a file. Click a variable above to insert it wherever your cursor is. Preview
         adds the unsubscribe footer, exactly as a send would.
       </div>
-      <EmailEditorTabs ref={editorRef} html={html} onChange={setHtml} onEnterPreview={onEnterPreview} height={480} />
+      <EmailEditorTabs ref={editorRef} html={html} onChange={setHtml} onEnterPreview={onEnterPreview} height={680} />
     </div>
   )
 }

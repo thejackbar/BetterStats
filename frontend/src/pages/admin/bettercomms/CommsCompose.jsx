@@ -364,7 +364,7 @@ export default function CommsCompose() {
             )}
 
             <label className="block text-sm text-pb-faint mb-1">Message</label>
-            <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={360} />
+            <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={560} />
             <div className="text-pb-faintest text-xs mb-3 mt-1">
               Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club}}'}</code>.
               Switching out of HTML mode tidies the code automatically; Preview renders it exactly as a send would.
