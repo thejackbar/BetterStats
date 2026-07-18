@@ -240,7 +240,7 @@ class Settings(BaseSettings):
     # Users > System users > Assign assets > Generate new token).
     meta_access_token: str = ""
     meta_ad_account_id: str = "1030195476512456"
-    meta_campaign_id: str = "120249237210710121"
+    meta_campaign_id: str = "120249890918010121"  # BC_AU_SelfServe_Aug2026 (old early-bird: 120249237210710121)
     meta_api_version: str = "v21.0"
 
     @property

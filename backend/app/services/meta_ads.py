@@ -1,7 +1,8 @@
 """Meta Marketing API client + recommendation logic for the Meta Ads HQ dashboard.
 
 Reads BetterCricket's own ad account (platform-level, not club data) — the
-"BC_AU_Traffic_ClubHistory_Jul2026" early-bird campaign. No SDK, plain httpx
+campaign in settings.meta_campaign_id (currently "BC_AU_SelfServe_Aug2026",
+the self-serve trial campaign; the Jul 2026 early-bird was the first). No SDK, plain httpx
 against the Graph API. Every call is wrapped so a bad/expired token or a Meta
 outage surfaces as a typed error on the HQ page instead of a 500.
 """
@@ -24,13 +25,27 @@ TIMEOUT = 20.0
 # Ad -> destination map (§1 of the spec). Stable IDs; the live API response's
 # ad_name/ad_id are preferred where available, this is the fallback label.
 AD_DESTINATIONS = {
+    # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
+    # same tag the ad-signups report groups by (see routers/meta_ads.py).
+    "120249908493850121": {"name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
+    "120249908396070121": {"name": "Ad2_SelfServe_SimpleCTA", "destination": "betterat.cricket/trial", "utm_content": "static_simple_cta"},
+    "120249892616050121": {"name": "Ad3_SelfServe_StaticShowcase_RTG", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_rtg"},
+    "120249892619080121": {"name": "Ad4_SelfServe_SimpleCTA_RTG", "destination": "betterat.cricket/trial", "utm_content": "static_simple_rtg"},
+    # BC_AU_Traffic_ClubHistory_Jul2026 (finished) — kept so old snapshots still label.
     "120249237210730121": {"name": "Ad1_EntireClubHistory", "destination": "betterat.cricket/applecross", "utm_content": "entire_club_history"},
     "120249238467140121": {"name": "Ad2_PlayerStory", "destination": "betterat.cricket/applecross", "utm_content": "every_player_story"},
     "120249238467150121": {"name": "Ad3_Analysis", "destination": "betterat.cricket/ (homepage)", "utm_content": "cricket_analysis"},
     "120249238467160121": {"name": "Ad4_Legacy", "destination": "betterat.cricket/ (homepage)", "utm_content": "club_legacy"},
 }
 
-_LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead"}
+# The self-serve campaign optimises for CompleteRegistration (a finished
+# trial signup), so registrations count as conversions alongside classic
+# leads — one indicative Meta-side number. The authoritative per-signup
+# record is our own ad-signups report (organisations.signup_attribution).
+_LEAD_ACTION_TYPES = {
+    "lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead",
+    "complete_registration", "offsite_conversion.fb_pixel_complete_registration",
+}
 
 
 class MetaAdsError(Exception):
