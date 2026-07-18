@@ -33,6 +33,20 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
 
   useEffect(() => { api.commsMergeVariables().then(setVars).catch(() => {}) }, [])
 
+  // Design mode defaults to open on mount, but designSrcDoc is otherwise only
+  // populated by changeMode's explicit "switching into design" transition —
+  // which never fires for the initial mode, since there's nothing to switch
+  // from. Without this, the iframe starts empty and flush() (e.g. clicking
+  // the HTML tab) reads that emptiness straight back into `html`, silently
+  // wiping real content. Only runs while srcDoc is still unset, so it's a
+  // no-op once changeMode has populated it for real.
+  useEffect(() => {
+    if (mode !== 'design' || designSrcDoc !== null) return
+    const isFull = isFullHtmlDoc(html)
+    setDesignIsFullDoc(isFull)
+    setDesignSrcDoc(isFull ? html : wrapFragmentForEditing(html))
+  }, [mode, html, designSrcDoc])
+
   // Raw (untidied) read of the design iframe's current content — cheap enough
   // to call on every keystroke for a debounced "keep parent state roughly in
   // sync" pass, separate from the tidied read used when actually leaving mode.

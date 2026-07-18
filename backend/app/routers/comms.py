@@ -2851,8 +2851,13 @@ async def seed_starter_templates(conn) -> int:
     template library — called from main.py's lifespan on every startup, so
     existing clubs backfill and new clubs pick them up automatically with no
     separate creation hook. Keyed per (org, name): a club that already has a
-    same-named template (including a re-run) is left untouched — ON CONFLICT
-    DO NOTHING, not an overwrite. Returns the count actually inserted."""
+    same-named template with real content is left untouched. The one
+    exception is a same-named row with no real text content left in it —
+    empty, or just an empty HTML skeleton with all tags and no text (stripped
+    via regexp_replace before the blank check) — that self-heals back to the
+    starter content instead of staying broken forever, since a now-fixed
+    client-side bug could flush an uninitialised, empty Design iframe over a
+    template's real content on save. Returns the count inserted or repaired."""
     total = 0
     for t in STARTER_TEMPLATES:
         result = await conn.execute(
@@ -2860,7 +2865,9 @@ async def seed_starter_templates(conn) -> int:
                 INSERT INTO comms_templates (id, organisation_id, name, html)
                 SELECT gen_random_uuid(), o.id, :name, :html
                 FROM organisations o
-                ON CONFLICT (organisation_id, name) DO NOTHING
+                ON CONFLICT (organisation_id, name) DO UPDATE
+                    SET html = EXCLUDED.html, updated_at = NOW()
+                    WHERE btrim(regexp_replace(comms_templates.html, '<[^>]*>', '', 'g')) = ''
             """),
             {"name": t["name"], "html": t["html"]},
         )
