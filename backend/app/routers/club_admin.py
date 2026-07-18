@@ -654,6 +654,11 @@ class SettingsPatch(BaseModel):
     public_show_opening: Optional[bool] = None
     public_show_gender: Optional[bool] = None
     include_fill_ins_in_stats: Optional[bool] = None
+    # BetterSocials post-generator style (palette/font/background choices +
+    # saved custom palettes/designs) — persisted per club so the look
+    # survives browsers and the Setup Wizard can auto-detect it. See
+    # _sanitize_socials_style for the accepted shape.
+    socials_style: Optional[dict] = None
 
 
 # Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
@@ -671,6 +676,26 @@ _HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 
 def _valid_hex(value) -> bool:
     return isinstance(value, str) and bool(_HEX_RE.match(value.strip()))
+
+
+# Top-level keys the socials_style blob may carry (the post generator's Style
+# state — see AdminSocialPost.jsx). Values are stored as sent bar the
+# allowlist and an overall size cap; the generator is the only consumer, so
+# deep validation would just chase its shape around.
+_SOCIALS_STYLE_KEYS = {"palette", "dark", "font", "bg", "bg_colors", "palettes", "designs"}
+_SOCIALS_STYLE_MAX_BYTES = 32_768
+
+
+def _sanitize_socials_style(raw: dict) -> dict | None:
+    clean = {k: v for k, v in raw.items() if k in _SOCIALS_STYLE_KEYS}
+    if not clean:
+        return None
+    try:
+        if len(_json.dumps(clean)) > _SOCIALS_STYLE_MAX_BYTES:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return clean
 
 
 def _sanitize_theme_config(raw: dict) -> dict:
@@ -725,6 +750,7 @@ async def get_settings(
         "public_show_opening": bool(club.public_show_opening),
         "public_show_gender": bool(club.public_show_gender),
         "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
+        "socials_style": club.socials_style,
     }
 
 
@@ -772,6 +798,8 @@ async def patch_settings(
         club.public_show_gender = bool(data.public_show_gender)
     if data.include_fill_ins_in_stats is not None:
         club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
+    if data.socials_style is not None:
+        club.socials_style = _sanitize_socials_style(data.socials_style)
 
     # Record which fields the admin touched. Don't dump full new values into
     # the audit row — colour codes / names will already be visible in the

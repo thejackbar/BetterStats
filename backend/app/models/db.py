@@ -165,6 +165,12 @@ class OnboardingWizardState(Base):
     # "addressed but not done". Separate from completed_steps so existing
     # progress rows and consumers keep working untouched.
     skipped_steps = Column(JSON, nullable=False, default=list)
+    # Steps the admin marked "doesn't apply" (migration 162) — e.g. Connect
+    # Square for a club that doesn't use Square. Unlike a skip (parked,
+    # still counts as to-do), a not-applicable step drops out of progress
+    # counts entirely. Only steps flagged ``optional`` in the registry offer
+    # it; auto-detection still beats it if the thing later exists.
+    na_steps = Column(JSON, nullable=False, default=list)
     dismissed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     sync_steps_shown_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -290,6 +296,15 @@ class Organisation(Base):
     # routers/meta_ads.py. NULL for every org onboarded any other way.
     signup_source = Column(Text, nullable=True)
     signup_attribution = Column(JSONB, nullable=True)
+    # ─── BetterSocials: post-generator style (migration 162) ─────────────────
+    # The social post generator's Style choices (palette key, dark/light,
+    # font, background texture + colour overrides, saved custom palettes and
+    # designs), previously localStorage-only. Persisted per CLUB so the look
+    # survives browser changes and a second admin, and so the Setup Wizard's
+    # socials_palette step can auto-detect. NULL until an admin changes any
+    # style control away from the defaults (the default palette already
+    # derives from the club's own colours).
+    socials_style = Column(JSONB, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only

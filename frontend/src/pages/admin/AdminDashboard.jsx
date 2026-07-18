@@ -134,10 +134,11 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, request
 /* Club-setup progress card — sits in the modules grid so a half-set-up club
    sees what's outstanding right on the dashboard (same list style as the
    wizard's wrap-up screen). Skipped steps are listed too: skipping parks a
-   step, it doesn't complete it. Hidden once every step is genuinely done. */
+   step, it doesn't complete it. Steps marked "doesn't apply" stay off the
+   list entirely. Hidden once every remaining step is genuinely done. */
 function SetupCard({ flow }) {
   const steps = flow.groups.flatMap((g) => g.steps)
-  const open = steps.filter((s) => !s.done && !s.skipped)
+  const open = steps.filter((s) => !s.done && !s.skipped && !s.na)
   const skipped = steps.filter((s) => !s.done && s.skipped)
   const outstanding = [...open, ...skipped]
   if (!outstanding.length) return null

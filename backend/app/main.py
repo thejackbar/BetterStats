@@ -382,6 +382,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "
             "ADD COLUMN IF NOT EXISTS skipped_steps JSON NOT NULL DEFAULT '[]'"))
+        # Setup Wizard "doesn't apply" steps + persisted socials style (migration 162).
+        await conn.execute(text(
+            "ALTER TABLE onboarding_wizard_state "
+            "ADD COLUMN IF NOT EXISTS na_steps JSON NOT NULL DEFAULT '[]'"))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS socials_style JSONB"))
         # Club-user invite flow — set-your-password-by-email (migration 141).
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT UNIQUE"))
