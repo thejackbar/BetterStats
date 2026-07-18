@@ -111,7 +111,7 @@ export default function Trial() {
             </h1>
             <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed mb-10">
               Register your club yourself and start a {trialDays}-day free trial of the whole
-              BetterCricket platform: stats, selection, club website, admin and analytics.
+              BetterCricket platform: stats, selection, social media templates, admin and analytics.
               Pick your club from the Cricket Australia register and you&rsquo;re in.
             </p>
             {status === null ? (
