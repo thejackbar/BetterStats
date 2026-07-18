@@ -3,8 +3,10 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import Reveal from '../../components/marketing/Reveal'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import { COMPARISON_SOLO } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 // The per-module comparisons, each with a plain-English intro line. The actual
 // table content lives in COMPARISONS (src/data/marketing.js) — here we just
@@ -89,6 +91,7 @@ export default function Compare() {
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/compare',
   })
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
@@ -134,12 +137,19 @@ export default function Compare() {
                 Stop stitching five tools together every weekend. We bring your history across,
                 set it all up and have your club live in under an hour.
               </p>
-              <Link to="/contact" className="cta-primary">Get Your Club on BetterCricket today!</Link>
+              <button type="button" onClick={triggerTrial} className="cta-primary">Get Your Club on BetterCricket today!</button>
             </Reveal>
           </div>
         </section>
       </div>
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

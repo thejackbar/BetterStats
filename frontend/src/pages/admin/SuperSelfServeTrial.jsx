@@ -5,9 +5,11 @@ import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 
 // Internal entry point for the self-serve club trial registration flow (see
 // docs/self-serve-trial-onboarding-plan.md). Reachable only via the Super Admin
-// menu, and only while the self_serve_registration_enabled platform flag is on —
-// the backend 404s /self-serve-trial/status when it's off, so a direct link after
-// the flag is disabled fails closed rather than showing a broken modal.
+// menu (require_super_admin) — this flow always works for a super admin,
+// regardless of the All Clubs -> General Settings "Self-serve trials enabled"
+// checkbox. That checkbox only gates the public surface (/trial and the
+// website's "Request access" / "Get your club on BetterCricket" CTAs) —
+// see routers/public_self_serve.py.
 export default function SuperSelfServeTrial() {
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
@@ -17,9 +19,7 @@ export default function SuperSelfServeTrial() {
   useEffect(() => {
     api.selfServeTrialStatus()
       .then((s) => setStatus(s))
-      .catch((e) => setError(e?.status === 404
-        ? 'Self-serve registration is currently switched off. Turn it on from General Settings on All Clubs.'
-        : (e?.message || 'Could not load self-serve trial status.')))
+      .catch((e) => setError(e?.message || 'Could not load self-serve trial status.'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -29,8 +29,9 @@ export default function SuperSelfServeTrial() {
         <div>
           <h1 className="text-xl font-semibold text-pb-text">Self-Serve Trial (Internal)</h1>
           <p className="font-mono text-[11px] text-pb-faintest mt-1">
-            Registers a real club and admin account through the same flow the public
-            site will eventually use. Internal-only for now — see
+            Registers a real club and admin account through the same flow /trial and
+            the "Get your club on BetterCricket" CTAs use. Always available here,
+            regardless of whether the public flow is switched on — see
             docs/self-serve-trial-onboarding-plan.md.
           </p>
         </div>

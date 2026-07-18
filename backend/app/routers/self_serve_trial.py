@@ -1,9 +1,12 @@
-"""Internal self-serve club trial registration (Super Admin-only in this phase).
+"""Internal self-serve club trial registration — Super Admin menu item.
 
-See docs/self-serve-trial-onboarding-plan.md. Everything here sits behind the
-``self_serve_registration_enabled`` platform flag (off by default) as well as
-``require_super_admin`` — the flag hides the feature, it is not itself an
-authorization boundary.
+See docs/self-serve-trial-onboarding-plan.md. Reachable from the Super Admin
+"Self-Serve Trial (Internal)" page (``require_super_admin``) ONLY — this is
+NOT gated by the ``self_serve_registration_enabled`` platform flag. That flag
+controls the *public* self-serve surface only (routers/public_self_serve.py,
+the /trial ad-campaign landing page), and must not also hide this internal
+tool from a super admin who needs it regardless of whether the public flow
+is switched on.
 """
 import logging
 import re
@@ -22,7 +25,7 @@ from app.models.db import (
     ClubMembership, DiscountCouponRedemption, ModuleActionRequest, Organisation,
     SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db,
 )
-from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
+from app.routers.auth import require_super_admin
 from app.services import module_subscriptions as mod_subs
 from app.services import password_policy
 from app.services import platform_settings as ps
@@ -41,13 +44,12 @@ _SELECTABLE_MODULES = tuple(k for k in BILLABLE_MODULES if k != MODULE_CORE)
 
 logger = logging.getLogger(__name__)
 
-# Both guards apply to every route in this router, present and future: the flag
-# check alone is not an authorization boundary (see require_self_serve_registration_
-# enabled's docstring), so it always travels paired with require_super_admin.
+# require_super_admin only — no flag dependency. This router always works
+# for a super admin, checkbox or no checkbox (see module docstring).
 router = APIRouter(
     prefix="/self-serve-trial",
     tags=["self-serve-trial"],
-    dependencies=[Depends(require_super_admin), Depends(require_self_serve_registration_enabled)],
+    dependencies=[Depends(require_super_admin)],
 )
 
 

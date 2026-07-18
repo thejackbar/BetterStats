@@ -5,11 +5,13 @@ import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import ZoomableImage from '../../components/marketing/ZoomableImage'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import { COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
 import { moduleBySlug, MODULES_MARKETING, CORE_MARKETING } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES, FANTASY } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 // Themed faux app-window shown until a real screenshot is dropped at
 // /public/marketing/modules/<slug>.jpg (then ScreenshotOrMock upgrades to it).
@@ -57,6 +59,7 @@ function modulePrice(m) {
 export default function ModuleDetail() {
   const { slug } = useParams()
   const m = moduleBySlug(slug)
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
 
   const priced = m
     ? (PRICED_MODULES.find((x) => x.key === m.key)
@@ -128,7 +131,7 @@ export default function ModuleDetail() {
               </h1>
               <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
-                <Link to="/contact" className="cta-primary">Get Your Club on BetterCricket today!</Link>
+                <button type="button" onClick={triggerTrial} className="cta-primary">Get Your Club on BetterCricket today!</button>
                 {m.deepTour
                   ? <Link to={m.deepTour} className="cta-secondary">Full feature tour →</Link>
                   : <Link to="/pricing" className="cta-secondary">See pricing</Link>}
@@ -309,7 +312,7 @@ export default function ModuleDetail() {
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/pricing" className="cta-primary">See pricing & calculator →</Link>
-              <Link to="/contact" className="cta-secondary">Request access</Link>
+              <button type="button" onClick={triggerTrial} className="cta-secondary">Request access</button>
             </div>
           </div>
         </section>
@@ -380,6 +383,13 @@ export default function ModuleDetail() {
         </section>
       </div>
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

@@ -2,7 +2,9 @@ import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import BrandLogo from './BrandLogo'
 import ModuleLockup, { ModuleWordmark } from './ModuleLockup'
+import SelfServeTrialModal from './admin/SelfServeTrialModal'
 import { CORE_MARKETING, MODULES_MARKETING } from '../data/modules-marketing'
+import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 
 const LINKS = [
   { to: '/pricing', label: 'Pricing' },
@@ -25,6 +27,7 @@ export default function MarketingNav() {
   const [modOpen, setModOpen] = useState(false)  // desktop Modules dropdown
   const modRef = useRef(null)
   const isHome = pathname === '/'
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30)
@@ -141,13 +144,14 @@ export default function MarketingNav() {
               </Link>
             )
           })}
-          <Link
-            to="/contact"
+          <button
+            type="button"
+            onClick={triggerTrial}
             className="ml-3 cta-primary !text-[13px] !py-2.5 !px-4 whitespace-nowrap"
             aria-label="Request access for your club"
           >
             Request access
-          </Link>
+          </button>
         </div>
 
         {/* Mobile hamburger */}
@@ -193,14 +197,21 @@ export default function MarketingNav() {
               {link.label}
             </Link>
           ))}
-          <Link
-            to="/contact"
+          <button
+            type="button"
+            onClick={() => { setOpen(false); triggerTrial() }}
             className="mt-2 cta-primary !py-3 justify-center"
-            onClick={() => setOpen(false)}
           >
             Request access
-          </Link>
+          </button>
         </div>
+      )}
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
       )}
     </nav>
   )

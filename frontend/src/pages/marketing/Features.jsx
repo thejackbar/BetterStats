@@ -6,6 +6,7 @@ import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import ZoomableImage from '../../components/marketing/ZoomableImage'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import {
   MockLeaderboard,
   MockPlayerProfile,
@@ -16,6 +17,7 @@ import { SCREENSHOT_PATHS } from '../../data/marketing'
 import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 // ============================================================
 // SECTIONS — preserves the existing detailed content for SEO,
@@ -274,7 +276,7 @@ function BeyondCore() {
 }
 
 // ─── Feature Block (alternating layout) ──────────────────────────────────
-function FeatureBlock({ f, idx }) {
+function FeatureBlock({ f, idx, onCta }) {
   const flip = idx % 2 === 1
   return (
     <section className={`px-4 sm:px-6 lg:px-10 py-20 ${idx % 2 === 1 ? 'bg-black/20 border-y pb-hairline' : ''}`}>
@@ -296,7 +298,7 @@ function FeatureBlock({ f, idx }) {
                   </li>
                 ))}
               </ul>
-              <Link to="/contact" className="cta-primary !text-sm !py-2.5 !px-5">Get Your Club on BetterCricket today!</Link>
+              <button type="button" onClick={onCta} className="cta-primary !text-sm !py-2.5 !px-5">Get Your Club on BetterCricket today!</button>
             </div>
             <div className="col-span-1 lg:col-span-7 lg:[direction:ltr]">
               <div className="relative product-shadow rounded-2xl">
@@ -332,7 +334,7 @@ function ShortFeatures() {
 }
 
 // ─── CTA ─────────────────────────────────────────────────────────────────
-function FeaturesCTA() {
+function FeaturesCTA({ onCta }) {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-24 relative overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
@@ -344,7 +346,7 @@ function FeaturesCTA() {
             Everything on this page is BetterStats, from $399 a year, flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link to="/contact" className="cta-primary">Request club access →</Link>
+            <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>
             <Link to="/pricing" className="cta-secondary">See pricing</Link>
           </div>
         </div>
@@ -361,20 +363,28 @@ export default function Features() {
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/features',
   })
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
         <Hero />
         {HERO_SECTIONS.map((f, i) => (
-          <FeatureBlock key={f.n} f={f} idx={i} />
+          <FeatureBlock key={f.n} f={f} idx={i} onCta={triggerTrial} />
         ))}
         <ShortFeatures />
         <Comparison3Way which="betterstats" />
         <BeyondCore />
-        <FeaturesCTA />
+        <FeaturesCTA onCta={triggerTrial} />
       </div>
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

@@ -599,11 +599,11 @@ export default function SuperClubs() {
                   Self-Serve Trials
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  Today this only exposes the registration flow from the Super Admin menu, for
-                  internal testing — it isn't reachable from betterat.cricket yet. This is the
-                  flag that will gate the real thing once "Get your club on BetterCricket" and
-                  "Request access" are wired straight into it. Until then, and whenever this is
-                  off, those buttons keep sending people to the contact form instead.
+                  Gates the public self-serve wizard: when this is ON, /trial and the website's
+                  "Get your club on BetterCricket" and "Request access" buttons open the
+                  registration flow directly. When it's OFF, those buttons send people to the
+                  contact form instead. Either way, the Super Admin "Self-Serve Trial (Internal)"
+                  menu item always works, for internal testing.
                 </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
                   <input type="checkbox" checked={!!settingsForm.self_serve_registration_enabled}
