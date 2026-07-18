@@ -495,14 +495,14 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       style={{ backdropFilter: 'blur(2px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="self-serve-trial-modal-title"
     >
-      <div className="pb-card bg-pb-surface w-full max-w-lg mt-6 mb-6 max-h-[92vh] overflow-hidden flex flex-col">
+      <div className="pb-card bg-pb-surface w-full max-w-lg max-h-[92vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-b pb-hairline shrink-0">
           <h2 id="self-serve-trial-modal-title" className="font-display font-bold text-base text-pb-text">
             Start your club's {defaultTrialDays} Day Free Trial
@@ -617,7 +617,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
                   <p className="font-mono text-[11px] text-pb-text">
                     {orgName(duplicateClub)} has already been registered in BetterCricket
-                    {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}.
+                    {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}
+                    {/* the admin label already ends in an ellipsis when truncated
+                        (see backend _primary_admin_label) — appending another "."
+                        right after it collapses into a stray "…." */}
+                    {duplicateClub.already_registered_by?.endsWith('…') ? '' : '.'}{' '}
                     Please either (a) contact your club's administrator; or (b) email us at{' '}
                     <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
                     if you think your club has been incorrectly registered.

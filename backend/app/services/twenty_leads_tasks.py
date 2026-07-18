@@ -40,8 +40,8 @@ from sqlalchemy.orm import selectinload
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_client import client
 from app.services.twenty_sync import (
-    _all_contacts_unsubscribed, _billing_modules, _engagement, _lifecycle, _link_get,
-    _link_put, _module_split, _raise_task, _twenty_modules, _upsert,
+    OPPORTUNITY_AUTO_THRESHOLD, _all_contacts_unsubscribed, _billing_modules, _engagement,
+    _lifecycle, _link_get, _link_put, _module_split, _raise_task, _twenty_modules, _upsert,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,7 +214,16 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
             continue
         values = _lead_values(sig, _lifecycle(club, is_paying, all_unsub))
         values["name"] = club.name          # the Lead's display name = the club name
-        snaps.append((guid, tid_by_guid[guid], values, sig["status"]))
+        # "Top performer" auto-promotion: a prospect (never a paying customer —
+        # those already have a real deal) whose engagement score has crossed
+        # OPPORTUNITY_AUTO_THRESHOLD earns an Opportunity automatically on
+        # whichever refresh first notices it, rather than waiting on a human to
+        # flip Twenty's own createOpportunity cascade field. Checked here so a
+        # self-serve trial club that keeps digging into the product (historical
+        # import, merges, module trial usage — services/trial_engagement.py)
+        # gets promoted the moment it earns it, not just at registration.
+        auto_opportunity = not is_paying and org is not None and (eng.get("engagementScore") or 0) >= OPPORTUNITY_AUTO_THRESHOLD
+        snaps.append((guid, tid_by_guid[guid], values, sig["status"], club, auto_opportunity))
     # Diagnostics so the caller/UI can see WHY the result is what it is — a cold list
     # with no interest signals reads 0 qualified, which is correct, not a failure.
     stats["clubs_scanned"] += scanned
@@ -226,7 +235,7 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
     # qualifies zero Leads doesn't silently discard every cache write.
     await session.commit()
 
-    for guid, company_tid, values, status in snaps:
+    for guid, company_tid, values, status, club, auto_opportunity in snaps:
         try:
             _, act = await _upsert(
                 session, http, "lead", guid, "leads", "bcLeadKey", values,
@@ -236,6 +245,20 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         except Exception:  # noqa: BLE001 — one bad lead can't stop the rest
             stats["leads_errored"] += 1
             logger.exception("twenty lead upsert failed for club %s", guid)
+        if auto_opportunity:
+            try:
+                # Once only — an existing Opportunity is the human's deal to
+                # manage from here, never overwritten by a later refresh.
+                existing = await _link_get(session, "opportunity", guid)
+                if not existing:
+                    from app.services import twenty_opportunity
+                    modules = twenty_opportunity._default_modules(club)
+                    await twenty_opportunity._upsert_opportunity(
+                        session, http, club, company_tid, modules, stage="SELF_SERVE_TRIAL")
+                    stats["opportunities_auto_created"] += 1
+            except Exception:  # noqa: BLE001 — one bad opportunity can't stop the rest
+                stats["opportunities_errored"] += 1
+                logger.exception("twenty auto-opportunity failed for club %s", guid)
         await session.commit()
 
 

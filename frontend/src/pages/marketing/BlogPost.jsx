@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { Link, useParams, Navigate } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 import ZoomableImage from '../../components/marketing/ZoomableImage'
 import { getPost, POSTS } from '../../data/blog'
 
@@ -109,6 +111,7 @@ function ContentBlock({ block }) {
 export default function BlogPost() {
   const { slug } = useParams()
   const post = getPost(slug)
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
 
   const postUrl = post ? `https://betterat.cricket/blog/${post.slug}` : ''
   const postImage = post?.image ? `https://betterat.cricket${post.image}` : 'https://betterat.cricket/og-cover.png'
@@ -234,14 +237,15 @@ export default function BlogPost() {
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Want this for your club?</p>
           <h2 className="font-display font-bold text-2xl text-pb-text mb-4 tracking-tight">Get automated stats for your cricket club.</h2>
           <div className="flex flex-col sm:flex-row gap-3">
-            <Link
-              to="/contact"
+            <button
+              type="button"
+              onClick={triggerTrial}
               aria-label="Request access"
               className="inline-block px-6 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
               REQUEST ACCESS
-            </Link>
+            </button>
             <Link
               to="/features"
               className="inline-block px-6 py-3 border pb-hairline rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"
@@ -275,6 +279,13 @@ export default function BlogPost() {
       </div>
 
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

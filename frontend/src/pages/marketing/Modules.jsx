@@ -3,10 +3,12 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ZoomableImage from '../../components/marketing/ZoomableImage'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import { CORE_MARKETING, MODULES_MARKETING, HUB_SHOWCASE } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES, ALL_IN } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 function ModuleCard({ m, delay }) {
   const to = `/modules/${m.slug}`
@@ -116,7 +118,7 @@ function PricingStrip() {
   )
 }
 
-function CTA() {
+function CTA({ onCta }) {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-24 relative overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
@@ -125,7 +127,7 @@ function CTA() {
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">Start with BetterStats. <span className="gradient-text">Grow into the rest.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">Tell us your club details and we’ll get your site live, then turn on modules whenever you’re ready.</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link to="/contact" className="cta-primary">Request club access →</Link>
+            <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>
             <Link to="/pricing" className="cta-secondary">See pricing</Link>
           </div>
         </div>
@@ -142,6 +144,7 @@ export default function Modules() {
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/modules',
   })
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
@@ -150,9 +153,16 @@ export default function Modules() {
         <Showcase />
         <Grid />
         <PricingStrip />
-        <CTA />
+        <CTA onCta={triggerTrial} />
       </div>
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

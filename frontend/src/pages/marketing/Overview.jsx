@@ -4,6 +4,7 @@ import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import {
   MockHeritageCard,
   MockLeaderboard,
@@ -23,6 +24,7 @@ import {
 import { CORE, PRICED_MODULES } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 // Old way vs BetterCricket — kept tight and scannable.
 const PROBLEMS = [
@@ -44,7 +46,7 @@ function Placeholder({ icon, accent, label }) {
 }
 
 // ─── Hero ────────────────────────────────────────────────────────────────
-function Hero() {
+function Hero({ onCta }) {
   return (
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow pointer-events-none" />
@@ -59,7 +61,7 @@ function Hero() {
             Stats. A public site. Selection. Socials. Admin. Analytics. <span className="text-pb-text">BetterCricket is all of it</span>, one login, fed by one match feed, with no spreadsheets to keep and no data entry.
           </p>
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-6">
-            <Link to="/contact" className="cta-primary">Request club access →</Link>
+            <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
@@ -353,7 +355,7 @@ function Testimonial() {
 }
 
 // ─── Final CTA ───────────────────────────────────────────────────────────
-function FinalCTA() {
+function FinalCTA({ onCta }) {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-24 relative overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
@@ -369,7 +371,7 @@ function FinalCTA() {
               Tell us about your club and we’ll get your site live, fast, with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
-              <Link to="/contact" className="cta-primary">Request club access →</Link>
+              <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>
               <Link to="/contact" className="cta-secondary">Talk to us</Link>
             </div>
             <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>
@@ -388,11 +390,12 @@ export default function Overview() {
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/overview',
   })
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
-        <Hero />
+        <Hero onCta={triggerTrial} />
         <Showcase />
         <ProblemSolution />
         <Core />
@@ -401,9 +404,16 @@ export default function Overview() {
         <HowItWorks />
         <PricingSnapshot />
         <Testimonial />
-        <FinalCTA />
+        <FinalCTA onCta={triggerTrial} />
       </div>
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CORE, PRICED_MODULES, priceFor } from '../../data/pricing'
 import { ModuleWordmark } from './../ModuleLockup'
+import SelfServeTrialModal from '../admin/SelfServeTrialModal'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 /**
  * Modular plan builder. BetterStats is always in; tick the modules
@@ -20,6 +22,7 @@ export default function PricingCalculator() {
     })
 
   const { discount, total, moduleCount, modules } = priceFor([...selected])
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
 
   return (
     <div className="surface p-6 lg:p-8">
@@ -119,10 +122,17 @@ export default function PricingCalculator() {
               <p className="text-[11px] text-accent text-center mb-4">Everything in, $146 off the lot.</p>
             )}
 
-            <Link to="/contact" className="cta-primary w-full justify-center">Get Your Club on BetterCricket today!</Link>
+            <button type="button" onClick={triggerTrial} className="cta-primary w-full justify-center">Get Your Club on BetterCricket today!</button>
           </div>
         </div>
       </div>
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

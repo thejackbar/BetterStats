@@ -2,9 +2,13 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { isMarketingPath } from '../App'
 import QuickEnquiryModal from './QuickEnquiryModal'
+import SelfServeTrialModal from './admin/SelfServeTrialModal'
+import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 
-// Sticky bottom "Get your club on BetterCricket" bar, opens a short enquiry
-// modal (see QuickEnquiryModal) rather than navigating away.
+// Sticky bottom "Get your club on BetterCricket" bar. Opens the public
+// self-serve trial wizard when self-serve trials are switched on (All Clubs
+// -> General Settings -> "Self-serve trials enabled"); otherwise falls back
+// to the short enquiry modal (see QuickEnquiryModal), its original behaviour.
 //
 // Visibility:
 // - BetterCricket's own marketing pages (MARKETING_PATHS, minus /contact — those
@@ -51,7 +55,13 @@ function isPaidVisitor() {
 export default function ClubCTABar() {
   const { pathname } = useLocation()
   const [show, setShow] = useState(false)
-  const [modalOpen, setModalOpen] = useState(false)
+  const [quickModalOpen, setQuickModalOpen] = useState(false)
+  const {
+    enabled: selfServeEnabled,
+    modalOpen: selfServeModalOpen,
+    setModalOpen: setSelfServeModalOpen,
+    defaultTrialDays,
+  } = useSelfServeTrialGate()
 
   useEffect(() => {
     const onContact = pathname === '/contact'
@@ -82,7 +92,7 @@ export default function ClubCTABar() {
       sessionStorage.setItem(AUTO_OPEN_KEY, '1')
     } catch { /* ignore */ }
 
-    const timer = setTimeout(() => setModalOpen(true), AUTO_OPEN_DELAY_MS)
+    const timer = setTimeout(() => setQuickModalOpen(true), AUTO_OPEN_DELAY_MS)
     return () => clearTimeout(timer)
   }, [pathname])
 
@@ -117,7 +127,7 @@ export default function ClubCTABar() {
             Turn your club's full cricket history into a site like this.
           </span>
           <button
-            onClick={() => setModalOpen(true)}
+            onClick={() => { if (selfServeEnabled) setSelfServeModalOpen(true); else setQuickModalOpen(true) }}
             style={{
               background: '#34d399', color: '#0b1220', fontWeight: 700,
               padding: '10px 18px', borderRadius: 10, border: 'none',
@@ -138,7 +148,14 @@ export default function ClubCTABar() {
           </button>
         </div>
       </div>
-      {modalOpen && <QuickEnquiryModal onClose={() => setModalOpen(false)} />}
+      {quickModalOpen && <QuickEnquiryModal onClose={() => setQuickModalOpen(false)} />}
+      {selfServeModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setSelfServeModalOpen(false)}
+        />
+      )}
     </>
   )
 }

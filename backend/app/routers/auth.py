@@ -124,13 +124,19 @@ async def require_super_admin(
 
 
 async def require_self_serve_registration_enabled(db: AsyncSession = Depends(get_db)) -> None:
-    """Route dependency for the internal self-serve club trial registration flow
-    (see docs/self-serve-trial-onboarding-plan.md). 404s, not 403s, when the
-    ``self_serve_registration_enabled`` platform flag is off, so a disabled feature
-    reads as "doesn't exist" rather than revealing a gated feature. This is a
-    feature-flag check, not an authorization check — every route it guards must
-    also depend on ``require_super_admin`` (or, once this flow goes public, whatever
-    the public-facing auth model turns out to be)."""
+    """Route dependency for the *public* self-serve club trial registration
+    flow (routers/public_self_serve.py — the /trial ad-campaign landing page
+    and the website's "Request access" / "Get your club on BetterCricket"
+    CTAs). 404s, not 403s, when the ``self_serve_registration_enabled``
+    platform flag is off, so a disabled feature reads as "doesn't exist"
+    rather than revealing a gated feature.
+
+    This does NOT gate the internal Super Admin flow
+    (routers/self_serve_trial.py) — that router depends on
+    ``require_super_admin`` alone and always works for a super admin,
+    checkbox or no checkbox. This flag is a feature-flag check, not an
+    authorization check, which is why the public router pairs it with
+    per-IP rate limits and bot guardrails rather than any auth dependency."""
     from app.services import platform_settings as ps
     if not await ps.get_self_serve_registration_enabled(db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)

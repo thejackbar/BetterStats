@@ -7,6 +7,7 @@ import CountUp from '../../components/marketing/CountUp'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import DotField from '../../components/marketing/DotField'
+import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import {
   MockHeritageCard,
   MockLeaderboard,
@@ -22,6 +23,7 @@ import {
 import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
 function hexToRgba(hex, alpha) {
   const m = hex.trim().match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i)
@@ -33,7 +35,7 @@ function hexToRgba(hex, alpha) {
 }
 
 // ─── Hero ────────────────────────────────────────────────────────────────
-function Hero() {
+function Hero({ onCta }) {
   // Drive the dot field straight from the theme tokens so it always matches the
   // site CSS — a brand green→blue gradient that bulges away from the cursor.
   const dots = useMemo(() => {
@@ -80,9 +82,9 @@ function Hero() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-4">
-            <Link to="/contact" className="cta-primary">
+            <button type="button" onClick={onCta} className="cta-primary">
               Get Your Club on BetterCricket today!
-            </Link>
+            </button>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
 
@@ -531,7 +533,7 @@ function Promise_() {
 }
 
 // ─── Final CTA ───────────────────────────────────────────────────────────
-function FinalCTA() {
+function FinalCTA({ onCta }) {
   return (
     <section id="cta" className="px-4 sm:px-6 lg:px-10 py-24 relative overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
@@ -547,7 +549,7 @@ function FinalCTA() {
               Tell us about your club. We'll get your site live fast, with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
-              <Link to="/contact" className="cta-primary">Request club access →</Link>
+              <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
             <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>
@@ -566,11 +568,12 @@ export default function Landing() {
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/',
   })
+  const { trigger: triggerTrial, modalOpen: trialModalOpen, setModalOpen: setTrialModalOpen, defaultTrialDays } = useSelfServeTrialGate()
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
-        <Hero />
+        <Hero onCta={triggerTrial} />
         <Logos />
         <ValueProps />
         <StatBanner />
@@ -581,9 +584,16 @@ export default function Landing() {
         <Testimonials />
         <HowItWorks />
         <Promise_ />
-        <FinalCTA />
+        <FinalCTA onCta={triggerTrial} />
       </div>
       <MarketingFooter />
+      {trialModalOpen && (
+        <SelfServeTrialModal
+          publicMode
+          defaultTrialDays={defaultTrialDays}
+          onClose={() => setTrialModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

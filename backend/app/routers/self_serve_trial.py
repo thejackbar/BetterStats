@@ -1,9 +1,12 @@
-"""Internal self-serve club trial registration (Super Admin-only in this phase).
+"""Internal self-serve club trial registration — Super Admin menu item.
 
-See docs/self-serve-trial-onboarding-plan.md. Everything here sits behind the
-``self_serve_registration_enabled`` platform flag (off by default) as well as
-``require_super_admin`` — the flag hides the feature, it is not itself an
-authorization boundary.
+See docs/self-serve-trial-onboarding-plan.md. Reachable from the Super Admin
+"Self-Serve Trial (Internal)" page (``require_super_admin``) ONLY — this is
+NOT gated by the ``self_serve_registration_enabled`` platform flag. That flag
+controls the *public* self-serve surface only (routers/public_self_serve.py,
+the /trial ad-campaign landing page), and must not also hide this internal
+tool from a super admin who needs it regardless of whether the public flow
+is switched on.
 """
 import logging
 import re
@@ -22,7 +25,7 @@ from app.models.db import (
     ClubMembership, DiscountCouponRedemption, ModuleActionRequest, Organisation,
     SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db,
 )
-from app.routers.auth import require_super_admin, require_self_serve_registration_enabled
+from app.routers.auth import require_super_admin
 from app.services import module_subscriptions as mod_subs
 from app.services import password_policy
 from app.services import platform_settings as ps
@@ -41,13 +44,12 @@ _SELECTABLE_MODULES = tuple(k for k in BILLABLE_MODULES if k != MODULE_CORE)
 
 logger = logging.getLogger(__name__)
 
-# Both guards apply to every route in this router, present and future: the flag
-# check alone is not an authorization boundary (see require_self_serve_registration_
-# enabled's docstring), so it always travels paired with require_super_admin.
+# require_super_admin only — no flag dependency. This router always works
+# for a super admin, checkbox or no checkbox (see module docstring).
 router = APIRouter(
     prefix="/self-serve-trial",
     tags=["self-serve-trial"],
-    dependencies=[Depends(require_super_admin), Depends(require_self_serve_registration_enabled)],
+    dependencies=[Depends(require_super_admin)],
 )
 
 
@@ -66,10 +68,20 @@ async def get_status(db: AsyncSession = Depends(get_db)):
 def _duplicate_club_message(name: str, admin_label: str | None) -> str:
     """Shared wording for the "already registered" 409 — matches the search
     step's own duplicate message in SelfServeTrialModal.jsx so the same
-    condition reads the same way wherever it's surfaced."""
-    by = f" by {admin_label}" if admin_label else ""
+    condition reads the same way wherever it's surfaced.
+
+    ``admin_label`` already ends in an ellipsis (see ``_primary_admin_label``)
+    when it carries a truncated last name, so the sentence terminator is
+    dropped in that case rather than appended — otherwise the two collide
+    into a stray "…." that reads like a typo."""
+    if admin_label:
+        by = f" by {admin_label}"
+        sep = " " if admin_label.endswith("…") else ". "
+    else:
+        by = ""
+        sep = ". "
     return (
-        f"{name} has already been registered in BetterCricket{by}. "
+        f"{name} has already been registered in BetterCricket{by}{sep}"
         "Please either (a) contact your club's administrator; or (b) email us at "
         "support@bettersports.com.au if you think your club has been incorrectly registered."
     )
@@ -91,7 +103,7 @@ async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:
         return None
     first = row.first_name.strip()
     last = (row.last_name or "").strip()
-    return f"{first} {last[0]}." if last else first
+    return f"{first} {last[0]}…" if last else first
 
 
 @router.get("/search")
@@ -106,8 +118,9 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     against duplicates (find_matching_organisation), so an operator can see a
     club is taken before attempting to register it. A registered club also
     carries ``already_registered_by`` — the Primary Club Admin's first name +
-    last initial only (e.g. "Jack B.") — so the duplicate message can point at
-    a real person without exposing a full name or any contact details."""
+    last initial only (e.g. "Jack B…") — so the duplicate message can point at
+    a real person without exposing a full name, its length, or any contact
+    details."""
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
