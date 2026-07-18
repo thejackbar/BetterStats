@@ -4,6 +4,16 @@ import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 
+const REQUEST_TEMPLATE_EMAIL = 'support@bettersports.com.au'
+const REQUEST_TEMPLATE_BODY = `Hi BetterCricket team,
+
+I've come across an email template I'd like to see added to BetterComms.
+
+Paste the HTML below, or forward the original email to ${REQUEST_TEMPLATE_EMAIL}, and we'll take a look at adding it to the template library.
+
+Thanks`
+const REQUEST_TEMPLATE_MAILTO = `mailto:${REQUEST_TEMPLATE_EMAIL}?subject=${encodeURIComponent('New email template')}&body=${encodeURIComponent(REQUEST_TEMPLATE_BODY)}`
+
 function fmtWhen(s) {
   if (!s) return ''
   try { return new Date(s).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
@@ -352,16 +362,26 @@ export default function CommsCompose() {
               </div>
             </div>
 
-            {templates.length > 0 && (
-              <div className="mb-3">
-                <label className="block text-xs text-pb-faint mb-1">Template</label>
-                <select value={templateId} onChange={e => onPickTemplate(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
-                  <option value="">No template — write from scratch</option>
-                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
+            <div className="mb-3">
+              <label className="block text-xs text-pb-faint mb-1">Template</label>
+              <div className="flex items-center gap-2">
+                {templates.length > 0 ? (
+                  <select value={templateId} onChange={e => onPickTemplate(e.target.value)}
+                    className="flex-1 min-w-0 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
+                    <option value="">No template — write from scratch</option>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                ) : (
+                  <div className="flex-1 min-w-0 px-3 py-2 rounded bg-pb-surface2 text-pb-faint border pb-hairline text-sm">
+                    No templates yet
+                  </div>
+                )}
+                <a href={REQUEST_TEMPLATE_MAILTO}
+                  className="shrink-0 px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 whitespace-nowrap">
+                  Request a template
+                </a>
               </div>
-            )}
+            </div>
 
             <label className="block text-sm text-pb-faint mb-1">Message</label>
             <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={560} />

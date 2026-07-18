@@ -152,16 +152,81 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     doc.execCommand(cmd, false, val)
   }
 
+  const escapeHtml = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+  // The <a> the caret/selection is currently inside, if any — lets Link edit
+  // an existing link's href in place (including a Button's) instead of only
+  // ever being able to wrap fresh text in a new one.
+  const linkAtSelection = () => {
+    const doc = designFrameRef.current?.contentDocument
+    const node = doc?.getSelection?.()?.anchorNode
+    if (!node) return null
+    const el = node.nodeType === 3 ? node.parentElement : node
+    return el?.closest ? el.closest('a') : null
+  }
+
   const insertLink = () => {
-    const url = window.prompt('Link URL:', 'https://')
-    if (url) exec('createLink', url)
+    const frame = designFrameRef.current
+    const doc = frame?.contentDocument
+    if (!doc) return
+    frame.contentWindow?.focus()
+    const existing = linkAtSelection()
+    const url = window.prompt(
+      existing ? 'Edit link URL:' : 'Link URL — select some text first, or click inside an existing link/button to edit it:',
+      existing?.getAttribute('href') || 'https://'
+    )
+    if (!url) return
+    if (existing) {
+      existing.setAttribute('href', url)
+      onChange(readDesign())
+    } else if (doc.getSelection().isCollapsed) {
+      window.alert('Select some text first, then click Link to turn it into a link.')
+    } else {
+      doc.execCommand('createLink', false, url)
+    }
   }
   const insertImage = () => {
     const url = window.prompt('Image URL:')
     if (url) exec('insertImage', url)
   }
   const insertButton = () => {
-    exec('insertHTML', '<a href="https://" style="display:inline-block;background:#243352;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;">Button text</a>')
+    const url = window.prompt('Button link URL:', 'https://')
+    if (!url) return
+    const label = window.prompt('Button text:', 'Button text') || 'Button text'
+    exec('insertHTML', `<a href="${escapeHtml(url)}" style="display:inline-block;background:#243352;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;">${escapeHtml(label)}</a>`)
+  }
+
+  // Table helpers operate on the raw DOM (there's no cross-browser execCommand
+  // for row insert/delete) — they mutate directly, then push the result back
+  // through the same sync path onFrameLoad's 'input' listener uses, since a
+  // script-driven mutation never fires that event on its own.
+  const rowAtSelection = () => {
+    const doc = designFrameRef.current?.contentDocument
+    const node = doc?.getSelection?.()?.anchorNode
+    if (!node) return null
+    const el = node.nodeType === 3 ? node.parentElement : node
+    return el?.closest ? el.closest('tr') : null
+  }
+  const insertTableRow = (after) => {
+    const row = rowAtSelection()
+    if (!row) { window.alert('Click inside a table cell first, then Row +.'); return }
+    const clone = row.cloneNode(true)
+    clone.querySelectorAll('td, th').forEach(cell => { cell.innerHTML = '&nbsp;' })
+    if (after) row.after(clone)
+    else row.before(clone)
+    onChange(readDesign())
+  }
+  const deleteTableRow = () => {
+    const row = rowAtSelection()
+    if (!row) { window.alert('Click inside a table row first, then Row −.'); return }
+    const table = row.closest('table')
+    if (table && table.querySelectorAll('tr').length <= 1) {
+      window.alert("Can't delete the only row in this table.")
+      return
+    }
+    row.remove()
+    onChange(readDesign())
   }
 
   const varList = (vars.variables || []).filter(v => !v.marketing_only || vars.is_marketing)
@@ -236,10 +301,14 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
             <ToolbarBtn onClick={() => exec('insertUnorderedList')} title="Bullet list">• List</ToolbarBtn>
             <ToolbarBtn onClick={() => exec('insertOrderedList')} title="Numbered list">1. List</ToolbarBtn>
             <Divider />
-            <ToolbarBtn onClick={insertLink} title="Insert link">Link</ToolbarBtn>
+            <ToolbarBtn onClick={insertLink} title="Insert a link, or click inside an existing link/button to edit its URL">Link</ToolbarBtn>
             <ToolbarBtn onClick={() => exec('unlink')} title="Remove link">Unlink</ToolbarBtn>
             <ToolbarBtn onClick={insertImage} title="Insert image">Image</ToolbarBtn>
             <ToolbarBtn onClick={insertButton} title="Insert a button-styled link">Button</ToolbarBtn>
+            <Divider />
+            <ToolbarBtn onClick={() => insertTableRow(false)} title="Insert a table row above the current one">Row ↑+</ToolbarBtn>
+            <ToolbarBtn onClick={() => insertTableRow(true)} title="Insert a table row below the current one">Row ↓+</ToolbarBtn>
+            <ToolbarBtn onClick={deleteTableRow} title="Delete the current table row">Row −</ToolbarBtn>
           </div>
           <iframe
             ref={designFrameRef}
