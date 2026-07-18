@@ -617,7 +617,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
                   <p className="font-mono text-[11px] text-pb-text">
                     {orgName(duplicateClub)} has already been registered in BetterCricket
-                    {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}.
+                    {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}
+                    {/* the admin label already ends in an ellipsis when truncated
+                        (see backend _primary_admin_label) — appending another "."
+                        right after it collapses into a stray "…." */}
+                    {duplicateClub.already_registered_by?.endsWith('…') ? '' : '.'}{' '}
                     Please either (a) contact your club's administrator; or (b) email us at{' '}
                     <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
                     if you think your club has been incorrectly registered.

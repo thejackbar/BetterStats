@@ -66,10 +66,20 @@ async def get_status(db: AsyncSession = Depends(get_db)):
 def _duplicate_club_message(name: str, admin_label: str | None) -> str:
     """Shared wording for the "already registered" 409 — matches the search
     step's own duplicate message in SelfServeTrialModal.jsx so the same
-    condition reads the same way wherever it's surfaced."""
-    by = f" by {admin_label}" if admin_label else ""
+    condition reads the same way wherever it's surfaced.
+
+    ``admin_label`` already ends in an ellipsis (see ``_primary_admin_label``)
+    when it carries a truncated last name, so the sentence terminator is
+    dropped in that case rather than appended — otherwise the two collide
+    into a stray "…." that reads like a typo."""
+    if admin_label:
+        by = f" by {admin_label}"
+        sep = " " if admin_label.endswith("…") else ". "
+    else:
+        by = ""
+        sep = ". "
     return (
-        f"{name} has already been registered in BetterCricket{by}. "
+        f"{name} has already been registered in BetterCricket{by}{sep}"
         "Please either (a) contact your club's administrator; or (b) email us at "
         "support@bettersports.com.au if you think your club has been incorrectly registered."
     )
@@ -91,7 +101,7 @@ async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:
         return None
     first = row.first_name.strip()
     last = (row.last_name or "").strip()
-    return f"{first} {last[0]}." if last else first
+    return f"{first} {last[0]}…" if last else first
 
 
 @router.get("/search")
@@ -106,8 +116,9 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     against duplicates (find_matching_organisation), so an operator can see a
     club is taken before attempting to register it. A registered club also
     carries ``already_registered_by`` — the Primary Club Admin's first name +
-    last initial only (e.g. "Jack B.") — so the duplicate message can point at
-    a real person without exposing a full name or any contact details."""
+    last initial only (e.g. "Jack B…") — so the duplicate message can point at
+    a real person without exposing a full name, its length, or any contact
+    details."""
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
