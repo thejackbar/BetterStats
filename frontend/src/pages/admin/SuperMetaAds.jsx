@@ -6,8 +6,8 @@ import {
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
-const CAMPAIGN_WINDOW = '28 Jun – 12 Jul 2026'
-const CAMPAIGN_BUDGET = 200
+const CAMPAIGN_WINDOW = 'BC_AU_SelfServe_Aug2026 · ~30 days from launch'
+const CAMPAIGN_BUDGET = 520  // the campaign's lifetime spend cap
 
 const REC_STYLE = {
   keep_going: {
@@ -153,7 +153,7 @@ export default function SuperMetaAds() {
   const header = (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Early Bird Campaign</h1>
+        <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Self-Serve Trial Campaign</h1>
         <p className="text-sm text-pb-dim mt-1">{CAMPAIGN_WINDOW}</p>
       </div>
       <div className="flex items-center gap-3">
@@ -243,7 +243,7 @@ export default function SuperMetaAds() {
               />
 
               <div className="pb-card px-3 py-2.5">
-                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Meta-attributed leads</div>
+                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Meta-attributed conversions</div>
                 <div className="font-display text-xl text-pb-text mt-0.5">{fmtNum(campaign.leads_effective)}</div>
                 <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
                   {fmtNum(campaign.leads)} from Meta
