@@ -21,10 +21,10 @@ export default function Terms() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">1. About these terms</h2>
             <p>
-              BetterCricket ("the Service", "we", "us", "our") is a cricket platform for Australian clubs,
-              provided by BetterSports (ABN 32 624 335 397), a trading name based in Perth, Western Australia.
-              These terms govern your club's use of the Service. By creating an account or using the Service,
-              your club agrees to these terms.
+              BetterCricket ("the Service", "we", "us", "our") is a software platform for cricket clubs,
+              provided by BetterSports, which is a Registered Business Name of KlubPro Pty Limited
+              (ABN 32 624 335 397), based in Perth, Western Australia. These terms govern your club's use of the
+              Service. By creating an account or using the Service, your club agrees to these terms.
             </p>
           </section>
 
@@ -53,42 +53,47 @@ export default function Terms() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">4. Acceptable use</h2>
             <p>
               You agree to use the Service only for lawful purposes and only for your own club. You must not
-              attempt to access another club's data or admin area, interfere with or disrupt the Service, probe
-              or test its security, or use it in any way that breaches applicable law or these terms.
+              attempt to register a club which you have no authorised responsibility for or association with.
+              You must not attempt to access another club's data or admin area, interfere with or disrupt the
+              Service, probe or test its security, or use it in any way that breaches applicable law or these
+              terms.
             </p>
           </section>
 
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">5. Email and BetterComms</h2>
             <p>
-              BetterComms lets your club email its members. You may email only your own members and associates,
-              or people who have asked to hear from you. You must not use bought, scraped or shared lists.
-              Every email includes a one-click unsubscribe and identifies your club, as the Spam Act 2003 requires,
-              and we honour unsubscribes across your club automatically.
+              BetterComms lets your club email its players and members. You may email only your own members and
+              associates, or people who have asked to hear from you. You must not use bought, scraped or shared
+              lists. Every email includes a one-click unsubscribe. Every email you send using BetterComms must
+              clearly identify your club, as the Spam Act 2003 requires. BetterCricket honours unsubscribes
+              across your club automatically.
             </p>
             <p className="mt-3">
-              All BetterComms mail goes out through a shared email service, so we set sending limits to keep it
-              healthy for everyone. A new club starts with a small daily limit and can ask us to raise it once its
-              sending looks clean. We may pace, cap or pause sending to protect the service, and we may suspend a
-              club whose emails bounce or get marked as spam too often, until the problem is fixed.
+              All BetterComms email goes out through a shared email service, so we set sending limits to keep it
+              healthy for everyone. A new club starts with a small daily limit and can ask us to raise that limit
+              once its sending looks clean. We may pace, cap or pause sending to protect the service, and we may
+              suspend a club whose emails bounce or get marked as spam too often, until the problem is fixed.
             </p>
           </section>
 
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">6. Subscription &amp; payment</h2>
             <p>
-              The Service is offered on flat per-club plans: the <strong className="text-pb-text">Core</strong> (BetterStats)
-              is $399 per year, and you can add modules (<strong className="text-pb-text">BetterSelect</strong>,{' '}
-              <strong className="text-pb-text">BetterSocials</strong> and <strong className="text-pb-text">BetterAdmin</strong> at
-              $149 per year each, <strong className="text-pb-text">BetterIQ</strong> at $249), with a discount when you bundle.
-              Pricing is per club regardless of how many grades, teams or players you run. The plan you select at
-              sign-up, and what it includes, is set out on our{' '}
+              The Service is offered on flat per-club annual plans: the <strong className="text-pb-text">Core</strong> (BetterStats)
+              is a mandatory module, and you can add other modules (e.g. <strong className="text-pb-text">BetterSelect</strong>,{' '}
+              <strong className="text-pb-text">BetterSocials</strong> and <strong className="text-pb-text">BetterAdmin</strong>).
+              We may offer a bundle discount for your first year when you select multiple modules in addition to
+              BetterStats on your first subscription. Pricing is per club regardless of how many grades, teams or
+              players you run. The plan you select at sign-up, and what it includes, is set out on our{' '}
               <Link to="/pricing" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>pricing page</Link>.
             </p>
             <p className="mt-3">
-              Subscriptions are an annual licence, invoiced once a year. Access continues
-              for the period you have paid for; we will contact you before each renewal. Fees are payable in
-              Australian dollars. Except where required by Australian Consumer Law, fees already paid are
+              Subscriptions are an annual licence, invoiced once a year. Access continues for the period you have
+              paid for; we will notify you when a module's trial is expiring and when a module's subscription is
+              about to renew. The fee for an additional module subscribed to during the BetterStats subscription
+              period will be prorated to the renewal date of the BetterStats subscription. Subscription fees are
+              payable in advance. Except where required by Australian Consumer Law, fees already paid are
               non-refundable for partial periods.
             </p>
           </section>
@@ -101,7 +106,7 @@ export default function Terms() {
               data, the records your club produces and maintains. While we work hard to keep everything accurate,
               we don't guarantee that every statistic is complete or error-free, and you remain responsible for the
               accuracy of the data your club provides. We may use de-identified, aggregated information to operate,
-              secure and improve the Service.
+              analyse, secure and improve the Service.
             </p>
           </section>
 
@@ -131,17 +136,17 @@ export default function Terms() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">10. Changes to these terms</h2>
             <p>
-              We may update these terms from time to time. If we make a material change, we'll let subscribers know
-              by email or through the Service. Continuing to use the Service after a change takes effect means your
-              club accepts the updated terms.
+              We may update these terms from time to time. If we make a material change, we may inform
+              subscribers by email or through the Service. Continuing to use the Service after a change takes
+              effect means your club accepts the updated terms.
             </p>
           </section>
 
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">11. Contact</h2>
             <p>
-              BetterCricket is provided by BetterSports (ABN 32 624 335 397), Perth, Western Australia. Questions
-              about these terms? Email{' '}
+              BetterCricket is provided by KlubPro Pty Ltd, trading as BetterSports (ABN 32 624 335 397), Perth,
+              Western Australia. Questions about these terms? Email{' '}
               <a href="mailto:support@bettersports.com.au" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>support@bettersports.com.au</a>.
             </p>
           </section>

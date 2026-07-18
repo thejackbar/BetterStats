@@ -20,8 +20,9 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Who we are</h2>
             <p>
-              BetterCricket is provided by BetterSports (ABN 32 624 335 397), a trading name based in Perth,
-              Western Australia. This policy explains how we collect, use, store and handle personal information,
+              BetterCricket is provided by BetterSports (ABN 32 624 335 397), a Registered Business Name of
+              KlubPro Pty Ltd, in Perth, Western Australia. This policy explains how we collect, use, store and
+              handle personal information,
               in accordance with the Australian Privacy Act 1988 and the Australian Privacy Principles (APPs). It
               applies to the BetterCricket service and websites.
             </p>
@@ -31,7 +32,7 @@ export default function Privacy() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">What we collect</h2>
             <ul className="space-y-2 ml-4 list-disc">
               <li><strong className="text-pb-text">Club and player information:</strong> Player names and cricket statistics derived from your club's own match data, along with club details such as name, contact email and branding preferences.</li>
-              <li><strong className="text-pb-text">Admin account information:</strong> The username and password used to sign in to a club's admin area. Passwords are stored only as a secure hash, never in plain text.</li>
+              <li><strong className="text-pb-text">Admin account information:</strong> The email address, mobile number, username and password used to sign in to a club's admin area. Passwords are stored only as a secure hash, never in plain text.</li>
               <li><strong className="text-pb-text">Usage and analytics data:</strong> Standard web logs and analytics such as IP address, device and browser details, and pages viewed, used to keep the Service secure and to understand and improve how it's used.</li>
             </ul>
           </section>
@@ -109,7 +110,7 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Contact</h2>
             <p>
-              BetterSports (ABN 32 624 335 397), trading as BetterCricket · Perth, Western Australia ·{' '}
+              KlubPro Pty Ltd, trading as BetterSports (ABN 32 624 335 397) · Perth, Western Australia ·{' '}
               <a href="mailto:support@bettersports.com.au" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>support@bettersports.com.au</a>
             </p>
           </section>
