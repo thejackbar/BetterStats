@@ -298,13 +298,16 @@ def start_scheduler():
         id="daily_trial_lifecycle_nudges",
         replace_existing=True,
     )
-    # Meta Ads HQ dashboard — daily campaign/ad snapshot at 09:00 Perth time (the
-    # spec's "refreshed by a daily 9am job"). No-op when the token isn't set.
+    # Meta Ads HQ dashboard — hourly campaign/ad snapshot (was daily 09:00
+    # Perth; hourly per direct request for the self-serve campaign launch, so
+    # the dashboard tracks the live campaign through the day). Three insight
+    # calls an hour is nowhere near Meta's rate limits. No-op when the token
+    # isn't set. Same job id as the old daily job so replace_existing retires
+    # it on deploy.
     scheduler.add_job(
         snapshot_meta_ads,
         trigger="cron",
-        hour=9,
-        minute=0,
+        minute=5,
         timezone=ZoneInfo("Australia/Perth"),
         id="daily_meta_ads_snapshot",
         replace_existing=True,
@@ -362,7 +365,7 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
                 "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
-                "trial lifecycle nudges 08:00, Meta Ads snapshot 09:00 Perth, "
+                "trial lifecycle nudges 08:00, Meta Ads snapshot hourly at :05, "
                 "draft tick /15min", marketing_mode)
 
 
