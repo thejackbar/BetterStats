@@ -28,10 +28,16 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
-from app.services import platform_settings
+from app.services import platform_settings, trial_engagement
 from app.services.club_directory import _PATH_CODE, club_filters
 from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
                                         full_name, link, phone)
+
+# A club's engagement score at or above this crosses from "worth watching" to
+# "start the deal" — twenty_leads_tasks._seed_and_refresh_leads uses this to
+# auto-create an Opportunity the moment a Lead's score reaches it, rather than
+# waiting on a human to flip Twenty's own createOpportunity cascade field.
+OPPORTUNITY_AUTO_THRESHOLD = 90
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +442,7 @@ async def _engagement(session, club: MarketingClub,
     recency = _recency_pts(last_touch)
 
     # Tier bands: Cold < 30, Warm 30-45, Hot > 45 (open-ended at the top).
+    trial_depth = None
     if is_customer:
         # Account health + expansion. A paying account starts engaged, gains for
         # recent product use, and for an active expansion opportunity; floored at Warm.
@@ -459,6 +466,20 @@ async def _engagement(session, club: MarketingClub,
             score += 20
         score = min(score, 100)
         tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
+
+        # Trial-depth floor: a self-serve/onboarded prospect's own product-setup
+        # effort (registration, historical import, merges, module trial usage —
+        # see services/trial_engagement.py) can outscore the web/email recency+
+        # frequency formula above, especially in the first hours after signup
+        # before any usage_events/email_events have had time to accumulate. Only
+        # a floor (never lowers a score the ordinary formula already earned) and
+        # only for a club that's actually been onboarded — a bare marketing-
+        # directory row with no linked Organisation has nothing to be deep in.
+        if org is not None:
+            trial_depth = await trial_engagement.trial_depth_score(session, org)
+            if trial_depth["score"] > score:
+                score = trial_depth["score"]
+                tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
 
     # freq_pts sums fractional per-event decay points (the 21-28 day web-view tier
     # is worth 0.5), so score can come out fractional here — round once, at the
@@ -492,7 +513,8 @@ async def _engagement(session, club: MarketingClub,
     # long after its score has decayed back to Cold.
     in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
-        or onboarding_count or sessions or eng_30d)
+        or onboarding_count or sessions or eng_30d
+        or (trial_depth and trial_depth["score"] >= 70))
 
     fields = {
         "engagementScore": score,
@@ -516,6 +538,7 @@ async def _engagement(session, club: MarketingClub,
         "_webDecayPts": round(web_decay_pts, 1),
         "_freqPts": round(freq_pts, 1),
         "_directEnquiryHot": direct_enquiry_hot,
+        "_trialDepth": trial_depth,
     }
     if last_touch:
         fields["lastSeenAt"] = last_touch.isoformat()
@@ -1194,6 +1217,7 @@ async def handle_contact_opt_out(session, email: str) -> None:
 
 async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" = None,
                                  engagement_override: "Optional[dict]" = None,
+                                 force_lead: bool = False,
                                  create_opportunity: bool = False,
                                  opportunity_modules: "Optional[list]" = None,
                                  lead_lifecycle_override: "Optional[str]" = None,
@@ -1217,12 +1241,24 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
     this club currently qualify as a Lead" rule (``_lead_signal``) already gates
     against a routine send alone creating one.
 
+    ``force_lead`` (without an ``engagement_override``) also upserts a real Lead
+    immediately, using the NORMALLY-COMPUTED engagement rollup rather than a
+    forced score — used by ``push_self_serve_registration``, where the
+    registration itself is real news worth a Lead right away, but the actual
+    score should still come from ``_engagement()`` (which now includes the
+    trial-depth floor from services/trial_engagement.py) rather than a flat
+    override the way a direct enquiry gets.
+
     ``create_opportunity`` additionally upserts an Opportunity right after the
-    Lead — used only by a self-serve trial registration (a materially stronger
-    signal than a bare enquiry, which still waits on a human to flip Twenty's
-    own ``createOpportunity`` cascade field). ``opportunity_modules`` scopes it;
-    falls back to ``twenty_opportunity._default_modules(club)`` when omitted.
-    Every other caller leaves this off and is unaffected.
+    Lead, but ONLY once the engagement score (after any override) has actually
+    reached ``OPPORTUNITY_AUTO_THRESHOLD`` — a brand-new self-serve signup is
+    real interest, but not yet a deal to work; the Opportunity is earned by the
+    club's own trial-depth score crossing the line, whether that happens at
+    this exact call or a later refresh notices it (see
+    twenty_leads_tasks._seed_and_refresh_leads for the recurring check).
+    ``opportunity_modules`` scopes it; falls back to
+    ``twenty_opportunity._default_modules(club)`` when omitted. Every other
+    caller leaves both off and is unaffected.
 
     ``lead_lifecycle_override``/``opportunity_stage`` force the Lead's
     ``lifecycleStage`` and the Opportunity's ``stage`` at creation (via
@@ -1262,14 +1298,14 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
             async with httpx.AsyncClient() as http:
                 ctid, _cact = await _upsert(session, http, "club", club.grassroots_guid,
                                             "companies", "bcClubId", company)
-                if engagement_override:
+                if engagement_override or force_lead:
                     from app.services import twenty_leads_tasks
                     await twenty_leads_tasks.upsert_lead_for_club(
                         session, http, club, org, ctid, engagement,
                         lifecycle_override=lead_lifecycle_override)
                 else:
                     await _sync_lead_from_company(session, http, club.grassroots_guid, company)
-                if create_opportunity:
+                if create_opportunity and (engagement.get("engagementScore") or 0) >= OPPORTUNITY_AUTO_THRESHOLD:
                     from app.services import twenty_opportunity
                     modules = (opportunity_modules if opportunity_modules is not None
                                else twenty_opportunity._default_modules(club))
@@ -1470,22 +1506,33 @@ async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_na
 async def push_self_serve_registration(*, org_id, org_name: str, contact_name: str = "",
                                        email: str = "", phone: "Optional[str]" = None,
                                        modules: "Optional[list]" = None) -> dict:
-    """A self-serve trial registration is the strongest signal a prospect can
-    give — a real person just created real login credentials for a real club,
-    with no enquiry-then-follow-up gap at all. Find-or-create the linked
-    MarketingClub + registering-admin Contact (``_resolve_self_serve_club``),
-    then push Company + Lead + Contact forced Hot (100 — same treatment
-    ``push_onboarding_enquiry`` gives a plain enquiry) AND an Opportunity,
-    scoped to the modules the admin actually selected a trial for. Unlike a
-    bare enquiry, a registration doesn't wait on a human to flip Twenty's own
-    ``createOpportunity`` field — the deal is real from the moment the club
-    exists. The Lead opens at ``lifecycleStage`` "Self-Serve Trial" (until the
-    next daily Lead refresh recomputes it, same as any other Lead) and the
-    Opportunity opens at ``stage`` "Self-Serve Trial" (permanent — Opportunity
-    stage is never recomputed by anything, only a human moving the deal in
-    Twenty changes it), so both read distinctly from an enquiry- or
-    outbound-originated deal the moment they land. Best-effort and
-    backgrounded by the caller; never raises."""
+    """A self-serve trial registration is a real signal — a real person just
+    created real login credentials for a real club — but unlike a direct
+    "onboard my club" enquiry it is NOT forced to a flat Hot score any more:
+    the club has done nothing yet beyond registering, and per direct
+    instruction a registration alone should read as a real-but-modest signal
+    (70 for the club's own admin, 55 if a Super Admin performed the
+    registration — see services/trial_engagement.py), with the score then
+    growing from the club's own subsequent trial-depth (historical import,
+    merges, module trial usage) on later refreshes rather than starting
+    already maxed out. Find-or-create the linked MarketingClub +
+    registering-admin Contact (``_resolve_self_serve_club``), then push
+    Company + Lead + Contact using the NORMALLY-COMPUTED engagement rollup
+    (``force_lead=True`` so the Lead still lands immediately rather than
+    waiting for tomorrow's refresh), scoped to the modules the admin actually
+    selected a trial for. An Opportunity is only created here if the
+    registration score alone already clears ``OPPORTUNITY_AUTO_THRESHOLD``
+    (it won't, at 70/55) — otherwise one is created automatically once a
+    later refresh sees the club's trial-depth score cross that line (see
+    twenty_leads_tasks._seed_and_refresh_leads), which is the "top performers
+    automatically become Opportunities" behaviour this replaces the old
+    instant-Opportunity-at-signup with. The Lead opens at ``lifecycleStage``
+    "Self-Serve Trial" (until the next daily Lead refresh recomputes it, same
+    as any other Lead) and any Opportunity this club goes on to earn opens at
+    ``stage`` "Self-Serve Trial" too (permanent — Opportunity stage is never
+    recomputed by anything, only a human moving the deal in Twenty changes
+    it), so both read distinctly from an enquiry- or outbound-originated deal.
+    Best-effort and backgrounded by the caller; never raises."""
     if not client.configured:
         return {"skipped": "not configured"}
     try:
@@ -1500,8 +1547,7 @@ async def push_self_serve_registration(*, org_id, org_name: str, contact_name: s
         return {"error": str(e)}
 
     return await push_club_and_contacts(
-        club_id, contact_ids=[contact_id],
-        engagement_override={"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True},
+        club_id, contact_ids=[contact_id], force_lead=True,
         create_opportunity=True, opportunity_modules=_twenty_modules(modules or []),
         lead_lifecycle_override="SELF_SERVE_TRIAL", opportunity_stage="SELF_SERVE_TRIAL")
 

@@ -55,9 +55,11 @@ from app.models.db import (
     Sponsor,
     SyncRun,
     Team,
+    User,
     get_db,
 )
-from app.routers.auth import get_current_club
+from app.routers.auth import get_current_club, get_current_user
+from app.services.audit_log import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -593,7 +595,8 @@ async def dismiss(club: Organisation = Depends(get_current_club), db: AsyncSessi
 
 @router.post("/steps/{step_key}")
 async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends(get_current_club),
-                   db: AsyncSession = Depends(get_db)):
+                   db: AsyncSession = Depends(get_db),
+                   current_user: User = Depends(get_current_user)):
     """Mark a step done / not done, or skipped / unskipped. Done and skipped
     are mutually exclusive — setting one clears the other. Unknown keys are
     accepted (old checklist keys like explore_select may still be stored) but
@@ -603,6 +606,16 @@ async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends
     skipped = set(state.skipped_steps or [])
     if data.done is not None:
         if data.done:
+            # Actor trail for services/trial_engagement.py's Super-Admin-vs-
+            # club-admin scoring discount — only meaningful the first time a
+            # step is newly marked done (a re-save shouldn't keep bumping the
+            # timestamp used to pick "the" actor).
+            if step_key not in completed:
+                await log_activity(
+                    db, org_id=club.id, user_id=current_user.id,
+                    action="setup_wizard_step_done", target_type="wizard_step",
+                    target_id=step_key,
+                )
             completed.add(step_key)
             skipped.discard(step_key)
         else:
