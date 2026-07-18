@@ -61,17 +61,8 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
-  const [vars, setVars] = useState({ is_marketing: false, variables: [] })
-  const [copied, setCopied] = useState('')
   const fileRef = useRef(null)
   const editorRef = useRef(null)
-
-  useEffect(() => { api.commsMergeVariables().then(setVars).catch(() => {}) }, [])
-
-  const copyVar = (name) => {
-    try { navigator.clipboard?.writeText(`{{${name}}}`) } catch { /* clipboard may be blocked */ }
-    setCopied(name); setTimeout(() => setCopied(''), 1200)
-  }
 
   // Rendered exactly as a send would (footer injected) — fetched when the
   // Preview tab is opened rather than on every keystroke.
@@ -139,27 +130,9 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
       {err && <div className="text-pb-red text-xs mb-2">{err}</div>}
       {notice && <div className="text-pb-amber text-xs mb-2">{notice}</div>}
 
-      <div className="pb-card p-3 mb-3">
-        <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">Merge variables — click to copy</div>
-        <div className="flex flex-wrap gap-1.5">
-          {(vars.variables || []).filter(v => !v.marketing_only || vars.is_marketing).map(v => (
-            <button key={v.name} onClick={() => copyVar(v.name)} title={v.desc}
-              className="font-mono text-[11px] border pb-hairline rounded px-2 py-1 hover:bg-pb-surface2"
-              style={{ color: 'var(--pb-accent)' }}>
-              {copied === v.name ? 'copied!' : `{{${v.name}}}`}
-            </button>
-          ))}
-        </div>
-        {vars.is_marketing && (
-          <div className="text-pb-faintest text-xs mt-2">
-            The club / association / utm_code variables resolve to each recipient club's own details from the Clubs Directory.
-          </div>
-        )}
-      </div>
-
       <div className="text-pb-faintest text-xs mb-1">
-        HTML — paste your own, or import a file. Use {'{{first_name}}'}, {'{{club_name}}'} etc. Switching out of HTML mode
-        tidies the code automatically; Preview adds the unsubscribe footer, exactly as a send would.
+        Paste your own HTML, or import a file. Click a variable above to insert it wherever your cursor is. Preview
+        adds the unsubscribe footer, exactly as a send would.
       </div>
       <EmailEditorTabs ref={editorRef} html={html} onChange={setHtml} onEnterPreview={onEnterPreview} height={480} />
     </div>

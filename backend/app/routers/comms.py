@@ -2694,6 +2694,180 @@ async def copy_list_members(
 
 # ─── Email templates (Phase 3) ───────────────────────────────────────────────
 
+# Built-in starter templates every club gets automatically (seeded at startup,
+# see seed_starter_templates below). Fragments (no <html>/<body>), matching
+# compose-body style — the send pipeline wraps them in the club's own shell +
+# mandatory footer, so they pick up each club's branding automatically.
+STARTER_TEMPLATES = [
+    {
+        "name": "AGM / Club Announcement",
+        "html": (
+            '<p style="margin:0 0 4px 0; font-family:inherit; font-size:12px; letter-spacing:0.08em; '
+            'text-transform:uppercase; color:#8a8a92;">Club Announcement</p>\n'
+            '<h1 style="margin:0 0 16px 0; font-family:inherit; font-size:22px; line-height:1.3; '
+            'color:#1c1c21; font-weight:700;">Notice of Annual General Meeting</h1>\n\n'
+            '<p style="margin:0 0 20px 0;">Hi {{first_name}},<br><br>All members are invited to attend '
+            "this year's Annual General Meeting. We'll be reviewing the season, electing committee "
+            'positions for next year, and hearing any items members would like to raise.</p>\n\n'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="border:1px solid #e5e7eb; border-radius:6px; margin:0 0 20px 0;">\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92; '
+            'width:110px; border-bottom:1px solid #e5e7eb;">Date</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700; border-bottom:1px solid #e5e7eb;">Wednesday 12 August</td>\n'
+            '  </tr>\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92; '
+            'border-bottom:1px solid #e5e7eb;">Time</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700; border-bottom:1px solid #e5e7eb;">7:00pm</td>\n'
+            '  </tr>\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92;">Location</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700;">Clubrooms, Main Oval</td>\n'
+            '  </tr>\n'
+            '</table>\n\n'
+            '<p style="margin:0 0 24px 0;">If you\'d like to nominate for a committee position or add an '
+            'item to the agenda, please reply to this email by Friday 7 August.</p>\n\n'
+            '<!-- button fill is a neutral default; the header/logo band above already picks up the '
+            "club's accent color automatically -->\n"
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">\n'
+            '<tr><td align="center" bgcolor="#2b2f38" style="border-radius:6px;">\n'
+            '  <a href="https://betterat.cricket" target="_blank" style="display:block; padding:12px 24px; '
+            'font-family:inherit; font-size:14px; font-weight:700; color:#ffffff;">RSVP to attend</a>\n'
+            '</td></tr>\n'
+            '</table>\n\n'
+            '<p style="margin:0;">Regards,<br>{{club}} Committee</p>\n'
+        ),
+    },
+    {
+        "name": "Weekly Newsletter",
+        "html": (
+            '<p style="margin:0 0 4px 0; font-family:inherit; font-size:12px; letter-spacing:0.08em; '
+            'text-transform:uppercase; color:#8a8a92;">Club Newsletter</p>\n'
+            '<h1 style="margin:0 0 16px 0; font-family:inherit; font-size:22px; line-height:1.3; '
+            'color:#1c1c21; font-weight:700;">This week at {{club}}</h1>\n\n'
+            '<p style="margin:0 0 20px 0;">Hi {{first_name}},<br><br>Here\'s a quick round-up of results, '
+            "what's coming up, and news from around the club.</p>\n\n"
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px 0;">\n'
+            '<tr><td style="border-top:1px solid #e5e7eb; font-size:1px; line-height:1px;">&nbsp;</td></tr>\n'
+            '</table>\n\n'
+            '<p style="margin:20px 0 12px 0; font-family:inherit; font-size:13px; letter-spacing:0.06em; '
+            'text-transform:uppercase; color:#8a8a92; font-weight:700;">Results</p>\n'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="border:1px solid #e5e7eb; border-radius:6px; margin:0 0 20px 0;">\n'
+            '  <tr><td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'border-bottom:1px solid #e5e7eb;"><strong>1st XI</strong> beat Riverside CC by 34 runs</td></tr>\n'
+            '  <tr><td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21;">'
+            '<strong>2nd XI</strong> lost to Hillview CC by 4 wickets</td></tr>\n'
+            '</table>\n\n'
+            '<p style="margin:20px 0 12px 0; font-family:inherit; font-size:13px; letter-spacing:0.06em; '
+            'text-transform:uppercase; color:#8a8a92; font-weight:700;">Upcoming fixtures</p>\n'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;">\n'
+            '  <tr>\n'
+            '    <td style="padding:10px 0; border-bottom:1px solid #e5e7eb; font-family:inherit; '
+            'font-size:14px; color:#3f3f46; width:70%;">Sat 25 Jul &mdash; 1st XI vs Coastal CC</td>\n'
+            '    <td style="padding:10px 0; border-bottom:1px solid #e5e7eb; font-family:inherit; '
+            'font-size:14px; color:#8a8a92; text-align:right;">Home</td>\n'
+            '  </tr>\n'
+            '  <tr>\n'
+            '    <td style="padding:10px 0; font-family:inherit; font-size:14px; color:#3f3f46; width:70%;">'
+            'Sat 1 Aug &mdash; 2nd XI vs Riverside CC</td>\n'
+            '    <td style="padding:10px 0; font-family:inherit; font-size:14px; color:#8a8a92; '
+            'text-align:right;">Away</td>\n'
+            '  </tr>\n'
+            '</table>\n\n'
+            '<p style="margin:20px 0 8px 0; font-family:inherit; font-size:13px; letter-spacing:0.06em; '
+            'text-transform:uppercase; color:#8a8a92; font-weight:700;">Club news</p>\n'
+            '<p style="margin:0 0 24px 0;">Nets resume Thursday evenings from 6pm at the main oval. All '
+            'members welcome &mdash; gear is available to borrow for anyone getting started.</p>\n\n'
+            '<!-- button fill is a neutral default; the header/logo band above already picks up the '
+            "club's accent color automatically -->\n"
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">\n'
+            '<tr><td align="center" bgcolor="#2b2f38" style="border-radius:6px;">\n'
+            '  <a href="https://betterat.cricket" target="_blank" style="display:block; padding:12px 24px; '
+            'font-family:inherit; font-size:14px; font-weight:700; color:#ffffff;">View full fixtures &amp; '
+            'results</a>\n'
+            '</td></tr>\n'
+            '</table>\n\n'
+            '<p style="margin:0;">See you at the ground,<br>{{club}}</p>\n'
+        ),
+    },
+    {
+        "name": "Match Day Selection",
+        "html": (
+            '<p style="margin:0 0 4px 0; font-family:inherit; font-size:12px; letter-spacing:0.08em; '
+            'text-transform:uppercase; color:#8a8a92;">Team Selection</p>\n'
+            '<h1 style="margin:0 0 16px 0; font-family:inherit; font-size:22px; line-height:1.3; '
+            'color:#1c1c21; font-weight:700;">You\'ve been selected, {{first_name}}</h1>\n\n'
+            '<p style="margin:0 0 20px 0;">You\'re in the squad for this weekend\'s match. Details below '
+            '&mdash; please confirm your availability as soon as you can.</p>\n\n'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="border:1px solid #e5e7eb; border-radius:6px; margin:0 0 20px 0;">\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92; '
+            'width:110px; border-bottom:1px solid #e5e7eb;">Opponent</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700; border-bottom:1px solid #e5e7eb;">Coastal CC</td>\n'
+            '  </tr>\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92; '
+            'border-bottom:1px solid #e5e7eb;">Date</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700; border-bottom:1px solid #e5e7eb;">Saturday 25 July</td>\n'
+            '  </tr>\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92; '
+            'border-bottom:1px solid #e5e7eb;">Report time</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700; border-bottom:1px solid #e5e7eb;">12:00pm</td>\n'
+            '  </tr>\n'
+            '  <tr>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:13px; color:#8a8a92;">Venue</td>\n'
+            '    <td style="padding:14px 16px; font-family:inherit; font-size:14px; color:#1c1c21; '
+            'font-weight:700;">Main Oval (home)</td>\n'
+            '  </tr>\n'
+            '</table>\n\n'
+            '<!-- button fill is a neutral default; the header/logo band above already picks up the '
+            "club's accent color automatically -->\n"
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;">\n'
+            '<tr><td align="center" bgcolor="#2b2f38" style="border-radius:6px;">\n'
+            '  <a href="https://betterat.cricket" target="_blank" style="display:block; padding:12px 24px; '
+            'font-family:inherit; font-size:14px; font-weight:700; color:#ffffff;">View full team sheet</a>\n'
+            '</td></tr>\n'
+            '</table>\n\n'
+            '<p style="margin:0 0 20px 0;">Can\'t make it? Let your captain know as early as possible so '
+            'the team can be adjusted.</p>\n\n'
+            '<p style="margin:0;">Good luck,<br>{{club}} Selection Committee</p>\n'
+        ),
+    },
+]
+
+
+async def seed_starter_templates(conn) -> int:
+    """Insert the built-in starter templates into every club's BetterComms
+    template library — called from main.py's lifespan on every startup, so
+    existing clubs backfill and new clubs pick them up automatically with no
+    separate creation hook. Keyed per (org, name): a club that already has a
+    same-named template (including a re-run) is left untouched — ON CONFLICT
+    DO NOTHING, not an overwrite. Returns the count actually inserted."""
+    total = 0
+    for t in STARTER_TEMPLATES:
+        result = await conn.execute(
+            text("""
+                INSERT INTO comms_templates (id, organisation_id, name, html)
+                SELECT gen_random_uuid(), o.id, :name, :html
+                FROM organisations o
+                ON CONFLICT (organisation_id, name) DO NOTHING
+            """),
+            {"name": t["name"], "html": t["html"]},
+        )
+        total += result.rowcount or 0
+    return total
+
+
 def _template_out(t: CommsTemplate, *, full: bool = False) -> dict:
     d = {"id": str(t.id), "name": t.name,
          "updated_at": t.updated_at.isoformat() if t.updated_at else None}

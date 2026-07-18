@@ -2748,6 +2748,15 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as stub_session:
         await generate_all_stubs(stub_session)
 
+    # Seed every club's BetterComms library with the built-in starter templates
+    # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
+    # any club created since the last startup with no separate creation hook).
+    from app.routers.comms import seed_starter_templates
+    async with engine.begin() as conn:
+        seeded = await seed_starter_templates(conn)
+        if seeded:
+            logger.info(f"Seeded {seeded} BetterComms starter templates across clubs")
+
     # Warm the SES send-rate cache from platform_settings so a DB-configured rate
     # takes effect immediately on boot (not only once a super admin opens the page).
     from app.services import platform_settings as _ps
