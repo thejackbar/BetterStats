@@ -2474,10 +2474,19 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_meta_ad_snapshots_date_level_ad "
-            "ON meta_ad_snapshots(snapshot_date, level, COALESCE(ad_id, ''))"
-        ))
+        # The original 3-column unique index (snapshot_date, level, ad_id) that
+        # used to be created here is GONE — superseded by the 4-column
+        # campaign_id-aware one further down (migration 162). Do not
+        # reintroduce a "CREATE UNIQUE INDEX IF NOT EXISTS
+        # uq_meta_ad_snapshots_date_level_ad" line here: once two campaigns
+        # have both written a same-day snapshot (the exact scenario 162 exists
+        # to support), the old 3-column definition is genuinely violated by
+        # real data — "IF NOT EXISTS" only skips it while the index doesn't
+        # exist, so the very first boot after 162 successfully drops it, EVERY
+        # later boot tries to recreate the old (now-broken) definition and
+        # crashes the app on startup. This took the site down in production
+        # (Jul 2026) — see the campaign scoping note below before touching
+        # either index statement again.
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_meta_ad_snapshots_date "
             "ON meta_ad_snapshots(snapshot_date DESC)"
