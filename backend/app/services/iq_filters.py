@@ -56,12 +56,40 @@ def grade_match_clause(col_expr: str) -> str:
     return f"{col_expr} = ANY(string_to_array(:grade, '||'))"
 
 
-def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr") -> str:
-    """Combined season (year-expanded) + grade (by name base) filter for the
-    per-game IQ queries, where the grades table is aliased ``gr`` by default."""
+def grade_canonical_label(alias: str = "gr", org_param: str = "org") -> str:
+    """SQL expression: a grade row's merge- and sponsor-aware grouping label.
+
+    An admin can merge two genuinely different-looking raw grade names (e.g.
+    "PSWL South" and "PSWL: South") into one competition via the merge-grades
+    admin screen (``grade_merge_logs``: org-scoped active rows ``alias_name ->
+    canonical_name``, at most one active row per alias, mirrored idempotently at
+    startup in ``main.py``) — ``aggregations._GRADE_MATCH`` already honours this
+    for leaderboards. BetterIQ's grade filter didn't, so a club with a merged
+    grade saw both raw names as separate options that each only matched their
+    own literal games. Resolves an active alias to its canonical raw name
+    (single-hop, matching ``_GRADE_MATCH`` — merges are re-targeted onto the
+    final root at merge time, not chased through a chain here), then strips the
+    trailing sponsor parenthetical (``grade_base``) from whichever name applies,
+    so team_grades()'s listing and season_grade_clause's matching agree."""
+    own = grade_base(f"COALESCE({alias}.display_name_override, {alias}.name)")
+    return (
+        f"COALESCE("
+        f"(SELECT {grade_base('gml.canonical_name')} FROM grade_merge_logs gml"
+        f" WHERE gml.org_id = CAST(:{org_param} AS UUID)"
+        f" AND gml.alias_name = {alias}.name AND gml.undone_at IS NULL LIMIT 1), "
+        f"{own})"
+    )
+
+
+def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr", org_param: str = "org") -> str:
+    """Combined season (year-expanded) + grade (by merged, sponsor-stripped
+    name) filter for the per-game IQ queries, where the grades table is
+    aliased ``gr`` by default. ``org_param`` is the already-bound org-id
+    parameter name the caller's query uses (``org`` everywhere except iq.py's
+    ``org_id`` — see ``grade_canonical_label``)."""
     parts = []
     if season_id:
         parts.append(season_member_clause(f"{grade_alias}.season_id", season_id))
     if grade_id:
-        parts.append(f"AND {grade_match_clause(grade_base(grade_alias + '.name'))}")
+        parts.append(f"AND {grade_match_clause(grade_canonical_label(grade_alias, org_param))}")
     return " ".join(p for p in parts if p)

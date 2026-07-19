@@ -381,11 +381,12 @@ function OurRecord({ performers }) {
   if (!bat.length && !bowl.length) return null
   const row = (p, phrase) => (
     <div key={p.player_id} className="flex items-center justify-between gap-3">
-      <span className={`text-[13.5px] whitespace-nowrap ${p.active ? '' : 'text-pb-faint'}`}>
-        <PlayerLink id={p.player_id}>{p.name}</PlayerLink>
-        {p.squad && <span className="iq-mono text-pb-faintest ml-1.5" style={{ fontSize: 9.5 }}>{p.squad}</span>}
-        {!p.active && ' ·'}
-      </span>
+      <div className={`min-w-0 flex-1 ${p.active ? '' : 'text-pb-faint'}`}>
+        <div className="text-[13.5px] truncate">
+          <PlayerLink id={p.player_id}>{p.name}</PlayerLink>{!p.active && ' ·'}
+        </div>
+        {p.squad && <div className="iq-mono text-pb-faintest truncate" style={{ fontSize: 9.5 }}>{p.squad}</div>}
+      </div>
       <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{phrase}</span>
     </div>
   )

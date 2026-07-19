@@ -733,6 +733,21 @@ Five related fixes/features from live feedback on the Opposition page:
 - **Radar context**: `viz.Radar` has hover/focus tooltips per vertex (score,
   and with `buildRadar`'s new `details` the actual value + peer mean) and a
   `legend` prop; opposition + deep-dive callers pass both.
+- **Multi-grade also honours the merge-grades admin feature**: a club can
+  merge two literally-different raw grade names (e.g. "PSWL South" / "PSWL:
+  South") into one competition via `grade_merge_logs` (org-scoped active
+  `alias_name -> canonical_name` rows, `aggregations._GRADE_MATCH` already
+  reads it for leaderboards) — the first cut of this filter only stripped the
+  sponsor parenthetical (`grade_base`), so a merged club still saw both raw
+  names as separate filter options that each only matched their own literal
+  games. `iq_filters.grade_canonical_label(alias, org_param)` resolves an
+  active alias to its canonical raw name (single-hop, matching
+  `_GRADE_MATCH` — merges are re-targeted onto the final root at merge time,
+  not chased through a chain here) before stripping the sponsor
+  parenthetical; `season_grade_clause`/`iq_team._scope`/`iq_team.player_impact`
+  /`iq_trends._movers_src`/`iq._opp_scope`/`iq_team.team_grades` (the
+  filter-bar listing query) all route through it. `org_param` defaults to
+  `"org"` (every caller except `iq.py`, which binds `"org_id"`).
 - **Ask BetterIQ fixture/opposition tools** (`iq_ask.py`): `upcoming_fixtures`,
   `opposition_report` (trimmed instant report; performers carry `squad` for
   team-relevance), `opponent_danger_players` (reads the dossier cache via
