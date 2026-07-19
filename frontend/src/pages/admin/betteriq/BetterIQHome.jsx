@@ -12,7 +12,7 @@ import {
   LoadingBar, fmtCount, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, DonutStat } from './viz'
-import { useIQFilter, effectiveSeasonId } from './Context'
+import { useIQFilter, effectiveSeasonId, gradeBase, teamNames } from './Context'
 import { formatSeason } from '../../../lib/cricketFormat'
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
@@ -399,6 +399,7 @@ export default function BetterIQHome() {
   const { ctx } = useIQFilter()
   const seasonId = effectiveSeasonId(ctx)
   const gradeId = ctx?.team?.id || undefined
+  const gradeNames = useMemo(() => teamNames(ctx?.team), [ctx])
 
   const [opponents, setOpponents] = useState(undefined) // undefined = loading
   const [mvp, setMvp] = useState(undefined)
@@ -444,7 +445,7 @@ export default function BetterIQHome() {
   // Next fixture + scout cards scope to the selected grade (by grade name); the
   // fixtures feed spans all grades.
   const allUpcoming = opponents?.upcoming || []
-  const upcoming = gradeId ? allUpcoming.filter(f => f.grade_name === gradeId) : allUpcoming
+  const upcoming = gradeNames.length ? allUpcoming.filter(f => gradeNames.includes(gradeBase(f.grade_name))) : allUpcoming
   const nextFx = upcoming[0] || null
   const scoutCards = upcoming.slice(0, 4)
 
