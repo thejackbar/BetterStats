@@ -748,7 +748,14 @@ export default function OppositionScout() {
   // the default newest one) is a real filter. Only "All seasons" means all-time
   // — the old "newest single season counts as no filter" special case made the
   // header say 2025/26 over an all-time record.
-  const seasonActive = !isAllSeasons && seasonIds.length > 0 && ctx?.season?.mode !== 'all'
+  // `untouchedDefault`: before the user has touched the filter bar this session,
+  // the season is ABOUT to be corrected to All seasons by the effect below —
+  // read it as already-all-time here too, so the very first report fetch (which
+  // can fire on the same render, e.g. a deep-linked ?opponent=) requests the
+  // same scope the correction will settle on, instead of firing once now and
+  // again a moment later once ctx.season textually flips to 'all'.
+  const untouchedDefault = !ctx?.touched
+  const seasonActive = !untouchedDefault && !isAllSeasons && seasonIds.length > 0 && ctx?.season?.mode !== 'all'
   const hasFilter = ctxGradeNames.length > 0 || seasonActive
   const filterLabel = [ctx?.team?.id ? ctx.team.name : null, seasonActive ? seasonText : null].filter(Boolean).join(' · ') || 'Filtered'
   // First landing (filter bar untouched this session): default the season to
