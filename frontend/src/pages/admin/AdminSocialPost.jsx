@@ -9,7 +9,7 @@ import {
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgToPalette,
+  PALETTES, orgAccent, orgToPalette,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
@@ -1457,7 +1457,7 @@ export default function AdminSocialPost() {
                   className={`flex items-center gap-2 px-2.5 py-1 rounded border text-[11px] font-mono transition-colors ${paletteKey === 'club' ? '' : 'text-pb-faint hover:text-pb-text border-transparent'}`}
                   style={paletteKey === 'club' ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
                 >
-                  <span style={{ width: 12, height: 12, borderRadius: 2, background: settings?.primary_color || '#16c784', display: 'inline-block' }} />
+                  <span style={{ width: 12, height: 12, borderRadius: 2, background: orgAccent(settings), display: 'inline-block' }} />
                   Club
                 </button>
                 {Object.entries(PALETTES).map(([key, pal]) => (

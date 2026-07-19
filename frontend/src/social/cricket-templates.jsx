@@ -270,15 +270,22 @@ export const PALETTES = {
   graphite: { name: 'Graphite', primary: '#101113', secondary: '#1d1f23', accent: '#e8ff00', ink: '#ffffff' },
 }
 
+// The club's own accent colour, resolved the same way the site theme is:
+// theme_config.accent (what the branding/settings pages actually edit),
+// then the accent_color column it's mirrored into, then the legacy
+// primary_color, then brand green. Reading primary_color first (the old
+// behaviour) left most clubs stuck on the default green, since nothing
+// edits that column any more.
+export function orgAccent(org) {
+  return org?.theme_config?.accent || org?.accent_color || org?.primary_color || '#16c784'
+}
+
 export function orgToPalette(org) {
-  const accent = org?.primary_color || '#16c784'
-  const primary = org?.accent_color || '#243352'
-  const r = parseInt(primary.slice(1, 3), 16)
-  const g = parseInt(primary.slice(3, 5), 16)
-  const b = parseInt(primary.slice(5, 7), 16)
-  const lighter = (x, a) => Math.min(255, x + a).toString(16).padStart(2, '0')
-  const secondary = `#${lighter(r, 20)}${lighter(g, 20)}${lighter(b, 20)}`
-  return { name: 'Club', primary, secondary, accent, ink: '#ffffff' }
+  // Neutral dark background pair with the club's primary colour as the
+  // accent only — club colours rarely make a good post background, and the
+  // light theme swaps in its own paper/ink via applyTheme anyway. Anyone
+  // who wants a club-coloured background can build it as a Custom palette.
+  return { name: 'Club', primary: '#101113', secondary: '#1d1f23', accent: orgAccent(org), ink: '#ffffff' }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
