@@ -285,11 +285,13 @@ export default function SetupWizard() {
                   <StepBody step={step} onRefresh={load} onOpenTool={openTool} />
                 )}
 
-                {/* Footer nav. Auto-detected steps deliberately have no
-                    manual "mark done" — do the thing and the step ticks
-                    itself; NEXT just moves on. Manual steps get both a plain
-                    NEXT and MARK DONE & NEXT. Optional steps add DOESN'T
-                    APPLY, which is reversible from this same card. */}
+                {/* Footer nav. Every non-vital step can be marked done by
+                    hand (auto-detection is a convenience, not a gate — e.g.
+                    Net Manager might be "done enough" without saving
+                    settings); vital steps (first sync, the merges) only
+                    complete when the wizard can actually see the result, so
+                    they get NEXT STEP with no manual mark. Optional steps
+                    add DOESN'T APPLY, which is reversible from this card. */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t pb-hairline">
                   <WizardButton variant="secondary" onClick={() => goTo(currentIndex - 1)} disabled={currentIndex === 0}>
                     ← BACK
@@ -316,7 +318,7 @@ export default function SetupWizard() {
                             DOESN'T APPLY TO US
                           </WizardButton>
                         )}
-                        {step.auto ? (
+                        {step.vital ? (
                           <WizardButton onClick={() => goTo(currentIndex + 1)}>NEXT STEP →</WizardButton>
                         ) : (
                           <>
@@ -330,7 +332,7 @@ export default function SetupWizard() {
                     )}
                   </div>
                 </div>
-                {step.auto && !step.done && !step.na && !step.group.locked && (
+                {step.vital && step.auto && !step.done && !step.group.locked && (
                   <p className="font-mono text-[10px] text-pb-faintest text-right -mt-2">
                     This step ticks itself off once the work's done — no need to mark anything.
                   </p>
