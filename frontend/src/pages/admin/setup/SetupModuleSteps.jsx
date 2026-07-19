@@ -139,7 +139,7 @@ export function AssignPlayersStep({ step, onRefresh }) {
       }
       let updated = 0
       for (const [teamId, playerIds] of byTeam) {
-        const res = await api.bsSquadAssign(playerIds, teamId)
+        const res = await api.bsAssignSquad(playerIds, teamId)
         updated += res?.updated || 0
       }
       setMsg({ tone: 'good', text: `${updated} player${updated === 1 ? '' : 's'} assigned.` })
