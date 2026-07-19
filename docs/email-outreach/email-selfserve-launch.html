@@ -1,8 +1,10 @@
 <!DOCTYPE html>
-<!-- Subject (set this in Gmail / Mail - pick one):
-       Your club's entire history, live in minutes
-       You can now set BetterCricket up yourself
-       Seen us on Facebook? Here's the news behind the ad
+<!-- Subject (set this in Gmail / Mail):
+       Get all of your club's stats online today! Free 14 day trial, no strings attached
+     Preheader (the hidden div right after <body> below) is separate from the
+     subject - it's what shows as the grey preview snippet in the inbox list,
+     so it should ADD to the subject, not repeat it. Currently:
+       No sales call. No credit card. Just search your club and go live.
      Campaign: the self-serve launch EDM, sent alongside the BC_AU_SelfServe_Aug2026
      Meta campaign. utm_campaign=BC_AU_SelfServe_EDM_Aug2026 keeps email signups in
      their own bucket on the ad-signups report. make_sends.py works unchanged:
@@ -18,6 +20,27 @@
 <title>Your club's entire history, live in minutes</title>
 </head>
 <body style="margin:0; padding:0; background-color:#0b1220;">
+
+<!-- ── Hidden preheader ─────────────────────────────────────────────────
+     This is the grey preview snippet Gmail/Apple Mail/Outlook show next to
+     the subject in the inbox list. Without it, clients default to grabbing
+     the first visible text in the email - here that would've been "Hi
+     [first name]," which wastes the slot. The combination of display:none +
+     font-size:1px + max-height:0 + opacity:0 + mso-hide is the
+     cross-client-safe way to hide it from the rendered email while keeping
+     it in the DOM for the preview scanner to read.
+     The second block of repeated &zwnj;&nbsp; is padding, not a typo: most
+     clients show ~100-140 characters of preview text, and if the preheader
+     text alone is shorter than that, they'll keep reading into your next
+     visible text (the "Hi [first name]," greeting) to fill the gap -
+     diluting the punchy line with a weak one. The invisible padding eats up
+     the remaining character budget so nothing else leaks in. -->
+<div style="display:none; font-size:1px; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
+No sales call. No credit card. Just search your club and go live.
+</div>
+<div style="display:none; font-size:1px; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
+&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
+</div>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b1220;">
   <tr>
