@@ -331,16 +331,23 @@ def _apply_utm(html: str, utm: dict, utm_code: Optional[str] = None) -> str:
     code = str(utm_code or "").strip()
     if not params and not code:
         return html
-    campaign_qs = "&".join(f"{k}={quote(v, safe='')}" for k, v in params)
 
     def repl(m):
         url = m.group(2)
         low = url.lower()
         if not low.startswith(("http://", "https://")) or "/public/comms/unsubscribe/" in low:
             return m.group(0)
-        parts = []
-        if params and "utm_source=" not in low:
-            parts.append(campaign_qs)
+        # Each UTM key is added independently, skipped only if THAT key is
+        # already on the link — not gated behind utm_source alone. A template
+        # that hand-places {{utm_source}}={{utm_code}} (the documented
+        # per-club merge-var pattern) used to suppress utm_campaign/medium/
+        # content too, since the old check ("skip the whole campaign_qs block
+        # if utm_source= is already present") couldn't tell "already has ITS
+        # OWN utm_source" apart from "already has every campaign param". That
+        # silently dropped utm_campaign on exactly the links utm_id-per-club
+        # attribution most needs it on — a visit tagged with a club's utm_code
+        # then couldn't be traced back to which campaign sent it.
+        parts = [f"{k}={quote(v, safe='')}" for k, v in params if f"{k}=" not in low]
         if code and "utm_id=" not in low:
             parts.append(f"utm_id={quote(code, safe='')}")
         if not parts:

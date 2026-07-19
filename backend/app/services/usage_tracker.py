@@ -166,6 +166,7 @@ async def record_event(
     click_source: Optional[str] = None,
     landing_referrer: Optional[str] = None,
     landing_path: Optional[str] = None,
+    time_on_page_ms: Optional[int] = None,
 ) -> None:
     """Insert one breadcrumb. Opens its own session so it can run after the
     request session has been closed. Never raises."""
@@ -197,14 +198,16 @@ async def record_event(
                         user_id, org_id, ip_hash, user_agent, referer,
                         country, region, city, metadata,
                         visitor_id, utm_source, utm_medium, utm_campaign,
-                        utm_content, utm_id, click_id, traffic_source, landing_path
+                        utm_content, utm_id, click_id, traffic_source, landing_path,
+                        time_on_page_ms
                     ) VALUES (
                         :event_type, :method, :path, :route, :status, :duration_ms,
                         :user_id, :org_id, :ip_hash, :user_agent, :referer,
                         :country, :region, :city,
                         CAST(:metadata AS JSONB),
                         :visitor_id, :utm_source, :utm_medium, :utm_campaign,
-                        :utm_content, :utm_id, :click_id, :traffic_source, :landing_path
+                        :utm_content, :utm_id, :click_id, :traffic_source, :landing_path,
+                        :time_on_page_ms
                     )
                     RETURNING id
                     """
@@ -234,6 +237,12 @@ async def record_event(
                     "click_id": (click_id or "")[:300] or None,
                     "traffic_source": traffic_source,
                     "landing_path": (landing_path or "")[:500] or None,
+                    # Sanity-clamp: a beacon can't reliably report more than a day
+                    # on one page — a bad clock or a stuck timer shouldn't skew averages.
+                    "time_on_page_ms": (
+                        max(0, min(int(time_on_page_ms), 24 * 60 * 60 * 1000))
+                        if time_on_page_ms is not None else None
+                    ),
                 },
             )
             row_id = result.scalar()

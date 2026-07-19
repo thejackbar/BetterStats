@@ -1981,6 +1981,56 @@ while it's off — merge-safe ahead of campaign launch). The internal
   `org_module_subscriptions.id`), so a fresh ORM-created DB needs those
   defaults added by hand before the lifespan module backfill runs.
 
+## Usage tracking — session duration, time on page, visitor journeys (migration 165, v8.75.0, Jul 2026)
+
+`usage_events` had club, page, and UTM/campaign granularity but nothing on how
+long a visitor actually stayed anywhere, and no built-in ordered-journey view
+(see the earlier "Data Source Topology"-style investigation this session did
+into what the table could and couldn't answer). Both gaps are closed without
+a new table:
+
+- **`usage_events.time_on_page_ms`** (migration 165) is filled by a new
+  `page_exit` event, not by the existing `page_view` row. `usePageView.js`
+  fires it via `navigator.sendBeacon` on `pagehide` and on `visibilitychange`
+  going hidden (covers both real navigation/tab-close and a mobile browser
+  backgrounding the tab without ever firing `pagehide`), and again on every
+  route change to close out the page just left. `POST /usage/event/exit`
+  (`routers/usage.py`) writes it; clamped server-side to 24h so a stuck timer
+  (laptop asleep, tab backgrounded for hours) can't skew an average.
+- **Session duration is computed on read, not stored.** A "session" is a
+  visitor's `page_view` timestamps grouped on a ≥30-minute gap (the
+  industry-standard boundary); duration is the span between first and last
+  page_view PLUS the final page's own `time_on_page_ms` (matched by visitor +
+  path + nearest-following `page_exit`) — without that tail, a single-page
+  bounce session always reads 0ms even if the visitor read the page for a
+  minute before leaving. `GET /club-admin/usage/session-duration` returns
+  avg/median session length, a length distribution, and top pages by average
+  dwell time; surfaced as a new "Engagement" panel on the Usage page.
+- **`GET /club-admin/usage/journey?visitor_id=`** reconstructs one visitor's
+  actual ordered page-path, split into sessions, each step carrying its
+  matched dwell time and whatever UTM/campaign tag was on it — every other
+  Usage endpoint aggregates across visitors, this is the only one that
+  replays a single visitor's route through the site. Surfaced automatically
+  on the Usage page: typing (or deep-linking with) a visitor UUID into the
+  existing search box now shows a "Visitor journey" panel above the regular
+  aggregate views.
+- **Campaign-capture fix, found while building this**: a club outreach
+  link's UTM tags are applied by `comms.py::_apply_utm`, keyed on `utm_id`
+  (the recipient club's `marketing_clubs.utm_code`) plus the sending
+  campaign's own `utm_source`/`medium`/`campaign`/`content`. The old skip
+  logic gated the WHOLE campaign-params block behind "does the link already
+  have `utm_source=`" — so a template that hand-placed
+  `{{utm_source}}={{utm_code}}` (a documented per-club merge-var pattern)
+  silently dropped `utm_campaign` too, even though only `utm_source` was
+  actually already present. Now each UTM key is checked and added
+  independently. Separately, `usePageView.js` used to send only the
+  visitor's STICKY first-touch `utm_campaign` (`getAttribution()`) — a
+  returning visitor clicking a brand-new campaigned link would have that
+  click's `utm_id` recorded fresh but its `utm_campaign` reported as
+  whatever their first-ever visit happened to carry. `visitor.js` gained
+  `getCurrentUtm()` (a non-sticky parse of the CURRENT URL's own UTM params),
+  which now wins over the first-touch snapshot whenever present.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

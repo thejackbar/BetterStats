@@ -93,6 +93,21 @@ function fmtNum(n) {
   return String(n)
 }
 
+// ms → a short human duration ("45s", "2m 10s", "1h 5m"). 0/null → "—".
+function fmtDuration(ms) {
+  if (!ms || ms <= 0) return '—'
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rs = s % 60
+  if (m < 60) return rs ? `${m}m ${rs}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return rm ? `${h}h ${rm}m` : `${h}h`
+}
+
+const VISITOR_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function userLabel(row) {
   return row.user_display_name || row.user_email
     || (row.user_id ? row.user_id.slice(0, 8) : 'anon')
@@ -439,6 +454,177 @@ function LiveSection() {
       )}
       </>)}
     </div>
+  )
+}
+
+// ─── Engagement: session duration + per-page dwell time ──────────────────────
+// Derived from the page_exit beacon (usePageView.js) — no "duration" existed
+// anywhere before it. Session = a visitor's page views grouped on a ≥30-min
+// gap; duration = span between first/last page_view + the final page's own
+// dwell time, so even a single-page (bounce) visit reads a real number.
+
+function EngagementSection({ days }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api.adminUsageSessionDuration({ days })
+      .then(d => { if (!cancelled) { setData(d); setError(null) } })
+      .catch(e => { if (!cancelled) setError(e?.message || 'Failed to load') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [days])
+
+  const dist = data?.distribution || []
+  const distMax = Math.max(1, ...dist.map(d => d.count || 0))
+  const topPages = data?.top_pages || []
+
+  return (
+    <Panel id="engagement" title="Engagement" sub="session duration & time on page">
+      {error && (
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
+      {loading && !data && (
+        <div className="pb-card p-6 text-center font-mono text-[11px] text-pb-faint">Loading…</div>
+      )}
+      {data && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="pb-card px-3 py-2">
+              <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Sessions</div>
+              <div className="font-display text-xl text-pb-text">{fmtNum(data.sessions)}</div>
+            </div>
+            <div className="pb-card px-3 py-2" style={{ background: 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' }}>
+              <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Avg session</div>
+              <div className="font-display text-xl text-pb-text">{fmtDuration(data.avg_session_ms)}</div>
+            </div>
+            <div className="pb-card px-3 py-2">
+              <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Median session</div>
+              <div className="font-display text-xl text-pb-text">{fmtDuration(data.median_session_ms)}</div>
+            </div>
+            <div className="pb-card px-3 py-2">
+              <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Pages / session</div>
+              <div className="font-display text-xl text-pb-text">{data.avg_pages_per_session}</div>
+            </div>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-5">
+            <div>
+              <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">Session length distribution</h3>
+              <div className="pb-card px-3 py-2">
+                {data.sessions === 0 ? (
+                  <div className="py-3 text-center font-mono text-[10px] text-pb-faint">No sessions in window.</div>
+                ) : dist.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2 py-1">
+                    <div className="w-16 shrink-0 font-mono text-[11px] text-pb-text">{d.bucket}</div>
+                    <div className="flex-1 h-3 bg-pb-surface2 rounded overflow-hidden">
+                      <div className="h-full rounded" style={{ width: `${Math.round((d.count / distMax) * 100)}%`, background: 'var(--pb-accent)' }} />
+                    </div>
+                    <div className="w-10 text-right font-mono text-[10px] text-pb-faint">{d.count}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">Avg time on page</h3>
+              <div className="pb-card overflow-hidden">
+                {topPages.length === 0 ? (
+                  <div className="p-4 text-center font-mono text-[10px] text-pb-faint">Not enough dwell-time samples yet.</div>
+                ) : topPages.map((p, i) => (
+                  <div key={i} className={`flex items-center gap-3 px-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] text-pb-text truncate">{p.label}</div>
+                      <div className="font-mono text-[9px] text-pb-faintest truncate">{p.page} · {p.samples} samples</div>
+                    </div>
+                    <div className="font-mono text-[12px] text-pb-text shrink-0">{fmtDuration(p.avg_time_on_page_ms)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+// ─── Visitor journey ──────────────────────────────────────────────────────────
+// Shown when the search box is a visitor UUID (e.g. from an onboarding
+// request's "View activity" deep link, or pasted from Recent events). Every
+// other panel on this page aggregates ACROSS visitors — this reconstructs
+// one visitor's actual ordered path, split into visits, with per-page dwell
+// time and whatever UTM/campaign tag was attached to each step.
+
+function VisitorJourney({ visitorId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setData(null)
+    api.adminUsageJourney(visitorId)
+      .then(d => { if (!cancelled) { setData(d); setError(null) } })
+      .catch(e => { if (!cancelled) setError(e?.message || 'Failed to load') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [visitorId])
+
+  return (
+    <Panel id="journey" title="Visitor journey" sub={visitorId}>
+      {error && (
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
+      {loading && (
+        <div className="pb-card p-6 text-center font-mono text-[11px] text-pb-faint">Loading…</div>
+      )}
+      {data && data.sessions.length === 0 && !loading && (
+        <div className="pb-card p-6 text-center font-mono text-[11px] text-pb-faint">No page views recorded for this visitor.</div>
+      )}
+      {data && data.sessions.length > 0 && (
+        <div className="space-y-4">
+          <div className="font-mono text-[10px] text-pb-faintest">
+            {data.total_page_views} page view{data.total_page_views === 1 ? '' : 's'} across {data.sessions.length} visit{data.sessions.length === 1 ? '' : 's'}
+          </div>
+          {data.sessions.map((sess, si) => (
+            <div key={si} className="pb-card overflow-hidden">
+              <div className="px-3 py-1.5 pb-hairline-b font-mono text-[9px] uppercase tracking-wide text-pb-faint">
+                Visit {si + 1} · {fmtTime(sess.started_at)}
+              </div>
+              {sess.steps.map((step, ti) => (
+                <div key={ti} className={`flex items-start gap-2 px-3 py-2 ${ti > 0 ? 'pb-hairline-t' : ''}`}>
+                  <span className="font-mono text-[9px] text-pb-faintest w-5 shrink-0 mt-0.5">{ti + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <a href={step.path} target="_blank" rel="noopener noreferrer"
+                        className="text-[12px] text-pb-text hover:text-pb-accent hover:underline">{step.label}</a>
+                      {(step.utm_campaign || step.utm_id) && (
+                        <span className="font-mono text-[9px] text-pb-accent">
+                          {step.utm_campaign || step.utm_id}
+                        </span>
+                      )}
+                      {step.traffic_source && (
+                        <span className="font-mono text-[9px] text-pb-faintest">via {step.traffic_source}</span>
+                      )}
+                    </div>
+                    <div className="font-mono text-[9px] text-pb-faintest truncate">{step.path}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-mono text-[10px] text-pb-faintest">{fmtTime(step.created_at)}</div>
+                    <div className="font-mono text-[10px] text-pb-text">{fmtDuration(step.time_on_page_ms)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
   )
 }
 
@@ -810,6 +996,12 @@ export default function AdminUsage() {
           </div>
         )}
         </Panel>
+
+        {/* Visitor journey — appears only when the search box is a visitor UUID. */}
+        {VISITOR_ID_RE.test(q) && <VisitorJourney visitorId={q} />}
+
+        {/* Engagement — session duration & time on page */}
+        <EngagementSection days={days} />
 
         {/* Meta ads & campaigns (marketing attribution) */}
         <MetaCampaigns data={campaigns} loading={loading} />
