@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<!-- Subject (set this in Gmail / Mail — pick one):
+<!-- Subject (set this in Gmail / Mail - pick one):
        Your club's entire history, live in minutes
        You can now set BetterCricket up yourself
        Seen us on Facebook? Here's the news behind the ad
      Campaign: the self-serve launch EDM, sent alongside the BC_AU_SelfServe_Aug2026
      Meta campaign. utm_campaign=BC_AU_SelfServe_EDM_Aug2026 keeps email signups in
-     their own bucket on the ad-signups report (don't merge with the ad campaign's
-     name or email conversions will pollute the ads' cost-per-signup). make_sends.py
-     works unchanged: utm_source=ca is the per-club placeholder, greeting is
-     "Hi [first name],". -->
+     their own bucket on the ad-signups report. make_sends.py works unchanged:
+     utm_source=ca is the per-club placeholder, greeting is "Hi [first name],".
+     Images (logo, module icons, club logos) are served from
+     betterat.cricket/email/*.png - they show once the frontend is deployed. -->
 <html lang="en-AU">
 <head>
 <meta charset="utf-8">
@@ -25,10 +25,14 @@
 
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#0b1220; border:1px solid #1d2331; border-radius:12px;">
 
-        <!-- ── Header (brand wordmark) ──────────────────────────────── -->
+        <!-- Header: logo mark + wordmark (wordmark stays live text so the
+             header still reads with images blocked) -->
         <tr>
-          <td align="center" style="padding:30px 36px 0 36px;">
-            <a href="https://betterat.cricket/?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026" style="text-decoration:none;"><span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:25px; line-height:30px; font-weight:bold; letter-spacing:-0.3px; color:#e6e8ef;">Better<span style="color:#16C784;">Cricket</span></span></a>
+          <td align="center" style="padding:32px 36px 0 36px;">
+            <a href="https://betterat.cricket/?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026" style="text-decoration:none;">
+              <img src="https://betterat.cricket/email/bettercricket-logo.png" width="76" alt="" style="display:block; border:0; margin:0 auto 10px auto;">
+              <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:25px; line-height:30px; font-weight:bold; letter-spacing:-0.3px; color:#e6e8ef;">Better<span style="color:#16C784;">Cricket</span></span>
+            </a>
           </td>
         </tr>
         <tr>
@@ -39,69 +43,89 @@
           </td>
         </tr>
 
-        <!-- ── Headline (echoes the ad and the /trial hero) ─────────── -->
+        <!-- Pill (echoes the /trial hero) -->
         <tr>
-          <td align="center" style="padding:26px 36px 0 36px;">
-            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:26px; line-height:33px; font-weight:bold; letter-spacing:-0.4px; color:#e6e8ef;">Your club&rsquo;s entire history,<br><span style="color:#16C784;">live in minutes.</span></span>
+          <td align="center" style="padding:24px 36px 0 36px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="border:1px solid #2a3450; border-radius:999px; padding:7px 16px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:16px; color:#aab1c2;">
+                  <span style="color:#16C784;">&#9679;</span>&nbsp;&nbsp;No credit card &middot; No sales call
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
 
-        <!-- ── Body copy ────────────────────────────────────────────── -->
+        <!-- Headline (echoes the ad and the /trial hero) -->
         <tr>
-          <td style="padding:24px 36px 0 36px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <td align="center" style="padding:18px 36px 0 36px;">
+            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:28px; line-height:35px; font-weight:bold; letter-spacing:-0.4px; color:#e6e8ef;">Your club&rsquo;s entire history,<br><span style="color:#16C784;">live in minutes.</span></span>
+          </td>
+        </tr>
 
+        <!-- Body copy -->
+        <tr>
+          <td style="padding:26px 36px 0 36px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td style="padding-bottom:18px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
                   Hi [first name],
                 </td>
               </tr>
-
               <tr>
                 <td style="padding-bottom:18px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
                   You might have spotted Better<span style="color:#16C784; font-weight:bold;">Cricket</span> in your Facebook feed this week. Here&rsquo;s the news behind the ad: <strong>clubs can now set themselves up.</strong> No waiting on us, no demo call to book.
                 </td>
               </tr>
-
               <tr>
                 <td style="padding-bottom:22px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  Register your club yourself and every module switches on for a <strong>14-day free trial</strong>, running on your club&rsquo;s own data. No credit card. It takes about 3 minutes:
-                </td>
-              </tr>
-
-            </table>
-          </td>
-        </tr>
-
-        <!-- ── The three steps (mirrors the /trial page) ────────────── -->
-        <tr>
-          <td style="padding:0 36px 6px 36px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
-              <tr>
-                <td style="padding:20px 22px 6px 22px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  <span style="color:#16C784; font-weight:bold;">1&nbsp;&nbsp;Find your club</span><br>
-                  <span style="color:#aab1c2;">A simple search of the Cricket Australia register.</span>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:10px 22px 6px 22px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  <span style="color:#16C784; font-weight:bold;">2&nbsp;&nbsp;Enter your details</span><br>
-                  <span style="color:#aab1c2;">Set up your admin profile and verify your email.</span>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:10px 22px 20px 22px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  <span style="color:#16C784; font-weight:bold;">3&nbsp;&nbsp;Complete the setup wizard</span><br>
-                  <span style="color:#aab1c2;">A step-by-step guide customises BetterCricket to your club while your full playing history imports in the background.</span>
+                  Register your club yourself and every module switches on for a <strong>14-day free trial</strong>, running on your club&rsquo;s own data. It takes about 3 minutes:
                 </td>
               </tr>
             </table>
           </td>
         </tr>
 
-        <!-- ── Primary CTA ──────────────────────────────────────────── -->
+        <!-- The three steps (mirrors the /trial page cards) -->
         <tr>
-          <td align="center" style="padding:22px 36px 8px 36px;">
+          <td style="padding:0 36px 0 36px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="padding-bottom:12px; background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:16px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                    <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:4px;">Step 1</div>
+                    <div style="font-size:16px; line-height:22px; font-weight:bold; color:#e6e8ef; padding-bottom:3px;">Find your club</div>
+                    <div style="font-size:14px; line-height:21px; color:#aab1c2;">A simple search of the Cricket Australia register.</div>
+                  </td></tr></table>
+                </td>
+              </tr>
+              <tr><td style="height:12px; line-height:12px; font-size:1px;">&nbsp;</td></tr>
+              <tr>
+                <td style="padding-bottom:12px; background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:16px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                    <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:4px;">Step 2</div>
+                    <div style="font-size:16px; line-height:22px; font-weight:bold; color:#e6e8ef; padding-bottom:3px;">Enter your details</div>
+                    <div style="font-size:14px; line-height:21px; color:#aab1c2;">Set up your admin profile and verify your email.</div>
+                  </td></tr></table>
+                </td>
+              </tr>
+              <tr><td style="height:12px; line-height:12px; font-size:1px;">&nbsp;</td></tr>
+              <tr>
+                <td style="padding-bottom:12px; background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:16px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                    <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:4px;">Step 3</div>
+                    <div style="font-size:16px; line-height:22px; font-weight:bold; color:#e6e8ef; padding-bottom:3px;">Complete the setup wizard</div>
+                    <div style="font-size:14px; line-height:21px; color:#aab1c2;">A step-by-step guide customises BetterCricket to your club while your full playing history imports in the background.</div>
+                  </td></tr></table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Primary CTA -->
+        <tr>
+          <td align="center" style="padding:24px 36px 8px 36px;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="center" bgcolor="#16C784" style="background-color:#16C784; border-radius:8px;">
@@ -112,22 +136,154 @@
           </td>
         </tr>
         <tr>
-          <td align="center" style="padding:0 36px 24px 36px;">
+          <td align="center" style="padding:0 36px 26px 36px;">
             <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; color:#8a90a2;">Quick and easy setup &middot; Every module included &middot; No obligation</span>
           </td>
         </tr>
 
-        <!-- ── History reassurance ──────────────────────────────────── -->
+        <!-- Modules (same cards as the site, lead-in echoes the /trial page) -->
+        <tr>
+          <td style="padding:0 36px 4px 36px;">
+            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:17px; line-height:24px; font-weight:bold; color:#e6e8ef; display:block; padding-bottom:14px;">Then you&rsquo;re free to explore everything Better<span style="color:#16C784;">Cricket</span> has to offer:</span>
+          </td>
+        </tr>
         <tr>
           <td style="padding:0 36px 0 36px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<!-- BetterStats -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betterstats?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_module_card" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#16C784" style="background-color:#16C784; border-radius:10px;"><img src="https://betterat.cricket/email/betterstats.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#16C784;">Stats</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Your club&#8217;s memory: every player, every season, kept forever.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#16C784;">Explore BetterStats &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterSelect -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betterselect?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_module_card" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#3B82F6" style="background-color:#3B82F6; border-radius:10px;"><img src="https://betterat.cricket/email/betterselect.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#3B82F6;">Select</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Availability and team selection, sorted for every grade in minutes.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#3B82F6;">Explore BetterSelect &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterSocials -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/bettersocials?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_module_card" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#EC4899" style="background-color:#EC4899; border-radius:10px;"><img src="https://betterat.cricket/email/bettersocials.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#EC4899;">Socials</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Your public website plus match-day posts your community actually reposts.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#EC4899;">Explore BetterSocials &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterAdmin -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betteradmin?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_module_card" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#F59E0B" style="background-color:#F59E0B; border-radius:10px;"><img src="https://betterat.cricket/email/betteradmin.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#F59E0B;">Admin</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Run the back office: fees, comms and merch in one place.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#F59E0B;">Explore BetterAdmin &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterIQ -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betteriq?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_module_card" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#A855F7" style="background-color:#A855F7; border-radius:10px;"><img src="https://betterat.cricket/email/betteriq.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#A855F7;">IQ</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Broadcast-grade analytics and an opposition scout for your club.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#A855F7;">Explore BetterIQ &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterFantasyCricket -->
+              <tr>
+                <td style="padding-bottom:4px;">
+                  <a href="https://betterat.cricket/modules/betterfantasy?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_module_card" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#22D3EE" style="background-color:#22D3EE; border-radius:10px;"><img src="https://betterat.cricket/email/betterfantasy.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#22D3EE;">FantasyCricket</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">A fantasy cricket comp for your club, scored off your own games.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#22D3EE;">Explore BetterFantasyCricket &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- History + trial-end reassurance -->
+        <tr>
+          <td style="padding:16px 36px 0 36px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td style="padding-bottom:18px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  Everything Cricket Australia holds for your club imports automatically, as far back as the records go. There&rsquo;s no limit. And if your club&rsquo;s older history lives in spreadsheets, we can bring those in too.
+                  Everything already online for your club imports automatically, as far back as the records go. There&rsquo;s no limit. And if your club&rsquo;s older history lives in spreadsheets, we can bring those in too.
                 </td>
               </tr>
               <tr>
-                <td style="padding-bottom:24px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
+                <td style="padding-bottom:8px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
                   And when the trial ends? Nothing is charged and nothing is deleted. Your stats stay safely stored, so your club can come back online whenever it&rsquo;s ready.
                 </td>
               </tr>
@@ -135,21 +291,73 @@
           </td>
         </tr>
 
-        <!-- ── Secondary CTA (see it live first) ────────────────────── -->
+        <!-- Clubs already on BetterCricket (the homepage trust strip) -->
         <tr>
-          <td style="padding:0 36px 26px 36px;">
+          <td style="padding:14px 36px 4px 36px;">
+            <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:14px;">Clubs already on BetterCricket</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 36px 14px 36px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
               <tr>
-                <td style="padding-bottom:14px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  Rather see it running on a real club first?
+                <td style="padding-bottom:12px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td width="49%" valign="top" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                        <a href="https://betterat.cricket/applecross?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_club_grid" style="text-decoration:none; display:block; padding:16px 12px;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                            <td align="center"><img src="https://betterat.cricket/email/applecross-cc.png" width="44" alt="" style="display:block; border:0; margin:0 auto 8px auto;"></td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:18px; font-weight:bold; color:#e6e8ef;">Applecross Cricket Club</td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:bold; color:#16C784; padding-top:4px;">Visit site &#8594;</td>
+                          </tr></table>
+                        </a>
+                      </td>
+                      <td width="2%" style="font-size:1px; line-height:1px;">&nbsp;</td>
+                      <td width="49%" valign="top" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                        <a href="https://betterat.cricket/kalamunda-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_club_grid" style="text-decoration:none; display:block; padding:16px 12px;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                            <td align="center"><img src="https://betterat.cricket/email/kalamunda-cc.png" width="44" alt="" style="display:block; border:0; margin:0 auto 8px auto;"></td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:18px; font-weight:bold; color:#e6e8ef;">Kalamunda Cricket Club</td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:bold; color:#16C784; padding-top:4px;">Visit site &#8594;</td>
+                          </tr></table>
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
               <tr>
-                <td align="center">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <td style="padding-bottom:12px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                     <tr>
-                      <td align="center" style="border:1px solid #2a3450; border-radius:8px;">
-                        <a href="https://betterat.cricket/applecross?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_see_club" style="display:inline-block; padding:13px 30px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:18px; font-weight:bold; color:#e6e8ef; text-decoration:none; border-radius:8px;">See a club in action&nbsp;&nbsp;&#8594;</a>
+                      <td width="49%" valign="top" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                        <a href="https://betterat.cricket/gosnells-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_club_grid" style="text-decoration:none; display:block; padding:16px 12px;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                            <td align="center"><img src="https://betterat.cricket/email/gosnells-cc.png" width="44" alt="" style="display:block; border:0; margin:0 auto 8px auto;"></td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:18px; font-weight:bold; color:#e6e8ef;">Gosnells Cricket Club</td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:bold; color:#16C784; padding-top:4px;">Visit site &#8594;</td>
+                          </tr></table>
+                        </a>
+                      </td>
+                      <td width="2%" style="font-size:1px; line-height:1px;">&nbsp;</td>
+                      <td width="49%" valign="top" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                        <a href="https://betterat.cricket/leeming-spartan-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026&amp;utm_content=edm_club_grid" style="text-decoration:none; display:block; padding:16px 12px;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                            <td align="center"><img src="https://betterat.cricket/email/leeming-spartan-cc.png" width="44" alt="" style="display:block; border:0; margin:0 auto 8px auto;"></td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:18px; font-weight:bold; color:#e6e8ef;">Leeming Spartan Cricket Club</td>
+                          </tr><tr>
+                            <td align="center" style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:bold; color:#16C784; padding-top:4px;">Visit site &#8594;</td>
+                          </tr></table>
+                        </a>
                       </td>
                     </tr>
                   </table>
@@ -159,9 +367,9 @@
           </td>
         </tr>
 
-        <!-- ── Signature ────────────────────────────────────────────── -->
+        <!-- Signature -->
         <tr>
-          <td style="padding:0 36px 30px 36px;">
+          <td style="padding:8px 36px 30px 36px;">
             <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">Reply any time with questions. Otherwise, your club&rsquo;s history is three minutes away.<br><br>
             Jack &amp; Elton<br>
             <a href="https://betterat.cricket/?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_SelfServe_EDM_Aug2026" style="font-weight:bold; color:#16C784; text-decoration:none;">BetterCricket</a><br>
@@ -169,7 +377,7 @@
           </td>
         </tr>
 
-        <!-- ── Footer ───────────────────────────────────────────────── -->
+        <!-- Footer -->
         <tr>
           <td style="padding:0 36px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
