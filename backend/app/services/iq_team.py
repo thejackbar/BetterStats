@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.grade_labels import suggest_category
-from app.services.iq_filters import grade_base, grade_match_clause, season_grade_clause
+from app.services.iq_filters import grade_canonical_label, grade_match_clause, season_grade_clause
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +97,12 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
     ``grades`` row keyed on a fresh uuid5 every season), AND CA decorates the grade
     name with that season's sponsor ("B Grade" one year, "B Grade (DXC Technology)"
     the next), so listing raw names gives the same grade several times. We
-    de-duplicate by the sponsor-stripped NAME (``grade_base``) and key the filter
-    on it — ``_scope`` matches the same base, scoped to the chosen season — so
-    picking "B Grade" covers every sponsor variant across whatever seasons are in
-    view. The returned ``grade_id`` IS that base name.
+    de-duplicate by the merge- and sponsor-aware grouping label
+    (``grade_canonical_label`` — also folds in any admin grade merge, e.g. "PSWL
+    South" / "PSWL: South") and key the filter on it — ``_scope`` matches the same
+    label, scoped to the chosen season — so picking "B Grade" covers every
+    sponsor variant AND merged alias across whatever seasons are in view. The
+    returned ``grade_id`` IS that label.
 
     Each row also carries ``season_id`` so the global Team filter can scope its
     options to the selected season — a club only fielded a given grade in some
@@ -111,7 +113,7 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
     name-based suggestion the merge-grades screen uses — it powers the filter
     bar's "Seniors only" preset and per-grade tags."""
     season_clause = "AND gr.season_id = CAST(:season AS UUID)" if season_id else ""
-    base = grade_base("gr.name")
+    base = grade_canonical_label("gr", "org")
     res = await session.execute(
         text(
             f"""
@@ -150,7 +152,7 @@ def _scope(season_id: str | None, grade_id: str | None) -> str:
         in_list = ", ".join("'" + s + "'::uuid" for s in sids)
         parts = [f"AND gr.season_id IN ({in_list})"]
         if grade_id:
-            parts.append(f"AND {grade_match_clause(grade_base('gr.name'))}")
+            parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
         return " ".join(parts)
     return season_grade_clause(season_id, grade_id)
 
@@ -1161,7 +1163,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                          + COALESCE(SUM(psg.stumpings), 0) AS dis
                 FROM players p
                 JOIN player_season_grade_stats psg ON psg.player_id = p.id
-                JOIN grades gr ON gr.id = psg.grade_id AND {grade_match_clause(grade_base('gr.name'))}
+                JOIN grades gr ON gr.id = psg.grade_id AND {grade_match_clause(grade_canonical_label('gr', 'org'))}
                 JOIN seasons s ON s.id = psg.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
                 GROUP BY p.id, p.display_name_override, p.name
                 HAVING GREATEST(COALESCE(SUM(psg.matches), 0), COALESCE(SUM(psg.batting_innings), 0),
