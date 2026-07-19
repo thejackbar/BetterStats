@@ -86,34 +86,41 @@
           </td>
         </tr>
 
-        <!-- The three steps (mirrors the /trial page cards) -->
+        <!-- The three steps, side by side (mirrors the /trial page cards,
+             laid out horizontally per request). Fixed-width spacer columns
+             (not %-gaps) for email-client reliability, matches the club-grid
+             pattern further down. Stand-alone <table> per card (not just a
+             <td>) so Outlook's table engine sizes/borders each tile
+             correctly at ~169px. -->
         <tr>
           <td style="padding:0 36px 0 36px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="padding-bottom:12px; background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:14px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                    <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:4px;">Step 1</div>
-                    <div style="font-size:17px; line-height:22px; font-weight:bold; color:#e6e8ef;">Find your club</div>
-                  </td></tr></table>
+                <td width="32%" valign="top">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
+                    <tr><td align="center" style="padding:16px 10px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                      <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:6px;">Step 1</div>
+                      <div style="font-size:16px; line-height:21px; font-weight:bold; color:#e6e8ef;">Find your club</div>
+                    </td></tr>
+                  </table>
                 </td>
-              </tr>
-              <tr><td style="height:12px; line-height:12px; font-size:1px;">&nbsp;</td></tr>
-              <tr>
-                <td style="padding-bottom:12px; background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:14px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                    <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:4px;">Step 2</div>
-                    <div style="font-size:17px; line-height:22px; font-weight:bold; color:#e6e8ef;">Enter your details</div>
-                  </td></tr></table>
+                <td width="2%" style="font-size:1px; line-height:1px;">&nbsp;</td>
+                <td width="32%" valign="top">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
+                    <tr><td align="center" style="padding:16px 10px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                      <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:6px;">Step 2</div>
+                      <div style="font-size:16px; line-height:21px; font-weight:bold; color:#e6e8ef;">Enter your details</div>
+                    </td></tr>
+                  </table>
                 </td>
-              </tr>
-              <tr><td style="height:12px; line-height:12px; font-size:1px;">&nbsp;</td></tr>
-              <tr>
-                <td style="padding-bottom:12px; background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:14px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                    <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:4px;">Step 3</div>
-                    <div style="font-size:17px; line-height:22px; font-weight:bold; color:#e6e8ef;">Complete the setup wizard</div>
-                  </td></tr></table>
+                <td width="2%" style="font-size:1px; line-height:1px;">&nbsp;</td>
+                <td width="32%" valign="top">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#111a2e; border:1px solid #1d2331; border-radius:10px;">
+                    <tr><td align="center" style="padding:16px 10px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                      <div style="font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2; padding-bottom:6px;">Step 3</div>
+                      <div style="font-size:16px; line-height:21px; font-weight:bold; color:#e6e8ef;">Complete setup</div>
+                    </td></tr>
+                  </table>
                 </td>
               </tr>
             </table>
