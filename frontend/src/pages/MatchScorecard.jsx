@@ -679,8 +679,10 @@ export default function MatchScorecard() {
   // Determine team names per innings from batting_team if available
   const t1 = (game.innings_totals || {})[inn1.num] || {}
   const t2 = (game.innings_totals || {})[inn2.num] || {}
-  const inn1Team = t1.batting_team || game.home_team || '1ST INNINGS'
-  const inn2Team = t2.batting_team || game.away_team || '2ND INNINGS'
+  // Never fall back to home_team/away_team by innings index — the away team bats
+  // first as often as the home team does, so that guess is frequently backwards.
+  const inn1Team = t1.batting_team || '1ST INNINGS'
+  const inn2Team = t2.batting_team || '2ND INNINGS'
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
