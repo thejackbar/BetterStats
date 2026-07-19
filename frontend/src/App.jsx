@@ -12,6 +12,7 @@ import ScrollToTop from './components/ScrollToTop'
 import FaviconManager from './components/FaviconManager'
 import ClubCTABar from './components/ClubCTABar'
 import { usePageView } from './hooks/usePageView'
+import { useHeartbeat } from './hooks/useHeartbeat'
 import { MARKETING_PATHS, isMarketingPath } from './lib/marketingPaths'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes.
@@ -31,6 +32,14 @@ function ConditionalNavbar() {
 // React Router location changes so we can see what people look at.
 function PageViewBeacon() {
   usePageView()
+  return null
+}
+
+// Mounted alongside PageViewBeacon; keeps pinging /api/usage/heartbeat every
+// ~25s while the tab is open and visible, so "Active now" on the Usage page
+// reflects someone actually having a page open rather than a recent nav.
+function HeartbeatBeacon() {
+  useHeartbeat()
   return null
 }
 
@@ -207,6 +216,7 @@ export default function App() {
       <div className="min-h-screen bg-pb-bg">
         <ScrollToTop />
         <PageViewBeacon />
+        <HeartbeatBeacon />
         <ClubCTABar />
         <FaviconManager />
         <ConditionalNavbar />

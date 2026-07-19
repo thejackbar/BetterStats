@@ -683,6 +683,8 @@ export const api = {
   },
   // Realtime snapshot: active visitors, per-minute, live feed, top pages, sources, UTMs.
   adminUsageLive: () => request('/club-admin/usage/live'),
+  // City-level visitor points for the Usage page map (city-centroid precision only).
+  adminUsageGeo: ({ hours = 24 } = {}) => request(`/club-admin/usage/geo?hours=${hours}`),
   // Notification centre (bell icon)
   getNotificationsCount: () => request('/club-admin/notifications/count'),
   getNotificationsSummary: () => request('/club-admin/notifications/summary'),
