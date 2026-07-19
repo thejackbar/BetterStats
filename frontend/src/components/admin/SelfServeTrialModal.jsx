@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { MODULE_TOGGLES } from '../../lib/modules'
@@ -523,7 +524,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     return phase
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       style={{ backdropFilter: 'blur(2px)' }}
@@ -1094,6 +1095,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
