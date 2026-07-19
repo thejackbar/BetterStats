@@ -818,9 +818,9 @@ dismissal mix we *do* hold into a short "DNA" read.
   the dossier on the frontend like the other tags). For our own players, a new
   `player_scouting_cards` table (`organisation_id`, `player_id`, the two blobs,
   `updated_by`; unique `(org, player)`). Blob shape — batting: `vuln_bowling[]`,
-  `zones[20]` (4 lengths × 5 lines, intensity 0–3), `shots[]`, `strengths`,
-  `weaknesses`, `plan`; bowling: `stock`, `variations[]`, `zones[20]`, `danger[]`,
-  `strengths`, `weaknesses`, `plan`.
+  `fav_bowling[]`, `zones[20]` (4 lengths × 5 lines, intensity 0–3), `fav_shots[]`,
+  `risky_shots[]`, `strengths`, `weaknesses`, `plan`; bowling: `stock`,
+  `variations[]`, `zones[20]`, `danger[]`, `strengths`, `weaknesses`, `plan`.
 - **Validation** — `services/scouting_intel.py` (`clean_batting_intel` /
   `clean_bowling_intel` + the controlled vocab: `BOWLING_KINDS`, `BAT_SHOTS`,
   `BOWL_VARIATIONS`, `BOWL_DANGER`, `ZONE_LENGTHS`/`ZONE_LINES`). Shared by the
@@ -856,6 +856,20 @@ dismissal mix we *do* hold into a short "DNA" read.
   derives **"how he takes wickets"** + wicket quality (set/started/new from the
   dismissed batter's runs) by parsing the opposition cards in the innings he
   bowled — reusing sync's `_parse_bowler_and_fielder` / `_BOWLER_CREDIT_DT`.
+- **Batting intel split into favoured vs risky (Jul 2026)**: the original single
+  "Favoured / risky shots" chip group and single "Vulnerable to (bowler type)"
+  group didn't distinguish a batter's comfort zone from his danger zone. Batting
+  intel now carries four vocab lists instead of two: `vuln_bowling[]`/
+  `fav_bowling[]` (both `BOWLING_KINDS`) and `risky_shots[]`/`fav_shots[]` (both
+  `BAT_SHOTS`) — `ScoutingCard.jsx`'s batting editor shows them as two side-by-side
+  pairs. `scoutDna.buildBattingDna` emits a bullet per populated list ("Vulnerable
+  to…" / "Comfortable against…" / "Goes after the…, set the trap" / "Favours
+  the…"). A pre-split blob's old combined `shots[]` key is a **read-side
+  fallback only** (never written again): `buildBattingDna` and the editor's
+  `seed()` both treat it as `risky_shots` when the new split fields are still
+  empty, so already-saved intel isn't silently dropped when the deploy lands or
+  the editor is reopened; bowling intel (`stock`/`variations`/`danger`) is
+  unchanged.
 
 **Two data layers** (`backend/app/services/`):
 - `iq.py` — *instant* report from data we already hold: head-to-head vs an opponent (W/L/D, home/away split, recent meetings) + our players' record vs them (selection intel). Opponent identity = `COALESCE(opp_org_id, opp_club_name)` (`opp_key`), org-scoped via grades→seasons over the `v_effective_*` views — same pattern as `aggregations.get_player_by_opposition`.

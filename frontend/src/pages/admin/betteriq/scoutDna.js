@@ -96,10 +96,19 @@ export function buildBattingDna(intel, dismissals) {
   }
   const vuln = labelList(i.vuln_bowling, BOWLING_KINDS)
   if (vuln.length) out.push({ tone: 'scout', text: `Vulnerable to ${vuln.join(', ').toLowerCase()}.` })
+  const favBowl = labelList(i.fav_bowling, BOWLING_KINDS)
+  if (favBowl.length) out.push({ tone: 'scout', text: `Comfortable against ${favBowl.join(', ').toLowerCase()}.` })
   const zone = topZonePhrase(i.zones)
   if (zone) out.push({ tone: 'scout', text: `Struggles with ${zone}.` })
-  const shots = labelList(i.shots, BAT_SHOTS)
-  if (shots.length) out.push({ tone: 'scout', text: `Goes after the ${shots.join(', ').toLowerCase()} — set the trap.` })
+  // A pre-split blob only ever carried one combined "shots" list — read it as
+  // risky (the card's framing was "how to get him out") when neither new list
+  // has been entered yet, so already-saved intel isn't silently dropped.
+  const riskyShots = labelList(i.risky_shots, BAT_SHOTS)
+  const favShots = labelList(i.fav_shots, BAT_SHOTS)
+  const legacyShots = (!riskyShots.length && !favShots.length) ? labelList(i.shots, BAT_SHOTS) : []
+  const risky = riskyShots.length ? riskyShots : legacyShots
+  if (risky.length) out.push({ tone: 'scout', text: `Goes after the ${risky.join(', ').toLowerCase()} — set the trap.` })
+  if (favShots.length) out.push({ tone: 'scout', text: `Favours the ${favShots.join(', ').toLowerCase()}.` })
   if (i.weaknesses) out.push({ tone: 'scout', text: i.weaknesses })
   return { bullets: out, plan: i.plan || null, strengths: i.strengths || null }
 }

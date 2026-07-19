@@ -102,9 +102,19 @@ function DnaRead({ dna, emptyHint }) {
 function IntelSide({ side, keyId, intel, stats, onSave }) {
   const isBat = side === 'bat'
   const blank = isBat
-    ? { vuln_bowling: [], zones: [], shots: [], strengths: '', weaknesses: '', plan: '' }
+    ? { vuln_bowling: [], fav_bowling: [], zones: [], fav_shots: [], risky_shots: [], strengths: '', weaknesses: '', plan: '' }
     : { stock: null, variations: [], zones: [], danger: [], strengths: '', weaknesses: '', plan: '' }
-  const seed = () => ({ ...blank, ...(intel || {}) })
+  // A pre-split blob only ever carried one combined "shots" list — seed it into
+  // risky_shots (the card's original framing was "how to get him out") when the
+  // new split fields are still empty, so opening the editor on already-saved
+  // intel doesn't silently blank out what was there before.
+  const seed = () => {
+    const base = { ...blank, ...(intel || {}) }
+    if (isBat && !base.risky_shots?.length && !base.fav_shots?.length && intel?.shots?.length) {
+      base.risky_shots = intel.shots
+    }
+    return base
+  }
   const [open, setOpen] = useState(false)
   const [f, setF] = useState(seed)
   const [saving, setSaving] = useState(false)
@@ -120,7 +130,7 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
     setSaving(true)
     try {
       const blob = isBat
-        ? { vuln_bowling: f.vuln_bowling, zones: f.zones, shots: f.shots, strengths: f.strengths, weaknesses: f.weaknesses, plan: f.plan }
+        ? { vuln_bowling: f.vuln_bowling, fav_bowling: f.fav_bowling, zones: f.zones, fav_shots: f.fav_shots, risky_shots: f.risky_shots, strengths: f.strengths, weaknesses: f.weaknesses, plan: f.plan }
         : { stock: f.stock, variations: f.variations, zones: f.zones, danger: f.danger, strengths: f.strengths, weaknesses: f.weaknesses, plan: f.plan }
       await onSave(isBat ? { batting_intel: blob } : { bowling_intel: blob })
       setOpen(false)
@@ -143,8 +153,14 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
         <div className="space-y-4">
           {isBat ? (
             <>
-              <Field label="Vulnerable to (bowler type)"><Chips options={entries(BOWLING_KINDS)} value={f.vuln_bowling} onChange={v => set('vuln_bowling', v)} /></Field>
-              <Field label="Favoured / risky shots"><Chips options={entries(BAT_SHOTS)} value={f.shots} onChange={v => set('shots', v)} /></Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Vulnerable to (bowler type)"><Chips options={entries(BOWLING_KINDS)} value={f.vuln_bowling} onChange={v => set('vuln_bowling', v)} /></Field>
+                <Field label="Favoured (bowler type)"><Chips options={entries(BOWLING_KINDS)} value={f.fav_bowling} onChange={v => set('fav_bowling', v)} /></Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Risky shots"><Chips options={entries(BAT_SHOTS)} value={f.risky_shots} onChange={v => set('risky_shots', v)} /></Field>
+                <Field label="Favoured shots"><Chips options={entries(BAT_SHOTS)} value={f.fav_shots} onChange={v => set('fav_shots', v)} /></Field>
+              </div>
               <Field label="Where he's vulnerable (length × line)">
                 <div className="flex justify-center py-1"><ZoneGrid cells={f.zones} onChange={v => set('zones', v)} color="var(--pb-red)" /></div>
               </Field>

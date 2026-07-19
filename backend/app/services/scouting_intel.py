@@ -17,12 +17,19 @@ Shape (both stored as one JSONB blob each):
 
     batting_intel = {
         "vuln_bowling": [code, …],   # bowler types/kinds that trouble him (BOWLING_KINDS)
+        "fav_bowling":  [code, …],   # bowler types/kinds he handles comfortably (BOWLING_KINDS)
         "zones":        [int×20],    # 4 lengths × 5 lines, intensity 0–3 (where he's vulnerable)
-        "shots":        [code, …],   # favoured / risky shots (BAT_SHOTS)
+        "fav_shots":    [code, …],   # shots he favours (BAT_SHOTS)
+        "risky_shots":  [code, …],   # shots he plays that are risky / can get him out (BAT_SHOTS)
         "strengths":    str,
         "weaknesses":   str,
         "plan":         str,         # one-line "how to get him out"
     }
+
+    A legacy blob may still carry a single combined "shots" key (pre-split
+    favoured/risky) — read sites (frontend scoutDna.js) fall back to it as
+    risky_shots when both new keys are empty; a fresh save always writes the
+    split shape, so "shots" naturally drops out of storage over time.
     bowling_intel = {
         "stock":        code|None,   # stock delivery kind (BOWLING_KINDS)
         "variations":   [code, …],   # BOWL_VARIATIONS
@@ -151,8 +158,10 @@ def clean_batting_intel(d: dict | None) -> dict | None:
         return None
     out = {
         "vuln_bowling": _codes(d.get("vuln_bowling"), BOWLING_KINDS),
+        "fav_bowling": _codes(d.get("fav_bowling"), BOWLING_KINDS),
         "zones": _zones(d.get("zones")),
-        "shots": _codes(d.get("shots"), BAT_SHOTS),
+        "fav_shots": _codes(d.get("fav_shots"), BAT_SHOTS),
+        "risky_shots": _codes(d.get("risky_shots"), BAT_SHOTS),
         "strengths": _text(d.get("strengths")),
         "weaknesses": _text(d.get("weaknesses")),
         "plan": _text(d.get("plan")),
