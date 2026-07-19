@@ -32,7 +32,7 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
   const codeRef = useRef(null)
   const codeDirtyRef = useRef(false)
   const liveSyncTimerRef = useRef(null)
-  const [preview, setPreview] = useState({ loading: false, html: '', total: 1, index: 0, label: '', error: '' })
+  const [preview, setPreview] = useState({ loading: false, html: '', subject: '', total: 1, index: 0, label: '', error: '' })
   const [vars, setVars] = useState({ is_marketing: false, variables: [] })
   const [justInserted, setJustInserted] = useState('')
 
@@ -172,7 +172,15 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     setPreview(p => ({ ...p, loading: true, error: '' }))
     try {
       const r = await onEnterPreview({ html: currentHtml, index })
-      setPreview({ loading: false, html: r.html || '', total: r.total || 1, index: r.index ?? index, label: r.label || '', error: '' })
+      setPreview({
+        loading: false,
+        html: r.html || '',
+        subject: r.subject || '',
+        total: r.total || 1,
+        index: r.index ?? index,
+        label: r.label || '',
+        error: '',
+      })
     } catch (e) {
       setPreview(p => ({ ...p, loading: false, error: e.message || 'Could not render preview.' }))
     }
@@ -464,6 +472,12 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
       {mode === 'preview' && (
         <div>
           {preview.label && <div className="text-pb-faintest text-xs mb-1">{preview.label}</div>}
+          {preview.subject && (
+            <div className="text-pb-text text-sm mb-2">
+              <span className="text-pb-faintest">Subject: </span>
+              <span className="font-medium">{preview.subject}</span>
+            </div>
+          )}
           {preview.error && <div className="text-pb-red text-xs mb-1">{preview.error}</div>}
           <iframe title="preview" srcDoc={preview.html} className="w-full rounded border pb-hairline bg-white" style={{ height }} />
           {preview.total > 1 && (

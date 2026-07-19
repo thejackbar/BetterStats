@@ -272,9 +272,14 @@ def _unsub_url(token: str) -> str:
 
 
 def _merge(text: str, ctx: dict) -> str:
+    """Replace every ``{{key}}`` token with its value from ``ctx``. Any amount
+    of whitespace either side of the key is tolerated (``{{ key }}``,
+    ``{{  key  }}``) — a plain single-space-only .replace() used to leave a
+    stray-padded token untouched, silently passing it through to the sent
+    email."""
     out = text or ""
     for k, v in ctx.items():
-        out = out.replace("{{" + k + "}}", str(v)).replace("{{ " + k + " }}", str(v))
+        out = re.sub(r"\{\{\s*" + re.escape(k) + r"\s*\}\}", str(v), out)
     return out
 
 

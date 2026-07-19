@@ -227,6 +227,7 @@ export default function CommsCompose() {
     const r = await api.commsPreviewCampaign(id, index)
     return {
       html: r.html || '',
+      subject: r.subject || '',
       total: r.total || 1,
       index: r.index ?? index,
       label: r.contact
