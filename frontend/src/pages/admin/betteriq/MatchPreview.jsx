@@ -5,7 +5,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { useIQFilter, gradeBase } from './Context'
+import { useIQFilter, gradeBase, teamNames } from './Context'
+import { PlayerLink, OppPlayerLink } from './PlayerLink'
 import {
   Icon, CountUp, ResultPills, SplitBar, Card, Tag, Btn, Search, Empty,
   Initials, PageIntro, Note, a2, LoadingBar, fmtCount, fmtPct, runsPhrase,
@@ -163,7 +164,8 @@ export default function MatchPreview() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { ctx } = useIQFilter()
-  const gradeFilter = ctx?.team?.id || null         // global Grade filter (base name)
+  const gradeFilter = ctx?.team?.id || null         // global Grade filter ('||'-joined base names)
+  const gradeNames = useMemo(() => teamNames(ctx?.team), [ctx])
   const [opp, setOpp] = useState(null)              // {opponents, upcoming}
   const [team, setTeam] = useState(null)            // team overview (par/record)
   const [sel, setSel] = useState(null)              // {fixtureId, opponent, meta}
@@ -212,8 +214,8 @@ export default function MatchPreview() {
   // grade (fixtures carry the raw, sponsor-decorated grade name, so normalise).
   const upcoming = useMemo(() => {
     const all = opp?.upcoming || []
-    return gradeFilter ? all.filter(f => gradeBase(f.grade_name) === gradeFilter) : all
-  }, [opp, gradeFilter])
+    return gradeNames.length ? all.filter(f => gradeNames.includes(gradeBase(f.grade_name))) : all
+  }, [opp, gradeNames])
   const oppList = opp?.opponents || []
   const t = q.trim().toLowerCase()
   const oppMatches = (t ? oppList.filter(o => (o.name || '').toLowerCase().includes(t)) : oppList).slice(0, 20)
@@ -368,7 +370,7 @@ export default function MatchPreview() {
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={d.name} size={32} />
                             <div className="min-w-0">
-                              <div className="font-semibold truncate">{d.name}</div>
+                              <div className="font-semibold truncate"><OppPlayerLink playerId={d.player_id} fallbackName={d.name} oppKey={sel.opponent || report?.opponent?.opp_key} oppName={oppName}>{d.name}</OppPlayerLink></div>
                               {d.times_out ? <div className="iq-mono text-pb-faintest text-[10.5px]">out to us {d.times_out}×{d.top_score != null ? ` · best ${d.top_score}` : ''}</div> : null}
                             </div>
                           </div>
@@ -387,7 +389,7 @@ export default function MatchPreview() {
                         <div key={e.player_id || `b${i}`} className="flex items-center justify-between gap-3 py-1">
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={e.name} size={32} tone="accent" />
-                            <span className="font-semibold truncate">{e.name}</span>
+                            <span className="font-semibold truncate"><PlayerLink id={e.player_id}>{e.name}</PlayerLink></span>
                           </div>
                           <PerfStat value={e.runs} unit="runs" avg={e.average} />
                         </div>
@@ -396,7 +398,7 @@ export default function MatchPreview() {
                         <div key={e.player_id || `w${i}`} className="flex items-center justify-between gap-3 py-1">
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={e.name} size={32} tone="accent" />
-                            <span className="font-semibold truncate">{e.name}</span>
+                            <span className="font-semibold truncate"><PlayerLink id={e.player_id}>{e.name}</PlayerLink></span>
                           </div>
                           <PerfStat value={e.wickets} unit="wickets" avg={e.average} />
                         </div>

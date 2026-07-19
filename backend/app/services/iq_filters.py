@@ -10,7 +10,10 @@ never widened to the whole table). Grades are matched by NAME because the
 per-club / per-season grade ids all collapse to one competition grade.
 
 Both builders read the already-bound parameter ``:season`` (a season-row id) and,
-for the grade variant, ``:grade`` (a grade NAME). Callers bind these today.
+for the grade variant, ``:grade`` (a grade NAME — or several names joined with
+``||``, the multi-grade filter's wire format; a name never contains ``||``, so a
+single name and a multi-select read through the same parameter). Callers bind
+these today.
 """
 from __future__ import annotations
 
@@ -45,6 +48,14 @@ def grade_base(col: str) -> str:
     return f"regexp_replace({col}, '\\s*\\([^)0-9]*\\)\\s*$', '')"
 
 
+def grade_match_clause(col_expr: str) -> str:
+    """``<base name> = ANY(...)`` against the ``:grade`` parameter, which may be a
+    single grade name or several joined with ``||`` (multi-select). For a single
+    name ``string_to_array`` yields a one-element array, so behaviour is
+    identical to the old ``= :grade`` equality."""
+    return f"{col_expr} = ANY(string_to_array(:grade, '||'))"
+
+
 def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr") -> str:
     """Combined season (year-expanded) + grade (by name base) filter for the
     per-game IQ queries, where the grades table is aliased ``gr`` by default."""
@@ -52,5 +63,5 @@ def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr") -> str:
     if season_id:
         parts.append(season_member_clause(f"{grade_alias}.season_id", season_id))
     if grade_id:
-        parts.append(f"AND {grade_base(grade_alias + '.name')} = :grade")
+        parts.append(f"AND {grade_match_clause(grade_base(grade_alias + '.name'))}")
     return " ".join(p for p in parts if p)

@@ -115,9 +115,10 @@ function OppRadarCard({ entry, batPeers, bowlPeers, prefer }) {
     <Card eyebrow="profile vs their squad" title="Player radar"
       right={bat && bowl ? <Segmented sm value={side} onChange={setSide} options={[{ value: 'bat', label: 'Bat' }, { value: 'bowl', label: 'Bowl' }]} /> : null}>
       <div className="flex justify-center">
-        <Radar key={side} axes={r.axes} values={r.values} baseline={r.baseline} size={248} color={showBowl ? 'var(--pb-accent)' : 'var(--pb-red)'} />
+        <Radar key={side} axes={r.axes} values={r.values} baseline={r.baseline} details={r.details} size={248} color={showBowl ? 'var(--pb-accent)' : 'var(--pb-red)'}
+          legend={{ series: entry.name || 'player', baseline: 'squad average' }} />
       </div>
-      <Note>Each axis normalised 0–100 against this club's squad ({showBowl ? 'bowlers' : 'batters'}; dashed ring = squad average). Bowling axes are inverted so the outer edge is always stronger.</Note>
+      <Note>Each axis normalised 0–100 against this club's squad ({showBowl ? 'bowlers' : 'batters'}; dashed ring = squad average). Bowling axes are inverted so the outer edge is always stronger — hover a point for the real number.</Note>
     </Card>
   )
 }

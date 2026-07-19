@@ -42,7 +42,7 @@ from app.models.db import Organisation
 from app.services import grassroots_scores_client
 from app.services import scouting_intel
 from app.services.club_match import club_match_keys
-from app.services.iq_filters import grade_base
+from app.services.iq_filters import grade_base, grade_match_clause
 
 
 # The opponent key + display name for a game, from our club's perspective.
@@ -65,8 +65,9 @@ def _opp_scope(grade: str | None, season_ids: list[str] | None, params: dict) ->
     the default report is byte-for-byte what it was before filtering existed."""
     clauses: list[str] = []
     if grade:
+        # ``grade`` may be one name or several joined with '||' (multi-select).
         params["grade"] = grade
-        clauses.append(f"AND {grade_base('gr.name')} = :grade")
+        clauses.append(f"AND {grade_match_clause(grade_base('gr.name'))}")
     if season_ids:
         keys = []
         for i, sid in enumerate(season_ids):
@@ -620,6 +621,14 @@ async def _our_performers_vs(
     match-up. Restricted to currently-active players so retired names don't crowd
     the list, ordered by output. ``grade``/``season_ids`` scope it to match the
     record card's filter.
+
+    OUR players only: a shared game between two both-synced clubs holds BOTH
+    clubs' per-innings rows under one ``games.id``, so without the
+    ``p.organisation_id`` predicate the opponent's own (active) players leak into
+    "bat/bowl well vs them". Redacted rows (a name of asterisks — CA-privacy
+    juniors / stale fill-in records) are excluded too: unactionable in a
+    selection-intel list. Each row carries the player's current BetterSelect
+    ``squad`` so callers (Ask IQ, the UI) can judge team relevance.
     """
     params = {"org_id": org_id, "opp_key": opp_key}
     scope = _opp_scope(grade, season_ids, params)
@@ -630,6 +639,7 @@ async def _our_performers_vs(
                 p.id::text AS id,
                 COALESCE(p.display_name_override, p.name) AS name,
                 p.status AS status,
+                MAX(t.name) AS squad,
                 COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
                 COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS runs,
                 MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
@@ -639,9 +649,12 @@ async def _our_performers_vs(
             FROM v_effective_batting_innings bi
             JOIN v_effective_games g ON g.id = bi.game_id{_ORG_SCOPE}
             JOIN players p ON p.id = bi.player_id
+            LEFT JOIN teams t ON t.id = p.squad_team_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND p.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND p.status = 'active'
+              AND COALESCE(p.display_name_override, p.name) !~ '^\\*+$'
               {scope}
             GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) > 0
@@ -660,6 +673,7 @@ async def _our_performers_vs(
                 "player_id": r["id"],
                 "name": r["name"],
                 "active": r["status"] == "active",
+                "squad": r["squad"],
                 "innings": r["innings"] or 0,
                 "runs": runs,
                 "high_score": r["high_score"],
@@ -674,6 +688,7 @@ async def _our_performers_vs(
                 p.id::text AS id,
                 COALESCE(p.display_name_override, p.name) AS name,
                 p.status AS status,
+                MAX(t.name) AS squad,
                 COALESCE(SUM(bs.wickets), 0) AS wickets,
                 COALESCE(SUM(bs.runs), 0) AS runs,
                 COALESCE(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0) AS balls,
@@ -681,9 +696,12 @@ async def _our_performers_vs(
             FROM v_effective_bowling_spells bs
             JOIN v_effective_games g ON g.id = bs.game_id{_ORG_SCOPE}
             JOIN players p ON p.id = bs.player_id
+            LEFT JOIN teams t ON t.id = p.squad_team_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND p.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND p.status = 'active'
+              AND COALESCE(p.display_name_override, p.name) !~ '^\\*+$'
               {scope}
             GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bs.wickets), 0) > 0
@@ -703,6 +721,7 @@ async def _our_performers_vs(
                 "player_id": r["id"],
                 "name": r["name"],
                 "active": r["status"] == "active",
+                "squad": r["squad"],
                 "wickets": wkts,
                 "runs": runs,
                 "average": round(runs / wkts, 2) if wkts else None,
@@ -881,6 +900,9 @@ async def _our_bowler_dominance(
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             JOIN players p ON p.id = bw.bowler_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
+              -- OUR bowlers only: a shared both-synced game carries the other
+              -- club's bowler_wickets rows too (see _our_performers_vs).
+              AND p.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND bw.batter_name IS NOT NULL AND bw.batter_name <> ''
               {scope}
@@ -934,39 +956,56 @@ async def _last_meeting(
     if not row:
         return None
     gid = row["id"]
+    # Scope both sums to OUR players' rows: a shared both-synced game carries the
+    # opponent's innings/spells under the same game_id, which double-counted the
+    # scoreline (our score = our batters' runs; their score = runs OUR bowlers
+    # conceded).
     our_runs = (await session.execute(
-        text("SELECT COALESCE(SUM(runs), 0) FROM v_effective_batting_innings WHERE game_id = CAST(:gid AS UUID)"),
-        {"gid": gid},
+        text(
+            "SELECT COALESCE(SUM(bi.runs), 0) FROM v_effective_batting_innings bi"
+            " JOIN players p ON p.id = bi.player_id"
+            " WHERE bi.game_id = CAST(:gid AS UUID) AND p.organisation_id = CAST(:org_id AS UUID)"
+        ),
+        {"gid": gid, "org_id": org_id},
     )).scalar() or 0
     opp_runs = (await session.execute(
-        text("SELECT COALESCE(SUM(runs), 0) FROM v_effective_bowling_spells WHERE game_id = CAST(:gid AS UUID)"),
-        {"gid": gid},
+        text(
+            "SELECT COALESCE(SUM(bs.runs), 0) FROM v_effective_bowling_spells bs"
+            " JOIN players p ON p.id = bs.player_id"
+            " WHERE bs.game_id = CAST(:gid AS UUID) AND p.organisation_id = CAST(:org_id AS UUID)"
+        ),
+        {"gid": gid, "org_id": org_id},
     )).scalar() or 0
+    # "Our top" must be one of OUR players — a shared both-synced game carries
+    # the opponent's innings/spell rows under the same game_id (see
+    # _our_performers_vs), which used to surface their best batter as ours.
     tb = (await session.execute(
         text(
-            "SELECT COALESCE(p.display_name_override, p.name) AS name, bi.runs"
+            "SELECT COALESCE(p.display_name_override, p.name) AS name, p.id::text AS player_id, bi.runs"
             " FROM v_effective_batting_innings bi JOIN players p ON p.id = bi.player_id"
             " WHERE bi.game_id = CAST(:gid AS UUID) AND bi.runs IS NOT NULL"
+            "   AND p.organisation_id = CAST(:org_id AS UUID)"
             " ORDER BY bi.runs DESC LIMIT 1"
         ),
-        {"gid": gid},
+        {"gid": gid, "org_id": org_id},
     )).mappings().first()
     tw = (await session.execute(
         text(
-            "SELECT COALESCE(p.display_name_override, p.name) AS name, bs.wickets, bs.runs"
+            "SELECT COALESCE(p.display_name_override, p.name) AS name, p.id::text AS player_id, bs.wickets, bs.runs"
             " FROM v_effective_bowling_spells bs JOIN players p ON p.id = bs.player_id"
             " WHERE bs.game_id = CAST(:gid AS UUID) AND bs.wickets IS NOT NULL"
+            "   AND p.organisation_id = CAST(:org_id AS UUID)"
             " ORDER BY bs.wickets DESC, bs.runs ASC LIMIT 1"
         ),
-        {"gid": gid},
+        {"gid": gid, "org_id": org_id},
     )).mappings().first()
     return {
         "played_at": row["played_at"].isoformat() if row["played_at"] else None,
         "result": row["result"], "winning_team": row["winning_team"],
         "venue": row["venue"], "grade": row["grade"],
         "our_runs": our_runs, "opp_runs": opp_runs,
-        "our_top_bat": {"name": tb["name"], "runs": tb["runs"]} if tb else None,
-        "our_top_bowl": {"name": tw["name"], "wickets": tw["wickets"], "runs": tw["runs"]} if tw else None,
+        "our_top_bat": {"name": tb["name"], "player_id": tb["player_id"], "runs": tb["runs"]} if tb else None,
+        "our_top_bowl": {"name": tw["name"], "player_id": tw["player_id"], "wickets": tw["wickets"], "runs": tw["runs"]} if tw else None,
     }
 
 

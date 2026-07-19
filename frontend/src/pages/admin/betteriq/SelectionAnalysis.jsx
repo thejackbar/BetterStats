@@ -9,7 +9,8 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Icon, Btn, Tag, Empty, Search, Card, Note, PageIntro, Initials, a2, LoadingCard, runsPhrase, wktsPhrase } from './ui'
-import { useIQFilter, gradeBase } from './Context'
+import { useIQFilter, gradeBase, teamNames } from './Context'
+import { PlayerLink } from './PlayerLink'
 
 /* ── role + scoring model (ported from the design, fed by real fields) ─────── */
 const ROLE_CHIP = {
@@ -284,7 +285,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
                     <span className="iq-num text-pb-faint w-5 text-center shrink-0">{i + 1}</span>
                     <Initials name={p.name} size={32} tone={isNew ? 'accent' : undefined} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2"><span className="font-semibold text-[14px] whitespace-nowrap">{p.name}</span>{isNew && <Tag tone="win">In</Tag>}{out && <Tag tone="red">Out</Tag>}{p.spin && <span className="iq-mono text-pb-faint" style={{ fontSize: 9 }}>spin</span>}</div>
+                      <div className="flex items-center gap-2"><span className="font-semibold text-[14px] whitespace-nowrap"><PlayerLink id={p.id}>{p.name}</PlayerLink></span>{isNew && <Tag tone="win">In</Tag>}{out && <Tag tone="red">Out</Tag>}{p.spin && <span className="iq-mono text-pb-faint" style={{ fontSize: 9 }}>spin</span>}</div>
                       <div className="text-pb-faint text-[11.5px] iq-num">form {a2(p.form)}</div>
                     </div>
                     <RoleChip role={p.role} />
@@ -396,7 +397,7 @@ export default function SelectionAnalysis() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { ctx } = useIQFilter()
-  const gradeFilter = ctx?.team?.id || null
+  const gradeNames = useMemo(() => teamNames(ctx?.team), [ctx])
   const [rows, setRows] = useState(null)
   const [fixtureId, setFixtureId] = useState(searchParams.get('fixture') || null)
   const [data, setData] = useState(null)
@@ -407,9 +408,9 @@ export default function SelectionAnalysis() {
   // Follow the global Grade filter — narrow the fixture picker to that grade
   // (rows carry the raw, sponsor-decorated grade name, so normalise to match).
   const visibleRows = useMemo(() => {
-    if (!rows || !gradeFilter) return rows
-    return rows.filter(r => gradeBase(r.grade_name) === gradeFilter)
-  }, [rows, gradeFilter])
+    if (!rows || !gradeNames.length) return rows
+    return rows.filter(r => gradeNames.includes(gradeBase(r.grade_name)))
+  }, [rows, gradeNames])
   useEffect(() => {
     if (!fixtureId) { setData(null); return }
     let alive = true

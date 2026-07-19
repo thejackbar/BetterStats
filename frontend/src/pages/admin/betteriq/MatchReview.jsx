@@ -7,6 +7,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Card, Note, Tag, Btn, Empty, PageIntro, LoadingCard, fmtCount, fmtOvers } from './ui'
 import { useIQFilter, effectiveSeasonId } from './Context'
+import { PlayerLink } from './PlayerLink'
 
 const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
 
@@ -126,7 +127,7 @@ function GameReviewDetail({ review }) {
                 <div key={i} className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="iq-num text-pb-faint w-4 shrink-0">{i + 1}</span>
-                    <span className="font-semibold text-[14px] truncate">{p.name}</span>
+                    <span className="font-semibold text-[14px] truncate"><PlayerLink id={p.player_id}>{p.name}</PlayerLink></span>
                   </div>
                   <span className="iq-num text-pb-dim text-[13px] whitespace-nowrap">
                     {p.runs}{p.not_out ? '*' : ''}{p.balls != null ? ` (${p.balls})` : ''}
@@ -143,7 +144,7 @@ function GameReviewDetail({ review }) {
                 <div key={i} className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="iq-num text-pb-faint w-4 shrink-0">{i + 1}</span>
-                    <span className="font-semibold text-[14px] truncate">{p.name}</span>
+                    <span className="font-semibold text-[14px] truncate"><PlayerLink id={p.player_id}>{p.name}</PlayerLink></span>
                   </div>
                   <span className="iq-num font-semibold text-[13.5px] whitespace-nowrap">
                     {p.wickets ?? 0}/{p.runs ?? 0}{p.overs != null ? ` (${fmtOvers(p.overs)})` : ''}

@@ -29,7 +29,8 @@ export function PlayerRadarCard({ radar }) {
     <Card eyebrow="profile vs squad average" title="Player radar"
       right={hasBat && hasBowl ? <Segmented sm value={side} onChange={setSide} options={[{ value: 'bat', label: 'Bat' }, { value: 'bowl', label: 'Bowl' }]} /> : null}>
       <div className="flex flex-col items-center">
-        <Radar key={side} axes={r.axes} values={r.values} baseline={r.baseline || [50, 50, 50, 50, 50, 50]} size={250} />
+        <Radar key={side} axes={r.axes} values={r.values} baseline={r.baseline || [50, 50, 50, 50, 50, 50]} size={250}
+          legend={{ series: 'this player', baseline: 'squad average' }} />
       </div>
       <Note>Each axis normalised 0–100 against the squad average (the dashed ring at 50). Higher is better — bowling axes are inverted so the outer edge is always stronger.</Note>
     </Card>

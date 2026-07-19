@@ -37,6 +37,8 @@ export const BOWL_AXES = [
    items: peer-group array · axisDefs: [{label, value:(it)=>number, lower?}] */
 export function buildRadar(items, axisDefs, target) {
   const axes = axisDefs.map(a => ({ key: a.label, label: a.label }))
+  const fmt = v => (v == null || !isFinite(v) ? '—' : Math.round(v * 100) / 100)
+  const details = []
   const values = axisDefs.map(a => {
     const xs = (items || []).map(a.value).filter(v => typeof v === 'number' && isFinite(v) && v > 0)
     const mean = xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0
@@ -45,53 +47,105 @@ export function buildRadar(items, axisDefs, target) {
     if (!isFinite(v) || v <= 0) score = 0
     else if (a.lower) score = mean ? (mean / v) * 50 : 50
     else score = mean ? (v / mean) * 50 : 50
+    details.push({ raw: fmt(v), mean: mean ? fmt(mean) : '—', lower: !!a.lower })
     return Math.max(0, Math.min(100, Math.round(score * 10) / 10))
   })
-  return { axes, values, baseline: axisDefs.map(() => 50) }
+  return { axes, values, baseline: axisDefs.map(() => 50), details }
 }
 
-/* ── Radar — multi-axis player profile vs a baseline ring ─────────────────── */
-export function Radar({ axes, values, baseline, compareValues, compareColor = 'var(--iq-c-amber)', color = 'var(--pb-accent)', size = 240, max = 100, label }) {
+/* ── Radar — multi-axis player profile vs a baseline ring ───────────────────
+   Hover (or focus) a vertex for the number behind it: the 0–100 score, and —
+   when the caller passes `details` (from buildRadar) — the real value vs the
+   peer-group average that produced it. `legend` ({series, baseline}) names the
+   solid shape and the dashed ring under the chart, so the graph reads without
+   the surrounding prose. */
+export function Radar({ axes, values, baseline, compareValues, compareColor = 'var(--iq-c-amber)', color = 'var(--pb-accent)', size = 240, max = 100, label, details, legend }) {
   const on = useMounted()
+  const [hover, setHover] = useState(null)   // axis index
   const cx = size / 2, cy = size / 2, R = size / 2 - 40
   const n = axes.length
   const ang = i => (-90 + i * 360 / n) * Math.PI / 180
   const pt = (i, v) => [cx + Math.cos(ang(i)) * (v / max) * R, cy + Math.sin(ang(i)) * (v / max) * R]
   const poly = vals => vals.map((v, i) => pt(i, v).map(x => x.toFixed(1)).join(',')).join(' ')
   const rings = [0.25, 0.5, 0.75, 1]
+  const d = hover != null ? (details || [])[hover] : null
+  const hoverPt = hover != null ? pt(hover, values[hover]) : null
 
   return (
     <div className="flex flex-col items-center">
-      <svg width={size} height={size} className="overflow-visible">
-        {rings.map((r, ri) => (
-          <polygon key={ri} points={axes.map((_, i) => pt(i, r * max).join(',')).join(' ')}
-            fill="none" stroke="var(--pb-hairline2)" strokeWidth="1" opacity={ri === rings.length - 1 ? 0.9 : 0.5} />
-        ))}
-        {axes.map((a, i) => {
-          const [x, y] = pt(i, max)
-          const [lx, ly] = [cx + Math.cos(ang(i)) * (R + 18), cy + Math.sin(ang(i)) * (R + 18)]
-          const anchor = Math.abs(lx - cx) < 6 ? 'middle' : lx > cx ? 'start' : 'end'
-          return (
-            <g key={a.key}>
-              <line x1={cx} y1={cy} x2={x} y2={y} stroke="var(--pb-hairline)" strokeWidth="1" />
-              <text x={lx} y={ly} textAnchor={anchor} dominantBaseline="middle"
-                style={{ fontSize: 10.5, fill: 'var(--pb-faint)', fontFamily: 'var(--iq-font-mono)' }}>{a.label}</text>
+      <div className="relative">
+        <svg width={size} height={size} className="overflow-visible">
+          {rings.map((r, ri) => (
+            <polygon key={ri} points={axes.map((_, i) => pt(i, r * max).join(',')).join(' ')}
+              fill="none" stroke="var(--pb-hairline2)" strokeWidth="1" opacity={ri === rings.length - 1 ? 0.9 : 0.5} />
+          ))}
+          {axes.map((a, i) => {
+            const [x, y] = pt(i, max)
+            const [lx, ly] = [cx + Math.cos(ang(i)) * (R + 18), cy + Math.sin(ang(i)) * (R + 18)]
+            const anchor = Math.abs(lx - cx) < 6 ? 'middle' : lx > cx ? 'start' : 'end'
+            return (
+              <g key={a.key}>
+                <line x1={cx} y1={cy} x2={x} y2={y} stroke="var(--pb-hairline)" strokeWidth="1" />
+                <text x={lx} y={ly} textAnchor={anchor} dominantBaseline="middle"
+                  style={{ fontSize: 10.5, fill: hover === i ? 'var(--pb-text)' : 'var(--pb-faint)', fontFamily: 'var(--iq-font-mono)', cursor: 'default' }}
+                  onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(h => (h === i ? null : h))}>{a.label}</text>
+              </g>
+            )
+          })}
+          {baseline && (
+            <polygon points={poly(baseline)} fill="none" stroke="var(--pb-faint)" strokeWidth="1.3" strokeDasharray="3 3" opacity="0.7" />
+          )}
+          {compareValues && (
+            <polygon points={poly(compareValues)} fill={compareColor} fillOpacity="0.12" stroke={compareColor} strokeWidth="2"
+              style={{ transformOrigin: 'center', transform: on ? 'scale(1)' : 'scale(0.05)', opacity: on ? 1 : 0, transition: 'transform .9s cubic-bezier(.22,.61,.36,1) .1s, opacity .5s ease' }} />
+          )}
+          <polygon points={poly(values)} fill={color} fillOpacity="0.16" stroke={color} strokeWidth="2"
+            style={{ transformOrigin: 'center', transform: on ? 'scale(1)' : 'scale(0.05)', opacity: on ? 1 : 0,
+              transition: 'transform .9s cubic-bezier(.22,.61,.36,1), opacity .5s ease' }} />
+          {values.map((v, i) => { const [x, y] = pt(i, v); return (
+            <g key={i}>
+              <circle cx={x} cy={y} r={hover === i ? 4 : 2.6} fill={color}
+                style={{ opacity: on ? 1 : 0, transition: `opacity .3s ease ${0.5 + i * 0.05}s` }} />
+              {/* invisible, larger hit target for the hover */}
+              <circle cx={x} cy={y} r="11" fill="transparent" tabIndex={0}
+                onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(h => (h === i ? null : h))}
+                onFocus={() => setHover(i)} onBlur={() => setHover(h => (h === i ? null : h))}
+                style={{ cursor: 'pointer', outline: 'none' }} />
             </g>
-          )
-        })}
-        {baseline && (
-          <polygon points={poly(baseline)} fill="none" stroke="var(--pb-faint)" strokeWidth="1.3" strokeDasharray="3 3" opacity="0.7" />
+          ) })}
+        </svg>
+        {hover != null && hoverPt && (
+          <div className="absolute pointer-events-none z-10" style={{
+            left: hoverPt[0], top: hoverPt[1] - 10, transform: 'translate(-50%, -100%)',
+            background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline2)', borderRadius: 8,
+            padding: '6px 9px', boxShadow: '0 4px 14px rgba(0,0,0,.35)', whiteSpace: 'nowrap' }}>
+            <div className="iq-eyebrow" style={{ fontSize: 8.5 }}>{axes[hover].label}</div>
+            <div className="iq-num text-[12px] font-semibold" style={{ color: 'var(--pb-text)' }}>
+              {values[hover]}<span className="text-pb-faint font-normal">/100 vs peers</span>
+            </div>
+            {d && (
+              <div className="iq-num text-[11px]" style={{ color: 'var(--pb-faint)' }}>
+                actual {d.raw} · peer avg {d.mean}{d.lower ? ' · lower is better' : ''}
+              </div>
+            )}
+          </div>
         )}
-        {compareValues && (
-          <polygon points={poly(compareValues)} fill={compareColor} fillOpacity="0.12" stroke={compareColor} strokeWidth="2"
-            style={{ transformOrigin: 'center', transform: on ? 'scale(1)' : 'scale(0.05)', opacity: on ? 1 : 0, transition: 'transform .9s cubic-bezier(.22,.61,.36,1) .1s, opacity .5s ease' }} />
-        )}
-        <polygon points={poly(values)} fill={color} fillOpacity="0.16" stroke={color} strokeWidth="2"
-          style={{ transformOrigin: 'center', transform: on ? 'scale(1)' : 'scale(0.05)', opacity: on ? 1 : 0,
-            transition: 'transform .9s cubic-bezier(.22,.61,.36,1), opacity .5s ease' }} />
-        {values.map((v, i) => { const [x, y] = pt(i, v); return <circle key={i} cx={x} cy={y} r="2.6" fill={color}
-          style={{ opacity: on ? 1 : 0, transition: `opacity .3s ease ${0.5 + i * 0.05}s` }} /> })}
-      </svg>
+      </div>
+      {legend && (
+        <div className="flex items-center justify-center gap-4 mt-1.5" style={{ fontSize: 10.5, color: 'var(--pb-faint)', fontFamily: 'var(--iq-font-mono)' }}>
+          <span className="flex items-center gap-1.5">
+            <span style={{ width: 14, height: 0, borderTop: `2px solid ${color}` }} />{legend.series || 'player'}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span style={{ width: 14, height: 0, borderTop: '2px dashed var(--pb-faint)' }} />{legend.baseline || 'average'}
+          </span>
+          {compareValues && legend.compare && (
+            <span className="flex items-center gap-1.5">
+              <span style={{ width: 14, height: 0, borderTop: `2px solid ${compareColor}` }} />{legend.compare}
+            </span>
+          )}
+        </div>
+      )}
       {label && <div className="iq-eyebrow mt-1">{label}</div>}
     </div>
   )

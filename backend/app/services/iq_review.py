@@ -81,52 +81,71 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
     if not meta:
         return None
 
+    # Every per-game read below is scoped to OUR players: a match between two
+    # both-synced clubs shares one games.id carrying BOTH clubs' rows, so an
+    # unscoped sum/top-5 mixes the opponent's innings into ours (same fix as
+    # iq._our_performers_vs).
     totals = (await session.execute(
         text(
             """
             SELECT
-              (SELECT SUM(runs) FROM v_effective_batting_innings
-                 WHERE game_id = CAST(:gid AS UUID) AND did_not_bat IS NOT TRUE) AS our_runs,
-              (SELECT COUNT(*) FROM v_effective_batting_innings
-                 WHERE game_id = CAST(:gid AS UUID) AND did_not_bat IS NOT TRUE
-                   AND NOT not_out AND dismissal_type IS NOT NULL) AS our_wkts_lost,
-              (SELECT SUM(runs) FROM v_effective_bowling_spells WHERE game_id = CAST(:gid AS UUID)) AS opp_runs,
-              (SELECT SUM(wickets) FROM v_effective_bowling_spells WHERE game_id = CAST(:gid AS UUID)) AS opp_wkts,
-              (SELECT COALESCE(SUM(COALESCE(wides, 0) + COALESCE(no_balls, 0)), 0)
-                 FROM v_effective_bowling_spells WHERE game_id = CAST(:gid AS UUID)) AS extras_conceded
+              (SELECT SUM(bi.runs) FROM v_effective_batting_innings bi
+                 JOIN players p ON p.id = bi.player_id
+                 WHERE bi.game_id = CAST(:gid AS UUID) AND bi.did_not_bat IS NOT TRUE
+                   AND p.organisation_id = CAST(:org AS UUID)) AS our_runs,
+              (SELECT COUNT(*) FROM v_effective_batting_innings bi
+                 JOIN players p ON p.id = bi.player_id
+                 WHERE bi.game_id = CAST(:gid AS UUID) AND bi.did_not_bat IS NOT TRUE
+                   AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL
+                   AND p.organisation_id = CAST(:org AS UUID)) AS our_wkts_lost,
+              (SELECT SUM(bs.runs) FROM v_effective_bowling_spells bs
+                 JOIN players p ON p.id = bs.player_id
+                 WHERE bs.game_id = CAST(:gid AS UUID)
+                   AND p.organisation_id = CAST(:org AS UUID)) AS opp_runs,
+              (SELECT SUM(bs.wickets) FROM v_effective_bowling_spells bs
+                 JOIN players p ON p.id = bs.player_id
+                 WHERE bs.game_id = CAST(:gid AS UUID)
+                   AND p.organisation_id = CAST(:org AS UUID)) AS opp_wkts,
+              (SELECT COALESCE(SUM(COALESCE(bs.wides, 0) + COALESCE(bs.no_balls, 0)), 0)
+                 FROM v_effective_bowling_spells bs
+                 JOIN players p ON p.id = bs.player_id
+                 WHERE bs.game_id = CAST(:gid AS UUID)
+                   AND p.organisation_id = CAST(:org AS UUID)) AS extras_conceded
             """
         ),
-        {"gid": game_id},
+        {"gid": game_id, "org": org_id},
     )).mappings().first()
 
     bat = [dict(r) for r in (await session.execute(
         text(
             """
-            SELECT COALESCE(p.display_name_override, p.name) AS name,
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.batting_position
             FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
             WHERE bi.game_id = CAST(:gid AS UUID) AND bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+              AND p.organisation_id = CAST(:org AS UUID)
             ORDER BY bi.runs DESC NULLS LAST, bi.balls ASC NULLS LAST
             LIMIT 5
             """
         ),
-        {"gid": game_id},
+        {"gid": game_id, "org": org_id},
     )).mappings()]
 
     bowl = [dict(r) for r in (await session.execute(
         text(
             """
-            SELECT COALESCE(p.display_name_override, p.name) AS name,
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    bs.overs, bs.maidens, bs.runs, bs.wickets
             FROM v_effective_bowling_spells bs
             JOIN players p ON p.id = bs.player_id
             WHERE bs.game_id = CAST(:gid AS UUID)
+              AND p.organisation_id = CAST(:org AS UUID)
             ORDER BY bs.wickets DESC NULLS LAST, bs.runs ASC NULLS LAST
             LIMIT 5
             """
         ),
-        {"gid": game_id},
+        {"gid": game_id, "org": org_id},
     )).mappings()]
 
     bp = (await session.execute(

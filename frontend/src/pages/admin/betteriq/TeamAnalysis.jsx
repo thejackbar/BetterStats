@@ -12,6 +12,7 @@ import {
 } from './ui'
 import { AreaChart, PhaseStrip } from './viz'
 import { useIQFilter, seasonsInRange, seasonIdsInRange, effectiveSeasonId } from './Context'
+import { PlayerLink } from './PlayerLink'
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
@@ -300,7 +301,7 @@ function Batting({ d, seasonId, teamId }) {
                     <Initials name={s.name} size={30} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-[13.5px] truncate">{s.name}</span>
+                        <span className="font-semibold text-[13.5px] truncate"><PlayerLink id={s.player_id}>{s.name}</PlayerLink></span>
                         <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{fmtCount(s.runs)} runs · {fmtCount(s.innings)} inns{s.avg != null ? ` · ${a2(s.avg)}` : ''}</span>
                       </div>
                       <Bar pct={(s.runs / maxRuns) * 100} delay={i * 0.05} h={6} />
@@ -402,7 +403,7 @@ function Bowling({ d, seasonId, teamId }) {
                 <Initials name={a.name} size={34} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-[14px] truncate">{a.name}</span>
+                    <span className="font-semibold text-[14px] truncate"><PlayerLink id={a.player_id}>{a.name}</PlayerLink></span>
                     <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{wktsPhrase(a.wickets)} · avg {a2(a.avg)} · econ {a2(a.econ)}</span>
                   </div>
                   <div className="text-pb-faint text-[11.5px] mb-1">{a.role}{a.spin ? ' · spin' : a.pace ? ' · pace' : ''} · {fmtOvers(a.overs)} ov</div>
@@ -424,7 +425,7 @@ function Bowling({ d, seasonId, teamId }) {
                 <Initials name={b.name} size={34} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-[14px] truncate">{b.name}</span>
+                    <span className="font-semibold text-[14px] truncate"><PlayerLink id={b.player_id}>{b.name}</PlayerLink></span>
                     <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">
                       {b.bursts}× burst · {wktsPhrase(b.wickets)} · best {b.best_haul}{b.economy != null ? ` · econ ${a2(b.economy)}` : ''}
                     </span>
@@ -451,7 +452,7 @@ function Bowling({ d, seasonId, teamId }) {
             <div className="mt-2 space-y-1.5">
               {disc.bowlers.map(bl => (
                 <div key={bl.player_id} className="flex items-center justify-between gap-3 text-[12.5px] py-0.5">
-                  <span className="font-medium truncate">{bl.name}</span>
+                  <span className="font-medium truncate"><PlayerLink id={bl.player_id}>{bl.name}</PlayerLink></span>
                   <span className="iq-num text-pb-faint whitespace-nowrap">{fmtOvers(bl.overs)} ov · {bl.wides} wides · {bl.no_balls} no-balls · <span className="font-semibold text-pb-text">{a2(bl.extras_per_over)}/ov</span></span>
                 </div>
               ))}
@@ -565,7 +566,7 @@ function Players({ d }) {
                 <Initials name={c.name} size={34} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-semibold text-[14px] truncate">{c.name}</span>
+                    <span className="font-semibold text-[14px] truncate"><PlayerLink id={c.player_id}>{c.name}</PlayerLink></span>
                     <span className="iq-num font-bold text-[14px]" style={{ color: c.win_pct != null && c.win_pct >= 50 ? 'var(--pb-brand)' : 'var(--pb-text)' }}>{pctTxt(c.win_pct)}</span>
                   </div>
                   <div className="text-pb-faint text-[12px] mt-0.5 iq-num">
@@ -590,7 +591,7 @@ function Players({ d }) {
                   <Initials name={a.name} size={32} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-[13.5px] truncate">{a.name}</span>
+                      <span className="font-semibold text-[13.5px] truncate"><PlayerLink id={a.player_id}>{a.name}</PlayerLink></span>
                       {a.diff != null && <span className="iq-num font-bold text-[13px]" style={{ color: a.diff >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}>{a.diff >= 0 ? '+' : ''}{a2(a.diff)}</span>}
                     </div>
                     <div className="text-pb-faint text-[11.5px] mb-1 iq-num">{runsPhrase(a.runs, a.bat_avg)} · {wktsPhrase(a.wickets, a.bowl_avg)} · {a.role}</div>
@@ -609,7 +610,7 @@ function Players({ d }) {
               {roles.map(rr => (
                 <div key={rr.player_id} className="flex items-center justify-between gap-3 text-[13px]">
                   <div className="min-w-0">
-                    <span className="font-semibold truncate">{rr.name}</span>
+                    <span className="font-semibold truncate"><PlayerLink id={rr.player_id}>{rr.name}</PlayerLink></span>
                     <span className="text-pb-faint text-[11px] ml-2">{rr.role} · {rr.innings} inns</span>
                   </div>
                   <div className="flex items-center gap-3 whitespace-nowrap iq-num text-pb-faint text-[12.5px]">
@@ -631,7 +632,7 @@ function Players({ d }) {
               <div className="space-y-1.5">
                 {fld.fielders.map(f => (
                   <div key={f.player_id} className="flex justify-between gap-2 text-[13.5px] py-0.5">
-                    <span className="truncate">{f.name}</span>
+                    <span className="truncate"><PlayerLink id={f.player_id}>{f.name}</PlayerLink></span>
                     <span className="iq-num text-pb-faint whitespace-nowrap">{f.catches}c{f.run_outs ? ` · ${f.run_outs} ro` : ''}</span>
                   </div>
                 ))}
@@ -651,7 +652,7 @@ function Players({ d }) {
               <div className="space-y-1.5">
                 {fld.keepers.map(k => (
                   <div key={k.player_id} className="flex justify-between gap-2 text-[13.5px] py-0.5">
-                    <span className="truncate">{k.name}</span>
+                    <span className="truncate"><PlayerLink id={k.player_id}>{k.name}</PlayerLink></span>
                     <span className="iq-num text-pb-faint whitespace-nowrap">{k.catches}c · {k.stumpings}st</span>
                   </div>
                 ))}

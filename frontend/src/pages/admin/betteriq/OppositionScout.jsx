@@ -26,7 +26,8 @@ import KeyPlayersCard from './KeyPlayersCard'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 import { useClubPlayers, careerOnlyEntries, entryWithThreat } from './clubPlayers'
-import { useIQFilter, seasonIdsInRange, seasonLabel } from './Context'
+import { useIQFilter, seasonIdsInRange, seasonLabel, teamNames } from './Context'
+import { PlayerLink, OppPlayerLink } from './PlayerLink'
 import Dropdown from '../../../components/Dropdown'
 
 const POLL_MS = 2500
@@ -192,8 +193,8 @@ function CommandStrip({ h2h, lm, scope, onScope, scopeOptions, filterLabel }) {
             {lm.venue && <div className="text-[11.5px] text-pb-faintest mt-0.5">{lm.venue}</div>}
             {(lm.our_top_bat || lm.our_top_bowl) && (
               <div className="mt-3 pt-3 space-y-1 text-[12.5px]" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-                {lm.our_top_bat && <div><span className="text-pb-faint">Top bat:</span> {lm.our_top_bat.name} <span className="iq-num font-semibold">{fmtCount(lm.our_top_bat.runs)}</span></div>}
-                {lm.our_top_bowl && <div><span className="text-pb-faint">Top bowl:</span> {lm.our_top_bowl.name} <span className="iq-num font-semibold">{lm.our_top_bowl.wickets}/{lm.our_top_bowl.runs}</span></div>}
+                {lm.our_top_bat && <div><span className="text-pb-faint">Top bat:</span> <PlayerLink id={lm.our_top_bat.player_id}>{lm.our_top_bat.name}</PlayerLink> <span className="iq-num font-semibold">{fmtCount(lm.our_top_bat.runs)}</span></div>}
+                {lm.our_top_bowl && <div><span className="text-pb-faint">Top bowl:</span> <PlayerLink id={lm.our_top_bowl.player_id}>{lm.our_top_bowl.name}</PlayerLink> <span className="iq-num font-semibold">{lm.our_top_bowl.wickets}/{lm.our_top_bowl.runs}</span></div>}
               </div>
             )}
           </div>
@@ -343,7 +344,7 @@ const BOWL_RADAR_AXES = [
   { label: 'Workload', value: p => p.overs },
 ]
 
-function ThreatRadars({ dossier }) {
+function ThreatRadars({ dossier, oppKey, oppName }) {
   const batList = dossier.batting || []
   const bowlList = dossier.bowling || []
   const dBat = (dossier.danger_batters || [])[0]
@@ -352,8 +353,8 @@ function ThreatRadars({ dossier }) {
   const bowlTarget = dBowl ? (bowlList.find(p => p.player_id === dBowl.player_id) || dBowl) : null
 
   const cards = []
-  if (batList.length && batTarget) cards.push({ key: 'bat', name: batTarget.name, tag: 'Danger batter', radar: buildRadar(batList, BAT_RADAR_AXES, batTarget) })
-  if (bowlList.length && bowlTarget) cards.push({ key: 'bowl', name: bowlTarget.name, tag: 'Danger bowler', radar: buildRadar(bowlList, BOWL_RADAR_AXES, bowlTarget) })
+  if (batList.length && batTarget) cards.push({ key: 'bat', id: batTarget.player_id, name: batTarget.name, tag: 'Danger batter', radar: buildRadar(batList, BAT_RADAR_AXES, batTarget) })
+  if (bowlList.length && bowlTarget) cards.push({ key: 'bowl', id: bowlTarget.player_id, name: bowlTarget.name, tag: 'Danger bowler', radar: buildRadar(bowlList, BOWL_RADAR_AXES, bowlTarget) })
   if (!cards.length) return null
 
   return (
@@ -361,12 +362,13 @@ function ThreatRadars({ dossier }) {
       <div className="grid gap-6 sm:grid-cols-2">
         {cards.map(c => (
           <div key={c.key} className="flex flex-col items-center">
-            <div className="text-center mb-1"><div className="iq-display font-bold text-[15px]">{surname(c.name)}</div><div className="iq-eyebrow">{c.tag}</div></div>
-            <Radar axes={c.radar.axes} values={c.radar.values} baseline={c.radar.baseline} size={236} color="var(--pb-red)" />
+            <div className="text-center mb-1"><div className="iq-display font-bold text-[15px]"><OppPlayerLink playerId={c.id} oppKey={oppKey} oppName={oppName}>{surname(c.name)}</OppPlayerLink></div><div className="iq-eyebrow">{c.tag}</div></div>
+            <Radar axes={c.radar.axes} values={c.radar.values} baseline={c.radar.baseline} details={c.radar.details} size={236} color="var(--pb-red)"
+              legend={{ series: surname(c.name), baseline: 'squad average' }} />
           </div>
         ))}
       </div>
-      <Note>Each axis normalised 0–100 against this squad's average (dashed ring). The further the shape reaches, the bigger the threat.</Note>
+      <Note>Each axis normalised 0–100 against this squad's average (dashed ring at 50). The further the shape reaches, the bigger the threat — hover a point for the real number behind it.</Note>
     </Card>
   )
 }
@@ -377,29 +379,29 @@ function OurRecord({ performers }) {
   const bat = performers?.batting || []
   const bowl = performers?.bowling || []
   if (!bat.length && !bowl.length) return null
+  const row = (p, phrase) => (
+    <div key={p.player_id} className="flex items-center justify-between gap-3">
+      <span className={`text-[13.5px] whitespace-nowrap ${p.active ? '' : 'text-pb-faint'}`}>
+        <PlayerLink id={p.player_id}>{p.name}</PlayerLink>
+        {p.squad && <span className="iq-mono text-pb-faintest ml-1.5" style={{ fontSize: 9.5 }}>{p.squad}</span>}
+        {!p.active && ' ·'}
+      </span>
+      <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{phrase}</span>
+    </div>
+  )
   return (
     <Card eyebrow="selection intel" title="Our record against them">
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <div className="iq-eyebrow mb-2.5">Bat well vs them</div>
           <div className="space-y-2">
-            {bat.length ? bat.slice(0, 6).map(p => (
-              <div key={p.player_id} className="flex items-center justify-between gap-3">
-                <span className={`text-[13.5px] whitespace-nowrap ${p.active ? '' : 'text-pb-faint'}`}>{p.name}{!p.active && ' ·'}</span>
-                <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{runsPhrase(p.runs, p.average)}</span>
-              </div>
-            )) : <Empty>—</Empty>}
+            {bat.length ? bat.slice(0, 6).map(p => row(p, runsPhrase(p.runs, p.average))) : <Empty>—</Empty>}
           </div>
         </div>
         <div>
           <div className="iq-eyebrow mb-2.5">Bowl well vs them</div>
           <div className="space-y-2">
-            {bowl.length ? bowl.slice(0, 6).map(p => (
-              <div key={p.player_id} className="flex items-center justify-between gap-3">
-                <span className={`text-[13.5px] whitespace-nowrap ${p.active ? '' : 'text-pb-faint'}`}>{p.name}{!p.active && ' ·'}</span>
-                <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{wktsPhrase(p.wickets, p.average)}</span>
-              </div>
-            )) : <Empty>—</Empty>}
+            {bowl.length ? bowl.slice(0, 6).map(p => row(p, wktsPhrase(p.wickets, p.average))) : <Empty>—</Empty>}
           </div>
         </div>
       </div>
@@ -434,7 +436,7 @@ function VenueCard({ venues }) {
 
 /* ── Bowler match-up heatmap (instant) ───────────────────────────────────── */
 
-function Matchups({ matchups }) {
+function Matchups({ matchups, oppKey, oppName }) {
   const rows = matchups?.bowler_dominance || []
   const canMatrix = new Set(rows.map(r => r.bowler)).size >= 2 && new Set(rows.map(r => r.batter)).size >= 2
   const [view, setView] = useState('matrix')
@@ -459,8 +461,8 @@ function Matchups({ matchups }) {
             <tbody>
               {rows.map((m, idx) => (
                 <tr key={idx} style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-                  <td className="py-2 px-1 font-medium whitespace-nowrap">{m.bowler}{!m.active && <span className="text-pb-faint" title="no longer active"> ·</span>}</td>
-                  <td className="py-2 px-1 whitespace-nowrap">{m.batter}</td>
+                  <td className="py-2 px-1 font-medium whitespace-nowrap"><PlayerLink id={m.bowler_id}>{m.bowler}</PlayerLink>{!m.active && <span className="text-pb-faint" title="no longer active"> ·</span>}</td>
+                  <td className="py-2 px-1 whitespace-nowrap"><OppPlayerLink fallbackName={m.batter} oppKey={oppKey} oppName={oppName}>{m.batter}</OppPlayerLink></td>
                   <td className="py-2 px-1 text-right iq-num font-semibold">{m.dismissals}×</td>
                   <td className="py-2 px-1 text-pb-faint text-[11.5px] capitalize">{(m.how || []).join(', ') || '—'}</td>
                   <td className="py-2 px-1 text-right iq-num text-pb-faint">{fmtCount(m.runs_made)}</td>
@@ -546,7 +548,7 @@ function VsUsBowl({ vs }) {
   )
 }
 
-function SquadTable({ dossier }) {
+function SquadTable({ dossier, oppKey, oppName }) {
   const [tab, setTab] = useState('batting')
   const bat = dossier.batting || []
   const bowl = dossier.bowling || []
@@ -565,7 +567,7 @@ function SquadTable({ dossier }) {
               <tbody>
                 {bat.map(p => (
                   <tr key={p.player_id} style={{ borderTop: '1px solid var(--pb-hairline)' }} className="transition-colors hover:bg-pb-surface2">
-                    <td className="py-2.5 px-1.5 font-medium whitespace-nowrap">{p.name} {p.form === 'hot' && <Icon name="flame" size={13} className="inline" style={{ color: 'var(--pb-red)' }} />}</td>
+                    <td className="py-2.5 px-1.5 font-medium whitespace-nowrap"><OppPlayerLink playerId={p.player_id} oppKey={oppKey} oppName={oppName}>{p.name}</OppPlayerLink> {p.form === 'hot' && <Icon name="flame" size={13} className="inline" style={{ color: 'var(--pb-red)' }} />}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{fmtCount(p.innings)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num font-semibold">{fmtCount(p.runs)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{a2(p.average)}</td>
@@ -588,7 +590,7 @@ function SquadTable({ dossier }) {
               <tbody>
                 {bowl.map(p => (
                   <tr key={p.player_id} style={{ borderTop: '1px solid var(--pb-hairline)' }} className="transition-colors hover:bg-pb-surface2">
-                    <td className="py-2.5 px-1.5 font-medium whitespace-nowrap">{p.name}</td>
+                    <td className="py-2.5 px-1.5 font-medium whitespace-nowrap"><OppPlayerLink playerId={p.player_id} oppKey={oppKey} oppName={oppName}>{p.name}</OppPlayerLink></td>
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{fmtOvers(p.overs)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num font-semibold">{fmtCount(p.wickets)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{a2(p.average)}</td>
@@ -732,29 +734,43 @@ export default function OppositionScout() {
   const pollRef = useRef(null)
 
   // The GLOBAL BetterIQ filter bar (top of the page) is the single source of
-  // truth — no separate "Scout team" control. `ctx.team.id` is a grade NAME (the
-  // IQ-wide convention); the season can be a single year or a cross-season range.
-  const { ctx, seasons } = useIQFilter()
+  // truth — no separate "Scout team" control. `ctx.team.id` is one grade NAME or
+  // several joined with '||' (the IQ-wide multi-select convention); the season
+  // can be a single year, a cross-season range, or All seasons.
+  const { ctx, setCtx, seasons, ready: filterReady } = useIQFilter()
   const ctxGradeName = ctx?.team?.id || null
+  const ctxGradeNames = useMemo(() => teamNames(ctx?.team), [ctx])
   const seasonIds = useMemo(() => seasonIdsInRange(ctx, seasons), [ctx, seasons])
   const seasonIdsKey = seasonIds.join(',')
   const seasonText = ctx ? seasonLabel(ctx, seasons) : ''
   const isAllSeasons = seasons.length > 0 && seasonIds.length === seasons.length
-  // The newest single season is the global *default*, so treat it as "no season
-  // filter" (the all-time landing the user wants). Only an older single season or
-  // a multi-season range counts as an actively-chosen season filter.
-  const newestId = seasons.length ? seasons[seasons.length - 1].id : null
-  const seasonActive = !isAllSeasons && seasonIds.length > 0 && !(seasonIds.length === 1 && seasonIds[0] === newestId)
-  const hasFilter = !!ctxGradeName || seasonActive
-  const filterLabel = [ctxGradeName, seasonActive ? seasonText : null].filter(Boolean).join(' · ') || 'Filtered'
-  // Map the selected grade NAME onto THIS opponent's grade_id for the live scout
-  // (their grade ids carry the competition-wide grade name).
+  // What the header shows is what the data gets: any picked season (including
+  // the default newest one) is a real filter. Only "All seasons" means all-time
+  // — the old "newest single season counts as no filter" special case made the
+  // header say 2025/26 over an all-time record.
+  const seasonActive = !isAllSeasons && seasonIds.length > 0 && ctx?.season?.mode !== 'all'
+  const hasFilter = ctxGradeNames.length > 0 || seasonActive
+  const filterLabel = [ctx?.team?.id ? ctx.team.name : null, seasonActive ? seasonText : null].filter(Boolean).join(' · ') || 'Filtered'
+  // First landing (filter bar untouched this session): default the season to
+  // All seasons so the record card's all-time numbers and the header agree.
+  // The moment the user touches the bar, their choice wins and sticks.
+  useEffect(() => {
+    if (!filterReady || !ctx || ctx.touched) return
+    if (ctx.season.mode !== 'all' && seasons.length) {
+      setCtx({ ...ctx, season: { mode: 'all', from: seasons[0], to: seasons[seasons.length - 1] } })
+    }
+  }, [filterReady])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Map the selected grade NAME(s) onto THIS opponent's grade_id for the live
+  // scout (their grade ids carry the competition-wide grade name). The dossier
+  // scopes to ONE of their teams, so the first selected grade they field wins.
   const teamGradeId = useMemo(() => {
-    if (!ctxGradeName) return null
-    const lc = ctxGradeName.toLowerCase()
-    const t = teamsList.find(x => (x.team_name || '').toLowerCase() === lc || (x.grade_name || '').toLowerCase() === lc)
-    return t?.grade_id || null
-  }, [ctxGradeName, teamsList])
+    for (const n of ctxGradeNames) {
+      const lc = n.toLowerCase()
+      const t = teamsList.find(x => (x.team_name || '').toLowerCase() === lc || (x.grade_name || '').toLowerCase() === lc)
+      if (t?.grade_id) return t.grade_id
+    }
+    return null
+  }, [ctxGradeNames, teamsList])
   // Record-card toggle: All-time vs the active top-bar filter. Only shown when a
   // filter is actually active (otherwise the report is all-time anyway).
   const scopeOptions = hasFilter
@@ -887,6 +903,8 @@ export default function OppositionScout() {
   }
 
   const oppName = report?.opponent?.name || dossier?.opponent?.name || selected?.name || 'Opponent'
+  // Stable key for deep-linking an opposition player's profile page.
+  const oppLinkKey = report?.opponent?.opp_key || selected?.opponent || null
   const building = dossier?.status === 'building'
   const ready = dossier && dossier.status !== 'building' && dossier.status !== 'error' && dossier.status !== 'unavailable'
   const teamName = dossier?.selected_team_name || teamsList.find(t => t.grade_id === teamGradeId)?.team_name || null
@@ -970,12 +988,12 @@ export default function OppositionScout() {
             {report.head_to_head?.recent?.length > 0 && report.matchups?.bowler_dominance?.length > 0 ? (
               <div className="grid gap-5 lg:grid-cols-2 items-start">
                 <RecentMeetings recent={report.head_to_head.recent} />
-                <Matchups matchups={report.matchups} />
+                <Matchups matchups={report.matchups} oppKey={oppLinkKey} oppName={oppName} />
               </div>
             ) : (
               <>
                 <RecentMeetings recent={report.head_to_head?.recent} />
-                <Matchups matchups={report.matchups} />
+                <Matchups matchups={report.matchups} oppKey={oppLinkKey} oppName={oppName} />
               </>
             )}
           </>
@@ -984,8 +1002,8 @@ export default function OppositionScout() {
         {/* The live squad scout below follows the top "Their grade" filter — when
             it's narrowed to a grade this club doesn't field, fall back to the
             whole club rather than show nothing. */}
-        {ctxGradeName && teamsList.length > 0 && !teamGradeId && (
-          <Note>They don't field a side in “{ctxGradeName}” — showing their whole club below. Pick a different grade in the top bar to narrow it.</Note>
+        {ctxGradeNames.length > 0 && teamsList.length > 0 && !teamGradeId && (
+          <Note>They don't field a side in “{ctx?.team?.name}” — showing their whole club below. Pick a different grade in the top bar to narrow it.</Note>
         )}
 
         {/* Live dossier — phase 2 */}
@@ -1005,13 +1023,13 @@ export default function OppositionScout() {
             {/* Key players — the signature flick-through showcase cards */}
             {(dossier.danger_batters?.length > 0 || dossier.danger_bowlers?.length > 0) && (
               <div className="grid gap-5 lg:grid-cols-2">
-                <KeyPlayersCard title="Danger batters" subtitle="their top run-scorers this season" players={dossier.danger_batters} kind="bat" />
-                <KeyPlayersCard title="Danger bowlers" subtitle="their leading wicket-takers" players={dossier.danger_bowlers} kind="bowl" />
+                <KeyPlayersCard title="Danger batters" subtitle="their top run-scorers this season" players={dossier.danger_batters} kind="bat" oppKey={oppLinkKey} oppName={oppName} />
+                <KeyPlayersCard title="Danger bowlers" subtitle="their leading wicket-takers" players={dossier.danger_bowlers} kind="bowl" oppKey={oppLinkKey} oppName={oppName} />
               </div>
             )}
 
             {/* Threat radars — top danger batter/bowler, built from the dossier squad */}
-            <ThreatRadars dossier={dossier} />
+            <ThreatRadars dossier={dossier} oppKey={oppLinkKey} oppName={oppName} />
 
             {/* Innings phases — estimated from ball-by-ball games (recent only) */}
             <InningsPhases selected={selected} />
@@ -1031,7 +1049,7 @@ export default function OppositionScout() {
               </div>
             )}
 
-            <SquadTable dossier={dossier} />
+            <SquadTable dossier={dossier} oppKey={oppLinkKey} oppName={oppName} />
 
             {dossier.historical_threats?.length > 0 && (
               <Card eyebrow="not in their current squad · watch for a recall" title="Historically hurt us">
@@ -1040,7 +1058,7 @@ export default function OppositionScout() {
                     <div key={p.player_id} className="flex items-center justify-between gap-3 px-3.5 py-2.5"
                       style={{ background: 'var(--pb-surface2)', borderRadius: 10 }}
                       title={`${p.innings || 0} inns${p.high_score != null ? ` · HS ${p.high_score}` : ''} against us`}>
-                      <span className="text-[13.5px] font-medium truncate">{p.name}</span>
+                      <span className="text-[13.5px] font-medium truncate"><OppPlayerLink playerId={p.player_id} oppKey={oppLinkKey} oppName={oppName}>{p.name}</OppPlayerLink></span>
                       <span className="iq-num text-[12.5px] whitespace-nowrap shrink-0">
                         <span className="font-semibold">{fmtCount(p.runs)}</span>
                         <span className="text-pb-faint"> @ {a2(p.average)}</span>

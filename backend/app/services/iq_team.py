@@ -25,7 +25,8 @@ import uuid as _uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.iq_filters import grade_base, season_grade_clause
+from app.services.grade_labels import suggest_category
+from app.services.iq_filters import grade_base, grade_match_clause, season_grade_clause
 
 logger = logging.getLogger(__name__)
 
@@ -103,13 +104,19 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
 
     Each row also carries ``season_id`` so the global Team filter can scope its
     options to the selected season — a club only fielded a given grade in some
-    seasons, and offering one it didn't field returned an empty dashboard."""
+    seasons, and offering one it didn't field returned an empty dashboard.
+
+    ``category`` is the grade's classification (senior/junior/womens/masters/
+    mixed): the admin-confirmed ``grades.category`` when set, else the same
+    name-based suggestion the merge-grades screen uses — it powers the filter
+    bar's "Seniors only" preset and per-grade tags."""
     season_clause = "AND gr.season_id = CAST(:season AS UUID)" if season_id else ""
     base = grade_base("gr.name")
     res = await session.execute(
         text(
             f"""
-            SELECT {base} AS name, gr.season_id::text AS season_id
+            SELECT {base} AS name, gr.season_id::text AS season_id,
+                   MAX(gr.category) AS category
             FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
@@ -120,7 +127,15 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
         ),
         {"org": org_id, "season": season_id},
     )
-    return [{"grade_id": r["name"], "name": r["name"], "season_id": r["season_id"]} for r in res.mappings()]
+    return [
+        {
+            "grade_id": r["name"],
+            "name": r["name"],
+            "season_id": r["season_id"],
+            "category": r["category"] or suggest_category(r["name"]),
+        }
+        for r in res.mappings()
+    ]
 
 
 # Scope clause for the per-game functions. ``grade`` is a grade NAME (see
@@ -135,7 +150,7 @@ def _scope(season_id: str | None, grade_id: str | None) -> str:
         in_list = ", ".join("'" + s + "'::uuid" for s in sids)
         parts = [f"AND gr.season_id IN ({in_list})"]
         if grade_id:
-            parts.append(f"AND {grade_base('gr.name')} = :grade")
+            parts.append(f"AND {grade_match_clause(grade_base('gr.name'))}")
         return " ".join(parts)
     return season_grade_clause(season_id, grade_id)
 
@@ -1146,7 +1161,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                          + COALESCE(SUM(psg.stumpings), 0) AS dis
                 FROM players p
                 JOIN player_season_grade_stats psg ON psg.player_id = p.id
-                JOIN grades gr ON gr.id = psg.grade_id AND {grade_base('gr.name')} = :grade
+                JOIN grades gr ON gr.id = psg.grade_id AND {grade_match_clause(grade_base('gr.name'))}
                 JOIN seasons s ON s.id = psg.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
                 GROUP BY p.id, p.display_name_override, p.name
                 HAVING GREATEST(COALESCE(SUM(psg.matches), 0), COALESCE(SUM(psg.batting_innings), 0),
