@@ -93,19 +93,36 @@ async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:
     """First name + last-initial for the club's Primary Club Admin (falling
     back to the longest-standing club admin if no primary is set), so the
     "already registered" message can point at a real person to contact
-    without exposing a full name or any contact details."""
+    without exposing a full name or any contact details.
+
+    ``User.first_name``/``last_name`` were only ever populated by the
+    self-serve trial registration form itself (migration 135) — every admin
+    created any other way (the ordinary Super Admin "New Club" flow, which is
+    how almost every existing club's admin account exists) has those columns
+    NULL and only ``display_name`` set. Reading first/last name alone made
+    this return None for nearly every real club, which is the bug this
+    docstring used to paper over. Falls back to splitting ``display_name`` on
+    whitespace (first word + last word's initial) so a "Chris Mackinnon"
+    account still resolves to "Chris M…"."""
     row = (await db.execute(
-        select(User.first_name, User.last_name)
+        select(User.first_name, User.last_name, User.display_name)
         .join(ClubMembership, ClubMembership.user_id == User.id)
         .where(ClubMembership.club_id == club_id)
         .order_by(ClubMembership.is_primary_admin.desc(), ClubMembership.created_at.asc())
         .limit(1)
     )).first()
-    if row is None or not (row.first_name or "").strip():
+    if row is None:
         return None
-    first = row.first_name.strip()
-    last = (row.last_name or "").strip()
-    return f"{first} {last[0]}…" if last else first
+    if (row.first_name or "").strip():
+        first = row.first_name.strip()
+        last = (row.last_name or "").strip()
+        return f"{first} {last[0]}…" if last else first
+    parts = (row.display_name or "").strip().split()
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} {parts[-1][0]}…"
 
 
 @router.get("/search")
