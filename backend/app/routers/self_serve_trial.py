@@ -68,25 +68,23 @@ async def get_status(db: AsyncSession = Depends(get_db)):
 def _duplicate_club_message(name: str, admin_label: str | None, slug: str | None = None) -> str:
     """Shared wording for the "already registered" 409 — matches the search
     step's own duplicate message in SelfServeTrialModal.jsx so the same
-    condition reads the same way wherever it's surfaced.
+    condition reads the same way wherever it's surfaced. This is the
+    plain-text fallback for callers that can only show a flat string (e.g. the
+    final submit step's error, a race-condition edge case); structured callers
+    (search_clubs, the 409 detail dicts below) also return the raw ``slug``
+    and ``admin_label`` so the frontend can render the club name and its
+    public page as a real clickable link instead of the parenthetical slug
+    used here.
 
     ``admin_label`` already ends in an ellipsis (see ``_primary_admin_label``)
-    when it carries a truncated last name, so the sentence terminator is
-    dropped in that case rather than appended — otherwise the two collide
-    into a stray "…." that reads like a typo. ``slug`` (the existing club's
-    public page slug) is appended as a plain-text pointer for callers that
-    can only show a flat string; structured callers (search_clubs, the 409
-    detail dicts below) also return the raw slug so the frontend can render
-    it as a real clickable link instead."""
-    middle = f"{name} has already been registered in BetterCricket"
-    if admin_label:
-        middle += f" by {admin_label}"
-    if slug:
-        middle += f" - see {slug}"
-    sep = " " if middle.endswith("…") else ". "
+    when it carries a truncated last name, so a space (not a bare "…;") is
+    inserted before the semicolon that follows it — otherwise the two collide
+    into a stray "…;" that reads like a typo."""
+    see = f" - see {name}'s public page on BetterCricket ({slug})." if slug else "."
+    admin = f" {admin_label} ;" if admin_label else ";"
     return (
-        f"{middle}{sep}"
-        "Please either (a) contact your club's administrator; or (b) email us at "
+        f"{name} has already been registered in BetterCricket{see} "
+        f"Please either (a) contact your club's administrator{admin} or (b) email us at "
         "support@bettersports.com.au if you think your club has been incorrectly registered."
     )
 
@@ -248,7 +246,9 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
         admin_label = await _primary_admin_label(db, existing.id)
         raise HTTPException(status_code=409, detail={
             "message": _duplicate_club_message(name, admin_label, existing.slug),
+            "name": name,
             "slug": existing.slug,
+            "admin_label": admin_label,
         })
 
     org_data = await playhq_client.get_organisation(str(org_id))
@@ -588,7 +588,9 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         admin_label = await _primary_admin_label(db, dup.id)
         raise HTTPException(status_code=409, detail={
             "message": _duplicate_club_message((data.name or "").strip(), admin_label, dup.slug),
+            "name": (data.name or "").strip(),
             "slug": dup.slug,
+            "admin_label": admin_label,
         })
     if not await playhq_client.get_organisation(str(org_id)):
         raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
