@@ -531,7 +531,6 @@ export default function SuperMetaAds() {
                             <tr key={r.org_id} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
                               <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
                                 {r.slug ? <a href={`/${r.slug}`} className="hover:underline">{r.name}</a> : r.name}
-                                {r.archived && <span className="text-pb-faintest font-mono text-[9px] ml-1">ARCHIVED</span>}
                               </td>
                               <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{r.signed_up_at ? fmtTime(r.signed_up_at) : '–'}</td>
                               <td className="px-2 py-2">
