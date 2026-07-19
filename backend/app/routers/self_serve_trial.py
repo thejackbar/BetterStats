@@ -65,7 +65,7 @@ async def get_status(db: AsyncSession = Depends(get_db)):
     }
 
 
-def _duplicate_club_message(name: str, admin_label: str | None) -> str:
+def _duplicate_club_message(name: str, admin_label: str | None, slug: str | None = None) -> str:
     """Shared wording for the "already registered" 409 — matches the search
     step's own duplicate message in SelfServeTrialModal.jsx so the same
     condition reads the same way wherever it's surfaced.
@@ -73,15 +73,19 @@ def _duplicate_club_message(name: str, admin_label: str | None) -> str:
     ``admin_label`` already ends in an ellipsis (see ``_primary_admin_label``)
     when it carries a truncated last name, so the sentence terminator is
     dropped in that case rather than appended — otherwise the two collide
-    into a stray "…." that reads like a typo."""
+    into a stray "…." that reads like a typo. ``slug`` (the existing club's
+    public page slug) is appended as a plain-text pointer for callers that
+    can only show a flat string; structured callers (search_clubs, the 409
+    detail dicts below) also return the raw slug so the frontend can render
+    it as a real clickable link instead."""
+    middle = f"{name} has already been registered in BetterCricket"
     if admin_label:
-        by = f" by {admin_label}"
-        sep = " " if admin_label.endswith("…") else ". "
-    else:
-        by = ""
-        sep = ". "
+        middle += f" by {admin_label}"
+    if slug:
+        middle += f" - see {slug}"
+    sep = " " if middle.endswith("…") else ". "
     return (
-        f"{name} has already been registered in BetterCricket{by}{sep}"
+        f"{middle}{sep}"
         "Please either (a) contact your club's administrator; or (b) email us at "
         "support@bettersports.com.au if you think your club has been incorrectly registered."
     )
@@ -120,7 +124,8 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     carries ``already_registered_by`` — the Primary Club Admin's first name +
     last initial only (e.g. "Jack B…") — so the duplicate message can point at
     a real person without exposing a full name, its length, or any contact
-    details."""
+    details — and ``already_registered_slug``, the existing club's public page
+    slug, so the frontend can link straight to it."""
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
@@ -129,7 +134,12 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
         org_id = _parse_uuid(str(org.get("id") or ""))
         existing = await find_matching_organisation(db, org_id, org.get("name") or "", include_archived=False)
         admin_label = await _primary_admin_label(db, existing.id) if existing else None
-        out.append({**org, "already_registered": existing is not None, "already_registered_by": admin_label})
+        out.append({
+            **org,
+            "already_registered": existing is not None,
+            "already_registered_by": admin_label,
+            "already_registered_slug": existing.slug if existing else None,
+        })
     return out
 
 
@@ -236,7 +246,10 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
     existing = await find_matching_organisation(db, org_id, name, include_archived=False)
     if existing:
         admin_label = await _primary_admin_label(db, existing.id)
-        raise HTTPException(status_code=409, detail=_duplicate_club_message(name, admin_label))
+        raise HTTPException(status_code=409, detail={
+            "message": _duplicate_club_message(name, admin_label, existing.slug),
+            "slug": existing.slug,
+        })
 
     org_data = await playhq_client.get_organisation(str(org_id))
     if not org_data:
@@ -573,7 +586,10 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     dup = await find_matching_organisation(db, org_id, data.name, include_archived=False)
     if dup:
         admin_label = await _primary_admin_label(db, dup.id)
-        raise HTTPException(status_code=409, detail=_duplicate_club_message((data.name or "").strip(), admin_label))
+        raise HTTPException(status_code=409, detail={
+            "message": _duplicate_club_message((data.name or "").strip(), admin_label, dup.slug),
+            "slug": dup.slug,
+        })
     if not await playhq_client.get_organisation(str(org_id)):
         raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
 

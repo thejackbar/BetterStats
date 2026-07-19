@@ -102,17 +102,17 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   // any of these fields.
   const [preparing, setPreparing] = useState(false)
   const [preparedClub, setPreparedClub] = useState(null)
-  const [prepareError, setPrepareError] = useState('')
+  const [prepareError, setPrepareError] = useState(null)
 
   useEffect(() => {
     if (!selectedClub) {
       setPreparedClub(null)
-      setPrepareError('')
+      setPrepareError(null)
       return
     }
     let alive = true
     setPreparing(true)
-    setPrepareError('')
+    setPrepareError(null)
     // Public mode: one event_id shared between the browser pixel (fired on
     // success below) and the backend's server-side Conversions API Lead, so
     // Meta dedupes the pair — same pattern as QuickEnquiryModal.
@@ -135,7 +135,12 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
           }, { eventID: meta.eventId })
         }
       })
-      .catch((e) => { if (alive) setPrepareError(e?.message || 'Could not prepare this club.') })
+      .catch((e) => {
+        if (!alive) return
+        setPrepareError(e?.detail && typeof e.detail === 'object'
+          ? e.detail
+          : { message: e?.message || 'Could not prepare this club.' })
+      })
       .finally(() => { if (alive) setPreparing(false) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -618,10 +623,24 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                   <p className="font-mono text-[11px] text-pb-text">
                     {orgName(duplicateClub)} has already been registered in BetterCricket
                     {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}
-                    {/* the admin label already ends in an ellipsis when truncated
-                        (see backend _primary_admin_label) — appending another "."
-                        right after it collapses into a stray "…." */}
-                    {duplicateClub.already_registered_by?.endsWith('…') ? '' : '.'}{' '}
+                    {duplicateClub.already_registered_slug ? (
+                      <>
+                        {' '}- see{' '}
+                        <a
+                          href={`/${duplicateClub.already_registered_slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          {duplicateClub.already_registered_slug}
+                        </a>.
+                      </>
+                    ) : (
+                      // the admin label already ends in an ellipsis when truncated
+                      // (see backend _primary_admin_label) — appending another "."
+                      // right after it collapses into a stray "…."
+                      duplicateClub.already_registered_by?.endsWith('…') ? '' : '.'
+                    )}{' '}
                     Please either (a) contact your club's administrator; or (b) email us at{' '}
                     <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
                     if you think your club has been incorrectly registered.
@@ -647,7 +666,22 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                   )}
 
                   {!preparing && prepareError && (
-                    <p className="font-mono text-[11px] text-pb-red">{prepareError}</p>
+                    <p className="font-mono text-[11px] text-pb-red">
+                      {prepareError.message}
+                      {prepareError.slug && (
+                        <>
+                          {' '}
+                          <a
+                            href={`/${prepareError.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline"
+                          >
+                            View club page
+                          </a>
+                        </>
+                      )}
+                    </p>
                   )}
 
                   {!preparing && !prepareError && preparedClub && (
