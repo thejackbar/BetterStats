@@ -26,15 +26,15 @@ so a campaign switch on the same calendar day can't collide with an
 already-written row either. `services/meta_ads.py`'s read/write paths are
 updated in the same change to filter by `settings.meta_campaign_id`.
 
-Revision ID: 162
-Revises: 161
+Revision ID: 164
+Revises: 163
 Create Date: 2026-07-19
 """
 from alembic import op
 
 
-revision = '162'
-down_revision = '161'
+revision = '164'
+down_revision = '163'
 branch_labels = None
 depends_on = None
 

@@ -2508,7 +2508,7 @@ async def lifespan(app: FastAPI):
             "ON meta_lead_adjustments(created_at DESC)"
         ))
         # Meta Ads — scope snapshots + lead adjustments to a campaign
-        # (migration 162). Neither table recorded which real Meta campaign a
+        # (migration 164). Neither table recorded which real Meta campaign a
         # row belonged to, so switching settings.meta_campaign_id from the
         # finished July campaign to the new self-serve one stitched the two
         # campaigns' numbers together (the 14-day trend chart had no
