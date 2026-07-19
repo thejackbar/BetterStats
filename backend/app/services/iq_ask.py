@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
 from app.models.db import async_session_maker
-from app.services import iq_players, iq_team, iq_trends
+from app.services import iq_opponent, iq_players, iq_team, iq_trends
+from app.services import iq as iq_service
 from app.services.aggregations import get_player_by_opposition
 from app.services.bowling_style import bowling_class, bowling_label
 from app.services.llm_text import strip_em_dashes
@@ -31,7 +32,9 @@ logger = logging.getLogger(__name__)
 # claude-sonnet-4-6 / claude-haiku-4-5 for cheaper/faster at some quality cost.
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 1500
-MAX_STEPS = 6          # tool-call round trips before we force a final answer
+MAX_STEPS = 8          # tool-call round trips before we force a final answer
+                       # (fixture questions chain upcoming_fixtures → report →
+                       # squad → danger players, so they need more room than 6)
 MAX_HISTORY_TURNS = 8  # prior Q&A pairs carried in so follow-ups keep their subject
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
 
@@ -69,6 +72,25 @@ _SYSTEM = (
     "- To judge whether two players combine well in the same side (do they play well "
     "together / win together), use players_together — it gives the team's record when "
     "both play vs when only one does.\n"
+    "Upcoming games and the opposition:\n"
+    "- For any question about an upcoming match ('who should we pick for the 1st XI "
+    "game', 'who do we play next', 'how do we beat them'), start with "
+    "upcoming_fixtures to find the fixture, its team/grade and opponent. Then use "
+    "opposition_report for our head-to-head and which of OUR players bat/bowl well "
+    "against them, current_squad for the side in question, and "
+    "opponent_danger_players for their in-form threats.\n"
+    "- Keep selection suggestions TEAM-RELEVANT: each performer carries their "
+    "'squad' (the side they're currently picked in). For a 1st XI fixture, weigh "
+    "players in or around the 1st XI; a lower-grade player's strong record against "
+    "this opponent is worth a mention as a possible promotion, never an automatic "
+    "pick over the side's regulars.\n"
+    "- If opponent_danger_players says the dossier is still building, answer now "
+    "from opposition_report and add that the deeper scout (their current-season "
+    "form) will be ready if they ask again in a minute, or on the BetterIQ "
+    "Opposition page.\n"
+    "- If a fixture's opponent has no linked history (has_history false), say the "
+    "club can be linked via 'Match club' on the BetterIQ Opposition page to unlock "
+    "the head-to-head.\n"
     "If the tools don't cover what was asked, say so plainly and point to where in "
     "BetterIQ to look (Opposition scout for an opponent, Player search for one player, "
     "Team analysis for the side)."
@@ -141,6 +163,34 @@ TOOLS = [
         "name": "grades",
         "description": "The grade (team) names the club fields, so you can filter other tools by an exact grade name.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "upcoming_fixtures",
+        "description": "The club's upcoming fixtures: date, team/grade, opponent, venue, home/away, plus a fixture_id and whether we hold history against that opponent (has_history). Use this FIRST for any question about an upcoming game ('who should we pick for the 1st XI game', 'who do we play next') to identify the fixture, its team and its opponent, then feed the fixture_id into opposition_report / opponent_danger_players.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "opposition_report",
+        "description": "Our held record against ONE opponent club: head-to-head (won/lost, recent form), which of OUR players bat and bowl well against them (each with their current selection squad, for team relevance), our bowler → their batter repeat dismissals, our best/worst venues vs them, and what happened last meeting. Pass a fixture_id from upcoming_fixtures OR an opponent club name. Optionally scope to a grade name (from grades).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"},
+                "opponent": {"type": "string", "description": "opponent club name (or opp_key) when not asking about a specific fixture"},
+                "grade": {"type": "string", "description": "optional grade name to scope the record to"},
+            },
+        },
+    },
+    {
+        "name": "opponent_danger_players",
+        "description": "The opponent's CURRENT-SEASON danger batters and bowlers from the live scouting dossier: their form, averages, record against us, and a suggested plan for each. Pass a fixture_id or an opponent club name. If the dossier hasn't been built yet it starts building in the background and returns status 'building' — answer from opposition_report in the meantime and say the deeper scout will be ready shortly.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"},
+                "opponent": {"type": "string", "description": "opponent club name (or opp_key)"},
+            },
+        },
     },
 ]
 
@@ -343,6 +393,184 @@ async def _tool_grades(session, org_id):
     return {"grades": names}
 
 
+async def _tool_upcoming_fixtures(session, org_id):
+    data = await iq_service.list_opponents(session, org_id)
+    fixtures = (data.get("upcoming") or [])[:10]
+    if not fixtures:
+        return {
+            "count": 0,
+            "note": "No upcoming fixtures held. Fixtures sync from the BetterSelect Fixtures screen (or can be added manually there).",
+        }
+    return {"count": len(fixtures), "fixtures": [
+        {
+            "fixture_id": f["fixture_id"],
+            "date": f.get("played_on"),
+            "team": f.get("team_name"),
+            "grade": f.get("grade_name"),
+            "opponent": f.get("opponent_name"),
+            "home_away": f.get("home_away"),
+            "venue": f.get("venue"),
+            "has_history": bool(f.get("opp_key")),
+        }
+        for f in fixtures
+    ]}
+
+
+async def _resolve_opp_arg(session, org_id: str, opponent: str | None):
+    """Fuzzy-match a model-supplied club name onto a stable opp_key.
+
+    A synced opponent's key is an org GUID, not its name, so a bare name passed
+    straight through would miss it. Returns (opp_key_or_passthrough, name|None).
+    """
+    if not opponent:
+        return None, None
+    data = await iq_service.list_opponents(session, org_id)
+    ol = opponent.strip().lower()
+    opps = data.get("opponents") or []
+    exact = [o for o in opps if (o.get("name") or "").lower() == ol]
+    hits = exact or [
+        o for o in opps
+        if ol in (o.get("name") or "").lower() or (o.get("name") or "").lower() in ol
+    ]
+    if hits:
+        return hits[0]["opp_key"], hits[0].get("name")
+    return opponent, None  # may already be an opp_key / org GUID
+
+
+def _trim_performer(p, kind):
+    out = {"name": p.get("name"), "squad": p.get("squad"), "active": p.get("active")}
+    if kind == "bat":
+        out.update({"runs": p.get("runs"), "average": _round(p.get("average")), "innings": p.get("innings"), "high_score": p.get("high_score")})
+    else:
+        out.update({"wickets": p.get("wickets"), "average": _round(p.get("average")), "economy": _round(p.get("economy"))})
+    return out
+
+
+async def _tool_opposition_report(session, org_id, *, fixture_id=None, opponent=None, grade=None):
+    if not fixture_id and not opponent:
+        return {"error": "Pass a fixture_id (from upcoming_fixtures) or an opponent club name."}
+    opp_arg, opp_name = (None, None)
+    if not fixture_id:
+        opp_arg, opp_name = await _resolve_opp_arg(session, org_id, opponent)
+    rep = await iq_service.opposition_report(
+        session, org_id, opponent=opp_arg, fixture_id=fixture_id, grade=grade, display_name=opp_name,
+    )
+    if not (rep.get("opponent") or {}).get("opp_key"):
+        return {
+            "opponent": (rep.get("opponent") or {}).get("name") or opponent,
+            "no_history": True,
+            "note": ((rep.get("coverage") or {}).get("note") or "No history held against this opponent.")
+            + " The user can link this opponent to a known club via 'Match club' on the BetterIQ Opposition page.",
+        }
+    h2h = rep.get("head_to_head") or {}
+    perf = rep.get("our_performers") or {}
+    lm = rep.get("last_meeting")
+    out = {
+        "opponent": (rep.get("opponent") or {}).get("name"),
+        "grade_scope": grade or "all grades",
+        "record": {
+            "meetings": h2h.get("meetings"), "wins": h2h.get("wins"), "losses": h2h.get("losses"),
+            "draws": h2h.get("draws"), "win_pct": h2h.get("win_pct"),
+            "recent_form": h2h.get("recent_form"),
+        },
+        "our_batters_who_go_well": [_trim_performer(p, "bat") for p in (perf.get("batting") or [])[:8]],
+        "our_bowlers_who_go_well": [_trim_performer(p, "bowl") for p in (perf.get("bowling") or [])[:8]],
+        "our_bowler_holds_over_their_batter": [
+            {"bowler": m.get("bowler"), "their_batter": m.get("batter"), "dismissals": m.get("dismissals")}
+            for m in ((rep.get("matchups") or {}).get("bowler_dominance") or [])[:8]
+        ],
+        "venues": [
+            {"venue": v.get("venue"), "played": v.get("played"), "wins": v.get("wins"), "losses": v.get("losses")}
+            for v in (rep.get("venues") or [])[:5]
+        ],
+    }
+    if lm:
+        out["last_meeting"] = {
+            "date": lm.get("played_at"), "result": lm.get("result"),
+            "our_runs": lm.get("our_runs"), "their_runs": lm.get("opp_runs"),
+            "our_top_bat": lm.get("our_top_bat"), "our_top_bowl": lm.get("our_top_bowl"),
+        }
+    their = rep.get("their_key_players")
+    if their:
+        out["their_all_time_key_players"] = {
+            "batting": [{"name": p.get("name"), "runs": p.get("runs")} for p in (their.get("batting") or [])[:5]],
+            "bowling": [{"name": p.get("name"), "wickets": p.get("wickets")} for p in (their.get("bowling") or [])[:5]],
+        }
+    return out
+
+
+async def _tool_opponent_danger_players(session, org_id, *, fixture_id=None, opponent=None):
+    if not fixture_id and not opponent:
+        return {"error": "Pass a fixture_id (from upcoming_fixtures) or an opponent club name."}
+    opp_arg, opp_name = (None, None)
+    if not fixture_id:
+        opp_arg, opp_name = await _resolve_opp_arg(session, org_id, opponent)
+    opp_key, name, grade_id = await iq_service.resolve_opponent(
+        session, org_id, opponent=opp_arg, fixture_id=fixture_id, display_name=opp_name,
+    )
+    # Same keying as the dossier route: a never-played opponent is still
+    # scoutable when a fixture supplies their grade.
+    key = opp_key or (name if grade_id else None)
+    if not key:
+        return {
+            "status": "unavailable",
+            "note": f"No identity to scout for {name or opponent} yet. The user can link them via 'Match club' on the BetterIQ Opposition page.",
+        }
+    d = await iq_opponent.get_or_start_dossier(
+        session, org_id, key, opp_name=name, grade_id=grade_id,
+    )
+    status = d.get("status")
+    if status == "building":
+        return {
+            "status": "building",
+            "note": (
+                f"The live scout of {name or 'this opponent'} has started building in the background "
+                "(takes up to a minute). Answer from opposition_report for now and tell the user the "
+                "deeper current-season scout will be ready if they ask again shortly, or on the "
+                "BetterIQ Opposition page."
+            ),
+        }
+    if status in ("error", "unavailable"):
+        return {"status": status, "note": d.get("message") or "Couldn't build the live scout just now — use opposition_report instead."}
+
+    def _bat(p):
+        alert = p.get("alert") if isinstance(p.get("alert"), dict) else None
+        return {
+            "name": p.get("name"), "runs": p.get("runs"), "average": _round(p.get("average")),
+            "strike_rate": _round(p.get("strike_rate")), "form": p.get("form"),
+            "vs_us": p.get("vs_us"), "note": p.get("key_note"), "plan": p.get("plan"),
+            "alert": {
+                "level": alert.get("level"),
+                "reasons": (alert.get("danger") or []) + (alert.get("caution") or []),
+            } if alert else None,
+        }
+
+    def _bowl(p):
+        return {
+            "name": p.get("name"), "wickets": p.get("wickets"), "average": _round(p.get("average")),
+            "economy": _round(p.get("economy")), "form": p.get("form"),
+            "vs_us": p.get("vs_us"), "note": p.get("key_note"), "plan": p.get("plan"),
+        }
+
+    out = {
+        "status": "ready",
+        "opponent": name or (d.get("opponent") or {}).get("name"),
+        "season_scope": "current season (live scout)",
+        "danger_batters": [_bat(p) for p in (d.get("danger_batters") or [])[:6]],
+        "danger_bowlers": [_bowl(p) for p in (d.get("danger_bowlers") or [])[:6]],
+    }
+    gp = d.get("game_plan") or {}
+    if gp:
+        out["game_plan"] = {
+            "one_liner": gp.get("one_liner"),
+            "remove_early": (gp.get("remove_early") or {}).get("name") if isinstance(gp.get("remove_early"), dict) else gp.get("remove_early"),
+            "see_off": (gp.get("see_off") or {}).get("name") if isinstance(gp.get("see_off"), dict) else gp.get("see_off"),
+            "target_bowler": (gp.get("target_bowler") or {}).get("name") if isinstance(gp.get("target_bowler"), dict) else gp.get("target_bowler"),
+            "key_warning": gp.get("key_warning"),
+        }
+    return out
+
+
 _DISPATCH = {
     "find_players": _tool_find_players,
     "player_detail": _tool_player_detail,
@@ -352,6 +580,9 @@ _DISPATCH = {
     "form_movers": _tool_form_movers,
     "current_squad": _tool_current_squad,
     "grades": _tool_grades,
+    "upcoming_fixtures": _tool_upcoming_fixtures,
+    "opposition_report": _tool_opposition_report,
+    "opponent_danger_players": _tool_opponent_danger_players,
 }
 
 

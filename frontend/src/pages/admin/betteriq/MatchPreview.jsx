@@ -5,7 +5,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { useIQFilter, gradeBase } from './Context'
+import { useIQFilter, gradeBase, teamNames } from './Context'
+import { PlayerLink, OppPlayerLink } from './PlayerLink'
 import {
   Icon, CountUp, ResultPills, SplitBar, Card, Tag, Btn, Search, Empty,
   Initials, PageIntro, Note, a2, LoadingBar, fmtCount, fmtPct, runsPhrase,
@@ -163,7 +164,9 @@ export default function MatchPreview() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { ctx } = useIQFilter()
-  const gradeFilter = ctx?.team?.id || null         // global Grade filter (base name)
+  const gradeFilter = ctx?.team?.id || null         // sent to the backend — one name, or several '||'-joined
+  const gradeLabel = gradeFilter ? (ctx?.team?.name || gradeFilter) : null  // shown to the user
+  const gradeNames = useMemo(() => teamNames(ctx?.team), [ctx])
   const [opp, setOpp] = useState(null)              // {opponents, upcoming}
   const [team, setTeam] = useState(null)            // team overview (par/record)
   const [sel, setSel] = useState(null)              // {fixtureId, opponent, meta}
@@ -212,8 +215,8 @@ export default function MatchPreview() {
   // grade (fixtures carry the raw, sponsor-decorated grade name, so normalise).
   const upcoming = useMemo(() => {
     const all = opp?.upcoming || []
-    return gradeFilter ? all.filter(f => gradeBase(f.grade_name) === gradeFilter) : all
-  }, [opp, gradeFilter])
+    return gradeNames.length ? all.filter(f => gradeNames.includes(gradeBase(f.grade_name))) : all
+  }, [opp, gradeNames])
   const oppList = opp?.opponents || []
   const t = q.trim().toLowerCase()
   const oppMatches = (t ? oppList.filter(o => (o.name || '').toLowerCase().includes(t)) : oppList).slice(0, 20)
@@ -260,7 +263,7 @@ export default function MatchPreview() {
                 {(m.home_away || m.venue) && <span className="inline-flex items-center gap-1.5"><Icon name="target" size={14} className="text-pb-faint" />{[m.home_away, m.venue].filter(Boolean).join(' · ')}</span>}
                 {(m.grade_name || m.team_name) && <span className="iq-mono text-pb-faint">{[m.team_name, m.grade_name].filter(Boolean).join(' · ')}</span>}
                 {effGrade
-                  ? <Tag tone="accent">{effGrade}{gradeFilter ? ' · filtered' : ' · this grade'}</Tag>
+                  ? <Tag tone="accent">{gradeFilter ? gradeLabel : effGrade}{gradeFilter ? ' · filtered' : ' · this grade'}</Tag>
                   : <Tag tone="faint">all grades</Tag>}
               </div>
             </div>
@@ -368,7 +371,7 @@ export default function MatchPreview() {
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={d.name} size={32} />
                             <div className="min-w-0">
-                              <div className="font-semibold truncate">{d.name}</div>
+                              <div className="font-semibold truncate"><OppPlayerLink playerId={d.player_id} fallbackName={d.name} oppKey={sel.opponent || report?.opponent?.opp_key} oppName={oppName}>{d.name}</OppPlayerLink></div>
                               {d.times_out ? <div className="iq-mono text-pb-faintest text-[10.5px]">out to us {d.times_out}×{d.top_score != null ? ` · best ${d.top_score}` : ''}</div> : null}
                             </div>
                           </div>
@@ -387,7 +390,7 @@ export default function MatchPreview() {
                         <div key={e.player_id || `b${i}`} className="flex items-center justify-between gap-3 py-1">
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={e.name} size={32} tone="accent" />
-                            <span className="font-semibold truncate">{e.name}</span>
+                            <span className="font-semibold truncate"><PlayerLink id={e.player_id}>{e.name}</PlayerLink></span>
                           </div>
                           <PerfStat value={e.runs} unit="runs" avg={e.average} />
                         </div>
@@ -396,7 +399,7 @@ export default function MatchPreview() {
                         <div key={e.player_id || `w${i}`} className="flex items-center justify-between gap-3 py-1">
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={e.name} size={32} tone="accent" />
-                            <span className="font-semibold truncate">{e.name}</span>
+                            <span className="font-semibold truncate"><PlayerLink id={e.player_id}>{e.name}</PlayerLink></span>
                           </div>
                           <PerfStat value={e.wickets} unit="wickets" avg={e.average} />
                         </div>
@@ -445,7 +448,7 @@ export default function MatchPreview() {
           <div className="space-y-6">
             {upcoming.length > 0 && (
               <div>
-                <div className="iq-eyebrow mb-3">Upcoming fixtures{gradeFilter ? ` · ${gradeFilter}` : ''}</div>
+                <div className="iq-eyebrow mb-3">Upcoming fixtures{gradeLabel ? ` · ${gradeLabel}` : ''}</div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {upcoming.map(f => (
                     <button key={f.fixture_id} onClick={() => load(f)} className="iq-card text-left transition hover:brightness-110">
@@ -484,8 +487,8 @@ export default function MatchPreview() {
             </div>
 
             {upcoming.length === 0 && !q && (
-              <Card><Empty>{gradeFilter
-                ? `No upcoming fixtures in ${gradeFilter} — clear the grade filter, or search a club above.`
+              <Card><Empty>{gradeLabel
+                ? `No upcoming fixtures in ${gradeLabel} — clear the grade filter, or search a club above.`
                 : 'No upcoming fixtures with an opponent — search a club above to preview them.'}</Empty></Card>
             )}
           </div>

@@ -105,9 +105,14 @@ export default function OppositionPlayer() {
     const opp = searchParams.get('opponent')
     const player = searchParams.get('player')
     const nameParam = searchParams.get('name')
+    // ?playerName= — deep-link a player we only know by NAME (e.g. the instant
+    // report's danger batters carry no participant id). Resolved against the
+    // squad by the existing pending-name matcher once the dossier is ready.
+    const playerName = searchParams.get('playerName')
     if (opp && nameParam) {
       seededRef.current = true
       if (player) setSel(player)
+      else if (playerName) pendingNameRef.current = playerName.trim().toLowerCase()
       loadClub({ opp_key: opp, name: nameParam }, !!player)
       return
     }
@@ -117,6 +122,7 @@ export default function OppositionPlayer() {
       if (match) {
         seededRef.current = true
         if (player) setSel(player)
+        else if (playerName) pendingNameRef.current = playerName.trim().toLowerCase()
         loadClub({ opp_key: match.opp_key, name: match.name }, !!player)
       }
     } else {

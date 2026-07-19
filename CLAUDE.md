@@ -690,6 +690,60 @@ Best-tier analytics module (master-plan Phase 4). Gated by `require_module("iq")
 - **Bowling attack structure (v2.11.5)** — brief §8.3. `iq_team._attack_structure`: per-bowler workload over `v_effective_bowling_spells` — **overs are cricket notation** (10.2 = 10 overs 2 balls), so converted to balls in SQL (`FLOOR(overs)*6 + ROUND(frac*10)`) before summing; pace/spin split from `players.bowling_type` (`_PACE_TYPES`/`_SPIN_TYPES`), per-bowler econ/avg/SR + a Strike/Containment/Stock role tag (min 60 balls season / 300 all-time). `team_overview.attack`, card on the Team page.
 - **Consolidation & polish (v2.12.0)** — frontend-only. `TeamAnalysis` reorganised from a ~13-card scroll into **Overview / Batting / Bowling / Players** tabs (a `tab` state + tab bar; cards regrouped, the stray "conceding on avg" line promoted to a proper Bowling summary card). Added a reusable `<Note>` footnote component and "how this is worked out" notes to the opaque blended ratings (Club MVPs on home, all-rounders, collapse, bowling roles, reliability, similar-player). Player deep-dive detail gets a "Deep dive" section divider between the season-trajectory cards and the per-innings cards. No backend/API change.
 
+## BetterIQ — Filters honest, cross-club leak fix, multi-grade filter, clickable players, fixture-aware Ask (v8.74, Jul 2026)
+
+Five related fixes/features from live feedback on the Opposition page:
+
+- **Cross-club player leak (the "Zeplin in our bowl-well list" bug)**: a match
+  between two both-synced clubs shares ONE `games.id` carrying BOTH clubs'
+  per-innings rows (each club's sync attaches only its own players — by design,
+  see the shared-game note in sync.py). Any per-game read that org-scopes the
+  GAME (grades→seasons) but not the PLAYER join therefore mixes the opponent's
+  players into "our" lists. Fixed by adding `p.organisation_id = :org_id` at:
+  `iq._our_performers_vs` (both queries; also now excludes redacted `^\*+$`
+  names and returns each player's BetterSelect `squad`), `iq._our_bowler_dominance`,
+  `iq._last_meeting` (scoreline sums + top bat/bowl, which used to credit the
+  opponent's best batter as ours), and `iq_review.game_review` (totals + top-5s).
+  **Anti-pattern**: never read per-game tables "for a game in our org's grades"
+  without also scoping `players.organisation_id` when attributing to OUR side.
+- **Filters mean what they say**: `OppositionScout` no longer treats the
+  default newest season as "no filter" while the header shows 2025/26 over
+  all-time numbers. On first visit (filter bar untouched this session — new
+  `ctx.touched` flag set by ContextBar interactions) the page defaults the
+  global season to **All seasons**; any picked season/grade then genuinely
+  scopes every instant-report card (backend already supported it).
+- **Multi-select grade filter, IQ-wide**: `ctx.team.id` may now be several
+  grade base-names joined with `'||'` — `iq_filters.grade_match_clause`
+  (`= ANY(string_to_array(:grade, '||'))`) replaced every `= :grade` site
+  (iq_filters/iq/_opp_scope/iq_team×2/iq_trends), so the SAME single `:grade`
+  bind serves one name or many; all existing callers unchanged. The filter-bar
+  TeamPicker is a checkbox multi-select with a **Seniors only** preset driven
+  by `team_grades`'s new `category` field (stored `grades.category` else
+  `grade_labels.suggest_category` — the merge-grades classifier). Client-side
+  grade comparisons (MatchPreview/SelectionAnalysis fixture narrowing) use
+  `teamNames()` from Context.jsx.
+- **Clickable player names** (`PlayerLink.jsx`): our players →
+  `/admin/betteriq/trends?player=`, opposition → `/admin/betteriq/
+  opposition-player?opponent=&player=` (or `&playerName=` for name-only rows —
+  the instant report's danger batters have no participant id; OppositionPlayer
+  resolves it via its pending-name matcher once the dossier builds). Applied
+  across OppositionScout (our-record, match-ups, last meeting, squad tables,
+  radars, historical threats), KeyPlayersCard, TeamAnalysis boards, MatchReview,
+  MatchPreview, SelectionAnalysis XI.
+- **Radar context**: `viz.Radar` has hover/focus tooltips per vertex (score,
+  and with `buildRadar`'s new `details` the actual value + peer mean) and a
+  `legend` prop; opposition + deep-dive callers pass both.
+- **Ask BetterIQ fixture/opposition tools** (`iq_ask.py`): `upcoming_fixtures`,
+  `opposition_report` (trimmed instant report; performers carry `squad` for
+  team-relevance), `opponent_danger_players` (reads the dossier cache via
+  `get_or_start_dossier` — a cold dossier starts building in the background and
+  the tool reports `building`, so the model answers from held data now and says
+  the deeper scout will be ready shortly). System prompt: resolve the fixture
+  first; keep suggestions team-relevant via `squad` (a lower-grade record vs
+  the opponent is a "possible promotion" mention, not an automatic pick);
+  unlinked opponents → point at "Match club" on the Opposition page.
+  `MAX_STEPS` 6 → 8 for the longer tool chains.
+
 ## BetterIQ — Review Fixes (Jun 2026, v2.12.1)
 
 Post-v2.12.0 review pass (live-site feedback). All on branch `claude/gifted-babbage-7QE8g`.

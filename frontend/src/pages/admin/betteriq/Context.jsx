@@ -56,21 +56,36 @@ function _rowYear(s) {
   return m ? Number(m[1]) : null
 }
 
+/* A team selection is `{ id, name, names? }`. `id` stays the value every page
+   sends to the backend: one grade NAME, or several names joined with '||' (the
+   multi-select wire format — `season_grade_clause` splits it server-side), or
+   null for "All grades". `names` is the picked list for the UI. */
+export function teamFromNames(names) {
+  const list = (names || []).filter(Boolean)
+  if (!list.length) return { id: null, name: 'All grades', names: [] }
+  if (list.length === 1) return { id: list[0], name: list[0], names: list }
+  return { id: list.join('||'), name: `${list.length} grades`, names: list }
+}
+export function teamNames(team) {
+  if (!team || team.id == null) return []
+  if (team.names?.length) return team.names
+  return String(team.id).split('||').filter(Boolean)
+}
+
 function _reconcile(saved) {
   if (!saved || !saved.season || !_seasons?.length) return null
   const newest = _seasons[_seasons.length - 1]
   const from = _seasonById(saved.season.from?.id) || newest
   const to = _seasonById(saved.season.to?.id) || newest
-  // Grades are keyed by NAME now (de-duped across seasons). Drop a stale saved
-  // team that no longer matches a known grade name (e.g. an old raw-uuid id from
-  // a previous build) so it falls back to "All grades" instead of filtering to
+  // Grades are keyed by NAME now (de-duped across seasons). Drop any saved
+  // names that no longer match a known grade (e.g. an old raw-uuid id from a
+  // previous build) so it falls back to "All grades" instead of filtering to
   // nothing.
-  let team = saved.team && saved.team.name ? saved.team : { id: null, name: 'All grades' }
-  if (team.id != null && !(_grades || []).some(g => g.id === team.id || g.name === team.id)) {
-    team = { id: null, name: 'All grades' }
-  }
+  const known = new Set((_grades || []).flatMap(g => [g.id, g.name]))
+  const savedNames = teamNames(saved.team).filter(n => known.has(n))
+  const team = teamFromNames(savedNames)
   const mode = saved.season.mode === 'range' ? 'range' : saved.season.mode === 'all' ? 'all' : 'single'
-  return { team, season: { mode, from, to } }
+  return { team, season: { mode, from, to }, touched: !!saved.touched }
 }
 
 async function _ensureLoaded() {
@@ -94,11 +109,15 @@ async function _ensureLoaded() {
         byYear.get(key).ids.push(id)
       }
       _seasons = [...byYear.values()].sort((a, b) => sortKey(a) - sortKey(b))
-      _grades = (grades || []).map(g => ({ id: g.grade_id || g.id, name: g.name, season_id: g.season_id || null }))
+      _grades = (grades || []).map(g => ({ id: g.grade_id || g.id, name: g.name, season_id: g.season_id || null, category: g.category || null }))
       const newest = _seasons[_seasons.length - 1] || null
+      // `touched` = the user has interacted with the filter bar this session.
+      // Until then a page may apply its own default (e.g. Opposition switches
+      // the untouched default to All seasons so the header matches the data).
       _ctx = _reconcile(_loadCtx()) || {
-        team: { id: null, name: 'All grades' },
+        team: { id: null, name: 'All grades', names: [] },
         season: { mode: 'single', from: newest, to: newest },
+        touched: false,
       }
       _emit()
     })()
@@ -204,25 +223,70 @@ function PillTrigger({ icon, label, sub, open, accent }) {
   )
 }
 
-/* ── Team picker ──────────────────────────────────────────────────────────── */
+/* ── Team picker — multi-select grades + category presets ─────────────────────
+   Tick any set of grades (exclude juniors/women's, keep just the top sides…).
+   "Seniors only" uses the same grade classification the merge-grades admin
+   screen suggests (confirmed `grades.category` when set, else the name-based
+   guess) — served per grade by /iq/team/grades. Single-pick still reads as a
+   plain click; ticking more boxes builds the multi set. */
+const CATEGORY_TAGS = { junior: 'Jnr', womens: "Wom", masters: 'Mas', mixed: 'Mix' }
+
 function TeamPicker({ value, grades, onChange, label = 'Team' }) {
-  const opts = [{ id: null, name: 'All grades' }, ...(grades || [])]
+  const picked = new Set(teamNames(value))
+  const seniorNames = (grades || []).filter(g => (g.category || 'senior') === 'senior').map(g => g.name)
+  const hasNonSenior = seniorNames.length > 0 && seniorNames.length < (grades || []).length
+  const seniorsActive = picked.size > 0 && picked.size === seniorNames.length && seniorNames.every(n => picked.has(n))
+  const toggle = (name) => {
+    const next = new Set(picked)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    onChange(teamFromNames([...next]))
+  }
+  const presetBtn = (active) => ({
+    padding: '5px 9px', borderRadius: 8,
+    background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'var(--pb-surface2)',
+    color: active ? 'var(--pb-accent)' : 'var(--pb-dim)',
+    border: `1px solid ${active ? 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' : 'var(--pb-hairline2)'}`,
+  })
   return (
-    <Popover width={220} trigger={open => <PillTrigger icon="teams" sub={label} label={value?.name || 'All grades'} open={open} />}>
+    <Popover width={260} trigger={open => <PillTrigger icon="teams" sub={label} label={value?.name || 'All grades'} open={open} />}>
       {close => (
-        <div className="space-y-0.5 max-h-72 overflow-y-auto iq-scroll">
-          {opts.map(t => {
-            const active = (t.id || null) === (value?.id || null)
-            return (
-              <button key={t.id || 'all'} onClick={() => { onChange(t); close() }}
-                className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8, background: active ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}
-                onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--pb-surface2)' }}
-                onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}>
-                <span className="font-medium text-[13.5px]" style={{ color: active ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{t.name}</span>
-                {active && <Icon name="check" size={14} style={{ color: 'var(--pb-accent)' }} />}
-              </button>
-            )
-          })}
+        <div>
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <button onClick={() => { onChange(teamFromNames([])); close() }}
+              className="iq-display font-semibold text-[11.5px] transition" style={presetBtn(picked.size === 0)}>All grades</button>
+            {hasNonSenior && (
+              <button onClick={() => onChange(teamFromNames(seniorNames))}
+                className="iq-display font-semibold text-[11.5px] transition" style={presetBtn(seniorsActive)}
+                title="Every senior grade — excludes junior, women's, masters and mixed/social grades">Seniors only</button>
+            )}
+          </div>
+          <div className="space-y-0.5 max-h-72 overflow-y-auto iq-scroll">
+            {(grades || []).map(t => {
+              const active = picked.has(t.name)
+              const tag = CATEGORY_TAGS[t.category]
+              return (
+                <button key={t.name} onClick={() => toggle(t.name)}
+                  className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8, background: active ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--pb-surface2)' }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}>
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="shrink-0 inline-flex items-center justify-center" style={{
+                      width: 15, height: 15, borderRadius: 4,
+                      border: `1.5px solid ${active ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`,
+                      background: active ? 'var(--pb-accent)' : 'transparent' }}>
+                      {active && <Icon name="check" size={11} style={{ color: 'var(--pb-bg)' }} />}
+                    </span>
+                    <span className="font-medium text-[13.5px] truncate" style={{ color: active ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{t.name}</span>
+                  </span>
+                  {tag && <span className="iq-mono shrink-0" style={{ fontSize: 9, color: 'var(--pb-faintest)' }}>{tag}</span>}
+                </button>
+              )
+            })}
+          </div>
+          {picked.size > 1 && (
+            <div className="iq-mono mt-2 px-1" style={{ fontSize: 10, color: 'var(--pb-faint)' }}>{picked.size} grades selected</div>
+          )}
         </div>
       )}
     </Popover>
@@ -387,15 +451,21 @@ export function ContextBar({ route }) {
     const byName = new Map()
     for (const g of (grades || [])) {
       if (!ids.size || !g.season_id || ids.has(g.season_id)) {
-        if (!byName.has(g.name)) byName.set(g.name, { id: g.name, name: g.name })
+        const prev = byName.get(g.name)
+        // Keep a confirmed/known category over a missing one across season rows.
+        if (!prev) byName.set(g.name, { id: g.name, name: g.name, category: g.category || null })
+        else if (!prev.category && g.category) prev.category = g.category
       }
     }
     return [...byName.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
   }, [ctx, seasons, grades])
-  // Drop a selected grade that the club didn't field in the new season.
+  // Drop selected grades the club didn't field in the new season.
   useEffect(() => {
-    if (ctx?.team?.id && visibleGrades.length && !visibleGrades.some(g => g.id === ctx.team.id)) {
-      setCtx({ ...ctx, team: { id: null, name: 'All grades' } })
+    const names = teamNames(ctx?.team)
+    if (names.length && visibleGrades.length) {
+      const known = new Set(visibleGrades.map(g => g.name))
+      const kept = names.filter(n => known.has(n))
+      if (kept.length !== names.length) setCtx({ ...ctx, team: teamFromNames(kept) })
     }
   }, [visibleGrades])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!filters || (!filters.team && !filters.season)) return null
@@ -407,9 +477,9 @@ export function ContextBar({ route }) {
     <div className="sticky z-20 flex items-center gap-3 flex-wrap px-5 md:px-8 py-3"
       style={{ top: 64, background: 'color-mix(in srgb, var(--pb-bg) 86%, transparent)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderBottom: '1px solid var(--pb-hairline)' }}>
       <span className="iq-eyebrow hidden sm:block" style={{ fontSize: 9 }}>Showing</span>
-      {filters.team && <TeamPicker value={ctx.team} grades={visibleGrades} onChange={t => setCtx({ ...ctx, team: t })} label={filters.teamLabel || 'Team'} />}
+      {filters.team && <TeamPicker value={ctx.team} grades={visibleGrades} onChange={t => setCtx({ ...ctx, team: t, touched: true })} label={filters.teamLabel || 'Team'} />}
       {filters.season
-        ? <SeasonControl season={ctx.season} seasons={seasons} onChange={s => setCtx({ ...ctx, season: s })} allowRange={filters.season === 'range'} />
+        ? <SeasonControl season={ctx.season} seasons={seasons} onChange={s => setCtx({ ...ctx, season: s, touched: true })} allowRange={filters.season === 'range'} />
         : <div className="flex items-center gap-2 px-3" style={{ height: 38, borderRadius: 10, background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)' }}>
             <Icon name="clock" size={14} className="text-pb-faint" />
             <span className="iq-display font-semibold text-[13px]">{seasons[seasons.length - 1]?.label || 'Current'}</span>

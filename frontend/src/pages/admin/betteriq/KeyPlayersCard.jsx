@@ -11,6 +11,7 @@
  */
 import { useState } from 'react'
 import { Icon, CountUp, Sparkline, Tag, Segmented, surname, a2, runsPhrase, wktsPhrase } from './ui'
+import { OppPlayerLink } from './PlayerLink'
 
 /* recent_scores may be strings ('67*', '12') — parse to ints for the sparkline */
 function toInt(v) { const n = parseInt(String(v).replace(/[*]/g, ''), 10); return Number.isNaN(n) ? 0 : n }
@@ -32,7 +33,7 @@ function AlertBadge({ alert }) {
   )
 }
 
-export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' }) {
+export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat', oppKey, oppName }) {
   const [sel, setSel] = useState(0)
   if (!players?.length) return null
   const list = players.slice(0, 5)
@@ -76,7 +77,7 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' 
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="iq-display font-bold text-[20px] leading-tight truncate">{p.name}</span>
+              <span className="iq-display font-bold text-[20px] leading-tight truncate"><OppPlayerLink playerId={p.player_id} oppKey={oppKey} oppName={oppName}>{p.name}</OppPlayerLink></span>
               {formLabel && (
                 <span className="iq-mono shrink-0" style={{ fontSize: 9.5, padding: '2px 7px', borderRadius: 99,
                   background: `color-mix(in srgb, ${formColor} 16%, transparent)`, color: formColor }}>{formLabel}</span>
