@@ -378,10 +378,19 @@ def _unsub_sentence_text(club_name: str, unsub_url: str, marketing: bool) -> str
             f"any time: {unsub_url}")
 
 
+_FOOTER_FONT_STACK = "-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif"
+
+
 def _footer_block(footer: str, unsub_url: str, club_name: str, marketing: bool) -> str:
     """The mandatory sender-id + unsubscribe footer, injected into a full-HTML
-    template before </body>. Inherits the email's font so it adopts its style; the
-    unsubscribe link can never be removed by the author (Spam Act 2003)."""
+    template before </body>. Sets an explicit sans-serif stack rather than
+    relying on inheritance: _inject_footer appends this block right before
+    </body> as a SIBLING of the template's own content table, not a
+    descendant of it, so `font-family:inherit` (the old approach) only ever
+    reached the <body> tag itself — and most full-HTML templates set a
+    font-family on their content table, not on <body>, leaving the footer to
+    fall back to the email client's default serif font. The unsubscribe link
+    can never be removed by the author (Spam Act 2003)."""
     safe_footer = html_lib.escape(footer).replace("\n", "<br>") if footer else ""
     # A blank line between the sender-id block and the unsubscribe sentence.
     prefix = f"{safe_footer}<br><br>" if safe_footer else ""
@@ -390,7 +399,7 @@ def _footer_block(footer: str, unsub_url: str, club_name: str, marketing: bool) 
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="margin-top:8px;"><tr><td align="center" '
         'style="padding:14px 28px;border-top:1px solid #e5e7eb;color:#6b7280;'
-        'font-size:12px;line-height:1.5;font-family:inherit;text-align:center;">'
+        f'font-size:12px;line-height:1.5;font-family:{_FOOTER_FONT_STACK};text-align:center;">'
         f'{prefix}{sentence}</td></tr></table>'
     )
 
