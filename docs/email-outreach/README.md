@@ -6,7 +6,7 @@ Two pasteable HTML emails for the Cricket Australia outreach, plus plain-text fa
 |------|-----|---------|-------|
 | `email-initial-demo.html` | First email in the sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
-| `email-selfserve-launch.html` | The self-serve launch (re-engagement, sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Your club's entire history, live in minutes | Dark navy, echoes the /trial page: headline, three steps, one big trial CTA |
+| `email-selfserve-launch.html` | The self-serve launch (re-engagement, sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page: headline, three horizontal steps, module cards, club grid, hidden preheader |
 
 Each has a matching `.txt` plain-text fallback (`email-initial-demo.txt`, `email-followup-demo.txt`).
 
