@@ -164,7 +164,8 @@ export default function MatchPreview() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { ctx } = useIQFilter()
-  const gradeFilter = ctx?.team?.id || null         // global Grade filter ('||'-joined base names)
+  const gradeFilter = ctx?.team?.id || null         // sent to the backend — one name, or several '||'-joined
+  const gradeLabel = gradeFilter ? (ctx?.team?.name || gradeFilter) : null  // shown to the user
   const gradeNames = useMemo(() => teamNames(ctx?.team), [ctx])
   const [opp, setOpp] = useState(null)              // {opponents, upcoming}
   const [team, setTeam] = useState(null)            // team overview (par/record)
@@ -262,7 +263,7 @@ export default function MatchPreview() {
                 {(m.home_away || m.venue) && <span className="inline-flex items-center gap-1.5"><Icon name="target" size={14} className="text-pb-faint" />{[m.home_away, m.venue].filter(Boolean).join(' · ')}</span>}
                 {(m.grade_name || m.team_name) && <span className="iq-mono text-pb-faint">{[m.team_name, m.grade_name].filter(Boolean).join(' · ')}</span>}
                 {effGrade
-                  ? <Tag tone="accent">{effGrade}{gradeFilter ? ' · filtered' : ' · this grade'}</Tag>
+                  ? <Tag tone="accent">{gradeFilter ? gradeLabel : effGrade}{gradeFilter ? ' · filtered' : ' · this grade'}</Tag>
                   : <Tag tone="faint">all grades</Tag>}
               </div>
             </div>
@@ -447,7 +448,7 @@ export default function MatchPreview() {
           <div className="space-y-6">
             {upcoming.length > 0 && (
               <div>
-                <div className="iq-eyebrow mb-3">Upcoming fixtures{gradeFilter ? ` · ${gradeFilter}` : ''}</div>
+                <div className="iq-eyebrow mb-3">Upcoming fixtures{gradeLabel ? ` · ${gradeLabel}` : ''}</div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {upcoming.map(f => (
                     <button key={f.fixture_id} onClick={() => load(f)} className="iq-card text-left transition hover:brightness-110">
@@ -486,8 +487,8 @@ export default function MatchPreview() {
             </div>
 
             {upcoming.length === 0 && !q && (
-              <Card><Empty>{gradeFilter
-                ? `No upcoming fixtures in ${gradeFilter} — clear the grade filter, or search a club above.`
+              <Card><Empty>{gradeLabel
+                ? `No upcoming fixtures in ${gradeLabel} — clear the grade filter, or search a club above.`
                 : 'No upcoming fixtures with an opponent — search a club above to preview them.'}</Empty></Card>
             )}
           </div>
