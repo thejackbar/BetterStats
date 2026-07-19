@@ -2,19 +2,14 @@ Subject: Your club's entire history, live in minutes
 
 Hi [first name],
 
-You might have spotted BetterCricket in your Facebook feed this week.
-Here's the news behind the ad: clubs can now set themselves up. No
-waiting on us, no demo call to book.
+We've been working hard, and now you can set your club up yourself!
 
-Register your club yourself and every module switches on for a 14-day
-free trial, running on your club's own data. No credit card. It takes
-about 3 minutes:
+Every module, free for 14 days, on your club's own data. No credit card.
+About 3 minutes, start to finish:
 
-  1. Find your club - a simple search of the Cricket Australia register.
-  2. Enter your details - set up your admin profile and verify your email.
-  3. Complete the setup wizard - a step-by-step guide customises
-     BetterCricket to your club while your full playing history imports
-     in the background.
+  1. Find your club
+  2. Enter your details
+  3. Complete the setup wizard
 
 Start your club's free trial:
 https://betterat.cricket/trial?utm_source=ca&utm_medium=email&utm_campaign=BC_AU_SelfServe_EDM_Aug2026&utm_content=edm_primary_cta
