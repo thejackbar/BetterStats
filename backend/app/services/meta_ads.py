@@ -24,24 +24,31 @@ TIMEOUT = 20.0
 
 # Ad -> destination map (§1 of the spec). Stable IDs; the live API response's
 # ad_name/ad_id are preferred where available, this is the fallback label.
+# `campaign_id` lets get_registration_count() work out which utm_content tags
+# belong to the CURRENT campaign (settings.meta_campaign_id) without a second
+# round-trip — see that function.
 AD_DESTINATIONS = {
     # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
     # same tag the ad-signups report groups by (see routers/meta_ads.py).
-    "120249908493850121": {"name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
-    "120249908396070121": {"name": "Ad2_SelfServe_SimpleCTA", "destination": "betterat.cricket/trial", "utm_content": "static_simple_cta"},
-    "120249892616050121": {"name": "Ad3_SelfServe_StaticShowcase_RTG", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_rtg"},
-    "120249892619080121": {"name": "Ad4_SelfServe_SimpleCTA_RTG", "destination": "betterat.cricket/trial", "utm_content": "static_simple_rtg"},
+    "120249908493850121": {"campaign_id": "120249890918010121", "name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
+    "120249908396070121": {"campaign_id": "120249890918010121", "name": "Ad2_SelfServe_SimpleCTA", "destination": "betterat.cricket/trial", "utm_content": "static_simple_cta"},
+    "120249892616050121": {"campaign_id": "120249890918010121", "name": "Ad3_SelfServe_StaticShowcase_RTG", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_rtg"},
+    "120249892619080121": {"campaign_id": "120249890918010121", "name": "Ad4_SelfServe_SimpleCTA_RTG", "destination": "betterat.cricket/trial", "utm_content": "static_simple_rtg"},
     # BC_AU_Traffic_ClubHistory_Jul2026 (finished) — kept so old snapshots still label.
-    "120249237210730121": {"name": "Ad1_EntireClubHistory", "destination": "betterat.cricket/applecross", "utm_content": "entire_club_history"},
-    "120249238467140121": {"name": "Ad2_PlayerStory", "destination": "betterat.cricket/applecross", "utm_content": "every_player_story"},
-    "120249238467150121": {"name": "Ad3_Analysis", "destination": "betterat.cricket/ (homepage)", "utm_content": "cricket_analysis"},
-    "120249238467160121": {"name": "Ad4_Legacy", "destination": "betterat.cricket/ (homepage)", "utm_content": "club_legacy"},
+    "120249237210730121": {"campaign_id": "120249237210710121", "name": "Ad1_EntireClubHistory", "destination": "betterat.cricket/applecross", "utm_content": "entire_club_history"},
+    "120249238467140121": {"campaign_id": "120249237210710121", "name": "Ad2_PlayerStory", "destination": "betterat.cricket/applecross", "utm_content": "every_player_story"},
+    "120249238467150121": {"campaign_id": "120249237210710121", "name": "Ad3_Analysis", "destination": "betterat.cricket/ (homepage)", "utm_content": "cricket_analysis"},
+    "120249238467160121": {"campaign_id": "120249237210710121", "name": "Ad4_Legacy", "destination": "betterat.cricket/ (homepage)", "utm_content": "club_legacy"},
 }
 
 # The self-serve campaign optimises for CompleteRegistration (a finished
 # trial signup), so registrations count as conversions alongside classic
-# leads — one indicative Meta-side number. The authoritative per-signup
-# record is our own ad-signups report (organisations.signup_attribution).
+# leads — one indicative Meta-side number. It's kept only as a reference
+# figure now (campaign["leads"]) — the authoritative "did someone actually
+# register for the trial" count is get_registration_count() below, which
+# reads our own ad-signups ground truth (organisations.signup_attribution)
+# instead of trusting Meta's action-type rollup, which conflates reaching
+# the trial form (a Lead) with actually finishing it (a CompleteRegistration).
 _LEAD_ACTION_TYPES = {
     "lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead",
     "complete_registration", "offsite_conversion.fb_pixel_complete_registration",
@@ -365,6 +372,45 @@ async def get_lead_adjustments(db: AsyncSession, limit: int = 20) -> list[dict]:
     ]
 
 
+def _current_campaign_utm_contents() -> set[str]:
+    """utm_content tags of every ad AD_DESTINATIONS maps to the CURRENT
+    campaign (settings.meta_campaign_id) — how get_registration_count() ties
+    a real signup back to this specific Meta campaign rather than any other
+    campaign (an EDM send, organic, a past campaign) that also happens to
+    carry a utm_campaign tag."""
+    return {
+        meta["utm_content"]
+        for meta in AD_DESTINATIONS.values()
+        if meta.get("campaign_id") == settings.meta_campaign_id and meta.get("utm_content")
+    }
+
+
+async def get_registration_count(db: AsyncSession) -> int:
+    """Real, completed free-trial registrations attributed to the CURRENT
+    Meta campaign — ground truth from our own DB (organisations.
+    signup_attribution, migration 161), not Meta's self-reported Lead/
+    CompleteRegistration action counts. Those actions fire the moment a
+    prospect reaches the trial form (a Lead) or completes it (a
+    CompleteRegistration) and can double-count across the pixel/CAPI
+    action-type split (see the "2 conversions" investigation) — they also
+    can't tell a Meta-driven signup apart from one that came in through a
+    different campaign (an EDM send, a "national-launch" push, organic
+    traffic) that happens to carry its own utm tags. A club only counts here
+    if its own signup_attribution.utm_content matches one of THIS campaign's
+    ads, archived test signups are excluded (same default as the ad-signups
+    report and the main Club Directory)."""
+    utm_contents = _current_campaign_utm_contents()
+    if not utm_contents:
+        return 0
+    count = (await db.execute(text("""
+        SELECT COUNT(*) FROM organisations
+        WHERE signup_source IS NOT NULL
+          AND archived_at IS NULL
+          AND signup_attribution->>'utm_content' = ANY(:utm_contents)
+    """), {"utm_contents": list(utm_contents)})).scalar()
+    return int(count or 0)
+
+
 async def get_latest_summary(db: AsyncSession) -> dict:
     """Read back the most recent snapshot set for the CURRENT campaign (used
     for the fast page-load path, as opposed to /refresh which does a live
@@ -406,9 +452,12 @@ async def get_latest_summary(db: AsyncSession) -> dict:
             "leads": float(r["leads"]),
         }
 
+    registrations = await get_registration_count(db)
+
     campaign = _row_to_dict(campaign_row)
     campaign["leads_adjustment"] = adjustment
-    campaign["leads_effective"] = max(0.0, campaign["leads"] + adjustment)
+    campaign["registrations"] = registrations
+    campaign["leads_effective"] = max(0.0, registrations + adjustment)
     campaign["cost_per_lead"] = (
         round(campaign["spend"] / campaign["leads_effective"], 2) if campaign["leads_effective"] > 0 else None
     )

@@ -237,23 +237,24 @@ export default function SuperMetaAds() {
               <Stat label="Link CTR" value={fmtPct(campaign.link_ctr)} />
               <Stat label="Cost per LPV" value={campaign.cost_per_lpv != null ? fmtMoney(campaign.cost_per_lpv) : '–'} />
               <Stat
-                label="Cost per lead"
+                label="Cost per registration"
                 value={campaign.cost_per_lead != null ? fmtMoney(campaign.cost_per_lead) : '–'}
-                hint="spend / effective leads"
+                hint="spend / actual registrations"
               />
 
               <div className="pb-card px-3 py-2.5">
-                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Meta-attributed conversions</div>
+                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Free trial registrations</div>
                 <div className="font-display text-xl text-pb-text mt-0.5">{fmtNum(campaign.leads_effective)}</div>
                 <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
-                  {fmtNum(campaign.leads)} from Meta
+                  {fmtNum(campaign.registrations)} actual
                   {campaign.leads_adjustment ? `, ${campaign.leads_adjustment > 0 ? '+' : ''}${campaign.leads_adjustment} manual` : ''}
+                  {' '}&middot; {fmtNum(campaign.leads)} Meta-reported (Lead/CompleteRegistration &mdash; unreliable, see below)
                 </div>
                 <div className="flex items-center gap-1 mt-1.5">
                   <button
                     onClick={() => adjustLeads(-1)}
                     disabled={adjusting}
-                    title="Remove one lead (e.g. spam or duplicate)"
+                    title="Remove one registration (e.g. spam or duplicate)"
                     className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
                   >
                     &minus;
@@ -261,7 +262,7 @@ export default function SuperMetaAds() {
                   <button
                     onClick={() => adjustLeads(1)}
                     disabled={adjusting}
-                    title="Add one lead Meta didn't capture (e.g. a direct enquiry)"
+                    title="Add one registration our own tracking didn't capture (e.g. a manually onboarded club)"
                     className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
                   >
                     +
@@ -580,9 +581,12 @@ export default function SuperMetaAds() {
 
             {/* Footer note */}
             <p className="text-xs text-pb-faint">
-              Meta&rsquo;s Lead number is indicative &mdash; the real conversions are the request-access enquiries in
-              Formspree and the{' '}
-              <a href="/admin/super/onboarding" className="text-accent hover:underline">onboarding list</a>.
+              Meta&rsquo;s own Lead/CompleteRegistration numbers are indicative only &mdash; they fire the moment
+              someone reaches or submits the trial form and can double-count across the pixel/CAPI split. The
+              &ldquo;Free trial registrations&rdquo; figure above is the real count: clubs in the table whose
+              campaign/creative tag matches one of this campaign&rsquo;s own ads. A row tagged with a different
+              campaign (an EDM send, &ldquo;national-launch&rdquo;, organic) is a real signup but didn&rsquo;t come
+              from this Meta campaign, so it isn&rsquo;t counted in the tile above.
             </p>
           </>
         )}
