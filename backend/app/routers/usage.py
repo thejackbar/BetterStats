@@ -422,6 +422,43 @@ async def post_event(payload: PageViewIn, request: Request):
     return {"ok": True}
 
 
+class PageExitIn(BaseModel):
+    path: str
+    time_on_page_ms: int
+    visitor_id: Optional[str] = None
+
+
+@router.post("/usage/event/exit")
+async def post_event_exit(payload: PageExitIn, request: Request):
+    """Anonymous SPA dwell-time beacon — how long the visitor was actually on
+    ``path`` before navigating away, backgrounding the tab, or closing it.
+    Fired by usePageView.js on visibilitychange/pagehide, not on every page
+    view (there's no meaningful dwell time until the visitor leaves).
+
+    Written as its own event_type ('page_exit') rather than an UPDATE of the
+    original page_view row: sendBeacon calls on unload can't reliably read
+    back the original row's id, and an append-only insert is exactly the
+    pattern the rest of this table already uses. Read-time joins (session
+    duration, per-page average dwell) match a page_exit to its page_view by
+    (visitor_id, path, nearest following timestamp) — see
+    services/usage.py / the /usage/session-duration and /usage/journey routes."""
+    from app.main import _decode_user_id, _client_ip, _cf_country  # avoid import cycle
+
+    await record_event(
+        event_type="page_exit",
+        method="GET",
+        path=payload.path or "/",
+        status=200,
+        user_id=_decode_user_id(request),
+        ip=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        country=_cf_country(request),
+        visitor_id=payload.visitor_id,
+        time_on_page_ms=payload.time_on_page_ms,
+    )
+    return {"ok": True}
+
+
 # ─── Super-admin views ───────────────────────────────────────────────────────
 
 @router.get("/club-admin/usage/summary")
@@ -1281,6 +1318,240 @@ async def campaigns(
                 "views": int(r["views"] or 0),
             }
             for r in landing_rows
+        ],
+    }
+
+
+# ─── Session / dwell duration ────────────────────────────────────────────────
+#
+# "Session" is never stored — it's a read-time grouping of a visitor's
+# page_view timestamps into visits separated by a ≥30-minute gap (the
+# industry-standard session-boundary heuristic; matches GA4's default). A
+# session's duration is the span between its first and last page_view PLUS
+# the final page's own dwell time (from its page_exit beacon, matched by
+# visitor + path + nearest-following timestamp) — without that tail, a
+# single-page (bounce) session would always read as 0ms even though the
+# visitor may have read the page for a full minute before leaving.
+
+_SESSION_DURATION_SQL = f"""
+WITH pv AS (
+    SELECT {_VKEY} AS vkey, ue.created_at, ue.id,
+           split_part(ue.path, '?', 1) AS page
+    FROM usage_events ue
+    WHERE ue.event_type = 'page_view'
+      AND {_VKEY} IS NOT NULL
+      AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+),
+gapped AS (
+    SELECT *, created_at - LAG(created_at) OVER (PARTITION BY vkey ORDER BY created_at, id) AS gap
+    FROM pv
+),
+sessioned AS (
+    SELECT *, SUM(CASE WHEN gap IS NULL OR gap > INTERVAL '30 minutes' THEN 1 ELSE 0 END)
+        OVER (PARTITION BY vkey ORDER BY created_at, id) AS session_num
+    FROM gapped
+),
+session_bounds AS (
+    SELECT vkey, session_num,
+           MIN(created_at) AS start_ts,
+           MAX(created_at) AS end_ts,
+           COUNT(*) AS pages,
+           (ARRAY_AGG(page ORDER BY created_at DESC))[1] AS last_page
+    FROM sessioned
+    GROUP BY vkey, session_num
+),
+last_exit AS (
+    SELECT DISTINCT ON (sb.vkey, sb.session_num)
+           sb.vkey, sb.session_num, pe.time_on_page_ms
+    FROM session_bounds sb
+    JOIN usage_events pe
+      ON pe.event_type = 'page_exit'
+     AND COALESCE(pe.visitor_id::text, pe.ip_hash) = sb.vkey
+     AND split_part(pe.path, '?', 1) = sb.last_page
+     AND pe.created_at >= sb.end_ts
+     AND pe.created_at <= sb.end_ts + INTERVAL '10 minutes'
+    ORDER BY sb.vkey, sb.session_num, pe.created_at ASC
+),
+durations AS (
+    SELECT sb.vkey, sb.session_num, sb.pages,
+           (EXTRACT(EPOCH FROM (sb.end_ts - sb.start_ts)) * 1000
+             + COALESCE(le.time_on_page_ms, 0))::bigint AS duration_ms
+    FROM session_bounds sb
+    LEFT JOIN last_exit le ON le.vkey = sb.vkey AND le.session_num = sb.session_num
+)
+"""
+
+
+@router.get("/club-admin/usage/session-duration")
+async def session_duration(
+    days: int = 7,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Session-duration + per-page dwell-time analytics.
+
+    A "session" is derived on read (see _SESSION_DURATION_SQL above) — there
+    is no stored session table. ``avg_ms``/``median_ms`` cover full visits
+    (possibly several pages); ``top_pages`` is per-page average dwell time
+    from the page_exit beacon directly, independent of session grouping.
+    """
+    days = max(1, min(days, 365))
+    params = {"days": days}
+
+    row = (await db.execute(text(f"""
+        {_SESSION_DURATION_SQL}
+        SELECT
+            COUNT(*) AS sessions,
+            AVG(duration_ms) AS avg_ms,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms) AS median_ms,
+            AVG(pages) AS avg_pages,
+            COUNT(*) FILTER (WHERE duration_ms < 10000)                          AS b_10s,
+            COUNT(*) FILTER (WHERE duration_ms >= 10000  AND duration_ms < 30000)  AS b_30s,
+            COUNT(*) FILTER (WHERE duration_ms >= 30000  AND duration_ms < 60000)  AS b_1m,
+            COUNT(*) FILTER (WHERE duration_ms >= 60000  AND duration_ms < 180000) AS b_3m,
+            COUNT(*) FILTER (WHERE duration_ms >= 180000 AND duration_ms < 600000) AS b_10m,
+            COUNT(*) FILTER (WHERE duration_ms >= 600000)                         AS b_10m_plus
+        FROM durations
+    """), params)).mappings().first()
+
+    top_pages = (await db.execute(text("""
+        SELECT split_part(ue.path, '?', 1) AS page,
+               AVG(ue.time_on_page_ms) AS avg_ms,
+               COUNT(*) AS samples
+        FROM usage_events ue
+        WHERE ue.event_type = 'page_exit'
+          AND ue.time_on_page_ms IS NOT NULL
+          AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY 1
+        HAVING COUNT(*) >= 3
+        ORDER BY samples DESC
+        LIMIT 20
+    """), params)).mappings().all()
+
+    sessions_n = int(row["sessions"] or 0)
+    return {
+        "days": days,
+        "sessions": sessions_n,
+        "avg_session_ms": round(float(row["avg_ms"])) if row["avg_ms"] is not None else 0,
+        "median_session_ms": round(float(row["median_ms"])) if row["median_ms"] is not None else 0,
+        "avg_pages_per_session": round(float(row["avg_pages"]), 1) if row["avg_pages"] is not None else 0.0,
+        "distribution": [
+            {"bucket": "<10s",   "count": int(row["b_10s"] or 0)},
+            {"bucket": "10–30s", "count": int(row["b_30s"] or 0)},
+            {"bucket": "30s–1m", "count": int(row["b_1m"] or 0)},
+            {"bucket": "1–3m",   "count": int(row["b_3m"] or 0)},
+            {"bucket": "3–10m",  "count": int(row["b_10m"] or 0)},
+            {"bucket": "10m+",   "count": int(row["b_10m_plus"] or 0)},
+        ],
+        "top_pages": [
+            {
+                "page": r["page"],
+                "label": _page_label(r["page"]),
+                "avg_time_on_page_ms": round(float(r["avg_ms"])) if r["avg_ms"] is not None else 0,
+                "samples": int(r["samples"] or 0),
+            }
+            for r in top_pages
+        ],
+    }
+
+
+# ─── Visitor journey ──────────────────────────────────────────────────────────
+
+@router.get("/club-admin/usage/journey")
+async def visitor_journey(
+    visitor_id: str = Query(...),
+    limit: int = 300,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """One visitor's full ordered page-view path, split into sessions
+    (≥30-minute gap = a new visit) with per-page dwell time attached from the
+    matching page_exit beacon. This is the "what did they actually click
+    through, and in what order" view — every other Usage endpoint aggregates
+    across visitors; this one reconstructs a single visitor's journey.
+
+    Accepts either the first-party visitor_id (localStorage UUID) or, for
+    legacy rows written before that existed, the hashed IP — same identity
+    key (_VKEY) every other visitor-scoped endpoint uses.
+    """
+    limit = max(1, min(limit, 1000))
+    rows = (await db.execute(text(f"""
+        SELECT ue.id, ue.created_at, ue.event_type, ue.path, ue.route,
+               ue.utm_source, ue.utm_medium, ue.utm_campaign, ue.utm_content,
+               ue.utm_id, ue.traffic_source, ue.time_on_page_ms
+        FROM usage_events ue
+        WHERE {_VKEY} = :vkey
+          AND ue.event_type IN ('page_view', 'page_exit')
+        ORDER BY ue.created_at ASC
+        LIMIT :lim
+    """), {"vkey": visitor_id, "lim": limit})).mappings().all()
+
+    # Merge each page_view with its following page_exit (same page, next in
+    # the stream) into one step, and split into sessions on a ≥30-min gap.
+    steps: list[dict] = []
+    pending_exit_by_page: dict[str, dict] = {}
+    for r in rows:
+        page = (r["path"] or "").split("?")[0]
+        if r["event_type"] == "page_exit":
+            pending_exit_by_page[page] = r
+            continue
+        steps.append({
+            "created_at": r["created_at"],
+            "path": r["path"],
+            "label": _page_label(r["path"]),
+            "utm_source": r["utm_source"],
+            "utm_medium": r["utm_medium"],
+            "utm_campaign": r["utm_campaign"],
+            "utm_content": r["utm_content"],
+            "utm_id": r["utm_id"],
+            "traffic_source": r["traffic_source"],
+            "time_on_page_ms": None,
+        })
+    # Attach dwell time: a page_exit is matched to the MOST RECENT step for
+    # that same page path (handles a visitor revisiting the same page twice).
+    for page, exit_row in pending_exit_by_page.items():
+        candidates = [s for s in steps if s["path"].split("?")[0] == page
+                      and s["created_at"] <= exit_row["created_at"]]
+        if candidates:
+            candidates[-1]["time_on_page_ms"] = exit_row["time_on_page_ms"]
+
+    # Session split.
+    sessions: list[dict] = []
+    current: list[dict] = []
+    prev_ts = None
+    for s in steps:
+        if prev_ts is not None and (s["created_at"] - prev_ts).total_seconds() > 1800:
+            sessions.append(current)
+            current = []
+        current.append(s)
+        prev_ts = s["created_at"]
+    if current:
+        sessions.append(current)
+
+    def _fmt(step):
+        return {
+            "created_at": step["created_at"].isoformat() if step["created_at"] else None,
+            "path": step["path"],
+            "label": step["label"],
+            "time_on_page_ms": step["time_on_page_ms"],
+            "utm_source": step["utm_source"],
+            "utm_medium": step["utm_medium"],
+            "utm_campaign": step["utm_campaign"],
+            "utm_content": step["utm_content"],
+            "utm_id": step["utm_id"],
+            "traffic_source": step["traffic_source"],
+        }
+
+    return {
+        "visitor_id": visitor_id,
+        "total_page_views": len(steps),
+        "sessions": [
+            {
+                "started_at": sess[0]["created_at"].isoformat() if sess else None,
+                "ended_at": sess[-1]["created_at"].isoformat() if sess else None,
+                "steps": [_fmt(s) for s in sess],
+            }
+            for sess in sessions
         ],
     }
 

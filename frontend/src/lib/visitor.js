@@ -108,6 +108,20 @@ export function getLinkCode() {
   }
 }
 
+// Raw UTM params straight off the CURRENT URL — no first-touch stickiness.
+// Used alongside getAttribution() so a returning visitor's page-view beacon
+// still carries THIS click's own utm_campaign (e.g. a club outreach link's
+// ?utm_id=CODE&utm_campaign=NAME) instead of whatever campaign their first
+// ever visit happened to carry. Without this, a visitor who first arrived
+// organically (or from an older campaign) and later clicks a NEW campaigned
+// link would have that new visit's utm_id recorded (session-scoped, always
+// fresh) but its utm_campaign silently dropped back to the stale first-touch
+// value — so "which campaign does this utm_code visit belong to" couldn't be
+// answered for anyone but a brand-new visitor.
+export function getCurrentUtm() {
+  return parseAcquisition()
+}
+
 // Returns the visitor's first-touch attribution, capturing it on the first
 // visit. If that first visit carried no source (a plain direct hit) and a later
 // visit arrives via a real campaign/share, we upgrade it once to that source —
