@@ -972,6 +972,18 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_org_created "
             "ON usage_events(org_id, created_at DESC) WHERE org_id IS NOT NULL"
         ))
+        # Migration 165: how long a visitor actually stayed on a page. Filled
+        # by a `page_exit` beacon (visibilitychange/pagehide/unload) — see
+        # usePageView.js — not by anything at page-view time, so it starts
+        # NULL and is set once the visitor leaves. Session duration is a
+        # read-time computation over this + created_at, not a stored column.
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS time_on_page_ms INTEGER"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_type_created "
+            "ON usage_events(visitor_id, event_type, created_at) WHERE visitor_id IS NOT NULL"
+        ))
         # Login attempts — append-only audit of every sign-in attempt (success
         # or failure), so we can see which username/email is being tried, from
         # where, and whether it succeeded. IP is stored as a truncated SHA-256

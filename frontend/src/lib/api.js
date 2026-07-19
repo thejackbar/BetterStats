@@ -683,6 +683,17 @@ export const api = {
   },
   // Realtime snapshot: active visitors, per-minute, live feed, top pages, sources, UTMs.
   adminUsageLive: () => request('/club-admin/usage/live'),
+  // Session duration + per-page dwell time (derived from the page_exit beacon).
+  adminUsageSessionDuration: ({ days = 7 } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    return request(`/club-admin/usage/session-duration?${params}`)
+  },
+  // One visitor's ordered page-view path, split into sessions with per-page
+  // dwell time — the "what did they click through, in what order" view.
+  adminUsageJourney: (visitorId, { limit = 300 } = {}) => {
+    const params = new URLSearchParams({ visitor_id: visitorId, limit: String(limit) })
+    return request(`/club-admin/usage/journey?${params}`)
+  },
   // Notification centre (bell icon)
   getNotificationsCount: () => request('/club-admin/notifications/count'),
   getNotificationsSummary: () => request('/club-admin/notifications/summary'),
