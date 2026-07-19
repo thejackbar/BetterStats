@@ -95,13 +95,18 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     refresh (via the existing_org_id link), NOT a live _engagement() scan per
     row — and an ad signup can legitimately have no MarketingClub row at all
     (Twenty wasn't configured at registration time), so both club and score
-    are nullable here and the UI shows "not yet scored"."""
+    are nullable here and the UI shows "not yet scored".
+
+    Archived clubs are excluded — same default as the main Club Directory
+    (GET /club-admin/super/clubs). A super admin's own test signups get
+    archived after verifying the flow works (the documented cleanup step),
+    and this report exists to show real prospects, not test data."""
     from app.services.twenty_sync import _module_split
 
     orgs = (await db.execute(
         select(Organisation, MarketingClub.engagement_score, MarketingClub.engagement_scored_at)
         .outerjoin(MarketingClub, MarketingClub.existing_org_id == Organisation.id)
-        .where(Organisation.signup_source.isnot(None))
+        .where(Organisation.signup_source.isnot(None), Organisation.archived_at.is_(None))
         .options(selectinload(Organisation.module_subscriptions))
     )).all()
 
@@ -136,7 +141,6 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
             "trial_modules": trial,
             "paid_modules": paid,
             "converted_to_paid": bool(paid),
-            "archived": org.archived_at is not None,
             "engagement_score": score,
             "engagement_scored_at": scored_at.isoformat() if scored_at else None,
         })
