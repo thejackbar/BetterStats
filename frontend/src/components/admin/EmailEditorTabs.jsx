@@ -17,10 +17,15 @@ import { isFullHtmlDoc, tidyHtml, wrapFragmentForEditing, serializeIframeDocumen
 // (design-iframe edits read back, or tidied code) rather than relying on the
 // onChange callback's state update having landed yet.
 const EmailEditorTabs = forwardRef(function EmailEditorTabs(
-  { html, onChange, onEnterPreview, height = 640 },
+  { html, onChange, onEnterPreview, height = 640, subject, onSubjectChange, subjectInputRef },
   ref
 ) {
   const [mode, setMode] = useState('design') // 'design' | 'preview' | 'code'
+  // Only offered when the parent hands us a subject field to target (Compose has
+  // one, Templates doesn't) — lets the Insert bar direct a click at the Subject
+  // input instead of the message body.
+  const canTargetSubject = !!(onSubjectChange && subjectInputRef)
+  const [insertTarget, setInsertTarget] = useState('body') // 'body' | 'subject'
   const [designSrcDoc, setDesignSrcDoc] = useState(null)
   const [designIsFullDoc, setDesignIsFullDoc] = useState(true)
   const designFrameRef = useRef(null)
@@ -130,9 +135,26 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     })
   }
 
+  const insertIntoSubject = (token) => {
+    const el = subjectInputRef?.current
+    const current = subject || ''
+    if (!el) { onSubjectChange(current + token); return }
+    const start = el.selectionStart ?? current.length
+    const end = el.selectionEnd ?? current.length
+    const next = current.slice(0, start) + token + current.slice(end)
+    onSubjectChange(next)
+    const pos = start + token.length
+    requestAnimationFrame(() => {
+      el.focus()
+      try { el.setSelectionRange(pos, pos) } catch { /* ignore */ }
+    })
+  }
+
   const insertVariable = (name) => {
     const token = `{{${name}}}`
-    if (mode === 'design') {
+    if (canTargetSubject && insertTarget === 'subject') {
+      insertIntoSubject(token)
+    } else if (mode === 'design') {
       exec('insertText', token)
     } else if (mode === 'code') {
       insertAtCursor(token)
@@ -338,6 +360,18 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     <div>
       {varList.length > 0 && (
         <div className="pb-card p-2 mb-2">
+          {canTargetSubject && (
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-pb-faintest text-[10px] uppercase tracking-wide2">Insert into:</span>
+              {[['subject', 'Subject'], ['body', 'Message']].map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setInsertTarget(v)}
+                  className={`px-2 py-0.5 rounded text-[11px] border pb-hairline ${insertTarget === v ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
+                  style={insertTarget === v ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' } : {}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-pb-faintest text-xs uppercase tracking-wide2 mr-0.5">Insert:</span>
             {varList.map(v => (

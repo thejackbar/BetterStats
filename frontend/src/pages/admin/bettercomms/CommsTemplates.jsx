@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
@@ -143,11 +144,19 @@ export default function CommsTemplates() {
   const [templates, setTemplates] = useState(null)
   const [editing, setEditing] = useState(null) // {} new, object existing, null list
   const [error, setError] = useState('')
+  const location = useLocation()
 
   const load = useCallback(() => {
     api.commsListTemplates().then(setTemplates).catch(e => { setError(e.message); setTemplates([]) })
   }, [])
   useEffect(() => { load() }, [load])
+
+  // Clicking "Templates" in the sidebar while already on this page (e.g. mid-edit)
+  // pushes a new history entry (location.key changes) but React Router doesn't
+  // remount this component, so `editing` used to sit unchanged and nothing
+  // appeared to happen. Treat any fresh navigation to this route as "back to
+  // the list". Harmless on the very first mount, since editing is already null.
+  useEffect(() => { setEditing(null) }, [location.key])
 
   const openExisting = async (t) => {
     try { setEditing(await api.commsGetTemplate(t.id)) }

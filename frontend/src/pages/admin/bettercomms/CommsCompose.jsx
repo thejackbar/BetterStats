@@ -117,6 +117,7 @@ export default function CommsCompose() {
   const [editorKey, setEditorKey] = useState(0) // bumped to force-remount the editor when body is replaced wholesale
   const pollRef = useRef(null)
   const editorRef = useRef(null)
+  const subjectInputRef = useRef(null)
 
   const load = useCallback(async () => {
     const c = await api.commsGetCampaign(id)
@@ -344,7 +345,7 @@ export default function CommsCompose() {
           // ── Draft editor ────────────────────────────────────────────────
           <>
             <label className="block text-sm text-pb-faint mb-1">Subject</label>
-            <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Round 5 — training this Thursday"
+            <input ref={subjectInputRef} value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Round 5 — training this Thursday"
               className="w-full pb-input mb-4 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline" />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
@@ -384,7 +385,8 @@ export default function CommsCompose() {
             </div>
 
             <label className="block text-sm text-pb-faint mb-1">Message</label>
-            <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={560} />
+            <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={560}
+              subject={subject} onSubjectChange={setSubject} subjectInputRef={subjectInputRef} />
             <div className="text-pb-faintest text-xs mb-3 mt-1">
               Personalise with <code className="text-pb-faint">{'{{first_name}}'}</code> and <code className="text-pb-faint">{'{{club}}'}</code>.
               Switching out of HTML mode tidies the code automatically; Preview renders it exactly as a send would.
