@@ -247,6 +247,7 @@ function LiveSection() {
   const [open, toggle] = useCollapse('live', true)
   const [geo, setGeo] = useState(null)
   const [geoHours, setGeoHours] = useState(24)
+  const [mapOpen, toggleMap] = useCollapse('live-map', true)
 
   const load = useCallback(async () => {
     try {
@@ -280,13 +281,13 @@ function LiveSection() {
   }, [])
   // The map re-groups points server-side each call, so it doesn't need the
   // same 8s cadence as the counters — 20s keeps it feeling live without
-  // doubling query load.
-  useEffect(() => { if (open) loadGeo(geoHours) }, [open, geoHours, loadGeo])
+  // doubling query load. Also skips fetching while minimised.
+  useEffect(() => { if (open && mapOpen) loadGeo(geoHours) }, [open, mapOpen, geoHours, loadGeo])
   useEffect(() => {
-    if (!live || !open) return
+    if (!live || !open || !mapOpen) return
     const id = setInterval(() => loadGeo(geoHours), 20000)
     return () => clearInterval(id)
-  }, [live, open, geoHours, loadGeo])
+  }, [live, open, mapOpen, geoHours, loadGeo])
 
   const A = data?.active
   const recent = (data?.recent || []).filter(Boolean)
@@ -384,29 +385,36 @@ function LiveSection() {
           {/* Visitor map */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-              <div className="flex items-center gap-2">
+              <button onClick={toggleMap} className="flex items-center gap-2 min-w-0 text-left">
+                <span className="font-mono text-pb-faint text-[10px] w-3 shrink-0">{mapOpen ? '▾' : '▸'}</span>
                 <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">Visitor map</h3>
-                <span className="font-mono text-[9px] text-pb-faintest">
-                  city-level location · green = active now
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                {geoWindowOptions.map(o => (
-                  <button key={o.value} onClick={() => setGeoHours(o.value)}
-                    className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline"
-                    style={o.value === geoHours
-                      ? { color: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' }
-                      : { color: 'var(--pb-faint)' }}>
-                    {o.label}
-                  </button>
-                ))}
-              </div>
+                {mapOpen && (
+                  <span className="font-mono text-[9px] text-pb-faintest">
+                    city-level location · green = active now
+                  </span>
+                )}
+              </button>
+              {mapOpen && (
+                <div className="flex items-center gap-1">
+                  {geoWindowOptions.map(o => (
+                    <button key={o.value} onClick={() => setGeoHours(o.value)}
+                      className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline"
+                      style={o.value === geoHours
+                        ? { color: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' }
+                        : { color: 'var(--pb-faint)' }}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-            <VisitorMap points={geo?.points} loading={!geo} />
-            <p className="font-mono text-[9px] text-pb-faintest mt-1.5 leading-relaxed">
-              Points are resolved from IP address to the nearest city, the same precision ceiling as
-              the location shown in the feed below — never a street address or exact device location.
-            </p>
+            {mapOpen && (<>
+              <VisitorMap points={geo?.points} loading={!geo} />
+              <p className="font-mono text-[9px] text-pb-faintest mt-1.5 leading-relaxed">
+                Points are resolved from IP address to the nearest city, the same precision ceiling as
+                the location shown in the feed below — never a street address or exact device location.
+              </p>
+            </>)}
           </div>
 
           <div className="grid lg:grid-cols-3 gap-5">
