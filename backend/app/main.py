@@ -927,6 +927,18 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_country "
             "ON usage_events(country) WHERE country IS NOT NULL"
         ))
+        # City-centroid coordinates from the same ip-api.com lookup that
+        # already resolves region/city (its free tier includes lat/lon
+        # alongside regionName/city — no extra request). Powers the Usage
+        # page's visitor map. Never street-level: this is the geolocation
+        # database's own city/ISP-block precision, same ceiling as the
+        # region/city text fields above.
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION"
+        ))
         # Lead-tracking columns. `visitor_id` is a first-party random UUID the
         # SPA keeps in localStorage — a stable visitor identity that survives an
         # IP change, so returning visitors group correctly (the IP hash alone

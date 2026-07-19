@@ -7,10 +7,11 @@ silent on failure — tracking must never break a real request.
 Geo enrichment:
   - Country comes from Cloudflare's `cf-ipcountry` header (free on every
     CF plan) — captured by the caller and passed in at insert time.
-  - City + region come from a follow-up ip-api.com lookup (free, no key,
-    45 req/min/IP) cached in-process by IP hash. The lookup runs after
-    the row is written and UPDATEs the row in place. We never store the
-    raw IP — only the city/region resolved from it.
+  - City + region + a city-centroid lat/lng come from a follow-up
+    ip-api.com lookup (free, no key, 45 req/min/IP) cached in-process by
+    IP hash. The lookup runs after the row is written and UPDATEs the row
+    in place. We never store the raw IP — only the location resolved from
+    it, and only ever at city precision (never street-level).
 """
 from __future__ import annotations
 
@@ -173,12 +174,16 @@ async def record_event(
     ip_h = hash_ip(ip)
     region = None
     city = None
-    # Cached city/region for this IP, if we've already looked it up.
+    lat = None
+    lng = None
+    # Cached city/region/coords for this IP, if we've already looked it up.
     cached = _GEO_CACHE.get(ip_h) if ip_h else None
     if cached:
         country = country or cached.get("country")
         region = cached.get("region")
         city = cached.get("city")
+        lat = cached.get("lat")
+        lng = cached.get("lng")
 
     visitor = _valid_uuid(visitor_id)
     # First-touch acquisition source, bucketed once at insert time. Only the
@@ -196,14 +201,14 @@ async def record_event(
                     INSERT INTO usage_events (
                         event_type, method, path, route, status, duration_ms,
                         user_id, org_id, ip_hash, user_agent, referer,
-                        country, region, city, metadata,
+                        country, region, city, lat, lng, metadata,
                         visitor_id, utm_source, utm_medium, utm_campaign,
                         utm_content, utm_id, click_id, traffic_source, landing_path,
                         time_on_page_ms
                     ) VALUES (
                         :event_type, :method, :path, :route, :status, :duration_ms,
                         :user_id, :org_id, :ip_hash, :user_agent, :referer,
-                        :country, :region, :city,
+                        :country, :region, :city, :lat, :lng,
                         CAST(:metadata AS JSONB),
                         :visitor_id, :utm_source, :utm_medium, :utm_campaign,
                         :utm_content, :utm_id, :click_id, :traffic_source, :landing_path,
@@ -227,6 +232,8 @@ async def record_event(
                     "country": (country or "").upper()[:2] or None,
                     "region": (region or "")[:80] or None,
                     "city": (city or "")[:80] or None,
+                    "lat": lat,
+                    "lng": lng,
                     "metadata": json.dumps(metadata or {}),
                     "visitor_id": visitor,
                     "utm_source": (utm_source or "")[:120] or None,
@@ -264,40 +271,51 @@ async def record_event(
 
 
 async def _enrich_geo(*, ip: str, ip_hash: str, row_id: int, country: Optional[str]) -> None:
-    """Look up city/region via ip-api.com, cache, and UPDATE the row.
+    """Look up city/region/coords via ip-api.com, cache, and UPDATE the row.
 
     ip-api.com free tier: 45 req/min/IP, no key, JSON. Their TOS allows
-    non-commercial use. Endpoint: http://ip-api.com/json/{ip}.
+    non-commercial use. Endpoint: http://ip-api.com/json/{ip}. lat/lon are
+    the geolocation database's own city-centroid coordinates — the same
+    precision ceiling as regionName/city, never street-level.
     """
+    empty = {"country": country, "region": None, "city": None, "lat": None, "lng": None}
     try:
         async with httpx.AsyncClient(timeout=_GEO_LOOKUP_TIMEOUT) as client:
             resp = await client.get(
                 f"http://ip-api.com/json/{ip}",
-                params={"fields": "status,country,countryCode,regionName,city"},
+                params={"fields": "status,country,countryCode,regionName,city,lat,lon"},
             )
             if resp.status_code != 200:
-                _GEO_CACHE[ip_hash] = {"country": country, "region": None, "city": None}
+                _GEO_CACHE[ip_hash] = empty
                 return
             data = resp.json()
     except Exception as e:  # noqa: BLE001
         logger.debug(f"usage_tracker: geo lookup failed for {ip_hash}: {e}")
-        _GEO_CACHE[ip_hash] = {"country": country, "region": None, "city": None}
+        _GEO_CACHE[ip_hash] = empty
         return
 
     if data.get("status") != "success":
-        _GEO_CACHE[ip_hash] = {"country": country, "region": None, "city": None}
+        _GEO_CACHE[ip_hash] = empty
         return
 
     cc = (data.get("countryCode") or country or "").upper()[:2] or None
     region = data.get("regionName") or None
     city = data.get("city") or None
+    lat = data.get("lat")
+    lng = data.get("lon")
+    try:
+        lat = float(lat) if lat is not None else None
+        lng = float(lng) if lng is not None else None
+    except (TypeError, ValueError):
+        lat = None
+        lng = None
 
     # Soft-bound the cache.
     if len(_GEO_CACHE) >= _GEO_CACHE_CAP:
         # Drop ~10% of the oldest entries by simple FIFO order.
         for k in list(_GEO_CACHE.keys())[: _GEO_CACHE_CAP // 10]:
             _GEO_CACHE.pop(k, None)
-    _GEO_CACHE[ip_hash] = {"country": cc, "region": region, "city": city}
+    _GEO_CACHE[ip_hash] = {"country": cc, "region": region, "city": city, "lat": lat, "lng": lng}
 
     try:
         async with async_session_maker() as session:
@@ -310,12 +328,14 @@ async def _enrich_geo(*, ip: str, ip_hash: str, row_id: int, country: Optional[s
                     UPDATE usage_events
                     SET country = COALESCE(:country, country),
                         region  = COALESCE(:region,  region),
-                        city    = COALESCE(:city,    city)
+                        city    = COALESCE(:city,    city),
+                        lat     = COALESCE(:lat,     lat),
+                        lng     = COALESCE(:lng,     lng)
                     WHERE ip_hash = :ip_hash
                       AND (region IS NULL OR city IS NULL)
                     """
                 ),
-                {"country": cc, "region": region, "city": city, "ip_hash": ip_hash},
+                {"country": cc, "region": region, "city": city, "lat": lat, "lng": lng, "ip_hash": ip_hash},
             )
             await session.commit()
     except Exception as e:  # noqa: BLE001

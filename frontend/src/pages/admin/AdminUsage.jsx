@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import VisitorMap from '../../components/admin/VisitorMap'
 
 const WINDOW_OPTIONS = [
   { value: 1,   label: '24h' },
@@ -123,9 +124,9 @@ function deviceIcon(d) {
   }
 }
 
-function Dot({ on, color = '#10b981', size = 6 }) {
+function Dot({ on, color = '#10b981', size = 6, title }) {
   return (
-    <span className={on ? 'animate-pulse' : ''}
+    <span className={on ? 'animate-pulse' : ''} title={on ? title : undefined}
       style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%',
                background: on ? color : 'transparent' }} />
   )
@@ -244,6 +245,8 @@ function LiveSection() {
   const [updatedAt, setUpdatedAt] = useState(null)
   const [, tick] = useState(0)
   const [open, toggle] = useCollapse('live', true)
+  const [geo, setGeo] = useState(null)
+  const [geoHours, setGeoHours] = useState(24)
 
   const load = useCallback(async () => {
     try {
@@ -251,6 +254,15 @@ function LiveSection() {
       setData(d); setError(null); setUpdatedAt(Date.now())
     } catch (e) {
       setError(e?.message || 'Failed to load')
+    }
+  }, [])
+
+  const loadGeo = useCallback(async (hours) => {
+    try {
+      const d = await api.adminUsageGeo({ hours })
+      setGeo(d)
+    } catch (_) {
+      // Non-critical panel — leave the last-good points on screen.
     }
   }, [])
 
@@ -266,6 +278,15 @@ function LiveSection() {
     const id = setInterval(() => tick(n => n + 1), 1000)
     return () => clearInterval(id)
   }, [])
+  // The map re-groups points server-side each call, so it doesn't need the
+  // same 8s cadence as the counters — 20s keeps it feeling live without
+  // doubling query load.
+  useEffect(() => { if (open) loadGeo(geoHours) }, [open, geoHours, loadGeo])
+  useEffect(() => {
+    if (!live || !open) return
+    const id = setInterval(() => loadGeo(geoHours), 20000)
+    return () => clearInterval(id)
+  }, [live, open, geoHours, loadGeo])
 
   const A = data?.active
   const recent = (data?.recent || []).filter(Boolean)
@@ -276,10 +297,16 @@ function LiveSection() {
   const utms = (data?.utms || []).filter(Boolean)
 
   const windows = [
-    { key: 'now',   label: 'Active now',  sub: 'last 5 min', live: true },
+    { key: 'now',   label: 'Active now',  sub: 'right now', live: true },
     { key: 'm30',   label: 'Last 30 min', sub: '' },
     { key: 'today', label: 'Today',       sub: 'last 24h' },
     { key: 'week',  label: 'Last 7 days', sub: '' },
+  ]
+
+  const geoWindowOptions = [
+    { value: 1, label: '1h' },
+    { value: 24, label: '24h' },
+    { value: 168, label: '7d' },
   ]
 
   return (
@@ -354,6 +381,34 @@ function LiveSection() {
             </div>
           </div>
 
+          {/* Visitor map */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">Visitor map</h3>
+                <span className="font-mono text-[9px] text-pb-faintest">
+                  city-level location · green = active now
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                {geoWindowOptions.map(o => (
+                  <button key={o.value} onClick={() => setGeoHours(o.value)}
+                    className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline"
+                    style={o.value === geoHours
+                      ? { color: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' }
+                      : { color: 'var(--pb-faint)' }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <VisitorMap points={geo?.points} loading={!geo} />
+            <p className="font-mono text-[9px] text-pb-faintest mt-1.5 leading-relaxed">
+              Points are resolved from IP address to the nearest city, the same precision ceiling as
+              the location shown in the feed below — never a street address or exact device location.
+            </p>
+          </div>
+
           <div className="grid lg:grid-cols-3 gap-5">
             {/* Live page-view feed */}
             <div className="lg:col-span-2">
@@ -369,11 +424,14 @@ function LiveSection() {
                 <div className="max-h-[520px] overflow-y-auto">
                   {recent.map((e, i) => {
                     const m = sourceMeta(e.source)
-                    const isNew = (Date.now() - new Date(e.created_at).getTime()) < 15000
+                    // Backed by a real heartbeat, not a time-since-last-event
+                    // guess — lit only while that visitor's tab is actually
+                    // open (see the /usage/heartbeat ping), same signal
+                    // "Active now" above is built from.
                     return (
                       <div key={`${e.created_at}-${i}`}
                         className={`flex items-center gap-2 px-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                        <Dot on={isNew} />
+                        <Dot on={e.is_online} title="Still on this page" />
                         <span className="font-mono text-[10px] text-pb-faintest w-11 sm:w-14 shrink-0">{fmtAgo(e.created_at)}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] sm:text-[13px] text-pb-text truncate">{e.label}</div>

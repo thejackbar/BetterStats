@@ -364,6 +364,34 @@ class PageViewIn(BaseModel):
     landing_path: Optional[str] = None
 
 
+class HeartbeatIn(BaseModel):
+    path: str
+    visitor_id: Optional[str] = None
+
+
+@router.post("/usage/heartbeat")
+async def post_heartbeat(payload: HeartbeatIn, request: Request):
+    """A lightweight "still here" ping the SPA sends every ~25s while a public
+    page is open and the tab is visible (see frontend hooks/useHeartbeat.js).
+    Lets the Usage page's "Active now" reflect someone actually having the
+    page open right now, rather than inferring presence from how recently
+    their last page_view landed."""
+    from app.main import _decode_user_id, _client_ip, _cf_country  # avoid import cycle
+
+    await record_event(
+        event_type="heartbeat",
+        method="GET",
+        path=payload.path or "/",
+        status=200,
+        user_id=_decode_user_id(request),
+        ip=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        country=_cf_country(request),
+        visitor_id=payload.visitor_id,
+    )
+    return {"ok": True}
+
+
 @router.post("/usage/event")
 async def post_event(payload: PageViewIn, request: Request):
     """Anonymous SPA page-view beacon."""
@@ -1548,6 +1576,15 @@ async def live(
         "AND ue.user_id IS NULL "
         "AND split_part(ue.path, '?', 1) !~* '^/admin'"
     )
+    # "Right now" also counts heartbeats (see /usage/heartbeat) — a tab that's
+    # sat open on one page with no navigation still pings every ~25s, so this
+    # reflects someone actually having the page open, not just a recent nav.
+    _NOW_WINDOW = "45 seconds"
+    online_base = (
+        "ue.event_type IN ('page_view', 'heartbeat') "
+        "AND ue.user_id IS NULL "
+        "AND split_part(ue.path, '?', 1) !~* '^/admin'"
+    )
 
     active = (await db.execute(text(f"""
         WITH ev AS (
@@ -1556,8 +1593,6 @@ async def live(
             WHERE {base} AND ue.created_at >= NOW() - INTERVAL '7 days'
         )
         SELECT
-          COUNT(DISTINCT vkey) FILTER (WHERE created_at >= NOW() - INTERVAL '5 minutes')  AS v_now,
-          COUNT(*)             FILTER (WHERE created_at >= NOW() - INTERVAL '5 minutes')  AS p_now,
           COUNT(DISTINCT vkey) FILTER (WHERE created_at >= NOW() - INTERVAL '30 minutes') AS v_m30,
           COUNT(*)             FILTER (WHERE created_at >= NOW() - INTERVAL '30 minutes') AS p_m30,
           COUNT(DISTINCT vkey) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours')   AS v_day,
@@ -1565,6 +1600,12 @@ async def live(
           COUNT(DISTINCT vkey) AS v_week,
           COUNT(*)             AS p_week
         FROM ev
+    """))).mappings().first()
+
+    now_active = (await db.execute(text(f"""
+        SELECT COUNT(DISTINCT {_VKEY}) AS v_now, COUNT(*) AS p_now
+        FROM usage_events ue
+        WHERE {online_base} AND ue.created_at >= NOW() - INTERVAL '{_NOW_WINDOW}'
     """))).mappings().first()
 
     per_minute = (await db.execute(text(f"""
@@ -1622,7 +1663,13 @@ async def live(
                ue.country, ue.region, ue.city, ue.user_agent,
                {src_ue} AS source,
                lower(substring(ue.path from 'utm_source=([^&]+)')) AS utm_source,
-               substring(ue.path from 'utm_campaign=([^&]+)') AS utm_campaign
+               substring(ue.path from 'utm_campaign=([^&]+)') AS utm_campaign,
+               EXISTS (
+                   SELECT 1 FROM usage_events h
+                   WHERE {online_base.replace('ue.', 'h.')}
+                     AND h.created_at >= NOW() - INTERVAL '{_NOW_WINDOW}'
+                     AND {_VKEY.replace('ue.', 'h.')} = {_VKEY}
+               ) AS is_online
         FROM usage_events ue
         WHERE {base}
         ORDER BY ue.created_at DESC LIMIT 60
@@ -1633,7 +1680,7 @@ async def live(
 
     return {
         "active": {
-            "now":   {"visitors": int(active["v_now"] or 0),  "views": int(active["p_now"] or 0)},
+            "now":   {"visitors": int(now_active["v_now"] or 0), "views": int(now_active["p_now"] or 0)},
             "m30":   {"visitors": int(active["v_m30"] or 0),  "views": int(active["p_m30"] or 0)},
             "today": {"visitors": int(active["v_day"] or 0),  "views": int(active["p_day"] or 0)},
             "week":  {"visitors": int(active["v_week"] or 0), "views": int(active["p_week"] or 0)},
@@ -1666,7 +1713,59 @@ async def live(
              "country": r["country"], "region": r["region"], "city": r["city"],
              "source": r["source"] or "direct",
              "utm_source": _u(r["utm_source"]), "utm_campaign": _u(r["utm_campaign"]),
-             "device": _parse_device(r["user_agent"])}
+             "device": _parse_device(r["user_agent"]),
+             "is_online": bool(r["is_online"])}
             for r in recent
+        ],
+    }
+
+
+@router.get("/club-admin/usage/geo")
+async def geo(
+    hours: int = 24,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """City-level visitor locations for the Usage page's map. Points are city
+    centroids from ip-api.com's free geolocation lookup (see
+    services/usage_tracker.py) — city/ISP-block precision at best, never a
+    street address. Grouped by rounded lat/lng so a city's worth of visitors
+    renders as one point rather than a pile of near-duplicates, with
+    `is_online` true when any visitor at that point has pinged in the last
+    45 seconds (a page_view or a heartbeat — see /usage/heartbeat)."""
+    hours = max(1, min(hours, 24 * 30))
+    rows = (await db.execute(text(f"""
+        SELECT
+            round(ue.lat::numeric, 2) AS lat,
+            round(ue.lng::numeric, 2) AS lng,
+            MAX(ue.city) AS city,
+            MAX(ue.region) AS region,
+            MAX(ue.country) AS country,
+            COUNT(DISTINCT {_VKEY}) AS visitors,
+            COUNT(*) FILTER (WHERE ue.event_type = 'page_view') AS views,
+            MAX(ue.created_at) AS last_seen,
+            BOOL_OR(ue.created_at >= NOW() - INTERVAL '45 seconds') AS is_online
+        FROM usage_events ue
+        WHERE ue.event_type IN ('page_view', 'heartbeat')
+          AND ue.user_id IS NULL
+          AND split_part(ue.path, '?', 1) !~* '^/admin'
+          AND ue.lat IS NOT NULL AND ue.lng IS NOT NULL
+          AND ue.created_at >= NOW() - INTERVAL '{hours} hours'
+        GROUP BY 1, 2
+        ORDER BY visitors DESC
+        LIMIT 500
+    """))).mappings().all()
+
+    return {
+        "hours": hours,
+        "points": [
+            {
+                "lat": float(r["lat"]), "lng": float(r["lng"]),
+                "city": r["city"], "region": r["region"], "country": r["country"],
+                "visitors": int(r["visitors"] or 0), "views": int(r["views"] or 0),
+                "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
+                "is_online": bool(r["is_online"]),
+            }
+            for r in rows
         ],
     }
