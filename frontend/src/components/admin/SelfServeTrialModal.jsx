@@ -27,6 +27,31 @@ const orgName = (org) => org.name || org.shortName || org.organisationName || or
 
 const FIELD_CLS = 'w-full bg-pb-surface2 text-pb-text border pb-hairline rounded px-3 py-2 text-sm outline-none focus:border-pb-accent'
 
+// Shared "already registered" wording for both the search-step duplicate
+// card and the prepare-step 409 fallback, so the two surfaces read
+// identically. `slug` links the club name itself to its public page;
+// `adminLabel` (first name + last initial, e.g. "Elton B…") is omitted
+// gracefully when the club has no resolvable primary admin.
+function DuplicateClubNotice({ name, slug, adminLabel }) {
+  return (
+    <p className="font-mono text-[11px] text-pb-text">
+      {name} has already been registered in BetterCricket - see{' '}
+      {slug ? (
+        <a href={`/${slug}`} target="_blank" rel="noopener noreferrer" className="underline">
+          {name}
+        </a>
+      ) : (
+        name
+      )}
+      's public page on BetterCricket. Please either (a) contact your club's administrator
+      {adminLabel ? ` ${adminLabel} ;` : ';'}{' '}
+      or (b) email us at{' '}
+      <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
+      if you think your club has been incorrectly registered.
+    </p>
+  )
+}
+
 /**
  * The self-serve club trial registration modal shell. Two callers, one wizard:
  * the Super Admin "Self-Serve Trial (Internal)" page (default), and — with
@@ -620,31 +645,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
               {duplicateClub && (
                 <div className="pb-card p-4 bg-pb-surface2 border-pb-red/40">
-                  <p className="font-mono text-[11px] text-pb-text">
-                    {orgName(duplicateClub)} has already been registered in BetterCricket
-                    {duplicateClub.already_registered_by ? ` by ${duplicateClub.already_registered_by}` : ''}
-                    {duplicateClub.already_registered_slug ? (
-                      <>
-                        {' '}- see{' '}
-                        <a
-                          href={`/${duplicateClub.already_registered_slug}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline"
-                        >
-                          {duplicateClub.already_registered_slug}
-                        </a>.
-                      </>
-                    ) : (
-                      // the admin label already ends in an ellipsis when truncated
-                      // (see backend _primary_admin_label) — appending another "."
-                      // right after it collapses into a stray "…."
-                      duplicateClub.already_registered_by?.endsWith('…') ? '' : '.'
-                    )}{' '}
-                    Please either (a) contact your club's administrator; or (b) email us at{' '}
-                    <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>{' '}
-                    if you think your club has been incorrectly registered.
-                  </p>
+                  <DuplicateClubNotice
+                    name={orgName(duplicateClub)}
+                    slug={duplicateClub.already_registered_slug}
+                    adminLabel={duplicateClub.already_registered_by}
+                  />
                 </div>
               )}
 
@@ -666,22 +671,15 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                   )}
 
                   {!preparing && prepareError && (
-                    <p className="font-mono text-[11px] text-pb-red">
-                      {prepareError.message}
-                      {prepareError.slug && (
-                        <>
-                          {' '}
-                          <a
-                            href={`/${prepareError.slug}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline"
-                          >
-                            View club page
-                          </a>
-                        </>
-                      )}
-                    </p>
+                    prepareError.name ? (
+                      <DuplicateClubNotice
+                        name={prepareError.name}
+                        slug={prepareError.slug}
+                        adminLabel={prepareError.admin_label}
+                      />
+                    ) : (
+                      <p className="font-mono text-[11px] text-pb-red">{prepareError.message}</p>
+                    )
                   )}
 
                   {!preparing && !prepareError && preparedClub && (
