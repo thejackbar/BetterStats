@@ -171,6 +171,14 @@ class OnboardingWizardState(Base):
     # counts entirely. Only steps flagged ``optional`` in the registry offer
     # it; auto-detection still beats it if the thing later exists.
     na_steps = Column(JSON, nullable=False, default=list)
+    # Stamped the FIRST time POST /opened fires (migration 163) — i.e. the
+    # admin actually landed on the wizard page at least once. Distinct from
+    # this row's own existence: AdminLayout's /state poll (checked on every
+    # admin page mount, to show/hide the SETUP GUIDE button + sidebar badge)
+    # calls _get_or_create_state too, so a row can exist for a club that's
+    # never opened the wizard itself. This column is the real "did they ever
+    # look at it" signal the wizard-analytics page keys off.
+    first_opened_at = Column(TIMESTAMP(timezone=True), nullable=True)
     dismissed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     sync_steps_shown_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, billing, public_stripe, discount_coupons
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -388,6 +388,10 @@ async def lifespan(app: FastAPI):
             "ADD COLUMN IF NOT EXISTS na_steps JSON NOT NULL DEFAULT '[]'"))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS socials_style JSONB"))
+        # Setup Wizard analytics: real "ever opened" signal (migration 163).
+        await conn.execute(text(
+            "ALTER TABLE onboarding_wizard_state "
+            "ADD COLUMN IF NOT EXISTS first_opened_at TIMESTAMPTZ"))
         # Club-user invite flow — set-your-password-by-email (migration 141).
         await conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT UNIQUE"))
@@ -2943,6 +2947,7 @@ app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — B
 app.include_router(self_serve_trial.router)  # Self-serve club trial registration (internal, flag-gated — see docs/self-serve-trial-onboarding-plan.md)
 app.include_router(public_self_serve.router)  # Public self-serve trial registration (unauthenticated, same flag — the /trial ad-campaign landing page)
 app.include_router(onboarding_wizard.router)  # Club onboarding wizard (flag-gated — see docs/self-serve-trial-onboarding-plan.md Phase 15)
+app.include_router(wizard_analytics.router)  # Setup Wizard analytics (super-admin) — where clubs get stuck/skip
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

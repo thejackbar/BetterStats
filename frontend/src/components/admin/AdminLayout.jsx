@@ -100,6 +100,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
   { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
+  { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics' },
   { to: '/admin/usage', label: 'Usage' },
   { to: '/admin/super/users', label: 'Users' },
 ]

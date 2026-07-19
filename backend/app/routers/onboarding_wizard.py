@@ -593,8 +593,14 @@ async def mark_opened(club: Organisation = Depends(get_current_club), db: AsyncS
     """Call the moment the wizard page opens (auto- or manually-navigated).
     Stamps ``sync_steps_shown_at`` the first time this happens while the
     sync-dependent steps are available — the one-time trigger that stops the
-    auto-reopen from firing more than once per sync completion."""
+    auto-reopen from firing more than once per sync completion. Also stamps
+    ``first_opened_at`` the very first time this fires at all — the real
+    "did this club ever look at the wizard" signal wizard_analytics.py keys
+    off (this row can otherwise exist for a club that's never opened the
+    wizard page, since AdminLayout's /state poll creates it too)."""
     state = await _get_or_create_state(db, club.id)
+    if state.first_opened_at is None:
+        state.first_opened_at = datetime.now(timezone.utc)
     if await _sync_ready(db, club.id) and state.sync_steps_shown_at is None:
         state.sync_steps_shown_at = datetime.now(timezone.utc)
     await db.commit()
@@ -640,6 +646,15 @@ async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends
             completed.discard(step_key)
     if data.skipped is not None:
         if data.skipped:
+            # Same actor-trail reasoning as the done branch above, plus it
+            # feeds wizard_analytics.py's skip-rate stats — only log the
+            # transition INTO skipped, not every repeat "skip again" click.
+            if step_key not in skipped:
+                await log_activity(
+                    db, org_id=club.id, user_id=current_user.id,
+                    action="setup_wizard_step_skipped", target_type="wizard_step",
+                    target_id=step_key,
+                )
             skipped.add(step_key)
             completed.discard(step_key)
             na.discard(step_key)
@@ -647,6 +662,12 @@ async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends
             skipped.discard(step_key)
     if data.not_applicable is not None:
         if data.not_applicable:
+            if step_key not in na:
+                await log_activity(
+                    db, org_id=club.id, user_id=current_user.id,
+                    action="setup_wizard_step_na", target_type="wizard_step",
+                    target_id=step_key,
+                )
             na.add(step_key)
             completed.discard(step_key)
             skipped.discard(step_key)

@@ -1051,6 +1051,8 @@ export const api = {
     const qs = params.toString()
     return request(`/club-admin/billing/discount-report${qs ? `?${qs}` : ''}`)
   },
+  // Setup Wizard analytics (super-admin) — routers/wizard_analytics.py.
+  superWizardAnalytics: () => request('/club-admin/super/wizard-analytics'),
   // BetterCricket-managed discount coupons (migration 154) —
   // routers/discount_coupons.py. couponRedeem is the club-facing "apply a
   // code to my already-live subscription ahead of renewal" action; the rest
