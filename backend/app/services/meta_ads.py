@@ -256,14 +256,18 @@ def ad_status(ad: dict, all_ads: list[dict]) -> str:
 
 async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row: dict,
                            recommendation: str | None = None, recommendation_status: str | None = None) -> None:
+    """Stamped with the CURRENT settings.meta_campaign_id (migration 162) —
+    the conflict target includes campaign_id, so a campaign switch on the
+    same calendar day writes its own row instead of colliding with
+    whatever the previous campaign already wrote for today."""
     await db.execute(text("""
         INSERT INTO meta_ad_snapshots
-            (snapshot_date, level, ad_id, ad_name, spend, impressions, link_clicks,
+            (snapshot_date, level, ad_id, ad_name, campaign_id, spend, impressions, link_clicks,
              link_ctr, landing_page_views, cost_per_lpv, leads, recommendation, recommendation_status)
         VALUES
-            (:snapshot_date, :level, :ad_id, :ad_name, :spend, :impressions, :link_clicks,
+            (:snapshot_date, :level, :ad_id, :ad_name, :campaign_id, :spend, :impressions, :link_clicks,
              :link_ctr, :landing_page_views, :cost_per_lpv, :leads, :recommendation, :recommendation_status)
-        ON CONFLICT (snapshot_date, level, COALESCE(ad_id, ''))
+        ON CONFLICT (snapshot_date, level, COALESCE(ad_id, ''), COALESCE(campaign_id, ''))
         DO UPDATE SET
             ad_name = EXCLUDED.ad_name,
             spend = EXCLUDED.spend,
@@ -280,6 +284,7 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
         "level": level,
         "ad_id": row.get("ad_id"),
         "ad_name": row.get("ad_name") or row.get("name"),
+        "campaign_id": settings.meta_campaign_id,
         "spend": row.get("spend") or 0,
         "impressions": row.get("impressions") or 0,
         "link_clicks": row.get("link_clicks") or 0,
@@ -315,34 +320,40 @@ async def run_snapshot(db: AsyncSession) -> dict:
 
 
 async def get_leads_adjustment_total(db: AsyncSession) -> int:
-    """Running sum of every manual reconciliation delta ever recorded."""
+    """Running sum of every manual reconciliation delta recorded against the
+    CURRENT campaign (settings.meta_campaign_id) — scoped since migration 162
+    so a correction made against a previous campaign can't keep inflating or
+    deflating a later one's numbers forever."""
     total = (await db.execute(text(
-        "SELECT COALESCE(SUM(delta), 0) FROM meta_lead_adjustments"
-    ))).scalar()
+        "SELECT COALESCE(SUM(delta), 0) FROM meta_lead_adjustments WHERE campaign_id = :campaign_id"
+    ), {"campaign_id": settings.meta_campaign_id})).scalar()
     return int(total or 0)
 
 
 async def add_lead_adjustment(db: AsyncSession, delta: int, note: str | None, created_by_email: str | None) -> int:
-    """Record a manual +/- correction to the Meta-reported lead count. Returns
-    the new running total (does not touch ``meta_ad_snapshots.leads`` itself,
-    so the next snapshot pull can't silently wipe the correction)."""
+    """Record a manual +/- correction to the Meta-reported lead count, tagged
+    to the current campaign. Returns the new running total (does not touch
+    ``meta_ad_snapshots.leads`` itself, so the next snapshot pull can't
+    silently wipe the correction)."""
     await db.execute(text("""
-        INSERT INTO meta_lead_adjustments (delta, note, created_by_email)
-        VALUES (:delta, :note, :created_by_email)
-    """), {"delta": delta, "note": (note or None), "created_by_email": created_by_email})
+        INSERT INTO meta_lead_adjustments (delta, note, created_by_email, campaign_id)
+        VALUES (:delta, :note, :created_by_email, :campaign_id)
+    """), {"delta": delta, "note": (note or None), "created_by_email": created_by_email,
+           "campaign_id": settings.meta_campaign_id})
     await db.commit()
     return await get_leads_adjustment_total(db)
 
 
 async def get_lead_adjustments(db: AsyncSession, limit: int = 20) -> list[dict]:
-    """Recent manual reconciliation entries, newest first — the audit trail
-    behind the effective lead count."""
+    """Recent manual reconciliation entries for the CURRENT campaign, newest
+    first — the audit trail behind the effective lead count."""
     rows = (await db.execute(text("""
         SELECT delta, note, created_by_email, created_at
         FROM meta_lead_adjustments
+        WHERE campaign_id = :campaign_id
         ORDER BY created_at DESC
         LIMIT :limit
-    """), {"limit": limit})).mappings().all()
+    """), {"campaign_id": settings.meta_campaign_id, "limit": limit})).mappings().all()
     return [
         {
             "delta": int(r["delta"]),
@@ -355,14 +366,18 @@ async def get_lead_adjustments(db: AsyncSession, limit: int = 20) -> list[dict]:
 
 
 async def get_latest_summary(db: AsyncSession) -> dict:
-    """Read back the most recent snapshot set (used for the fast page-load path,
-    as opposed to /refresh which does a live pull)."""
+    """Read back the most recent snapshot set for the CURRENT campaign (used
+    for the fast page-load path, as opposed to /refresh which does a live
+    pull). Scoped by campaign_id since migration 162 — without it, the most
+    recent row could belong to a previous campaign's last snapshot before it
+    was switched off, or (worse) a stale row for today under the old
+    campaign could shadow the new one's."""
     campaign_row = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
-        WHERE level = 'campaign'
+        WHERE level = 'campaign' AND campaign_id = :campaign_id
         ORDER BY snapshot_date DESC, created_at DESC
         LIMIT 1
-    """))).mappings().first()
+    """), {"campaign_id": settings.meta_campaign_id})).mappings().first()
 
     adjustment = await get_leads_adjustment_total(db)
 
@@ -374,9 +389,9 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
-        WHERE level = 'ad' AND snapshot_date = :d
+        WHERE level = 'ad' AND campaign_id = :campaign_id AND snapshot_date = :d
         ORDER BY spend DESC
-    """), {"d": latest_date})).mappings().all()
+    """), {"campaign_id": settings.meta_campaign_id, "d": latest_date})).mappings().all()
 
     def _row_to_dict(r) -> dict:
         return {
@@ -418,13 +433,18 @@ async def get_latest_summary(db: AsyncSession) -> dict:
 
 
 async def get_history(db: AsyncSession, days: int = 14) -> list[dict]:
-    """Daily campaign-level series for the trend charts, from stored snapshots."""
+    """Daily campaign-level series for the trend charts, from stored
+    snapshots — scoped to the CURRENT campaign (migration 162). Previously
+    unscoped, so a "last 14 days" window spanning a campaign switch (like
+    the July -> August one) stitched both campaigns' daily numbers into one
+    line with no way to tell them apart. A campaign that just launched will
+    correctly show a short history rather than borrowing an old one's."""
     since = date.today() - timedelta(days=days)
     rows = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
-        WHERE level = 'campaign' AND snapshot_date >= :since
+        WHERE level = 'campaign' AND campaign_id = :campaign_id AND snapshot_date >= :since
         ORDER BY snapshot_date ASC
-    """), {"since": since})).mappings().all()
+    """), {"campaign_id": settings.meta_campaign_id, "since": since})).mappings().all()
     return [
         {
             "date": r["snapshot_date"].isoformat(),

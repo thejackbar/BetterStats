@@ -2497,6 +2497,28 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_meta_lead_adjustments_created_at "
             "ON meta_lead_adjustments(created_at DESC)"
         ))
+        # Meta Ads — scope snapshots + lead adjustments to a campaign
+        # (migration 162). Neither table recorded which real Meta campaign a
+        # row belonged to, so switching settings.meta_campaign_id from the
+        # finished July campaign to the new self-serve one stitched the two
+        # campaigns' numbers together (the 14-day trend chart had no
+        # campaign filter at all, and manual lead-adjustment corrections
+        # from the old campaign kept applying to the new one's total
+        # forever). Backfill assumes every pre-existing row was written
+        # while the July campaign was the only one that existed.
+        await conn.execute(text("ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS campaign_id TEXT"))
+        await conn.execute(text(
+            "UPDATE meta_ad_snapshots SET campaign_id = '120249237210710121' WHERE campaign_id IS NULL"
+        ))
+        await conn.execute(text("DROP INDEX IF EXISTS uq_meta_ad_snapshots_date_level_ad"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_meta_ad_snapshots_date_level_ad_campaign "
+            "ON meta_ad_snapshots(snapshot_date, level, COALESCE(ad_id, ''), COALESCE(campaign_id, ''))"
+        ))
+        await conn.execute(text("ALTER TABLE meta_lead_adjustments ADD COLUMN IF NOT EXISTS campaign_id TEXT"))
+        await conn.execute(text(
+            "UPDATE meta_lead_adjustments SET campaign_id = '120249237210710121' WHERE campaign_id IS NULL"
+        ))
         # Fill-in names on partnerships/fielding + a per-club toggle to show them
         # (migration 147) — mirrors FallOfWicket.batter_name for whichever side of
         # a partnership, or which fielder, has no linkable `players` row. Defensive
