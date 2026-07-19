@@ -305,8 +305,14 @@ export default function AdminLayout({ children }) {
             <span className="hidden sm:block font-mono text-[11px] tracking-wide2 text-pb-faint">ADMIN</span>
           </div>
 
+          {/* Everything here except the burger is desktop-only (`sm:`+) —
+              on mobile these all move into the drawer's own action row below
+              instead, so this row is never wider than logo + burger and the
+              page never needs horizontal scroll to reach the burger. */}
           <div className="flex items-center gap-3">
-            <ClubSwitcher />
+            <div className="hidden sm:block">
+              <ClubSwitcher />
+            </div>
             {user?.club_slug && (
               <Link
                 to={`/${user.club_slug}`}
@@ -319,7 +325,9 @@ export default function AdminLayout({ children }) {
                 VIEW PUBLIC PAGE
               </Link>
             )}
-            <BookmarkButton pageLabel={labelForPath(location.pathname)} />
+            <div className="hidden sm:block">
+              <BookmarkButton pageLabel={labelForPath(location.pathname)} />
+            </div>
             {wizardAvailable && (
               <button
                 onClick={() => navigate('/admin/setup')}
@@ -330,7 +338,9 @@ export default function AdminLayout({ children }) {
               </button>
             )}
             {user?.role === 'super_admin' && (
-              <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
+              <div className="hidden sm:block">
+                <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
+              </div>
             )}
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
@@ -340,7 +350,7 @@ export default function AdminLayout({ children }) {
             </span>
             <button
               onClick={handleLogout}
-              className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
+              className="hidden sm:inline-flex font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
             >
               LOG OUT
             </button>
@@ -396,6 +406,54 @@ export default function AdminLayout({ children }) {
           shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
         `}>
           <nav>
+            {/* Mobile-only action row — the header hides ClubSwitcher / view
+                public page / setup guide / notifications / user name / log out
+                below `sm` so the top bar never overflows; those same actions
+                live here instead so nothing is lost on a phone. */}
+            <div className="md:hidden mb-2 pb-2 border-b pb-hairline-b space-y-1.5">
+              {user?.can_switch_clubs && (
+                <div className="px-2"><ClubSwitcher /></div>
+              )}
+              <div className="px-2 flex items-center justify-between gap-2 font-mono text-[11px] text-pb-faint">
+                <span className="truncate">
+                  {user?.display_name || user?.username}
+                  {user?.role === 'super_admin' && (
+                    <span className="ml-1 text-[10px]" style={{ color: 'var(--pb-accent)' }}>(SUPER)</span>
+                  )}
+                </span>
+                <button onClick={handleLogout} className="shrink-0 tracking-wide2 hover:text-pb-text transition-colors border pb-hairline rounded px-2 py-1">
+                  LOG OUT
+                </button>
+              </div>
+              <div className="px-2 flex items-center gap-2 flex-wrap">
+                {user?.club_slug && (
+                  <Link
+                    to={`/${user.club_slug}`}
+                    onClick={() => setMobileOpen(false)}
+                    className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1"
+                  >
+                    VIEW PUBLIC PAGE
+                  </Link>
+                )}
+                {wizardAvailable && (
+                  <button
+                    onClick={() => { setMobileOpen(false); navigate('/admin/setup') }}
+                    className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1"
+                  >
+                    SETUP GUIDE
+                  </button>
+                )}
+                {user?.role === 'super_admin' && (
+                  <button
+                    onClick={() => { setMobileOpen(false); openBell() }}
+                    className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1"
+                  >
+                    NOTIFICATIONS
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* The core surface is BetterStats — its lockup sits at the top of
                 the main admin sidebar, mirroring how each module surface shows
                 its own lockup. The "Stats" suffix stays the fixed brand green

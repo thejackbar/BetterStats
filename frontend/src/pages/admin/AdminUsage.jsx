@@ -108,9 +108,9 @@ function deviceIcon(d) {
   }
 }
 
-function Dot({ on, color = '#10b981', size = 6 }) {
+function Dot({ on, color = '#10b981', size = 6, title }) {
   return (
-    <span className={on ? 'animate-pulse' : ''}
+    <span className={on ? 'animate-pulse' : ''} title={on ? title : undefined}
       style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%',
                background: on ? color : 'transparent' }} />
   )
@@ -354,11 +354,14 @@ function LiveSection() {
                 <div className="max-h-[520px] overflow-y-auto">
                   {recent.map((e, i) => {
                     const m = sourceMeta(e.source)
-                    const isNew = (Date.now() - new Date(e.created_at).getTime()) < 15000
+                    // Matches the "Active now" window above (last 5 min) so the
+                    // dot here means the same thing as that badge, not a separate
+                    // "just this second" flash.
+                    const isActive = (Date.now() - new Date(e.created_at).getTime()) < 5 * 60 * 1000
                     return (
                       <div key={`${e.created_at}-${i}`}
                         className={`flex items-center gap-2 px-3 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                        <Dot on={isNew} />
+                        <Dot on={isActive} title="Active in the last 5 min" />
                         <span className="font-mono text-[10px] text-pb-faintest w-11 sm:w-14 shrink-0">{fmtAgo(e.created_at)}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] sm:text-[13px] text-pb-text truncate">{e.label}</div>
