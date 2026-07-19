@@ -21,6 +21,9 @@ async function request(path, options = {}) {
     }
     const error = new Error(detail)
     error.status = res.status
+    if (err.detail && typeof err.detail === 'object' && !Array.isArray(err.detail)) {
+      error.detail = err.detail
+    }
     throw error
   }
   // 204 No Content (DELETE endpoints) and any empty 2xx body have nothing to
