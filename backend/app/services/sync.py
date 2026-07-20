@@ -1044,81 +1044,92 @@ async def _sync_organisation_impl(
         all_player_ids = [r[0] for r in all_pids_res]
         if all_player_ids:
             await _compute_milestones(session, all_player_ids, org_id)
+    # `session` (opened above) is done being useful here — everything left is
+    # either its own short-lived session or takes org_id_str and opens one
+    # internally. Closing it now (instead of holding it for the rest of the
+    # function) matters a lot in practice: the Grassroots per-game pass below
+    # can run for many minutes on a club with a large history, and a
+    # connection pool has only pool_size + max_overflow slots total — a long
+    # sync sitting on a connection it no longer needs, on top of the per-game
+    # sync's own connections, starves ordinary web traffic (and a second
+    # concurrent sync via _SYNC_GOVERNOR) of pool headroom for no reason. This
+    # was found investigating a "QueuePool limit ... reached" error during a
+    # club's data sync.
 
-        # Grassroots /scores/* — game-level scorecards for all seasons.
-        # The PlayHQ Partner game-level sync was removed (May 2026) — see git history
-        # or CLAUDE.md for context. Grassroots covers 50+ seasons including recent ones.
-        # Independent of org.playhq_id; uses its own DB session because the
-        # outer session has been through hundreds of commits during PlayHQ
-        # phase and can leave ORM state in a bad spot for async I/O.
-        try:
-            gr_stats = await sync_grassroots_game_level_data(org_id_str, run_id=run_id)
-            stats.update(gr_stats)
-        except SyncControlSignal:
-            # A pause/cancel checkpoint fired inside the game-level loop —
-            # propagate past this phase's own error handling so the run's
-            # owner (organisations.py::_sync_safe, club_admin.py's hard
-            # refresh _run) can finalize it as paused/cancelled instead of
-            # this looking like an ordinary sync failure.
-            raise
-        except Exception as e:
-            import traceback as _tb2
-            logger.error(f"Grassroots game-level sync failed for {org_id_str}: {e}\n{_tb2.format_exc()}")
+    # Grassroots /scores/* — game-level scorecards for all seasons.
+    # The PlayHQ Partner game-level sync was removed (May 2026) — see git history
+    # or CLAUDE.md for context. Grassroots covers 50+ seasons including recent ones.
+    # Independent of org.playhq_id; uses its own DB session because the
+    # outer session has been through hundreds of commits during PlayHQ
+    # phase and can leave ORM state in a bad spot for async I/O.
+    try:
+        gr_stats = await sync_grassroots_game_level_data(org_id_str, run_id=run_id)
+        stats.update(gr_stats)
+    except SyncControlSignal:
+        # A pause/cancel checkpoint fired inside the game-level loop —
+        # propagate past this phase's own error handling so the run's
+        # owner (organisations.py::_sync_safe, club_admin.py's hard
+        # refresh _run) can finalize it as paused/cancelled instead of
+        # this looking like an ordinary sync failure.
+        raise
+    except Exception as e:
+        import traceback as _tb2
+        logger.error(f"Grassroots game-level sync failed for {org_id_str}: {e}\n{_tb2.format_exc()}")
 
+    if run_id:
+        _progress(stats, "Finalising", 99)
+        await update_sync_run(run_id, stats)
+
+    # CA's aggregate API sometimes omits low-volume players for old seasons,
+    # leaving them with scorecard rows but no player_season_stats row. Every
+    # career number on the player page sums from player_season_stats, so
+    # those players show "0 matches" despite having real innings. Synthesise
+    # the missing aggregate from the per-game tables we already have.
+    try:
+        backfilled = await _backfill_missing_season_stats(org_id_str)
+        stats["aggregate_backfill"] = backfilled
         if run_id:
-            _progress(stats, "Finalising", 99)
             await update_sync_run(run_id, stats)
+    except Exception as e:
+        import traceback as _tb3
+        logger.error(f"Aggregate backfill failed for {org_id_str}: {e}\n{_tb3.format_exc()}")
 
-        # CA's aggregate API sometimes omits low-volume players for old seasons,
-        # leaving them with scorecard rows but no player_season_stats row. Every
-        # career number on the player page sums from player_season_stats, so
-        # those players show "0 matches" despite having real innings. Synthesise
-        # the missing aggregate from the per-game tables we already have.
-        try:
-            backfilled = await _backfill_missing_season_stats(org_id_str)
-            stats["aggregate_backfill"] = backfilled
-            if run_id:
-                await update_sync_run(run_id, stats)
-        except Exception as e:
-            import traceback as _tb3
-            logger.error(f"Aggregate backfill failed for {org_id_str}: {e}\n{_tb3.format_exc()}")
-
-        # BetterImport: re-derive the non-GR remainder of any uploaded historical
-        # summaries against the GR data we just (re)synced. Runs last so the
-        # residual shrinks automatically as GR coverage grows — no re-import. A
-        # no-op for orgs that have never imported (migration 070).
-        try:
-            from app.services.import_reconcile import reconcile_imported_totals
-            stats["import_reconciled"] = await reconcile_imported_totals(org_id_str)
-            if run_id:
-                await update_sync_run(run_id, stats)
-        except Exception as e:
-            import traceback as _tb4
-            logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
-
-        logger.info(f"Sync complete: {stats}")
-
-        # Refresh Postgres planner statistics. Every sync delete+reinserts this
-        # org's player_season_stats (and the GR pass rewrites the per-game
-        # tables), which leaves the statistics stale until autovacuum catches
-        # up. player_season_stats is a GLOBAL table (all clubs), so a stale plan
-        # makes the all-seasons leaderboard / club summary scan every club's
-        # rows and time out (35s → nginx 504) — the dashboard/leaderboard hang
-        # on a freshly-synced club while a player search (a light query) works.
-        # ANALYZE is seconds against a multi-minute sync and makes the heavy
-        # aggregate reads return in ~1s. Best-effort: never fail a sync over it.
-        try:
-            async with async_session_maker() as analyze_session:
-                await analyze_session.execute(text("ANALYZE"))
-                await analyze_session.commit()
-        except Exception as e:
-            logger.warning(f"Post-sync ANALYZE failed for {org_id_str}: {e}")
-
-        if run_id and owns_run:
-            await finish_sync_run(run_id, stats)
-        elif run_id:
+    # BetterImport: re-derive the non-GR remainder of any uploaded historical
+    # summaries against the GR data we just (re)synced. Runs last so the
+    # residual shrinks automatically as GR coverage grows — no re-import. A
+    # no-op for orgs that have never imported (migration 070).
+    try:
+        from app.services.import_reconcile import reconcile_imported_totals
+        stats["import_reconciled"] = await reconcile_imported_totals(org_id_str)
+        if run_id:
             await update_sync_run(run_id, stats)
-        return stats
+    except Exception as e:
+        import traceback as _tb4
+        logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
+
+    logger.info(f"Sync complete: {stats}")
+
+    # Refresh Postgres planner statistics. Every sync delete+reinserts this
+    # org's player_season_stats (and the GR pass rewrites the per-game
+    # tables), which leaves the statistics stale until autovacuum catches
+    # up. player_season_stats is a GLOBAL table (all clubs), so a stale plan
+    # makes the all-seasons leaderboard / club summary scan every club's
+    # rows and time out (35s → nginx 504) — the dashboard/leaderboard hang
+    # on a freshly-synced club while a player search (a light query) works.
+    # ANALYZE is seconds against a multi-minute sync and makes the heavy
+    # aggregate reads return in ~1s. Best-effort: never fail a sync over it.
+    try:
+        async with async_session_maker() as analyze_session:
+            await analyze_session.execute(text("ANALYZE"))
+            await analyze_session.commit()
+    except Exception as e:
+        logger.warning(f"Post-sync ANALYZE failed for {org_id_str}: {e}")
+
+    if run_id and owns_run:
+        await finish_sync_run(run_id, stats)
+    elif run_id:
+        await update_sync_run(run_id, stats)
+    return stats
 
 
 def _derive_partnerships(
