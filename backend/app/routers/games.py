@@ -633,9 +633,16 @@ async def get_scorecard(
             pid_to_name: dict[str, str] = {}
             opp_roster_pids: set[str] = set()
             our_team_roster_pids: set[str] = set()
+            # team id -> display name, straight off GR's own roster — the authoritative
+            # source for which team batted in a given innings (via battingTeamId below),
+            # independent of any of the "is this batter one of ours" identity matching.
+            gr_team_name_by_id: dict[str, str] = {}
             for _team in (gr_data.get("teams") or []):
                 _team_name = (_team.get("displayName") or _team.get("name") or "").lower()
                 _is_our_team = bool(org_word and org_word in _team_name)
+                _tid = (_team.get("id") or "").lower()
+                if _tid:
+                    gr_team_name_by_id[_tid] = _team.get("displayName") or _team.get("name") or ""
                 _all_members = (_team.get("players") or []) + (_team.get("nonPlayingMembers") or [])
                 for _pl in _all_members:
                     _pid = _pl.get("participantId") or _pl.get("id")
@@ -1061,13 +1068,21 @@ async def get_scorecard(
                 if inn_num_t not in our_batting_inns and inn_num_t in opp_inn_totals:
                     innings_totals[inn_num_t]["runs"] = opp_inn_totals[inn_num_t]["runs"]
                     innings_totals[inn_num_t]["wickets"] = opp_inn_totals[inn_num_t]["wickets"]
+                # Prefer GR's own authoritative battingTeamId -> team name lookup over
+                # the "is this batter one of ours" inference below, which is derived
+                # from player/roster identity matching and can misfire (e.g. the
+                # org-name-substring we_are_home check, or an innings whose batting
+                # rows all landed in our_missing_rows/fill-in handling).
+                _bt_id = str((gr_inn_totals.get(inn_num_t) or {}).get("batting_team_id") or "").lower()
+                _resolved_name = gr_team_name_by_id.get(_bt_id)
+
                 if inn_num_t in our_batting_inns:
-                    innings_totals[inn_num_t]["batting_team"] = our_display_name or game.home_team or ""
+                    innings_totals[inn_num_t]["batting_team"] = _resolved_name or our_display_name or game.home_team or ""
                     if inn_num_t in our_recomputed:
                         innings_totals[inn_num_t]["runs"] = our_recomputed[inn_num_t]["runs"]
                         innings_totals[inn_num_t]["wickets"] = our_recomputed[inn_num_t]["wickets"]
                 else:
-                    innings_totals[inn_num_t]["batting_team"] = opp_display_name or game.away_team or ""
+                    innings_totals[inn_num_t]["batting_team"] = _resolved_name or opp_display_name or game.away_team or ""
                 # Use GR innings-level totalExtras as authoritative source.
                 # This covers byes, leg-byes, penalties and avoids the per-bowler
                 # field-name uncertainty. Applies to both our and opp innings.
