@@ -46,6 +46,8 @@ async def _run_stripe_subscription_sweep():
 async def lifespan(app: FastAPI):
     from sqlalchemy import text
     from app.models.db import engine
+    _boot_started = time.monotonic()
+    logger.info("Lifespan startup: running the idempotent schema-mirror DDL block…")
     async with engine.begin() as conn:
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS playhq_id TEXT"
@@ -2804,23 +2806,31 @@ async def lifespan(app: FastAPI):
             seeded = await seed_org_definitions(conn, str(acc["id"]), APPLECROSS_TEMPLATE)
             if seeded:
                 logger.info(f"Seeded {seeded} award definitions for Applecross")
+    logger.info(
+        f"Lifespan startup: schema-mirror DDL block done in "
+        f"{time.monotonic() - _boot_started:.1f}s"
+    )
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
     # Generate yearbook stubs for any seasons that don't have one yet
+    _step_started = time.monotonic()
     from app.models.db import async_session_maker as AsyncSessionLocal
     from app.routers.yearbooks import generate_all_stubs
     async with AsyncSessionLocal() as stub_session:
         await generate_all_stubs(stub_session)
+    logger.info(f"Lifespan startup: yearbook stub generation done in {time.monotonic() - _step_started:.1f}s")
 
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
     # any club created since the last startup with no separate creation hook).
+    _step_started = time.monotonic()
     from app.routers.comms import seed_starter_templates
     async with engine.begin() as conn:
         seeded = await seed_starter_templates(conn)
         if seeded:
             logger.info(f"Seeded {seeded} BetterComms starter templates across clubs")
+    logger.info(f"Lifespan startup: BetterComms template seeding done in {time.monotonic() - _step_started:.1f}s")
 
     # Warm the SES send-rate cache from platform_settings so a DB-configured rate
     # takes effect immediately on boot (not only once a super admin opens the page).

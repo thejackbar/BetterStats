@@ -15,7 +15,18 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(settings.database_url, echo=False)
+# Defaults (pool_size=5, max_overflow=10 → 15 total) were sized for simple
+# request/response traffic and don't leave headroom once a data sync is
+# running: a full club sync legitimately holds a connection for minutes at a
+# time (see services/sync.py), and up to two can run concurrently
+# (_SYNC_GOVERNOR), on top of ordinary admin traffic and scheduled background
+# jobs sharing the same pool. Widened after a "QueuePool limit ... reached"
+# error surfaced during a club's data sync. pool_pre_ping guards against a
+# connection gone stale from sitting idle across a slow sync's HTTP calls.
+engine = create_async_engine(
+    settings.database_url, echo=False,
+    pool_size=10, max_overflow=20, pool_timeout=30, pool_pre_ping=True,
+)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

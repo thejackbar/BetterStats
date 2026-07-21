@@ -105,11 +105,20 @@ echo "==> [5/5] Backend API health check (end-to-end through the proxy)"
 # is the one answering (this also catches the crossed-/api-proxy bug from the Jun
 # 2026 post-mortem, where /api was served by a different app). On failure, print the
 # backend's own state and logs so the cause is right here in the deploy output.
+#
+# Budget is generous (20 attempts, ~2min) rather than the original 6x4s (~24s):
+# main.py's lifespan runs a single idempotent schema-mirror DDL block that has
+# grown to ~380 sequential statements across every migration ever shipped, plus
+# yearbook-stub/BetterComms-template seeding — all before the app accepts traffic.
+# A healthy boot on a real production dataset can legitimately take longer than
+# the original budget allowed, which would misreport a merely-slow-but-fine
+# startup as "down". main.py now logs elapsed time per lifespan phase, so a
+# genuine hang (vs. just slow) is visible in the log tail printed below.
 api_ok=""
-for i in 1 2 3 4 5 6; do
+for i in $(seq 1 20); do
   body="$(curl -s -m 10 https://betterat.cricket/api/openapi.json || true)"
   case "$body" in *BetterStats*) api_ok=1; break ;; esac
-  echo "    attempt $i/6: API not healthy yet, waiting…"; sleep 4
+  echo "    attempt $i/20: API not healthy yet, waiting…"; sleep 6
 done
 if [ -n "$api_ok" ]; then
   echo "    backend API healthy ✓ — /api is answered by BetterStats"
