@@ -54,6 +54,17 @@ _LEAD_ACTION_TYPES = {
     "complete_registration", "offsite_conversion.fb_pixel_complete_registration",
 }
 
+# Single source of truth for pacing/insights maths — the dashboard reads
+# these back from get_latest_summary() rather than the frontend hardcoding
+# its own copy (that drifted once already, see the campaign-budget line on
+# the KPI card before this file owned it).
+CAMPAIGN_BUDGET_AUD = 520.0
+CAMPAIGN_LENGTH_DAYS = 30
+
+# compute_recommendation()'s status vocabulary, mapped onto the insight feed's
+# four-way severity (critical/warning/info/good) used by build_insights().
+_REC_SEVERITY = {"keep_going": "good", "watch": "warning", "action_needed": "critical"}
+
 
 class MetaAdsError(Exception):
     """Typed error so the router/page can show a specific message."""
@@ -201,6 +212,34 @@ async def fetch_daily_trend(days: int = 14) -> list[dict]:
     return rows
 
 
+async def fetch_ad_daily_trend(days: int = 30) -> list[dict]:
+    """One row per ad per day (level=ad, time_increment=1) — TRUE daily
+    breakdowns from Meta, not the cumulative-to-date totals fetch_per_ad
+    returns. Powers the per-ad drill-down trend chart (get_ad_history)."""
+    body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
+        "level": "ad",
+        "fields": "ad_id,ad_name,spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
+        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+        "date_preset": "maximum",
+        "time_increment": 1,
+    })
+    rows = [_parse_row(r) for r in (body.get("data") or [])]
+    rows.sort(key=lambda r: (r.get("date_start") or "", r.get("ad_id") or ""))
+    if days:
+        keep_dates = set(sorted({r.get("date_start") for r in rows if r.get("date_start")})[-days:])
+        rows = [r for r in rows if r.get("date_start") in keep_dates]
+    return rows
+
+
+def _parse_insights_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def compute_recommendation(campaign: dict) -> tuple[str, str]:
     """§6 recommendation rules. Returns (status, reason_text)."""
     spend = campaign.get("spend") or 0.0
@@ -261,6 +300,198 @@ def ad_status(ad: dict, all_ads: list[dict]) -> str:
     return "on_track"
 
 
+def ad_note(ad: dict, all_ads: list[dict]) -> str:
+    """One-line, plain-English explanation for an ad's status chip — so a
+    reader never has to reverse-engineer *why* a badge says what it says."""
+    spend = ad.get("spend") or 0.0
+    status = ad.get("status")
+    cost_per_lpv = ad.get("cost_per_lpv")
+    lpv = ad.get("landing_page_views") or 0.0
+
+    if spend < 3:
+        return "Too little spend yet to judge. Give it more time before acting on it."
+
+    if status == "winner":
+        if cost_per_lpv:
+            return f"Best landing-page reach for its spend so far (${cost_per_lpv:.2f} per view). Keep it running."
+        return "Getting the most landing page views of the set so far. Keep it running."
+
+    if status == "laggard":
+        others = [a for a in all_ads if a.get("ad_id") != ad.get("ad_id") and a.get("cost_per_lpv")]
+        if others and cost_per_lpv:
+            best = min(others, key=lambda a: a["cost_per_lpv"])
+            mult = cost_per_lpv / best["cost_per_lpv"] if best["cost_per_lpv"] else None
+            if mult and mult > 1.1:
+                return (
+                    f"Costing {mult:.1f}x more per landing page view than {best.get('name', 'your best ad')}. "
+                    "Consider pausing it or refreshing the creative."
+                )
+        return "Click-through rate is well behind the rest of the set. Worth a look."
+
+    if lpv == 0 and spend >= 3:
+        return "Spending but nobody has reached the landing page yet. Check the creative and targeting."
+
+    return "Performing in line with the rest of the campaign. No action needed."
+
+
+def compute_funnel(campaign: dict) -> list[dict]:
+    """Ordered funnel stages, impressions through to a completed trial
+    registration, each carrying what % of the top and of the PREVIOUS stage
+    it represents — the numbers the KPI cards show individually, laid out so
+    the drop-off at each step is visible without anyone computing a ratio."""
+    stages_raw = [
+        ("impressions", "Impressions", campaign.get("impressions") or 0),
+        ("link_clicks", "Link clicks", campaign.get("link_clicks") or 0),
+        ("landing_page_views", "Landing page views", campaign.get("landing_page_views") or 0),
+        ("leads", "Started registering (Meta-reported)", campaign.get("leads") or 0),
+        ("registrations", "Completed registrations", campaign.get("registrations") or 0),
+    ]
+    top = stages_raw[0][2] or 0
+    stages: list[dict] = []
+    prev: float | None = None
+    for key, label, value in stages_raw:
+        pct_of_top = round(100 * value / top, 1) if top else 0.0
+        pct_of_prev = 100.0 if prev is None else (round(100 * value / prev, 1) if prev else 0.0)
+        stages.append({
+            "key": key, "label": label, "value": value,
+            "pct_of_top": pct_of_top, "pct_of_prev": pct_of_prev,
+        })
+        prev = value
+    return stages
+
+
+def build_insights(
+    campaign: dict, ads: list[dict], daily_history: list[dict],
+    campaign_budget: float, campaign_length_days: int,
+    recommendation: str | None = None, recommendation_status: str | None = None,
+) -> list[dict]:
+    """Plain-English, severity-ordered read of how the campaign is actually
+    going — the dashboard's headline feed, so a reader never has to interpret
+    the raw KPI numbers themselves. Each item is {severity, title, detail};
+    severity is critical / warning / info / good, and the list is returned
+    sorted worst-first."""
+    insights: list[dict] = []
+
+    if recommendation:
+        insights.append({
+            "severity": _REC_SEVERITY.get(recommendation_status, "info"),
+            "title": "Overall campaign pace",
+            "detail": recommendation,
+        })
+
+    spend = campaign.get("spend") or 0.0
+    impressions = campaign.get("impressions") or 0.0
+    link_clicks = campaign.get("link_clicks") or 0.0
+    lpv = campaign.get("landing_page_views") or 0.0
+    leads = campaign.get("leads") or 0.0
+    registrations = campaign.get("registrations") or 0
+
+    # Budget pacing — from REAL daily spend (daily_history is the
+    # level='campaign_daily' series), not the lifetime-to-date campaign
+    # total, so a short burst of higher spend can't be misread as the
+    # steady-state rate.
+    spend_days = {d["date"] for d in daily_history if (d.get("spend") or 0) > 0}
+    if campaign_budget and spend_days:
+        daily_rate = spend / len(spend_days)
+        projected = daily_rate * campaign_length_days
+        if projected > campaign_budget * 1.15:
+            over_pct = round((projected / campaign_budget - 1) * 100)
+            insights.append({
+                "severity": "warning",
+                "title": "On track to overspend the budget",
+                "detail": (
+                    f"At the current pace (${daily_rate:.2f}/day over {len(spend_days)} active day"
+                    f"{'s' if len(spend_days) != 1 else ''}), the campaign is projected to spend about "
+                    f"${projected:.0f} against a ${campaign_budget:.0f} budget over {campaign_length_days} days, "
+                    f"roughly {over_pct}% over. Trim the daily budget or pause the weaker ads below."
+                ),
+            })
+        elif projected < campaign_budget * 0.7 and len(spend_days) >= 2:
+            insights.append({
+                "severity": "info",
+                "title": "Under-pacing the budget",
+                "detail": (
+                    f"At ${daily_rate:.2f}/day it's on track to use only about ${projected:.0f} of the "
+                    f"${campaign_budget:.0f} budget over {campaign_length_days} days. If the ads below are "
+                    "performing, there's room to raise the daily budget and reach more people."
+                ),
+            })
+
+    # Funnel bottlenecks — where the drop-off actually hurts.
+    if impressions >= 500 and link_clicks / impressions < 0.005:
+        insights.append({
+            "severity": "critical",
+            "title": "Very few people are clicking through",
+            "detail": (
+                f"Only {link_clicks:.0f} link clicks from {impressions:.0f} impressions "
+                f"({100 * link_clicks / impressions:.2f}%). The creative or targeting isn't landing. "
+                "Try a different image or headline, or narrow the audience."
+            ),
+        })
+    if link_clicks >= 10 and lpv / link_clicks < 0.5:
+        insights.append({
+            "severity": "warning",
+            "title": "Over half of link clicks aren't reaching the landing page",
+            "detail": (
+                f"{lpv:.0f} landing page views from {link_clicks:.0f} link clicks "
+                f"({100 * lpv / link_clicks:.0f}%). That gap is usually a slow-loading page, a broken link, "
+                "or people bouncing before the page finishes loading. Worth checking /trial loads quickly "
+                "on mobile."
+            ),
+        })
+    if lpv >= 5 and leads == 0:
+        insights.append({
+            "severity": "warning",
+            "title": "Landing page traffic isn't converting to leads",
+            "detail": (
+                f"{lpv:.0f} people have reached the trial page but none have picked a club yet. Worth "
+                "checking the page's call-to-action is visible and the club search works."
+            ),
+        })
+    if leads >= 2 and registrations == 0 and spend >= 15:
+        insights.append({
+            "severity": "critical",
+            "title": "Visitors are starting registration but none are finishing",
+            "detail": (
+                f"Meta has recorded {leads:.0f} people picking a club, but {registrations} have actually "
+                "completed a trial registration. The most common cause is the email verification step. If "
+                "the backend's email provider isn't configured (still on the console/no-send default), "
+                "visitors never receive their code and get stuck. Worth running a real test signup to check."
+            ),
+        })
+
+    # Best vs worst spending ad.
+    spending_ads = [a for a in ads if (a.get("spend") or 0) >= 3 and a.get("cost_per_lpv")]
+    if len(spending_ads) >= 2:
+        best = min(spending_ads, key=lambda a: a["cost_per_lpv"])
+        worst = max(spending_ads, key=lambda a: a["cost_per_lpv"])
+        if best["ad_id"] != worst["ad_id"] and worst["cost_per_lpv"] > best["cost_per_lpv"] * 1.8:
+            insights.append({
+                "severity": "info",
+                "title": f"{best['name']} is your most efficient ad",
+                "detail": (
+                    f"${best['cost_per_lpv']:.2f} per landing page view, vs ${worst['cost_per_lpv']:.2f} for "
+                    f"{worst['name']} ({worst['cost_per_lpv'] / best['cost_per_lpv']:.1f}x more). Consider "
+                    f"shifting budget toward {best['name']} or pausing {worst['name']}."
+                ),
+            })
+
+    insights.append({
+        "severity": "info",
+        "title": "Meta's own Lead/CompleteRegistration count is indicative only",
+        "detail": (
+            "It fires the moment someone picks their club (step 2 of a 5-step form), not when they finish "
+            "registering, and can shift as Meta reconciles data after the fact. \"Completed "
+            "registrations\" in the funnel above is the real number: actual clubs that finished signing "
+            "up, matched to this campaign by their own attribution tag."
+        ),
+    })
+
+    severity_order = {"critical": 0, "warning": 1, "info": 2, "good": 3}
+    insights.sort(key=lambda i: severity_order.get(i["severity"], 9))
+    return insights
+
+
 async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row: dict,
                            recommendation: str | None = None, recommendation_status: str | None = None) -> None:
     """Stamped with the CURRENT settings.meta_campaign_id (migration 162) —
@@ -316,6 +547,25 @@ async def run_snapshot(db: AsyncSession) -> dict:
     await upsert_snapshot(db, today, "campaign", campaign, reason, status)
     for ad in ads:
         await upsert_snapshot(db, today, "ad", ad)
+
+    # TRUE (non-cumulative) daily breakdowns, stored under their own levels
+    # ('campaign'/'ad' above are lifetime-to-date-as-of-today totals, needed
+    # for the KPI cards — plotting THOSE on a "per day" trend chart would
+    # show a cumulative curve mislabeled as daily). Best-effort: a transient
+    # failure here just leaves the trend charts one day stale, it shouldn't
+    # fail a snapshot that otherwise succeeded.
+    try:
+        for row in await fetch_daily_trend(days=CAMPAIGN_LENGTH_DAYS + 5):
+            d = _parse_insights_date(row.get("date_start"))
+            if d:
+                await upsert_snapshot(db, d, "campaign_daily", row)
+        for row in await fetch_ad_daily_trend(days=CAMPAIGN_LENGTH_DAYS + 5):
+            d = _parse_insights_date(row.get("date_start"))
+            if d:
+                await upsert_snapshot(db, d, "ad_daily", row)
+    except MetaAdsError:
+        logger.exception("Meta Ads: daily-trend snapshot pull failed")
+
     await db.commit()
 
     return {
@@ -430,7 +680,8 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     if not campaign_row:
         return {"campaign": None, "ads": [], "recommendation": None,
                 "recommendation_status": None, "last_updated": None,
-                "leads_adjustment": adjustment}
+                "leads_adjustment": adjustment, "campaign_budget": CAMPAIGN_BUDGET_AUD,
+                "campaign_length_days": CAMPAIGN_LENGTH_DAYS, "insights": []}
 
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
@@ -470,6 +721,20 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         ad["utm_content"] = meta.get("utm_content")
         ad["status"] = ad_status(ad, ads)
         ad["cost_per_lead"] = round(ad["spend"] / ad["leads"], 2) if ad["leads"] > 0 else None
+        ad["note"] = ad_note(ad, ads)
+
+    # Used for both the funnel/pacing insights below AND the default trend
+    # chart window — a fixed lookback covering the whole campaign length so
+    # pacing maths isn't skewed by whatever `days` window the trend charts
+    # happen to be showing at the time.
+    daily_history = await get_history(db, days=CAMPAIGN_LENGTH_DAYS + 5)
+
+    campaign["funnel"] = compute_funnel(campaign)
+    insights = build_insights(
+        campaign, ads, daily_history, CAMPAIGN_BUDGET_AUD, CAMPAIGN_LENGTH_DAYS,
+        recommendation=campaign_row["recommendation"],
+        recommendation_status=campaign_row["recommendation_status"],
+    )
 
     return {
         "campaign": campaign,
@@ -478,22 +743,49 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         "recommendation_status": campaign_row["recommendation_status"],
         "last_updated": campaign_row["created_at"].isoformat() if campaign_row["created_at"] else None,
         "leads_adjustment": adjustment,
+        "campaign_budget": CAMPAIGN_BUDGET_AUD,
+        "campaign_length_days": CAMPAIGN_LENGTH_DAYS,
+        "insights": insights,
     }
 
 
 async def get_history(db: AsyncSession, days: int = 14) -> list[dict]:
-    """Daily campaign-level series for the trend charts, from stored
-    snapshots — scoped to the CURRENT campaign (migration 162). Previously
-    unscoped, so a "last 14 days" window spanning a campaign switch (like
-    the July -> August one) stitched both campaigns' daily numbers into one
-    line with no way to tell them apart. A campaign that just launched will
-    correctly show a short history rather than borrowing an old one's."""
+    """TRUE daily campaign-level series for the trend charts (level=
+    'campaign_daily' — see run_snapshot), scoped to the CURRENT campaign
+    (migration 162). These are each day's OWN spend/clicks/etc from Meta's
+    time_increment=1 breakdown — NOT the level='campaign' rows, which are
+    cumulative-to-date totals as of that day's snapshot pull and would plot
+    as an ever-rising curve mislabeled as "per day" if used here."""
     since = date.today() - timedelta(days=days)
     rows = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
-        WHERE level = 'campaign' AND campaign_id = :campaign_id AND snapshot_date >= :since
+        WHERE level = 'campaign_daily' AND campaign_id = :campaign_id AND snapshot_date >= :since
         ORDER BY snapshot_date ASC
     """), {"campaign_id": settings.meta_campaign_id, "since": since})).mappings().all()
+    return [
+        {
+            "date": r["snapshot_date"].isoformat(),
+            "spend": float(r["spend"]),
+            "impressions": float(r["impressions"]),
+            "link_clicks": float(r["link_clicks"]),
+            "link_ctr": float(r["link_ctr"]),
+            "landing_page_views": float(r["landing_page_views"]),
+            "cost_per_lpv": float(r["cost_per_lpv"]) if r["cost_per_lpv"] is not None else None,
+            "leads": float(r["leads"]),
+        }
+        for r in rows
+    ]
+
+
+async def get_ad_history(db: AsyncSession, ad_id: str, days: int = 30) -> list[dict]:
+    """TRUE daily per-ad series (level='ad_daily') for the drill-down trend
+    chart when a super admin clicks into one ad — same shape as get_history."""
+    since = date.today() - timedelta(days=days)
+    rows = (await db.execute(text("""
+        SELECT * FROM meta_ad_snapshots
+        WHERE level = 'ad_daily' AND campaign_id = :campaign_id AND ad_id = :ad_id AND snapshot_date >= :since
+        ORDER BY snapshot_date ASC
+    """), {"campaign_id": settings.meta_campaign_id, "ad_id": ad_id, "since": since})).mappings().all()
     return [
         {
             "date": r["snapshot_date"].isoformat(),

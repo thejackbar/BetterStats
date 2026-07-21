@@ -1,38 +1,51 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  ResponsiveContainer, AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis,
+  ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip,
 } from 'recharts'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
-const CAMPAIGN_WINDOW = 'BC_AU_SelfServe_Aug2026 · ~30 days from launch'
-const CAMPAIGN_BUDGET = 520  // the campaign's lifetime spend cap
+const DEFAULT_BUDGET = 520
+const DEFAULT_LENGTH_DAYS = 30
 
-const REC_STYLE = {
-  keep_going: {
-    label: 'Keep going',
-    box: 'bg-emerald-500/10 border-emerald-500/40',
-    text: 'text-emerald-300',
-    badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+const TREND_RANGES = [
+  { label: '7d', days: 7 },
+  { label: '14d', days: 14 },
+  { label: '30d', days: 30 },
+  { label: 'Lifetime', days: 90 },
+]
+
+const SEVERITY_STYLE = {
+  critical: {
+    label: 'Needs attention',
+    box: 'bg-red-500/10 border-red-500/40',
+    text: 'text-red-300',
+    badge: 'bg-red-500/15 text-red-300 border-red-500/40',
   },
-  watch: {
+  warning: {
     label: 'Watch',
     box: 'bg-amber-500/10 border-amber-500/40',
     text: 'text-amber-300',
     badge: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
   },
-  action_needed: {
-    label: 'Action needed',
-    box: 'bg-red-500/10 border-red-500/40',
-    text: 'text-red-300',
-    badge: 'bg-red-500/15 text-red-300 border-red-500/40',
+  info: {
+    label: 'Note',
+    box: 'bg-pb-surface2/60 border-pb-hairline',
+    text: 'text-pb-dim',
+    badge: 'bg-pb-surface2 text-pb-dim border-pb-hairline',
+  },
+  good: {
+    label: 'On track',
+    box: 'bg-emerald-500/10 border-emerald-500/40',
+    text: 'text-emerald-300',
+    badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
   },
 }
 
 const AD_STATUS_STYLE = {
-  winner:   { label: 'Winner',   cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
-  laggard:  { label: 'Laggard',  cls: 'bg-red-500/15 text-red-300 border-red-500/40' },
+  winner: { label: 'Winner', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
+  laggard: { label: 'Laggard', cls: 'bg-red-500/15 text-red-300 border-red-500/40' },
   on_track: { label: 'On track', cls: 'bg-pb-surface2 text-pb-faint border-pb-hairline' },
 }
 
@@ -48,7 +61,7 @@ function fmtNum(n) {
 }
 function fmtPct(n) {
   if (n == null) return '–'
-  return `${Number(n).toFixed(2)}%`
+  return `${Number(n).toFixed(1)}%`
 }
 function fmtTime(iso) {
   if (!iso) return 'never'
@@ -66,7 +79,7 @@ function ChartTooltip({ active, payload, label, money }) {
   if (!active || !payload?.length) return null
   return (
     <div className="bg-pb-surface border pb-hairline rounded px-3 py-2 text-xs shadow-lg">
-      {label && <p className="font-mono text-[10px] text-pb-faint mb-1">{label}</p>}
+      {label && <p className="font-mono text-[10px] text-pb-faint mb-1">{fmtDay(label)}</p>}
       {payload.map((p, i) => (
         <p key={i} className="font-mono text-pb-text">
           <span className="inline-block w-2 h-2 rounded-full mr-2 align-middle" style={{ background: p.color }} />
@@ -87,9 +100,190 @@ function Stat({ label, value, hint }) {
   )
 }
 
+function InsightCard({ insight }) {
+  const style = SEVERITY_STYLE[insight.severity] || SEVERITY_STYLE.info
+  return (
+    <div className={`pb-card border p-3.5 ${style.box}`}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <p className={`text-sm font-medium ${style.text}`}>{insight.title}</p>
+        <span className={`shrink-0 px-1.5 py-0.5 rounded-full border text-[9px] font-mono uppercase tracking-wide2 ${style.badge}`}>
+          {style.label}
+        </span>
+      </div>
+      <p className="text-xs text-pb-dim leading-relaxed">{insight.detail}</p>
+    </div>
+  )
+}
+
+function FunnelChart({ stages }) {
+  if (!stages?.length) return null
+  const top = stages[0]?.value || 0
+  return (
+    <div className="pb-card p-4">
+      <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
+        Funnel: impressions to a completed registration
+      </div>
+      <div className="space-y-2.5">
+        {stages.map((s, i) => {
+          const widthPct = top ? Math.max(2, (s.value / top) * 100) : 0
+          const fillOpacity = 0.3 + 0.7 * (top ? s.value / top : 0)
+          const dropSevere = i > 0 && s.pct_of_prev < 20 && (stages[i - 1]?.value || 0) >= 2
+          return (
+            <div key={s.key}>
+              {i > 0 && (
+                <div className={`font-mono text-[9px] pl-1 mb-1 ${dropSevere ? 'text-red-400' : 'text-pb-faintest'}`}>
+                  &darr; {fmtPct(s.pct_of_prev)} continued from &ldquo;{stages[i - 1].label}&rdquo;
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <div className="w-40 sm:w-52 shrink-0 text-xs text-pb-text truncate" title={s.label}>{s.label}</div>
+                <div className="flex-1 h-5 bg-pb-surface2 rounded overflow-hidden">
+                  <div
+                    className="h-full bg-pb-accent rounded"
+                    style={{ width: `${widthPct}%`, opacity: fillOpacity }}
+                  />
+                </div>
+                <div className="w-16 shrink-0 text-right font-mono text-xs text-pb-text">{fmtNum(s.value)}</div>
+                <div className="w-14 shrink-0 text-right font-mono text-[10px] text-pb-faint">{fmtPct(s.pct_of_top)}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center gap-3 mt-1.5 font-mono text-[9px] text-pb-faintest">
+        <div className="w-40 sm:w-52 shrink-0" />
+        <div className="flex-1" />
+        <div className="w-16 shrink-0 text-right">count</div>
+        <div className="w-14 shrink-0 text-right">of top</div>
+      </div>
+    </div>
+  )
+}
+
+function RangePicker({ value, onChange }) {
+  return (
+    <div className="inline-flex rounded border border-pb-hairline overflow-hidden">
+      {TREND_RANGES.map((r) => (
+        <button
+          key={r.days}
+          onClick={() => onChange(r.days)}
+          className={`px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide2 ${
+            value === r.days ? 'bg-pb-accent text-white' : 'text-pb-dim hover:bg-pb-surface2'
+          }`}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function TrendChart({ title, data, dataKey, kind = 'line', color = '#3b82f6', money }) {
+  return (
+    <div className="pb-card p-4">
+      <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">{title}</div>
+      <div style={{ width: '100%', height: 170 }}>
+        {data.length === 0 ? (
+          <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">No data yet.</div>
+        ) : kind === 'bar' ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+              <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip content={<ChartTooltip money={money} />} />
+              <Bar dataKey={dataKey} name={title} fill={color} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+              <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<ChartTooltip money={money} />} />
+              <Line type="monotone" dataKey={dataKey} name={title} stroke={color} strokeWidth={2} dot={{ r: 2 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AdTrendMini({ adId, days }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    setErr('')
+    api.metaAdsAdHistory(adId, days)
+      .then((d) => { if (alive) setRows(d.days || []) })
+      .catch((e) => { if (alive) setErr(e.message || "Could not load this ad's trend.") })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [adId, days])
+
+  if (loading) return <p className="text-xs text-pb-faint px-1 py-2">Loading trend&hellip;</p>
+  if (err) return <p className="text-xs text-red-400 px-1 py-2">{err}</p>
+  if (rows.length === 0) return <p className="text-xs text-pb-faint px-1 py-2">No daily history recorded yet for this ad.</p>
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+      <TrendChart title="Daily spend" data={rows} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} />
+      <TrendChart title="Daily link CTR" data={rows} dataKey="link_ctr" kind="line" color="#3b82f6" />
+    </div>
+  )
+}
+
+function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays }) {
+  const style = AD_STATUS_STYLE[ad.status] || AD_STATUS_STYLE.on_track
+  const barPct = ad.cost_per_lpv && maxCostPerLpv ? Math.min(100, (ad.cost_per_lpv / maxCostPerLpv) * 100) : 0
+  const barColor = ad.status === 'winner' ? 'bg-emerald-500' : ad.status === 'laggard' ? 'bg-red-500' : 'bg-pb-accent'
+
+  return (
+    <div className={`pb-card border overflow-hidden ${selected ? 'border-pb-accent' : 'border-pb-hairline'}`}>
+      <button onClick={onSelect} className="w-full text-left p-3.5 hover:bg-pb-surface2/40">
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="text-sm font-medium text-pb-text">{ad.name}</div>
+          <span className={`shrink-0 px-1.5 py-0.5 rounded-full border text-[9px] font-mono uppercase ${style.cls}`}>
+            {style.label}
+          </span>
+        </div>
+        <p className="text-xs text-pb-dim mb-2.5 leading-relaxed">{ad.note}</p>
+        <div className="grid grid-cols-3 gap-x-3 gap-y-1 font-mono text-[10px] text-pb-faint mb-2">
+          <div>Spend <span className="text-pb-text">{fmtMoney(ad.spend)}</span></div>
+          <div>Link CTR <span className="text-pb-text">{fmtPct(ad.link_ctr)}</span></div>
+          <div>LPVs <span className="text-pb-text">{fmtNum(ad.landing_page_views)}</span></div>
+          <div>Cost/LPV <span className="text-pb-text">{ad.cost_per_lpv != null ? fmtMoney(ad.cost_per_lpv) : '–'}</span></div>
+          <div>Leads <span className="text-pb-text">{fmtNum(ad.leads)}</span></div>
+          <div>Cost/Lead <span className="text-pb-text">{ad.cost_per_lead != null ? fmtMoney(ad.cost_per_lead) : '–'}</span></div>
+        </div>
+        {ad.cost_per_lpv != null && (
+          <div className="h-1.5 bg-pb-surface2 rounded-full overflow-hidden">
+            <div className={`h-full ${barColor}`} style={{ width: `${Math.max(4, barPct)}%` }} />
+          </div>
+        )}
+        <div className="font-mono text-[9px] text-pb-faintest mt-2">
+          {selected ? 'Hide trend over time' : 'Click for trend over time'}
+        </div>
+      </button>
+      {selected && (
+        <div className="border-t pb-hairline px-3.5 pb-3.5">
+          <AdTrendMini adId={ad.ad_id} days={trendDays} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SuperMetaAds() {
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -102,10 +296,13 @@ export default function SuperMetaAds() {
   const [attribution, setAttribution] = useState(null)
   const [adSignups, setAdSignups] = useState(null)
 
+  const [trendDays, setTrendDays] = useState(14)
+  const [selectedAdId, setSelectedAdId] = useState(null)
+
   const load = useCallback(() => {
     setLoading(true)
-    Promise.all([api.metaAdsSummary(), api.metaAdsHistory(14)])
-      .then(([s, h]) => { setSummary(s); setHistory(h.days || []); setError('') })
+    api.metaAdsSummary()
+      .then((s) => { setSummary(s); setError('') })
       .catch((e) => setError(e.message || 'Could not load the Meta Ads dashboard.'))
       .finally(() => setLoading(false))
     api.metaAdsLeadAdjustments().then((d) => setAdjustments(d.adjustments || [])).catch(() => {})
@@ -114,6 +311,14 @@ export default function SuperMetaAds() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    setHistoryLoading(true)
+    api.metaAdsHistory(trendDays)
+      .then((h) => setHistory(h.days || []))
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false))
+  }, [trendDays])
 
   const adjustLeads = async (delta) => {
     setAdjusting(true)
@@ -140,7 +345,7 @@ export default function SuperMetaAds() {
         setError(data.error.message)
       } else {
         setSummary(data)
-        const h = await api.metaAdsHistory(14)
+        const h = await api.metaAdsHistory(trendDays)
         setHistory(h.days || [])
       }
     } catch (e) {
@@ -150,11 +355,14 @@ export default function SuperMetaAds() {
     }
   }
 
+  const budget = summary?.campaign_budget ?? DEFAULT_BUDGET
+  const lengthDays = summary?.campaign_length_days ?? DEFAULT_LENGTH_DAYS
+
   const header = (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Self-Serve Trial Campaign</h1>
-        <p className="text-sm text-pb-dim mt-1">{CAMPAIGN_WINDOW}</p>
+        <p className="text-sm text-pb-dim mt-1">BC_AU_SelfServe_Aug2026 &middot; ~{lengthDays} days from launch</p>
       </div>
       <div className="flex items-center gap-3">
         <span className="font-mono text-[10px] text-pb-faint">
@@ -184,6 +392,9 @@ export default function SuperMetaAds() {
 
   const tokenConfigured = summary?.token_configured
   const campaign = summary?.campaign
+  const insights = summary?.insights || []
+  const ads = summary?.ads || []
+  const maxCostPerLpv = ads.reduce((m, a) => (a.cost_per_lpv != null && a.cost_per_lpv > m ? a.cost_per_lpv : m), 0)
 
   return (
     <AdminLayout>
@@ -214,27 +425,25 @@ export default function SuperMetaAds() {
           </div>
         ) : (
           <>
-            {/* Recommendation banner */}
-            <div className={`pb-card border p-4 mb-4 ${REC_STYLE[summary.recommendation_status]?.box || ''}`}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`px-2 py-0.5 rounded-full border text-[10px] font-mono uppercase tracking-wide2 ${REC_STYLE[summary.recommendation_status]?.badge || ''}`}>
-                  {REC_STYLE[summary.recommendation_status]?.label || summary.recommendation_status}
-                </span>
+            {/* Insights feed — the plain-English read of how the campaign is
+                actually going, sorted worst-first. This replaces the old
+                single recommendation banner. */}
+            <div className="mb-4">
+              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
+                What&rsquo;s happening
               </div>
-              <p className={`text-sm ${REC_STYLE[summary.recommendation_status]?.text || 'text-pb-text'}`}>
-                {summary.recommendation}
-              </p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                {insights.map((insight, i) => <InsightCard key={i} insight={insight} />)}
+              </div>
             </div>
 
-            {/* KPI cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-1">
+            {/* KPI strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-1">
               <Stat
                 label="Spend"
                 value={fmtMoney(campaign.spend)}
-                hint={`of ${fmtMoney(CAMPAIGN_BUDGET)} · ${Math.min(100, Math.round((campaign.spend / CAMPAIGN_BUDGET) * 100))}%`}
+                hint={`of ${fmtMoney(budget)} · ${Math.min(100, Math.round((campaign.spend / budget) * 100))}%`}
               />
-              <Stat label="Landing page views" value={fmtNum(campaign.landing_page_views)} />
-              <Stat label="Link CTR" value={fmtPct(campaign.link_ctr)} />
               <Stat label="Cost per LPV" value={campaign.cost_per_lpv != null ? fmtMoney(campaign.cost_per_lpv) : '–'} />
               <Stat
                 label="Cost per registration"
@@ -248,7 +457,7 @@ export default function SuperMetaAds() {
                 <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
                   {fmtNum(campaign.registrations)} actual
                   {campaign.leads_adjustment ? `, ${campaign.leads_adjustment > 0 ? '+' : ''}${campaign.leads_adjustment} manual` : ''}
-                  {' '}&middot; {fmtNum(campaign.leads)} Meta-reported (Lead/CompleteRegistration &mdash; unreliable, see below)
+                  {' '}&middot; {fmtNum(campaign.leads)} Meta-reported
                 </div>
                 <div className="flex items-center gap-1 mt-1.5">
                   <button
@@ -309,112 +518,48 @@ export default function SuperMetaAds() {
             <div className="w-full bg-pb-surface2 rounded-full h-1.5 mb-4 overflow-hidden">
               <div
                 className="h-full bg-pb-accent"
-                style={{ width: `${Math.min(100, (campaign.spend / CAMPAIGN_BUDGET) * 100)}%` }}
+                style={{ width: `${Math.min(100, (campaign.spend / budget) * 100)}%` }}
               />
             </div>
 
-            {/* Trend charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
-              <div className="pb-card p-4">
-                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">Spend over time</div>
-                <div style={{ width: '100%', height: 200 }}>
-                  {history.length === 0 ? (
-                    <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">No data yet.</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={history} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="spendFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="var(--pb-accent)" stopOpacity={0.4} />
-                            <stop offset="100%" stopColor="var(--pb-accent)" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
-                        <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <Tooltip content={<ChartTooltip money={new Set(['spend'])} />} labelFormatter={fmtDay} />
-                        <Area type="monotone" dataKey="spend" name="Spend" stroke="var(--pb-accent)" strokeWidth={2} fill="url(#spendFill)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
+            {/* Funnel */}
+            <div className="mb-4">
+              <FunnelChart stages={campaign.funnel} />
+            </div>
+
+            {/* Per-ad comparison, with click-to-drill-down trend */}
+            <div className="mb-4">
+              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
+                Ad-by-ad performance
               </div>
-              <div className="pb-card p-4">
-                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">CTR &amp; cost per LPV</div>
-                <div style={{ width: '100%', height: 200 }}>
-                  {history.length === 0 ? (
-                    <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">No data yet.</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={history} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
-                        <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis yAxisId="ctr" tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis yAxisId="cost" orientation="right" tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <Tooltip content={<ChartTooltip money={new Set(['cost_per_lpv'])} />} labelFormatter={fmtDay} />
-                        <Line yAxisId="ctr" type="monotone" dataKey="link_ctr" name="Link CTR %" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                        <Line yAxisId="cost" type="monotone" dataKey="cost_per_lpv" name="Cost per LPV" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-              </div>
-              <div className="pb-card p-4">
-                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">Leads per day (Meta-reported)</div>
-                <div style={{ width: '100%', height: 200 }}>
-                  {history.length === 0 ? (
-                    <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">No data yet.</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={history} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
-                        <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                        <Tooltip content={<ChartTooltip />} labelFormatter={fmtDay} />
-                        <Bar dataKey="leads" name="Leads" fill="#a78bfa" radius={[3, 3, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {ads.map((ad) => (
+                  <AdCard
+                    key={ad.ad_id}
+                    ad={ad}
+                    maxCostPerLpv={maxCostPerLpv}
+                    selected={selectedAdId === ad.ad_id}
+                    onSelect={() => setSelectedAdId((cur) => (cur === ad.ad_id ? null : ad.ad_id))}
+                    trendDays={trendDays}
+                  />
+                ))}
               </div>
             </div>
 
-            {/* Per-ad table */}
-            <div className="pb-card overflow-x-auto mb-4">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
-                    <th className="px-3 py-2.5">Ad</th>
-                    <th className="px-3 py-2.5">Destination</th>
-                    <th className="px-3 py-2.5">Spend</th>
-                    <th className="px-3 py-2.5">Link CTR</th>
-                    <th className="px-3 py-2.5">LPVs</th>
-                    <th className="px-3 py-2.5">Cost/LPV</th>
-                    <th className="px-3 py-2.5">Leads</th>
-                    <th className="px-3 py-2.5">Cost/Lead</th>
-                    <th className="px-3 py-2.5">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(summary.ads || []).map((ad) => (
-                    <tr key={ad.ad_id} className="border-b pb-hairline hover:bg-pb-surface2/40">
-                      <td className="px-3 py-2.5 font-medium text-pb-text">{ad.name}</td>
-                      <td className="px-3 py-2.5 text-pb-dim">{ad.destination || '–'}</td>
-                      <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{fmtMoney(ad.spend)}</td>
-                      <td className="px-3 py-2.5 text-pb-dim">{fmtPct(ad.link_ctr)}</td>
-                      <td className="px-3 py-2.5 text-pb-dim">{fmtNum(ad.landing_page_views)}</td>
-                      <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{ad.cost_per_lpv != null ? fmtMoney(ad.cost_per_lpv) : '–'}</td>
-                      <td className="px-3 py-2.5 text-pb-dim">{fmtNum(ad.leads)}</td>
-                      <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{ad.cost_per_lead != null ? fmtMoney(ad.cost_per_lead) : '–'}</td>
-                      <td className="px-3 py-2.5">
-                        <span className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-mono uppercase ${AD_STATUS_STYLE[ad.status]?.cls || ''}`}>
-                          {AD_STATUS_STYLE[ad.status]?.label || ad.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {/* Trend charts — true daily figures (not cumulative-to-date), each on its own axis */}
+            <div className="mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+                  Trend {historyLoading && <span className="text-pb-faintest normal-case">loading&hellip;</span>}
+                </div>
+                <RangePicker value={trendDays} onChange={setTrendDays} />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <TrendChart title="Spend per day" data={history} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} />
+                <TrendChart title="Link CTR per day" data={history} dataKey="link_ctr" kind="line" color="#3b82f6" />
+                <TrendChart title="Cost per LPV per day" data={history} dataKey="cost_per_lpv" kind="line" color="#f59e0b" money={new Set(['cost_per_lpv'])} />
+                <TrendChart title="Leads per day (Meta-reported)" data={history} dataKey="leads" kind="bar" color="#a78bfa" />
+              </div>
             </div>
 
             {/* On-site attribution & conversion, from our own visit tracking rather than Meta's numbers */}
@@ -578,16 +723,6 @@ export default function SuperMetaAds() {
                 )}
               </div>
             )}
-
-            {/* Footer note */}
-            <p className="text-xs text-pb-faint">
-              Meta&rsquo;s own Lead/CompleteRegistration numbers are indicative only &mdash; they fire the moment
-              someone reaches or submits the trial form and can double-count across the pixel/CAPI split. The
-              &ldquo;Free trial registrations&rdquo; figure above is the real count: clubs in the table whose
-              campaign/creative tag matches one of this campaign&rsquo;s own ads. A row tagged with a different
-              campaign (an EDM send, &ldquo;national-launch&rdquo;, organic) is a real signup but didn&rsquo;t come
-              from this Meta campaign, so it isn&rsquo;t counted in the tile above.
-            </p>
           </>
         )}
       </div>

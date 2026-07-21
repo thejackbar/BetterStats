@@ -45,6 +45,17 @@ async def history(
     return {"days": await meta_ads.get_history(db, days), "token_configured": settings.meta_ads_configured}
 
 
+@router.get("/ad-history/{ad_id}")
+async def ad_history(
+    ad_id: str,
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Per-ad daily trend for the drill-down chart when an ad is selected."""
+    return {"days": await meta_ads.get_ad_history(db, ad_id, days), "token_configured": settings.meta_ads_configured}
+
+
 @router.post("/refresh")
 async def refresh(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Run the snapshot pull now (Refresh now button) and return the fresh summary."""

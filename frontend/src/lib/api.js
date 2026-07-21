@@ -932,6 +932,7 @@ export const api = {
   // Meta Ads HQ dashboard (super admin) — BetterCricket's own campaign spend.
   metaAdsSummary: () => request('/club-admin/meta-ads/summary'),
   metaAdsHistory: (days = 14) => request(`/club-admin/meta-ads/history?days=${days}`),
+  metaAdsAdHistory: (adId, days = 30) => request(`/club-admin/meta-ads/ad-history/${adId}?days=${days}`),
   metaAdsRefresh: () => request('/club-admin/meta-ads/refresh', { method: 'POST' }),
   // Manual +/- correction to the Meta-reported lead count (indicative only).
   metaAdsAdjustLeads: (delta, note = '') =>
