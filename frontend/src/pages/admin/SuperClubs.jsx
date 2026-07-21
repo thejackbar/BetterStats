@@ -1040,7 +1040,11 @@ export default function SuperClubs() {
               <div className="grid grid-cols-[1fr_auto_auto_auto] items-center px-5 py-3 hover:bg-pb-surface2">
                 <div>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-pb-text text-sm whitespace-nowrap">{club.name}</span>
+                    <a href={`/admin/super/marketing?org_id=${club.id}`} target="_blank" rel="noopener noreferrer"
+                      className="text-pb-text text-sm whitespace-nowrap hover:text-pb-accent hover:underline"
+                      title="Open in Club Directory">
+                      {club.name}
+                    </a>
                     <span className="font-mono text-[10px] text-pb-faintest whitespace-nowrap">/{club.slug}</span>
                     <span
                       className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint whitespace-nowrap"
