@@ -25,10 +25,10 @@ export default function ClubLocationMap({ latitude, longitude, postcode, state }
         <MapContainer
           center={center}
           zoom={ZOOM}
-          scrollWheelZoom={false}
-          dragging={false}
-          zoomControl={false}
-          doubleClickZoom={false}
+          scrollWheelZoom
+          dragging
+          zoomControl
+          doubleClickZoom
           style={{ height: '100%', width: '100%', background: 'var(--pb-surface2)' }}
         >
           <TileLayer
