@@ -72,7 +72,8 @@ def _modes_from(obj) -> dict:
 
 def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, contact,
                    person=None, modes=None, associations=None, visited=False,
-                   countries=None, engagement_score_gte=None, engagement_score_lte=None):
+                   countries=None, engagement_score_gte=None, engagement_score_lte=None,
+                   existing_org_id=None):
     """Normalise the directory filter query-params into club_filters kwargs."""
     return {
         "q": q, "state": state, "association": association, "status": status,
@@ -85,6 +86,7 @@ def _filter_kwargs(q, state, association, status, postcode_from, postcode_to, co
         "countries": [c for c in (countries or []) if c],
         "engagement_score_gte": engagement_score_gte,
         "engagement_score_lte": engagement_score_lte,
+        "existing_org_id": existing_org_id,
     }
 
 
@@ -175,6 +177,7 @@ async def list_clubs(
     top_n_metric: str = Query("views", pattern="^(views|visitors)$"),
     engagement_score_gte: Optional[int] = None,
     engagement_score_lte: Optional[int] = None,
+    existing_org_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_super_admin),
 ):
@@ -188,7 +191,7 @@ async def list_clubs(
         q, state, association, status, postcode_from, postcode_to, contact,
         person, modes=modes, associations=associations, visited=visited,
         countries=countries, engagement_score_gte=engagement_score_gte,
-        engagement_score_lte=engagement_score_lte))
+        engagement_score_lte=engagement_score_lte, existing_org_id=existing_org_id))
     for cond in cd.club_filters(**kw):
         stmt = stmt.where(cond)
 

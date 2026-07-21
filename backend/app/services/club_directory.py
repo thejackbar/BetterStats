@@ -775,7 +775,8 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
                  association_extra: Optional[list] = None,
                  countries: Optional[list] = None,
                  engagement_score_gte: Optional[int] = None,
-                 engagement_score_lte: Optional[int] = None) -> list:
+                 engagement_score_lte: Optional[int] = None,
+                 existing_org_id: Optional[str] = None) -> list:
     """Build the WHERE conditions (on ``MarketingClub``) shared by the list view,
     the CSV export and the BetterComms export, so all three honour the same
     filters. Contact-presence filters use correlated EXISTS over the contacts.
@@ -785,6 +786,11 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
     'exclude'; see filter_mode_conditions."""
     C = MarketingClubContact
     conds = []
+    if existing_org_id:
+        # An exact, guaranteed-unique link from an already-onboarded club's
+        # own admin record (SuperClubs.jsx) to its directory entry — more
+        # reliable than matching on name/utm_code, which can both drift.
+        conds.append(MarketingClub.existing_org_id == existing_org_id)
     if state:
         conds.append(MarketingClub.state == state)
     # Tri-state directory filters (off / include / exclude).

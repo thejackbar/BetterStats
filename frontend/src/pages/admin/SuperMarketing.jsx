@@ -785,9 +785,12 @@ function UtmMatchPanel() {
 export default function SuperMarketing() {
   // A deep link (e.g. a club utm_code/name clicked on the Usage page) seeds
   // the search box so the linked club is filtered straight to the top —
-  // ?q=<utm_code or name>.
+  // ?q=<utm_code or name>. ?org_id=<uuid> is the guaranteed-unique variant,
+  // used by All Clubs (SuperClubs.jsx) which links its own Organisation rows
+  // through to their matched directory entry via existing_org_id.
   const [searchParams] = useSearchParams()
   const initialQ = searchParams.get('q') || ''
+  const initialOrgId = searchParams.get('org_id') || ''
 
   const [stats, setStats] = useState(null)
   const [status, setStatus] = useState(null)
@@ -814,6 +817,7 @@ export default function SuperMarketing() {
     top_n: '', top_n_metric: 'views',
     // Cached Twenty engagementScore (see marketing_clubs.engagement_score) — >=/<=.
     engagement_score_gte: '', engagement_score_lte: '',
+    existing_org_id: initialOrgId,
   })
   const [expanded, setExpanded] = useState(null)
   const [view, setView] = useState({ group: false, assocSort: 'asc', clubSort: 'asc' })
@@ -847,12 +851,13 @@ export default function SuperMarketing() {
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
   // Auto-expand the single matching club when the page was opened via a
-  // deep link (?q=...) — otherwise a landed-on club is filtered to the top
-  // but still needs a click to open, which defeats the point of the link.
+  // deep link (?q=... or ?org_id=...) — otherwise a landed-on club is
+  // filtered to the top but still needs a click to open, which defeats the
+  // point of the link.
   useEffect(() => {
-    if (initialQ && clubs.length === 1) setExpanded(clubs[0].id)
+    if ((initialQ || initialOrgId) && clubs.length === 1) setExpanded(clubs[0].id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialQ, clubs])
+  }, [initialQ, initialOrgId, clubs])
   useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
   useEffect(() => { api.mktCountries().then(setCountryOptions).catch(() => {}) }, [])
@@ -1159,7 +1164,8 @@ export default function SuperMarketing() {
               || filters.state
               || filters.postcode_from || filters.postcode_to || filters.contact || filters.person
               || filters.visited || MODE_FILTERS.some(mf => filters[mf.key])
-              || filters.engagement_score_gte || filters.engagement_score_lte || filters.top_n) && (
+              || filters.engagement_score_gte || filters.engagement_score_lte || filters.top_n
+              || filters.existing_org_id) && (
               <button className="text-[11px] text-pb-faint hover:text-pb-accent"
                       onClick={() => setFilters({ q: '', state: '', association: '', associations: [],
                                                   countries: [],
@@ -1168,7 +1174,8 @@ export default function SuperMarketing() {
                                                   rep: '', cricket_au: '', emailed: '', exported: '',
                                                   suppressed: '', excluded: '', visited: false,
                                                   top_n: '', top_n_metric: 'views',
-                                                  engagement_score_gte: '', engagement_score_lte: '' })}>
+                                                  engagement_score_gte: '', engagement_score_lte: '',
+                                                  existing_org_id: '' })}>
                 Clear all
               </button>
             )}
