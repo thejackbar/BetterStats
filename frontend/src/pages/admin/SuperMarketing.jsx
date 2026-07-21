@@ -599,7 +599,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                 {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
               </button>
             </div>
-            <ClubLocationMap latitude={club.latitude} longitude={club.longitude}
+            <ClubLocationMap clubId={club.id} latitude={club.latitude} longitude={club.longitude}
               postcode={club.postcode} state={club.state} />
           </div>
         </div>

@@ -2819,6 +2819,12 @@ class MarketingClub(Base):
     engagement_score = Column(Integer, nullable=True)
     engagement_tier = Column(Text, nullable=True)
     engagement_scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Suburb-level admin boundary polygon (from OpenStreetMap/Nominatim), fetched
+    # lazily and cached forever — the closest free approximation to a real
+    # postcode-area shape (no AU postcode boundary dataset is bundled here).
+    # NULL = never looked up; {} = looked up, nothing found; else a GeoJSON
+    # Polygon/MultiPolygon. See services/nominatim_client.py.
+    boundary_geojson = Column(JSONB, nullable=True)
     detail_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     first_seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_crawled_at = Column(TIMESTAMP(timezone=True), nullable=True)
