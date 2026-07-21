@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
@@ -132,6 +132,9 @@ export default function AdminImport() {
   const [allPlayers, setAllPlayers] = useState([])
   const [allSeasons, setAllSeasons] = useState([])
   const [history, setHistory] = useState([])
+  const [expandedBatch, setExpandedBatch] = useState(null)
+  const [batchPlayers, setBatchPlayers] = useState({}) // batchId -> [{player_id, name, rows}]
+  const [loadingBatchPlayers, setLoadingBatchPlayers] = useState(false)
 
   const loadHistory = useCallback(() => {
     api.importList().then(d => setHistory(d.imports || [])).catch(() => {})
@@ -246,6 +249,32 @@ export default function AdminImport() {
     try {
       const r = await api.importUndo(batchId)
       toast.success(`Removed ${r.rows_removed} imported rows`)
+      loadHistory()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  async function toggleBatch(batchId) {
+    if (expandedBatch === batchId) { setExpandedBatch(null); return }
+    setExpandedBatch(batchId)
+    if (!batchPlayers[batchId]) {
+      setLoadingBatchPlayers(true)
+      try {
+        const r = await api.importListPlayers(batchId)
+        setBatchPlayers(b => ({ ...b, [batchId]: r.players }))
+      } catch (e) { toast.error(e.message) } finally { setLoadingBatchPlayers(false) }
+    }
+  }
+
+  // Undo the import for just one player in a batch — for when a historical
+  // import accidentally attached one player's rows to the wrong record
+  // (e.g. a same-surname mismatch) and every OTHER player's imported truth
+  // in that batch should be left alone.
+  async function undoPlayer(batchId, playerId, playerName) {
+    if (!window.confirm(`Remove ${playerName}'s imported rows from this import and rebuild their stats? Other players in this import are untouched.`)) return
+    try {
+      const r = await api.importUndoPlayer(batchId, playerId)
+      toast.success(`Removed ${r.rows_removed} imported rows for ${playerName}`)
+      setBatchPlayers(b => ({ ...b, [batchId]: (b[batchId] || []).filter(p => p.player_id !== playerId) }))
       loadHistory()
     } catch (e) { toast.error(e.message) }
   }
@@ -441,17 +470,53 @@ export default function AdminImport() {
             <table className="w-full text-[12px]">
               <tbody>
                 {history.map(h => (
-                  <tr key={h.id} className="pb-hairline-t">
-                    <td className="py-2 pr-2 text-pb-text">{h.filename || '(unnamed)'}</td>
-                    <td className="py-2 pr-2 font-mono text-[10px] text-pb-faint">{h.granularity}</td>
-                    <td className="py-2 pr-2 font-mono text-[10px] text-pb-dim">{h.stats_rows} rows</td>
-                    <td className="py-2 pr-2 font-mono text-[10px] text-pb-faintest">{h.created_at?.slice(0, 10)}</td>
-                    <td className="py-2 pr-2 text-right">
-                      {h.undone_at
-                        ? <span className="font-mono text-[9px] text-pb-faint">UNDONE</span>
-                        : <button onClick={() => undo(h.id)} className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5">UNDO</button>}
-                    </td>
-                  </tr>
+                  <Fragment key={h.id}>
+                    <tr className="pb-hairline-t">
+                      <td className="py-2 pr-2 text-pb-text">
+                        {!h.undone_at && (
+                          <button onClick={() => toggleBatch(h.id)} className="text-pb-faint hover:text-pb-text mr-1.5 font-mono text-[10px]" title="Show players in this import">
+                            {expandedBatch === h.id ? '▾' : '▸'}
+                          </button>
+                        )}
+                        {h.filename || '(unnamed)'}
+                      </td>
+                      <td className="py-2 pr-2 font-mono text-[10px] text-pb-faint">{h.granularity}</td>
+                      <td className="py-2 pr-2 font-mono text-[10px] text-pb-dim">{h.stats_rows} rows</td>
+                      <td className="py-2 pr-2 font-mono text-[10px] text-pb-faintest">{h.created_at?.slice(0, 10)}</td>
+                      <td className="py-2 pr-2 text-right">
+                        {h.undone_at
+                          ? <span className="font-mono text-[9px] text-pb-faint">UNDONE</span>
+                          : <button onClick={() => undo(h.id)} className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5">UNDO ALL</button>}
+                      </td>
+                    </tr>
+                    {expandedBatch === h.id && (
+                      <tr>
+                        <td colSpan={5} className="pb-2 pl-6 pr-2">
+                          {loadingBatchPlayers && !batchPlayers[h.id] ? (
+                            <div className="font-mono text-[10px] text-pb-faint py-1">loading players…</div>
+                          ) : (
+                            <div className="rounded border pb-hairline divide-y pb-hairline-t">
+                              {(batchPlayers[h.id] || []).map(p => (
+                                <div key={p.player_id} className="flex items-center justify-between px-2 py-1.5">
+                                  <span className="text-pb-dim">{p.name}</span>
+                                  <span className="flex items-center gap-2">
+                                    <span className="font-mono text-[10px] text-pb-faintest">{p.rows} rows</span>
+                                    <button onClick={() => undoPlayer(h.id, p.player_id, p.name)}
+                                      className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5">
+                                      UNDO JUST THIS PLAYER
+                                    </button>
+                                  </span>
+                                </div>
+                              ))}
+                              {(batchPlayers[h.id] || []).length === 0 && !loadingBatchPlayers && (
+                                <div className="font-mono text-[10px] text-pb-faintest px-2 py-1.5">No players left in this import.</div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

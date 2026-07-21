@@ -989,6 +989,13 @@ class Game(Base):
     away_club = Column(Text)
     opp_org_id = Column(Text)
     opp_club_name = Column(Text)
+    # Per-side org id (migration 167) — the reliable, non-clobbering signal
+    # for a shared games.id row between two both-synced clubs. opp_org_id
+    # above is a single value set once by whichever club synced the row
+    # first, so it can only ever be correct from one side; these two columns
+    # let each synced club independently record which side it was on.
+    home_org_id = Column(UUID(as_uuid=True), nullable=True)
+    away_org_id = Column(UUID(as_uuid=True), nullable=True)
     result = Column(Text)
     winning_team = Column(Text)
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')

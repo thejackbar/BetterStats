@@ -2480,7 +2480,10 @@ async def get_bowling_by_grade(
 async def get_player_by_opposition(session: AsyncSession, player_id: str) -> list[dict]:
     result = await session.execute(
         text("""
-            WITH player_game_ids AS (
+            WITH player_org AS (
+                SELECT organisation_id FROM players WHERE id = CAST(:pid AS UUID)
+            ),
+            player_game_ids AS (
                 -- Synced games: player has a roster entry
                 SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
                 UNION
@@ -2492,13 +2495,27 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 SELECT manual_game_id AS game_id FROM manual_fielding_stats WHERE player_id = CAST(:pid AS UUID)
             ),
             player_games AS (
-                -- opp_key: stable org UUID when available (populated by sync),
-                -- falls back to home/away team-name match for synced rows,
-                -- and to the manual_games.opposition text for manual rows.
+                -- opp_key/opp_name priority: home_org_id/away_org_id FIRST —
+                -- the reliable, per-club signal set at sync time (migration
+                -- 167) for which side of a shared games.id row is OUR
+                -- player's club, so the opponent is unambiguously the other
+                -- side. opp_org_id/opp_club_name are a single pair of columns
+                -- stamped once by whichever club's sync created the shared
+                -- row first — for a player whose own club synced SECOND,
+                -- those columns hold that OTHER club's perspective, which can
+                -- literally equal our own org id (showing our own club as
+                -- its own opposition). Only fall back to opp_org_id/
+                -- opp_club_name, then team-name matching, when home_org_id/
+                -- away_org_id haven't been backfilled yet for this row.
                 SELECT
                     pgi.game_id,
                     g.played_at,
                     COALESCE(
+                        CASE
+                            WHEN g.home_org_id = po.organisation_id THEN COALESCE(g.away_org_id::text, g.away_club)
+                            WHEN g.away_org_id = po.organisation_id THEN COALESCE(g.home_org_id::text, g.home_club)
+                            ELSE NULL
+                        END,
                         g.opp_org_id,
                         CASE
                             WHEN ga.team_name = g.home_team THEN g.away_club
@@ -2507,6 +2524,11 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                         END
                     ) AS opp_key,
                     COALESCE(
+                        CASE
+                            WHEN g.home_org_id = po.organisation_id THEN g.away_club
+                            WHEN g.away_org_id = po.organisation_id THEN g.home_club
+                            ELSE NULL
+                        END,
                         g.opp_club_name,
                         CASE
                             WHEN ga.team_name = g.home_team THEN g.away_club
@@ -2517,6 +2539,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                     g.result
                 FROM player_game_ids pgi
                 JOIN v_effective_games g ON g.id = pgi.game_id
+                CROSS JOIN player_org po
                 LEFT JOIN game_appearances ga ON ga.game_id = pgi.game_id AND ga.player_id = CAST(:pid AS UUID)
             ),
             opp_display AS (
@@ -2709,22 +2732,28 @@ async def _club_results(
 ) -> dict:
     """W/L/D and win-rate over the org's own completed games.
 
-    A game is 'ours' when one of the org's own players has a recorded
-    appearance in it (a manual game is always ours — it's entered directly
-    against the org, with the opposition in a separate field) — mirrors
-    ``get_org_results`` so the headline matches the results list. This is
-    ID-based rather than matching the org's name against the free-text
-    home_team/away_team CA supplies, which silently zeroed every game for a
-    club whose CA-recorded team text doesn't literally contain the org's
-    first name-token (e.g. a hyphenated name like "Bayswater-Postels" where
-    CA spells it differently). Reads ``v_effective_games`` (so it
-    self-corrects with the cross-club views) and replaces the retired
-    PlayHQ Partner win/loss override.
+    A game is 'ours' if we're recorded as home_org_id/away_org_id on the row
+    (the reliable per-club signal for a shared games.id row between two
+    both-synced clubs — see migration 167), or the game's own grade belongs
+    to our org, or one of our players has a recorded appearance in it, or
+    it's a manual game — mirrors ``get_org_results`` so the headline matches
+    the results list. grades/seasons are LEFT JOINed (not INNER) so a shared
+    game whose grade_id belongs to the OTHER club (whichever synced it first)
+    still counts — an INNER JOIN gated on s.organisation_id would otherwise
+    silently exclude it regardless of the appearance check. NOT matching the
+    org's name against the free-text home_team/away_team CA supplies, which
+    silently zeroed every game for a club whose CA-recorded team text doesn't
+    literally contain the org's first name-token (e.g. a hyphenated name like
+    "Bayswater-Postels" where CA spells it differently). Reads
+    ``v_effective_games`` (so it self-corrects with the cross-club views) and
+    replaces the retired PlayHQ Partner win/loss override.
     """
     clauses = [
-        "s.organisation_id = CAST(:org_id AS UUID)",
         """(
             g.source = 'manual'
+            OR g.home_org_id = CAST(:org_id AS UUID)
+            OR g.away_org_id = CAST(:org_id AS UUID)
+            OR s.organisation_id = CAST(:org_id AS UUID)
             OR EXISTS (
                 SELECT 1 FROM game_appearances ga
                 JOIN players p ON p.id = ga.player_id
@@ -2734,10 +2763,20 @@ async def _club_results(
     ]
     params: dict = {"org_id": org_id}
     if grade_id:
-        clauses.append("gr.id = CAST(:grade_id AS UUID)")
+        clauses.append("""(
+            gr.id = CAST(:grade_id AS UUID)
+            OR (gr.grassroots_id IS NOT NULL AND gr.grassroots_id = (
+                SELECT grassroots_id FROM grades WHERE id = CAST(:grade_id AS UUID)
+            ))
+        )""")
         params["grade_id"] = grade_id
     elif season_ids:
-        clauses.append("s.id = ANY(:sids)")
+        clauses.append("""(
+            s.id = ANY(:sids)
+            OR (s.grassroots_id IS NOT NULL AND s.grassroots_id IN (
+                SELECT grassroots_id FROM seasons WHERE id = ANY(:sids) AND grassroots_id IS NOT NULL
+            ))
+        )""")
         params["sids"] = season_ids
 
     row = dict(
@@ -2751,8 +2790,8 @@ async def _club_results(
                 COUNT(*) FILTER (WHERE g.result = 'LOSS')              AS losses,
                 COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE'))    AS draws
             FROM v_effective_games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN seasons s ON s.id = gr.season_id
             WHERE {' AND '.join(clauses)}
         """
                 ),

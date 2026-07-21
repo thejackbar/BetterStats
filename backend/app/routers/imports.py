@@ -29,7 +29,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, delete as sa_delete
+from sqlalchemy import select, delete as sa_delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
@@ -511,6 +511,41 @@ async def list_imports(
     return {"imports": out}
 
 
+@router.get("/{batch_id}/players")
+async def list_import_players(
+    batch_id: str,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-player breakdown of a batch's still-live rows, so a batch can be
+    expanded in the history list and one player's import undone without
+    touching the rest — see /undo-player."""
+    try:
+        bid = uuid.UUID(batch_id)
+    except ValueError:
+        raise HTTPException(404, "Import not found.")
+    batch = (await db.execute(
+        select(ImportBatch).where(ImportBatch.id == bid, ImportBatch.organisation_id == club.id)
+    )).scalar_one_or_none()
+    if not batch:
+        raise HTTPException(404, "Import not found.")
+
+    rows = (await db.execute(
+        select(Player.id, Player.name, func.count(ImportedStat.id))
+        .join(ImportedStat, ImportedStat.player_id == Player.id)
+        .where(ImportedStat.import_batch_id == bid)
+        .group_by(Player.id, Player.name)
+        .order_by(Player.name)
+    )).all()
+    return {
+        "players": [
+            {"player_id": str(pid), "name": name, "rows": count}
+            for pid, name, count in rows
+        ]
+    }
+
+
 @router.post("/{batch_id}/undo")
 async def undo_import(
     batch_id: str,
@@ -549,6 +584,85 @@ async def undo_import(
 
     written = await recon.reconcile_imported_totals(str(club.id))
     return {"undone": True, "rows_removed": len(removed), "deltas_rebuilt": written}
+
+
+@router.post("/{batch_id}/undo-player/{player_id}")
+async def undo_import_for_player(
+    batch_id: str,
+    player_id: str,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove JUST one player's rows from a batch, leaving every other
+    player's imported truth untouched. `/undo` above only ever removed the
+    WHOLE batch — every player in it — which meant a single mismatched name
+    (e.g. a historical import that accidentally attached one player's rows
+    to the wrong, similarly-named record) could only be fixed by undoing the
+    entire club's import and starting over. `ImportedStat` already carries
+    `player_id` per row, so this is a WHERE-clause scoping of the same
+    delete-then-reconcile shape `/undo` uses, not a new data model.
+
+    If this was the last player still holding rows in the batch, the batch
+    itself flips to undone too (so it reads correctly in the imports list —
+    a batch showing "committed" with zero rows left would be confusing).
+    """
+    try:
+        bid = uuid.UUID(batch_id)
+        pid = uuid.UUID(player_id)
+    except ValueError:
+        raise HTTPException(404, "Import or player not found.")
+    batch = (await db.execute(
+        select(ImportBatch).where(ImportBatch.id == bid, ImportBatch.organisation_id == club.id)
+    )).scalar_one_or_none()
+    if not batch:
+        raise HTTPException(404, "Import not found.")
+    if batch.undone_at:
+        raise HTTPException(409, "This import has already been undone.")
+
+    player = (await db.execute(
+        select(Player).where(Player.id == pid, Player.organisation_id == club.id)
+    )).scalar_one_or_none()
+    if not player:
+        raise HTTPException(404, "Player not found.")
+
+    removed = (await db.execute(
+        select(ImportedStat.id).where(
+            ImportedStat.import_batch_id == bid, ImportedStat.player_id == pid,
+        )
+    )).scalars().all()
+    if not removed:
+        raise HTTPException(404, "No imported stats found for this player in this import.")
+
+    await db.execute(sa_delete(ImportedStat).where(
+        ImportedStat.import_batch_id == bid, ImportedStat.player_id == pid,
+    ))
+
+    remaining = (await db.execute(
+        select(ImportedStat.id).where(ImportedStat.import_batch_id == bid)
+    )).scalars().first()
+    batch_fully_undone = remaining is None
+    if batch_fully_undone:
+        batch.undone_at = datetime.now(timezone.utc)
+        batch.status = "undone"
+
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="undo",
+        target_table="imported_stats", target_id=f"batch:{bid}:player:{pid}",
+        summary=f"Undo BetterImport for {player.name} — removed {len(removed)} imported rows"
+                + (" (batch now fully undone)" if batch_fully_undone else ""),
+        before={"batch_id": str(bid), "player_id": str(pid), "rows": len(removed)}, after=None,
+    )
+    await db.commit()
+
+    written = await recon.reconcile_imported_totals(str(club.id))
+    return {
+        "undone": True,
+        "player_id": str(pid),
+        "rows_removed": len(removed),
+        "batch_fully_undone": batch_fully_undone,
+        "deltas_rebuilt": written,
+    }
 
 
 @router.get("/template.csv")
