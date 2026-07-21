@@ -2110,6 +2110,42 @@ ordinary graded API-synced game is unaffected.
 for a `v_effective_games` row; read the view's own `season_id`/
 `organisation_id` columns instead.
 
+## Uploaded scorecards log — edit/undo from the upload page (v8.76.2, Jul 2026)
+
+`/admin/upload-scorecard` (`AdminScorecardUpload.jsx`) was a one-shot flow —
+upload, review, import, done — with no way to see or revisit what had already
+been uploaded from that page short of finding it in the general-purpose
+"Manual Games" tab on `/admin/manual-entries`. It now has its own list,
+scoped to just the scorecards that came through the photo-upload flow.
+
+- **`GET /club-admin/manual-entries/games`** (`list_manual_games`) gained
+  `is_photo_upload` (whether `manual_games.extracted_payload` is set — the
+  AI reader's saved match+innings JSON, present only for a photo upload, not
+  a hand-typed manual game) and `created_by_name` (a `LEFT JOIN users`,
+  mirroring the pattern `list_audit` already used). The list keeps the full
+  `extracted_payload` blob out of the response (popped after computing the
+  boolean) — it's only needed in full when a single game is reopened via
+  `GET /games/{id}` (already returned it; unchanged).
+- **Jump back in ("Edit")**: since `extracted_payload` is the exact
+  `{match, innings}` shape the review screen already edits in memory,
+  reopening a past upload replays it through the SAME review UI used at
+  upload time — no separate "already-imported" editor to keep in sync. The
+  WK-catch split (`wkByPid`, not itself persisted) is reconstructed from the
+  saved `fielding_stats.catches_wk` per player. Saving calls `PATCH
+  /games/{id}` instead of `POST /games`; a fresh photo read always clears
+  `editingId` first so it can't accidentally overwrite a prior edit target.
+- **Duplicate check gained `exclude_id`** (`check_scorecard_duplicate`) — 
+  editing an already-saved game used to flag the game against itself as a
+  "possible duplicate" on the same date, since the query had no way to
+  exclude the row being edited.
+- **Delete** reuses the existing `DELETE /games/{id}`; the list's own footer
+  points at `/admin/manual-entries#audit` for restoring a deleted or edited
+  entry rather than re-implementing undo/restore on this page too — one
+  audit trail, not two.
+- Verified end-to-end against a real local Postgres instance: the
+  `is_photo_upload`/`created_by_name` join, and the `exclude_id` fix to the
+  duplicate check, both before shipping.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

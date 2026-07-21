@@ -206,6 +206,79 @@ function PlayerSelect({ value, roster, cardName, onChange }) {
   )
 }
 
+// ─── Uploaded scorecards log ────────────────────────────────────────────────
+// Every import (this page or the Manual Games tab) lands in the same manual_games
+// table; this list is filtered to just the ones read off a photo (is_photo_upload),
+// which is what "uploaded scorecards" means on this specific page. A hand-typed
+// manual game still shows on /admin/manual-entries#game, not duplicated here.
+function UploadsLog({ uploads, loading, err, onEdit, onDelete }) {
+  if (loading) return <p className="text-sm text-pb-faint">Loading…</p>
+  if (err) return <p className="text-sm text-red-400">{err}</p>
+  if (uploads.length === 0) return <p className="text-sm text-pb-faint">No scorecards uploaded yet.</p>
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-pb-faint font-mono text-[10px] border-b pb-hairline">
+            <th className="text-left py-2 pr-3">Date</th>
+            <th className="text-left py-2 pr-3">Opposition</th>
+            <th className="text-left py-2 pr-3">Season</th>
+            <th className="text-left py-2 pr-3">Uploaded</th>
+            <th className="text-right py-2 pr-3">Players</th>
+            <th className="py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {uploads.map(r => (
+            <tr key={r.id} className="border-b pb-hairline">
+              <td className="py-2 pr-3 text-pb-text">{r.played_at ? r.played_at.split('T')[0] : '—'}</td>
+              <td className="py-2 pr-3 text-pb-faint">{r.opposition || '—'}</td>
+              <td className="py-2 pr-3 text-pb-faint">{formatSeason(r.season_name)}</td>
+              <td className="py-2 pr-3 text-pb-faintest text-xs">
+                {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
+                {r.created_by_name ? <span> · {r.created_by_name}</span> : ''}
+              </td>
+              <td className="py-2 pr-3 text-right text-pb-text">{r.batting_count}</td>
+              <td className="py-2 text-right whitespace-nowrap">
+                <Link to={`/games/${r.id}`} target="_blank" className={BTN_SECONDARY + ' mr-2'}>View</Link>
+                <button className={BTN_SECONDARY + ' mr-2'} onClick={() => onEdit(r)}>Edit</button>
+                <button className="inline-flex items-center px-3 py-1.5 border border-red-400/40 text-red-300 text-xs rounded hover:bg-red-500/10" onClick={() => onDelete(r)}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-[11px] text-pb-faintest mt-3">
+        Every change here is logged and can be undone from{' '}
+        <Link to="/admin/manual-entries#audit" className="underline">Manual Entries → Audit &amp; Undo</Link>.
+      </p>
+    </div>
+  )
+}
+
+function DeleteConfirmModal({ row, onConfirm, onCancel, busy }) {
+  if (!row) return null
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4" onClick={onCancel}>
+      <div className="bg-pb-surface border pb-hairline rounded-lg max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-pb-text mb-2">Delete this scorecard?</h3>
+        <p className="text-sm text-pb-faint mb-4">
+          Remove the uploaded game from {row.played_at ? row.played_at.split('T')[0] : 'date unknown'}
+          {row.opposition ? ` vs ${row.opposition}` : ''}. This is logged and can be undone from the Manual Entries audit tab.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button className={BTN_SECONDARY} onClick={onCancel}>Cancel</button>
+          <button
+            className="inline-flex items-center px-3 py-1.5 border border-red-400/40 text-red-300 text-xs rounded hover:bg-red-500/10"
+            disabled={busy}
+            onClick={onConfirm}
+          >{busy ? 'Deleting…' : 'Delete'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminScorecardUpload() {
   const [step, setStep] = useState('upload')   // upload | review | done
   const [files, setFiles] = useState([])
@@ -215,6 +288,7 @@ export default function AdminScorecardUpload() {
 
   const [seasons, setSeasons] = useState([])
   const [grades, setGrades] = useState([])
+  const [allPlayers, setAllPlayers] = useState([])  // {id, name} — roster source when re-editing (no fresh OCR read)
 
   const [extract, setExtract] = useState(null)  // raw response
   const [roster, setRoster] = useState([])
@@ -230,29 +304,92 @@ export default function AdminScorecardUpload() {
   const [createdId, setCreatedId] = useState(null)
   const [dupes, setDupes] = useState([])
 
+  // editingId is set when we've jumped back into an already-saved upload from the
+  // log below, rather than reading a fresh photo — doImport then PATCHes it in place.
+  const [editingId, setEditingId] = useState(null)
+
+  const [uploads, setUploads] = useState([])
+  const [uploadsLoading, setUploadsLoading] = useState(true)
+  const [uploadsErr, setUploadsErr] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
+  const loadUploads = useCallback(async () => {
+    setUploadsLoading(true); setUploadsErr(null)
+    try {
+      const rows = await api.adminListManualGames()
+      setUploads((rows || []).filter(r => r.is_photo_upload))
+    } catch (e) { setUploadsErr(e.message) } finally { setUploadsLoading(false) }
+  }, [])
+
   // Warn if this club already has a game on that date — an uploaded game counts on
   // top of what's already there, so importing one that's already synced (or uploaded)
-  // double-counts it.
+  // double-counts it. Excludes the game itself when re-editing an existing upload.
   useEffect(() => {
     if (step !== 'review' || !form.played_at) { setDupes([]); return }
     let cancelled = false
     const t = setTimeout(async () => {
       try {
-        const res = await api.adminCheckScorecardDuplicate(form.played_at, form.opp_name || '')
+        const res = await api.adminCheckScorecardDuplicate(form.played_at, form.opp_name || '', editingId || '')
         if (!cancelled) setDupes(res.matches || [])
       } catch { if (!cancelled) setDupes([]) }
     }, 400)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [step, form.played_at, form.opp_name])
+  }, [step, form.played_at, form.opp_name, editingId])
 
   useEffect(() => {
     ;(async () => {
       try {
-        const [s, g] = await Promise.all([api.adminListSeasons(), api.adminListGradesBySeason()])
+        const [s, g, p] = await Promise.all([api.adminListSeasons(), api.adminListGradesBySeason(), api.adminListPlayers()])
         setSeasons(s || []); setGrades(g || [])
+        setAllPlayers((p || []).filter(x => x.is_player !== false).map(x => ({ id: x.id, name: x.display_name })))
       } catch {}
     })()
-  }, [])
+    loadUploads()
+  }, [loadUploads])
+
+  // Jump back into a previously uploaded scorecard for editing. The reviewed
+  // match+innings shape is preserved verbatim in extracted_payload from the original
+  // read, so this re-opens the exact same review screen instead of re-reading the photo.
+  const handleEditUpload = async (row) => {
+    setErr(null)
+    try {
+      const full = await api.adminGetManualGame(row.id)
+      const payload = full.extracted_payload || {}
+      setExtract({ suggestions: {}, read_notes: null })
+      setRoster(allPlayers)
+      setMatch(payload.match || {})
+      setInnings(payload.innings || [])
+      setWkByPid(Object.fromEntries((full.fielding_stats || []).map(f => [f.player_id, f.catches_wk || 0])))
+      setWarnings([])
+      setForm({
+        season_id: full.season_id || '',
+        grade_id: full.grade_id || '',
+        played_at: full.played_at ? full.played_at.split('T')[0] : '',
+        venue: full.venue || '',
+        result: full.result || '',
+        winning_team: full.winning_team || '',
+        is_final: !!full.is_final,
+        match_format: full.match_format || '',
+        opp_name: full.opposition || '',
+        opp_org_id: full.opp_org_id || '',
+      })
+      setEditingId(row.id)
+      setCreatedId(row.id)
+      setStep('review')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (e) { setErr(e.message || 'Could not load this scorecard.') }
+  }
+
+  const handleDeleteUpload = async () => {
+    if (!deleteTarget) return
+    setDeleteBusy(true)
+    try {
+      await api.adminDeleteManualGame(deleteTarget.id)
+      setDeleteTarget(null)
+      await loadUploads()
+    } catch (e) { setErr(e.message || 'Delete failed.') } finally { setDeleteBusy(false) }
+  }
 
   const seasonGrades = useMemo(
     () => (grades || []).filter(g => g.season_id === form.season_id),
@@ -268,6 +405,7 @@ export default function AdminScorecardUpload() {
   const runExtract = async () => {
     if (!files.length) { setErr('Add at least one scorecard photo.'); return }
     setErr(null); setBusy(true)
+    setEditingId(null); setCreatedId(null)  // a fresh read always creates a new game, never patches a prior edit target
     try {
       const data = await api.adminExtractScorecard(files)
       setExtract(data)
@@ -473,9 +611,15 @@ export default function AdminScorecardUpload() {
   const doImport = async () => {
     setErr(null); setBusy(true)
     try {
-      const created = await api.adminCreateManualGame(buildPayload())
-      setCreatedId(created?.id || null)
+      if (editingId) {
+        await api.adminPatchManualGame(editingId, buildPayload())
+        setCreatedId(editingId)
+      } else {
+        const created = await api.adminCreateManualGame(buildPayload())
+        setCreatedId(created?.id || null)
+      }
       setStep('done')
+      loadUploads()
     } catch (e) {
       setErr(e.message || 'Import failed.')
     } finally { setBusy(false); setConfirm(false) }
@@ -515,6 +659,19 @@ export default function AdminScorecardUpload() {
               </button>
               {busy && <span className="ml-3 text-xs text-pb-faint">This can take up to a minute for a full card.</span>}
             </div>
+          </div>
+        )}
+
+        {step === 'upload' && (
+          <div className="bg-pb-surface border pb-hairline rounded-lg p-4 mt-6">
+            <h3 className="text-base font-semibold text-pb-text mb-3">Uploaded scorecards</h3>
+            <UploadsLog
+              uploads={uploads}
+              loading={uploadsLoading}
+              err={uploadsErr}
+              onEdit={handleEditUpload}
+              onDelete={setDeleteTarget}
+            />
           </div>
         )}
 
@@ -768,8 +925,8 @@ export default function AdminScorecardUpload() {
             </div>
 
             <div className="flex items-center gap-3">
-              <button className={BTN_SECONDARY} onClick={() => { setStep('upload'); setErr(null) }}>Back</button>
-              <button className={BTN_PRIMARY} disabled={busy || !form.season_id} onClick={() => setConfirm(true)}>Import match</button>
+              <button className={BTN_SECONDARY} onClick={() => { setStep('upload'); setErr(null); setEditingId(null) }}>Back</button>
+              <button className={BTN_PRIMARY} disabled={busy || !form.season_id} onClick={() => setConfirm(true)}>{editingId ? 'Save changes' : 'Import match'}</button>
               {unmatched > 0 && <span className="text-xs text-amber-300">{unmatched} of our rows aren't matched to a player and won't be imported.</span>}
               {!form.season_id && <span className="text-xs text-pb-faint">Choose a season to import.</span>}
             </div>
@@ -778,14 +935,14 @@ export default function AdminScorecardUpload() {
 
         {step === 'done' && (
           <div className="bg-pb-surface border pb-hairline rounded-lg p-6 max-w-xl">
-            <h2 className="text-lg font-semibold text-pb-text mb-2">Match imported</h2>
+            <h2 className="text-lg font-semibold text-pb-text mb-2">{editingId ? 'Scorecard updated' : 'Match imported'}</h2>
             <p className="text-sm text-pb-faint mb-4">It now counts in the stats like any other game, and the match page shows both teams. Every change is reversible from the Manual Entries audit tab.</p>
             <div className="flex gap-3">
               {createdId && <Link to={`/games/${createdId}`} className={BTN_PRIMARY}>View match</Link>}
               <button className={BTN_SECONDARY} onClick={() => {
-                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setWarnings([]); setCreatedId(null)
+                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setWarnings([]); setCreatedId(null); setEditingId(null)
                 setForm({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
-              }}>Upload another</button>
+              }}>{editingId ? 'Back to list' : 'Upload another'}</button>
             </div>
           </div>
         )}
@@ -793,20 +950,27 @@ export default function AdminScorecardUpload() {
         {confirm && (
           <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4" onClick={() => setConfirm(false)}>
             <div className="bg-pb-surface border pb-hairline rounded-lg max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
-              <h3 className="text-lg font-semibold text-pb-text mb-2">Import this match?</h3>
+              <h3 className="text-lg font-semibold text-pb-text mb-2">{editingId ? 'Save changes to this scorecard?' : 'Import this match?'}</h3>
               <div className="text-sm text-pb-faint mb-4 space-y-2">
-                <p>It will be saved as a manual game and counted in the stats. Reversible from the Audit tab.</p>
+                <p>{editingId ? 'This updates the saved game and its stats in place.' : 'It will be saved as a manual game and counted in the stats.'} Reversible from the Audit tab.</p>
                 {dupes.length > 0
                   ? <p className="text-red-300 text-xs">Heads up: your club already has {dupes.length === 1 ? 'a game' : `${dupes.length} games`} on {form.played_at}. If this is the same match, importing will double-count it. Only proceed if it's a different game.</p>
                   : <p className="text-amber-300/90 text-xs">No existing game found on this date, so it won't double up.</p>}
               </div>
               <div className="flex justify-end gap-2">
                 <button className={BTN_SECONDARY} onClick={() => setConfirm(false)}>Cancel</button>
-                <button className={BTN_PRIMARY} disabled={busy} onClick={doImport}>{busy ? 'Importing…' : 'Import'}</button>
+                <button className={BTN_PRIMARY} disabled={busy} onClick={doImport}>{busy ? 'Saving…' : (editingId ? 'Save changes' : 'Import')}</button>
               </div>
             </div>
           </div>
         )}
+
+        <DeleteConfirmModal
+          row={deleteTarget}
+          busy={deleteBusy}
+          onConfirm={handleDeleteUpload}
+          onCancel={() => setDeleteTarget(null)}
+        />
       </div>
     </AdminLayout>
   )

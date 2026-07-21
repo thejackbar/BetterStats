@@ -629,15 +629,22 @@ async def list_manual_games(
     db: AsyncSession = Depends(get_db),
 ):
     rows = await db.execute(
-        select(ManualGame, Season)
+        select(ManualGame, Season, User.display_name, User.email)
         .join(Season, Season.id == ManualGame.season_id)
+        .outerjoin(User, User.id == ManualGame.created_by_user_id)
         .where(ManualGame.organisation_id == club.id)
         .order_by(ManualGame.played_at.desc().nullslast(), ManualGame.created_at.desc())
     )
     out = []
-    for game, season in rows.all():
+    for game, season, user_name, user_email in rows.all():
         d = _row_to_dict(game)
         d["season_name"] = season.name
+        # Keep the list response light — the full extracted_payload (the AI reader's
+        # match+innings JSON, fetched in full via GET /games/{id} when the admin
+        # re-opens it to edit) isn't needed just to render the list, only whether one
+        # exists (source = scorecard photo upload vs typed straight into the form).
+        d["is_photo_upload"] = d.pop("extracted_payload", None) is not None
+        d["created_by_name"] = user_name or user_email or None
         # Player count = unique players across any of the three child tables
         count_rows = await db.execute(
             select(func.count(func.distinct(ManualBattingInnings.player_id)))
@@ -1052,6 +1059,7 @@ async def extract_scorecard_upload(
 async def check_scorecard_duplicate(
     played_at: str,
     opponent: str = "",
+    exclude_id: str = "",
     current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
@@ -1059,19 +1067,28 @@ async def check_scorecard_duplicate(
     """Find an existing game (synced OR manual) in this club on the given date, so the
     upload can warn before double-counting a match that's already in the data. Uploaded
     games roll into season/career totals (v_effective_player_season_stats) and show in
-    every per-game surface, so the same match in both places double-counts."""
+    every per-game surface, so the same match in both places double-counts.
+
+    exclude_id is passed when re-editing an already-saved game (jumping back in from
+    the uploaded-scorecards log) so the game doesn't flag itself as a duplicate of
+    itself."""
     try:
         d = date_cls.fromisoformat((played_at or "").strip())
     except Exception:
         return {"matches": []}
-    rows = (await db.execute(_t("""
+    params: dict = {"org": str(club.id), "d": d}
+    exclude_clause = ""
+    if exclude_id:
+        exclude_clause = "AND g.id != CAST(:exclude_id AS UUID)"
+        params["exclude_id"] = exclude_id
+    rows = (await db.execute(_t(f"""
         SELECT g.id::text AS id, g.played_at, g.home_team, g.away_team,
                g.opp_club_name, g.source, gr.name AS grade
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
-        WHERE g.organisation_id = :org AND g.played_at = :d
+        WHERE g.organisation_id = :org AND g.played_at = :d {exclude_clause}
         ORDER BY g.source
-    """), {"org": str(club.id), "d": d})).mappings().all()
+    """), params)).mappings().all()
     opp_toks = [w for w in re.split(r"[^a-z0-9]+", (opponent or "").lower()) if len(w) > 2]
 
     def _likely(r) -> bool:
