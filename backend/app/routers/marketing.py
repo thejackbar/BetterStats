@@ -247,6 +247,8 @@ async def list_clubs(
             "association_guid": c.association_guid, "associations": c.associations,
             "suburb": c.suburb, "state": c.state,
             "postcode": c.postcode, "address_line1": c.address_line1,
+            "latitude": float(c.latitude) if c.latitude is not None else None,
+            "longitude": float(c.longitude) if c.longitude is not None else None,
             "website_url": c.website_url, "status": c.status,
             "is_customer": c.existing_org_id is not None,
             "emailed_at": c.emailed_at.isoformat() if c.emailed_at else None,
