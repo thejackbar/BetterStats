@@ -1,0 +1,13 @@
+[Unit]
+Description=BetterStats backup timer (ticks every 15 min; backup.sh itself decides whether it's the configured hour)
+
+[Timer]
+# Deliberately frequent, NOT a once-daily OnCalendar=03:00 — the actual
+# backup hour/minute is a super-admin-editable app setting (General
+# Settings -> Backups), not baked into this unit. backup.sh checks the
+# configured time on every tick and only does real work once a day.
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -114,6 +114,7 @@ export default function SuperClubs() {
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
     trial_nudges_enabled: false, billing_checkout_enabled: false,
     bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
+    backup_hour: 3, backup_minute: 0, backup_retention_days: 30,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -186,6 +187,9 @@ export default function SuperClubs() {
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
         billing_checkout_enabled: !!s?.billing_checkout_enabled,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
+        backup_hour: s?.backup_schedule?.hour ?? 3,
+        backup_minute: s?.backup_schedule?.minute ?? 0,
+        backup_retention_days: s?.backup_schedule?.retention_days ?? 30,
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -206,6 +210,9 @@ export default function SuperClubs() {
         bundle_discount_schedule: Object.fromEntries(
           BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
         ),
+        backup_hour: Math.min(23, Math.max(0, Number(settingsForm.backup_hour) || 0)),
+        backup_minute: Math.min(59, Math.max(0, Number(settingsForm.backup_minute) || 0)),
+        backup_retention_days: Math.max(1, Number(settingsForm.backup_retention_days) || 30),
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -764,6 +771,38 @@ export default function SuperClubs() {
                       />
                     </label>
                   ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Backups
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  When the daily automated backup runs (server clock is UTC) and how many days
+                  of daily backups are kept before the oldest is deleted. Read by the host
+                  backup script on every check — no redeploy needed to change either. See the
+                  Backups page for run history and current database size.
+                </p>
+                <div className="flex items-end gap-3">
+                  <label className="font-mono text-[10px] text-pb-faint">
+                    <span className="block mb-1">Hour (UTC)</span>
+                    <input type="number" min="0" max="23" value={settingsForm.backup_hour}
+                      onChange={e => setSettingsForm(f => ({ ...f, backup_hour: e.target.value }))}
+                      className={INPUT_CLS + ' w-16'} />
+                  </label>
+                  <label className="font-mono text-[10px] text-pb-faint">
+                    <span className="block mb-1">Minute</span>
+                    <input type="number" min="0" max="59" value={settingsForm.backup_minute}
+                      onChange={e => setSettingsForm(f => ({ ...f, backup_minute: e.target.value }))}
+                      className={INPUT_CLS + ' w-16'} />
+                  </label>
+                  <label className="font-mono text-[10px] text-pb-faint flex-1">
+                    <span className="block mb-1">Retention (days)</span>
+                    <input type="number" min="1" value={settingsForm.backup_retention_days}
+                      onChange={e => setSettingsForm(f => ({ ...f, backup_retention_days: e.target.value }))}
+                      className={INPUT_CLS} />
+                  </label>
                 </div>
               </div>
               </div>

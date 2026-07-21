@@ -948,6 +948,12 @@ export const api = {
   superGetGeneralSettings: () => request('/club-admin/super/general-settings'),
   superUpdateGeneralSettings: (data) =>
     request('/club-admin/super/general-settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Backup/restore task history + current DB size stats (super admin).
+  superListBackupTasks: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/club-admin/super/backups${q ? `?${q}` : ''}`)
+  },
+  superBackupStats: () => request('/club-admin/super/backups/stats'),
   // Self-serve club trial registration (internal, flag-gated — see
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),

@@ -88,6 +88,7 @@ const NAV_SECTIONS = [
 const SUPER_LINKS = [
   { to: '/admin/super', label: 'Platform Overview', exact: true },
   { to: '/admin/super/clubs', label: 'All Clubs' },
+  { to: '/admin/super/backups', label: 'Backups' },
   { to: '/admin/super/comms-limits', label: 'BetterComms Limits', badge: 'commsRequests' },
   { to: '/admin/changelog', label: 'Changelog' },
   { to: '/admin/super/announce', label: 'Club Announcements' },
