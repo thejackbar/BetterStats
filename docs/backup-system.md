@@ -89,12 +89,24 @@ containers on the same internal Docker network.
    docker compose build betterstats-backup-agent
    docker compose up -d --no-deps betterstats-backup-agent
    ```
-5. **Point the backend at it** — set in `/srv/docker/.env`:
+5. **Point the backend at it.** Set the values in `/srv/docker/.env`:
    ```bash
    BACKUP_AGENT_URL=http://betterstats-backup-agent:8080
    BACKUP_AGENT_SECRET=...   # same value as step 2
    ```
-   then redeploy the backend so it picks up the new env vars (`deploy.sh`).
+   **and** add the two vars to `betterstats-backend`'s `environment:` block in
+   the central `/srv/docker/docker-compose.yaml` (this project lists env vars
+   explicitly per service rather than passing the whole `.env` through — see
+   the existing `PLAYHQ_API_KEY`/`ANTHROPIC_API_KEY` lines for the pattern):
+   ```yaml
+     betterstats-backend:
+       environment:
+         # ...existing vars...
+         BACKUP_AGENT_URL: ${BACKUP_AGENT_URL:-}
+         BACKUP_AGENT_SECRET: ${BACKUP_AGENT_SECRET:-}
+   ```
+   Setting the `.env` value alone does nothing without this — then redeploy
+   the backend so it picks up the new env vars (`deploy.sh`).
 
 The agent runs `backup.sh` (with `BACKUP_FORCE=1`) and serves already-
 encrypted bundle files back for manual download (see "Manual download"
