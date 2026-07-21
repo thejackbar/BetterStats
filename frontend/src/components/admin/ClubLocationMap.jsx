@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { MapContainer, TileLayer, Circle, CircleMarker, GeoJSON, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -8,21 +8,23 @@ import { api } from '../../lib/api'
 // without needing a per-state bounding box; centering on the club's own
 // coordinates keeps it simple since those are always inside its own state.
 const ZOOM = 7
-// Fallback only — used while the real boundary is loading, or when
-// Nominatim has nothing for this suburb. Not a real postcode shape, just a
-// rough "somewhere around here" circle.
+// Used when we only have a boundary polygon (no lat/lng) to pick an initial
+// zoom before FitToBoundary refines it — and as the fallback circle's zoom.
+const BOUNDARY_ZOOM = 12
+// Fallback only — used when we have coordinates but no real boundary
+// (still loading, or Nominatim has nothing for this suburb). Not a real
+// postcode shape, just a rough "somewhere around here" circle.
 const FALLBACK_RADIUS_M = 15000
 
 const BOUNDARY_STYLE = { color: '#10b981', weight: 2, fillColor: '#10b981', fillOpacity: 0.15 }
 
 // Pans/zooms the map to fit a freshly-loaded boundary polygon — GeoJSON's
-// own bounds, not the fixed state-scale zoom used for the fallback circle.
+// own bounds, not the fixed zoom used for the initial render.
 function FitToBoundary({ geojson }) {
   const map = useMap()
   useEffect(() => {
     if (!geojson) return
-    const layer = new L.GeoJSON(geojson)
-    const bounds = layer.getBounds()
+    const bounds = L.geoJSON(geojson).getBounds()
     if (bounds.isValid()) map.fitBounds(bounds, { padding: [16, 16] })
   }, [geojson, map])
   return null
@@ -44,20 +46,41 @@ export default function ClubLocationMap({ clubId, latitude, longitude, postcode,
     return () => { cancelled = true }
   }, [clubId])
 
-  if (latitude == null || longitude == null) {
+  const hasPoint = latitude != null && longitude != null
+  // A boundary polygon can stand in for a centre point when the club has no
+  // lat/lng of its own (common — PlayHQ doesn't always supply coordinates,
+  // even when it does supply a suburb/postcode) — same data either way.
+  const boundaryCenter = useMemo(() => {
+    if (!boundary) return null
+    const bounds = L.geoJSON(boundary).getBounds()
+    if (!bounds.isValid()) return null
+    const c = bounds.getCenter()
+    return [c.lat, c.lng]
+  }, [boundary])
+
+  if (!hasPoint && !boundaryLoaded) {
+    return (
+      <div className="pb-card px-3 py-4 text-center font-mono text-[10px] text-pb-faint">
+        Loading location…
+      </div>
+    )
+  }
+  if (!hasPoint && !boundaryCenter) {
     return (
       <div className="pb-card px-3 py-4 text-center font-mono text-[10px] text-pb-faint">
         No location on file for this club.
       </div>
     )
   }
-  const center = [latitude, longitude]
+
+  const center = hasPoint ? [latitude, longitude] : boundaryCenter
+  const zoom = hasPoint ? ZOOM : BOUNDARY_ZOOM
   return (
     <div className="pb-card overflow-hidden">
       <div style={{ height: 260 }}>
         <MapContainer
           center={center}
-          zoom={ZOOM}
+          zoom={zoom}
           scrollWheelZoom
           dragging
           zoomControl
@@ -73,25 +96,29 @@ export default function ClubLocationMap({ clubId, latitude, longitude, postcode,
               <GeoJSON key={JSON.stringify(boundary)} data={boundary} style={() => BOUNDARY_STYLE} />
               <FitToBoundary geojson={boundary} />
             </>
-          ) : (
+          ) : hasPoint ? (
             <Circle
               center={center}
               radius={FALLBACK_RADIUS_M}
               pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.18, weight: 1 }}
             />
+          ) : null}
+          {hasPoint && (
+            <CircleMarker
+              center={center}
+              radius={4}
+              pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 1, weight: 1 }}
+            />
           )}
-          <CircleMarker
-            center={center}
-            radius={4}
-            pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 1, weight: 1 }}
-          />
         </MapContainer>
       </div>
       <div className="px-2 py-1 border-t pb-hairline-t font-mono text-[9px] text-pb-faintest">
         {boundary
           ? <>Suburb boundary for postcode {postcode || '—'}{state ? `, ${state}` : ''} · via OpenStreetMap</>
           : boundaryLoaded
-            ? <>No suburb boundary found — approximate area for postcode {postcode || '—'}{state ? `, ${state}` : ''}</>
+            ? hasPoint
+              ? <>No suburb boundary found — approximate area for postcode {postcode || '—'}{state ? `, ${state}` : ''}</>
+              : <>Loading boundary…</>
             : <>Loading boundary…</>}
       </div>
     </div>
