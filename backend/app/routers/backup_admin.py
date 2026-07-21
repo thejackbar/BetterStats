@@ -1,20 +1,28 @@
 """Super Admin — Backups page.
 
-Read-only for now (list of backup/restore tasks + current DB size stats).
-Tasks are written by ``app/scripts/backup_task.py``, called from the host
-backup/restore scripts (``ops/backup/``) — not from here. A "run backup now" /
-"restore" trigger button is a later phase, once the backup-agent service that
-gives the backend a safe way to reach the host's Docker/filesystem exists;
-this router only reads what those scripts have already recorded.
+Lists backup/restore tasks + current DB size stats (both written/computed
+elsewhere — ``app/scripts/backup_task.py`` from the host scripts in
+``ops/backup/``, ``services/backup_stats.py`` for the live size snapshot) and
+exposes ONE write action: "run a backup now". That action proxies to the
+``betterstats-backup-agent`` sidecar (see ops/backup/agent/) rather than
+doing anything itself — this process has no Docker socket or host filesystem
+access, by design, so it can't run backup.sh directly.
+
+Restore is deliberately NOT triggerable from here, at all — full or per-club,
+it stays an SSH-to-the-box operation (``ops/backup/restore.sh``). Restoring
+needs the age PRIVATE key, which docs/backup-system.md says to keep OFFLINE;
+exposing it to a network-reachable agent would defeat that.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import User, get_db
 from app.routers.auth import require_super_admin
 from app.services import backup_stats
@@ -93,3 +101,37 @@ async def live_db_stats(
     breakdown — not tied to any particular backup bundle. Per-club size is an
     estimate (see backup_stats module docstring); row counts are exact."""
     return await backup_stats.compute_db_stats(db)
+
+
+@router.post("/run")
+async def run_backup_now(
+    user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kicks off an immediate backup via the backup-agent sidecar. Fire-and-
+    forget: the agent starts backup.sh in the background and returns right
+    away — poll the task list (GET /club-admin/super/backups) for progress,
+    same as a scheduled run. 503s with a clear message if the agent isn't
+    configured/reachable rather than hanging on a request that can take
+    minutes."""
+    if not settings.backup_agent_url:
+        raise HTTPException(
+            status_code=503,
+            detail="The backup agent isn't configured on this server yet "
+                   "(BACKUP_AGENT_URL unset) — see docs/backup-system.md. "
+                   "Run a backup manually on the server in the meantime: "
+                   "ops/backup/backup.sh",
+        )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{settings.backup_agent_url.rstrip('/')}/run-backup",
+                headers={"X-Agent-Secret": settings.backup_agent_secret},
+                json={"triggered_by_user_id": str(user.id)},
+            )
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Backup agent returned {e.response.status_code}")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach the backup agent: {e}")

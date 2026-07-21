@@ -36,6 +36,8 @@ export default function SuperBackups() {
   const [stats, setStats] = useState(null)
   const [statsLoading, setStatsLoading] = useState(true)
   const [expanded, setExpanded] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [runMsg, setRunMsg] = useState('')
 
   const loadTasks = () => {
     setLoading(true)
@@ -62,21 +64,51 @@ export default function SuperBackups() {
       .sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0))
   }, [stats])
 
+  const runNow = async () => {
+    setRunning(true)
+    setRunMsg('')
+    try {
+      const res = await api.superRunBackupNow()
+      if (res?.status === 'already_running') {
+        setRunMsg('A backup is already running.')
+      } else {
+        setRunMsg('Backup started — this can take a few minutes. Refresh below to see it complete.')
+      }
+      // give the new "running" row a moment to land, then refresh the list
+      setTimeout(loadTasks, 2000)
+    } catch (err) {
+      setRunMsg(err.message || 'Could not start a backup.')
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
     <AdminLayout>
       <div className="max-w-[1200px] mx-auto p-4 sm:p-6">
-        <div className="mb-5">
-          <h1 className="text-xl font-semibold text-pb-text">Backups</h1>
-          <p className="text-sm text-pb-dim mt-1">
-            Daily automated backup history, plus current database size. Schedule and retention
-            are set from General Settings → Backups.
-          </p>
-          <p className="text-xs text-pb-faint mt-2 max-w-2xl">
-            Backup and restore both run as host-level scripts (see docs/backup-system.md) — this
-            page is a read-only view of what those scripts have logged. There's no "run now"
-            button here yet; a backup is triggered manually by an operator on the server, or
-            automatically by the daily timer.
-          </p>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-pb-text">Backups</h1>
+            <p className="text-sm text-pb-dim mt-1">
+              Daily automated backup history, plus current database size. Schedule and retention
+              are set from General Settings → Backups.
+            </p>
+            <p className="text-xs text-pb-faint mt-2 max-w-2xl">
+              Backup runs as a host-level script (see docs/backup-system.md) — this page proxies
+              "Run backup now" to it, then shows what it logged. Restore (full or per-club) is
+              deliberately NOT triggerable from here — it needs the backup encryption key, which
+              is kept offline for safety, so it's always run by an operator directly on the
+              server.
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <button onClick={runNow} disabled={running}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 uppercase font-semibold transition disabled:opacity-50 text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}>
+              {running ? 'Starting…' : 'Run backup now'}
+            </button>
+            {runMsg && <p className="font-mono text-[10px] text-pb-faint mt-2 max-w-[220px]">{runMsg}</p>}
+          </div>
         </div>
 
         {/* Live DB size / per-club stats */}

@@ -1,11 +1,11 @@
 # BetterStats backup system
 
-Automated daily backups, a manual full restore, and a manual per-club
-restore — all host-level scripts, plus a Super Admin "Backups" page showing
-run history and current database size stats. No downtime for backup; a full
-restore needs a brief app stop only at the final cutover step; a per-club
-restore needs no downtime at all. "Run backup now" / "Restore" buttons in the
-UI are a later phase — see "Not built yet" below.
+Automated daily backups (with a "Run backup now" button), a manual full
+restore, and a manual per-club restore, plus a Super Admin "Backups" page
+showing run history and current database size stats. No downtime for backup;
+a full restore needs a brief app stop only at the final cutover step; a
+per-club restore needs no downtime at all. Restore is deliberately
+SSH-only — see "Why restore has no UI button" below.
 
 ## What's backed up
 
@@ -59,6 +59,56 @@ changes rarely and shouldn't live in a daily-rotated, app-readable bundle.
 6. Set the schedule and retention from **Super Admin → All Clubs → General
    Settings → Backups** (defaults to 03:00 UTC, 30 days if you don't touch
    it) — no config file edit or redeploy needed to change either.
+
+7. **(Optional) Set up the backup-agent** so Super Admin gets a "Run backup
+   now" button instead of needing SSH for a manual run — see the next
+   section. Skip this step and the button just shows "not configured yet";
+   scheduled backups and SSH manual runs work either way.
+
+## Backup-agent — enables the "Run backup now" button
+
+The backend container has no Docker socket or host filesystem access (by
+design — CLAUDE.md's container-safety rules exist for good reason), so it
+can't run `backup.sh` itself. `ops/backup/agent/` is a small sidecar
+container that DOES have that access, with a single fixed, secret-gated
+endpoint (`POST /run-backup`) — no arbitrary command execution, and it's
+never routed through nginx-proxy-manager, so it's only reachable from other
+containers on the same internal Docker network.
+
+1. **Generate a shared secret**: `openssl rand -hex 32` → this is
+   `BACKUP_AGENT_SECRET`.
+2. **Add it to `/srv/docker/.env`** (or wherever `AGE_RECIPIENT`/`DB_PASSWORD`
+   already live): `BACKUP_AGENT_SECRET=...`
+3. **Paste `ops/backup/agent/docker-compose.snippet.yaml`'s service into the
+   central `/srv/docker/docker-compose.yaml`**, matching its `networks:` to
+   whichever internal network `betterstats-backend` is already on.
+4. **Build and start it**:
+   ```bash
+   cd /srv/docker
+   export COMPOSE_PROJECT_NAME=bltbox_docker_app
+   docker compose build betterstats-backup-agent
+   docker compose up -d --no-deps betterstats-backup-agent
+   ```
+5. **Point the backend at it** — set in `/srv/docker/.env`:
+   ```bash
+   BACKUP_AGENT_URL=http://betterstats-backup-agent:8080
+   BACKUP_AGENT_SECRET=...   # same value as step 2
+   ```
+   then redeploy the backend so it picks up the new env vars (`deploy.sh`).
+
+The agent only ever runs `backup.sh` (with `BACKUP_FORCE=1`) — it has no
+restore endpoint. See "Why restore has no UI button" below.
+
+## Why restore has no UI button
+
+Restoring (full or per-club) needs the age **private** key, and step 1 above
+says to keep that key OFFLINE — not on the box at all, let alone in a
+container the backend can reach over the network. Wiring restore into the
+agent would mean putting that key somewhere network-reachable, which defeats
+the point of keeping it offline. So restore — both `restore.sh apply` and
+`restore.sh restore-club` — stays an operator-runs-it-over-SSH action. The
+Super Admin Backups page shows restore tasks (logged the same way backups
+are) but never a button to start one.
 
 ## Manual runs
 
@@ -142,15 +192,8 @@ club's data got 10x bigger overnight", not a billing-grade number.
   bundle and sanity-check the reported row counts before ever passing
   `--apply` on production data. The dry-run path touches nothing, so it's
   safe to rehearse repeatedly.
-- **"Run backup now" / "Restore" buttons in the Super Admin UI.** Today,
-  triggering a backup or restore means SSHing into the box and running the
-  script directly (see "Manual runs" above). A UI button needs the backend to
-  reach the host's Docker socket and filesystem, which it deliberately can't
-  today — the plan is a small dedicated `betterstats-backup-agent` container
-  (Docker-socket + backup-volume access only, internal-network-only, fixed
-  API, no arbitrary command execution) that the backend calls instead of
-  getting that privilege itself. Until that's built, the Super Admin Backups
-  page is read-only (history + stats).
+- **Restore buttons in the UI.** Deliberate, not a gap — see "Why restore has
+  no UI button" above.
 - **Offsite storage.** Local disk only for now
   (`/srv/backups/betterstats`) — add an `rclone`/`rsync` step to `backup.sh`
   after a local run if/when that's wanted.

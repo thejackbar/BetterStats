@@ -85,7 +85,9 @@ STAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
 BUNDLE_DIR="$BACKUP_ROOT/$STAMP"
 mkdir -p "$BUNDLE_DIR"
 
-TASK_ID=$(exec_backend python -m app.scripts.backup_task start-task --type backup --triggered-by "$TRIGGERED_BY" | tr -d '\r')
+START_TASK_ARGS=(python -m app.scripts.backup_task start-task --type backup --triggered-by "$TRIGGERED_BY")
+[ -n "${BACKUP_TRIGGERED_BY_USER_ID:-}" ] && START_TASK_ARGS+=(--triggered-by-user-id "$BACKUP_TRIGGERED_BY_USER_ID")
+TASK_ID=$(exec_backend "${START_TASK_ARGS[@]}" | tr -d '\r')
 log "Started backup task $TASK_ID -> $BUNDLE_DIR"
 
 # --- Postgres: MVCC-consistent dump, no lock, no downtime ---------------------

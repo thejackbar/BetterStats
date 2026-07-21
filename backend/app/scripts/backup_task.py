@@ -44,14 +44,15 @@ async def _get_schedule():
     print(f"{sched['hour']} {sched['minute']} {sched['retention_days']}")
 
 
-async def _start_task(task_type: str, triggered_by: str, scope_org_id: str | None):
+async def _start_task(task_type: str, triggered_by: str, scope_org_id: str | None,
+                       triggered_by_user_id: str | None):
     async with async_session_maker() as session:
         row = (await session.execute(
             text(
-                "INSERT INTO backup_tasks (task_type, status, scope_org_id, triggered_by) "
-                "VALUES (:t, 'running', :org, :tb) RETURNING id"
+                "INSERT INTO backup_tasks (task_type, status, scope_org_id, triggered_by, triggered_by_user_id) "
+                "VALUES (:t, 'running', :org, :tb, :user) RETURNING id"
             ),
-            {"t": task_type, "org": scope_org_id, "tb": triggered_by},
+            {"t": task_type, "org": scope_org_id, "tb": triggered_by, "user": triggered_by_user_id},
         )).first()
         await session.commit()
         print(str(row[0]))
@@ -111,6 +112,7 @@ def main():
     p_start.add_argument("--type", required=True, choices=["backup", "restore_full", "restore_club"])
     p_start.add_argument("--triggered-by", default="scheduled", choices=["scheduled", "manual"])
     p_start.add_argument("--scope-org-id", default=None)
+    p_start.add_argument("--triggered-by-user-id", default=None)
 
     p_finish = sub.add_parser("finish-task")
     p_finish.add_argument("task_id")
@@ -131,7 +133,7 @@ def main():
         except ValueError:
             print(f"Invalid --scope-org-id: {args.scope_org_id}", file=sys.stderr)
             sys.exit(1)
-        asyncio.run(_start_task(args.type, args.triggered_by, org))
+        asyncio.run(_start_task(args.type, args.triggered_by, org, args.triggered_by_user_id))
     elif args.cmd == "finish-task":
         asyncio.run(_finish_task(args.task_id, args.status, args.bundle_path,
                                   args.uploads_size_bytes, args.error))

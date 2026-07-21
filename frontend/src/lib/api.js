@@ -954,6 +954,7 @@ export const api = {
     return request(`/club-admin/super/backups${q ? `?${q}` : ''}`)
   },
   superBackupStats: () => request('/club-admin/super/backups/stats'),
+  superRunBackupNow: () => request('/club-admin/super/backups/run', { method: 'POST' }),
   // Self-serve club trial registration (internal, flag-gated — see
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),
