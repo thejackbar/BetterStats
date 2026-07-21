@@ -955,6 +955,10 @@ export const api = {
   },
   superBackupStats: () => request('/club-admin/super/backups/stats'),
   superRunBackupNow: () => request('/club-admin/super/backups/run', { method: 'POST' }),
+  // Manual, on-demand download of a backup bundle file — still age-encrypted
+  // in transit, same as it sits on disk (no offsite auto-sync anywhere).
+  superDownloadBackupFile: (taskId, file) =>
+    fetch(`${BASE}/club-admin/super/backups/${taskId}/download?file=${file}`, { credentials: 'include' }),
   // Self-serve club trial registration (internal, flag-gated — see
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),

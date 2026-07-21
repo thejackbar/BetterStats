@@ -12,13 +12,22 @@ Restore is deliberately NOT triggerable from here, at all — full or per-club,
 it stays an SSH-to-the-box operation (``ops/backup/restore.sh``). Restoring
 needs the age PRIVATE key, which docs/backup-system.md says to keep OFFLINE;
 exposing it to a network-reachable agent would defeat that.
+
+Downloading a backup FILE is different from restoring one — it's offered as
+a manual, on-demand option (there's no automatic offsite sync, per direct
+instruction) and stays safe without the private key ever leaving the box:
+every file served here is still age-ENCRYPTED exactly as it sits in
+BACKUP_ROOT, so a downloaded copy is only ever as useful as the private key
+someone separately holds to decrypt it.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -135,3 +144,80 @@ async def run_backup_now(
         raise HTTPException(status_code=502, detail=f"Backup agent returned {e.response.status_code}")
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Could not reach the backup agent: {e}")
+
+
+# Mirrors ops/backup/agent/app.py's _DOWNLOADABLE_FILES — only db/uploads are
+# actually age-encrypted; manifest/checksums are plain, so the download
+# filename shouldn't claim a `.age` suffix that isn't there.
+_DOWNLOADABLE_FILES = {
+    "db": "db.dump.age",
+    "uploads": "uploads.tar.zst.age",
+    "manifest": "manifest.json",
+    "checksums": "checksums.sha256",
+}
+_BUNDLE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$")
+
+
+@router.get("/{task_id}/download")
+async def download_backup_file(
+    task_id: str,
+    file: str = Query(..., description="One of: db, uploads, manifest, checksums"),
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Streams one still-ENCRYPTED file from a completed backup bundle,
+    proxied through the backup-agent (this process has no filesystem access
+    to BACKUP_ROOT itself — same reasoning as /run above). Manual, on-demand
+    only; there's no automatic offsite sync of these files anywhere."""
+    if file not in _DOWNLOADABLE_FILES:
+        raise HTTPException(status_code=400, detail=f"file must be one of {sorted(_DOWNLOADABLE_FILES)}")
+    if not settings.backup_agent_url:
+        raise HTTPException(
+            status_code=503,
+            detail="The backup agent isn't configured on this server yet "
+                   "(BACKUP_AGENT_URL unset) — see docs/backup-system.md.",
+        )
+
+    row = (await db.execute(
+        text("SELECT bundle_path, task_type, status FROM backup_tasks WHERE id = :id"),
+        {"id": task_id},
+    )).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such backup task")
+    bundle_path, task_type, task_status = row
+    if task_type != "backup" or task_status != "completed" or not bundle_path:
+        raise HTTPException(status_code=400, detail="Only a completed backup task has files to download")
+
+    bundle = bundle_path.rstrip("/").rsplit("/", 1)[-1]
+    if not _BUNDLE_RE.match(bundle):
+        raise HTTPException(status_code=500, detail="Unexpected bundle path recorded for this task")
+
+    client = httpx.AsyncClient(timeout=None)
+    try:
+        req = client.build_request(
+            "GET", f"{settings.backup_agent_url.rstrip('/')}/backup-file",
+            params={"bundle": bundle, "file": file},
+            headers={"X-Agent-Secret": settings.backup_agent_secret},
+        )
+        upstream = await client.send(req, stream=True)
+    except httpx.HTTPError as e:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"Could not reach the backup agent: {e}")
+    if upstream.status_code != 200:
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=upstream.status_code, detail="Backup agent could not serve that file")
+
+    async def _stream():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        _stream(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{bundle}-{_DOWNLOADABLE_FILES[file]}"'},
+    )

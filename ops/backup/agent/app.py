@@ -5,7 +5,8 @@ betterstats-backend container Docker-socket access itself (a real privilege
 escalation risk — socket access is effectively root on the host).
 
 Fixed, narrow API — no arbitrary command execution:
-  POST /run-backup   body: {"triggered_by_user_id": "<uuid>"}   (optional)
+  POST /run-backup    body: {"triggered_by_user_id": "<uuid>"}   (optional)
+  GET  /backup-file    ?bundle=<timestamp>&file=<db|uploads|manifest|checksums>
   GET  /health
 
 Auth: a shared secret in the X-Agent-Secret header, checked against
@@ -14,23 +15,42 @@ nginx-proxy-manager — it's reachable only on the internal Docker network the
 backend is also on. The shared secret is defence in depth on top of that
 network boundary, not the only line of defence.
 
-Deliberately does NOT expose a restore endpoint. Restoring needs the age
-PRIVATE key, which docs/backup-system.md says to keep OFFLINE (a password
-manager, not on the box) — putting it in a container this reachable would
-defeat that. Restore (full or per-club) stays an SSH-to-the-box operation,
-see ops/backup/restore.sh.
+Deliberately does NOT expose a restore endpoint, and /backup-file only ever
+serves the STILL-ENCRYPTED bundle files as-is (db.dump.age,
+uploads.tar.zst.age, ...) — it has no access to the age PRIVATE key (see
+docs/backup-system.md: that key is kept OFFLINE, never on the box), so a
+downloaded file is exactly as safe in transit/at rest as it already was
+sitting in BACKUP_ROOT. Restore (full or per-club) stays an SSH-to-the-box
+operation, see ops/backup/restore.sh.
 """
 import asyncio
 import os
+import re
 import subprocess
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="betterstats-backup-agent")
 
 AGENT_SECRET = os.environ.get("BACKUP_AGENT_SECRET", "")
 BACKUP_SCRIPT = os.environ.get("BACKUP_SCRIPT", "/srv/docker/betterstats/ops/backup/backup.sh")
+BACKUP_ROOT = Path(os.environ.get("BACKUP_ROOT", "/srv/backups/betterstats"))
+
+# Bundle directory names are always backup.sh's own `date -u +%Y-%m-%dT%H-%M-%SZ`
+# stamp — validating against this shape (rather than just checking the
+# resolved path stays under BACKUP_ROOT) is the actual defence against path
+# traversal via a crafted `bundle` query param.
+_BUNDLE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$")
+
+_DOWNLOADABLE_FILES = {
+    "db": "db.dump.age",
+    "uploads": "uploads.tar.zst.age",
+    "manifest": "manifest.json",
+    "checksums": "checksums.sha256",
+}
 
 # Guards against a double-click firing two overlapping backup runs — backup.sh
 # itself is also idempotent (has-run-today), this just avoids two pg_dumps
@@ -86,3 +106,17 @@ async def run_backup(body: RunBackupBody, x_agent_secret: str | None = Header(de
         _running = True
         asyncio.create_task(_run_backup_process(body.triggered_by_user_id))
     return {"status": "started"}
+
+
+@app.get("/backup-file")
+async def backup_file(bundle: str, file: str, x_agent_secret: str | None = Header(default=None)):
+    _check_secret(x_agent_secret)
+    if not _BUNDLE_RE.match(bundle):
+        raise HTTPException(status_code=400, detail="Invalid bundle timestamp")
+    filename = _DOWNLOADABLE_FILES.get(file)
+    if not filename:
+        raise HTTPException(status_code=400, detail=f"Unknown file kind {file!r} (expected one of {sorted(_DOWNLOADABLE_FILES)})")
+    path = BACKUP_ROOT / bundle / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No such backup file")
+    return FileResponse(path, filename=f"{bundle}-{filename}", media_type="application/octet-stream")

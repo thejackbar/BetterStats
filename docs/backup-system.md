@@ -96,8 +96,10 @@ containers on the same internal Docker network.
    ```
    then redeploy the backend so it picks up the new env vars (`deploy.sh`).
 
-The agent only ever runs `backup.sh` (with `BACKUP_FORCE=1`) — it has no
-restore endpoint. See "Why restore has no UI button" below.
+The agent runs `backup.sh` (with `BACKUP_FORCE=1`) and serves already-
+encrypted bundle files back for manual download (see "Manual download"
+below) — it has no restore endpoint. See "Why restore has no UI button"
+below.
 
 ## Why restore has no UI button
 
@@ -140,6 +142,22 @@ BACKUP_FORCE=1 BACKUP_TRIGGERED_BY=manual /srv/docker/betterstats/ops/backup/bac
 Every run — scheduled or manual — is logged to the `backup_tasks` table and
 shows up on **Super Admin → Backups**, along with the DB size / row count /
 per-club breakdown captured at completion.
+
+## Manual download — no automatic offsite sync, by design
+
+Backups stay on `BACKUP_ROOT` and are never sent anywhere on their own — per
+direct instruction, this system doesn't commit to an offsite storage
+provider. What it does offer is a manual, on-demand download: every
+completed backup row on **Super Admin → Backups** has "DB" and "Uploads"
+buttons that stream that bundle's still-encrypted files
+(`db.dump.age`/`uploads.tar.zst.age`) straight to the browser, proxied
+through the backup-agent the same way "Run backup now" is. A downloaded copy
+is exactly as safe as the file already sitting in `BACKUP_ROOT` — it's still
+encrypted with the age **public** key, so it's only useful to whoever
+separately holds the offline private key. If you want your own offsite copy
+(a personal cloud drive, an external hard drive, whatever), download the
+file and put it there yourself; nothing here automates that step or commits
+you to a particular storage provider.
 
 ## Per-club restore — how it stays safe on a shared schema
 
@@ -194,6 +212,6 @@ club's data got 10x bigger overnight", not a billing-grade number.
   safe to rehearse repeatedly.
 - **Restore buttons in the UI.** Deliberate, not a gap — see "Why restore has
   no UI button" above.
-- **Offsite storage.** Local disk only for now
-  (`/srv/backups/betterstats`) — add an `rclone`/`rsync` step to `backup.sh`
-  after a local run if/when that's wanted.
+- **Automatic offsite sync.** Deliberate, not a gap — per direct instruction
+  this system doesn't commit to an offsite storage provider. Manual download
+  (see above) is the intended way a copy leaves the server.

@@ -26,6 +26,40 @@ function fmtDateTime(iso) {
   })
 }
 
+// Downloads a bundle file (still age-encrypted, exactly as it sits on
+// disk — this app never sends backups anywhere on its own; a manual
+// download is the only way a copy leaves the server).
+function DownloadLink({ taskId, file, label }) {
+  const [busy, setBusy] = useState(false)
+  const download = async () => {
+    setBusy(true)
+    try {
+      const res = await api.superDownloadBackupFile(taskId, file)
+      if (!res.ok) throw new Error(`Download failed (${res.status})`)
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="([^"]+)"/)
+      const filename = match ? match[1] : `${taskId}-${file}`
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      window.alert('Could not download this file — the backup-agent may be unreachable.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button onClick={download} disabled={busy}
+      className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text disabled:opacity-50">
+      {busy ? '…' : label}
+    </button>
+  )
+}
+
 export default function SuperBackups() {
   const [tasks, setTasks] = useState([])
   const [total, setTotal] = useState(0)
@@ -98,7 +132,8 @@ export default function SuperBackups() {
               "Run backup now" to it, then shows what it logged. Restore (full or per-club) is
               deliberately NOT triggerable from here — it needs the backup encryption key, which
               is kept offline for safety, so it's always run by an operator directly on the
-              server.
+              server. Backups are never sent anywhere automatically — every DB/Uploads download
+              below is a manual, on-demand copy of the still-encrypted file, nothing more.
             </p>
           </div>
           <div className="text-right shrink-0">
@@ -237,14 +272,20 @@ export default function SuperBackups() {
                       <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">
                         {t.total_row_count != null ? t.total_row_count.toLocaleString() : '-'}
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2.5 whitespace-nowrap space-y-1">
                         {t.club_stats && (
                           <button
                             onClick={() => setExpanded(expanded === t.id ? null : t.id)}
-                            className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text"
+                            className="block font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text"
                           >
                             {expanded === t.id ? 'Hide' : 'Per-club'}
                           </button>
+                        )}
+                        {t.task_type === 'backup' && t.status === 'completed' && (
+                          <div className="flex gap-2">
+                            <DownloadLink taskId={t.id} file="db" label="DB" />
+                            <DownloadLink taskId={t.id} file="uploads" label="Uploads" />
+                          </div>
                         )}
                       </td>
                     </tr>
