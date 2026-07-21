@@ -17,30 +17,10 @@ const TREND_RANGES = [
 ]
 
 const SEVERITY_STYLE = {
-  critical: {
-    label: 'Needs attention',
-    box: 'bg-red-500/10 border-red-500/40',
-    text: 'text-red-300',
-    badge: 'bg-red-500/15 text-red-300 border-red-500/40',
-  },
-  warning: {
-    label: 'Watch',
-    box: 'bg-amber-500/10 border-amber-500/40',
-    text: 'text-amber-300',
-    badge: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
-  },
-  info: {
-    label: 'Note',
-    box: 'bg-pb-surface2/60 border-pb-hairline',
-    text: 'text-pb-dim',
-    badge: 'bg-pb-surface2 text-pb-dim border-pb-hairline',
-  },
-  good: {
-    label: 'On track',
-    box: 'bg-emerald-500/10 border-emerald-500/40',
-    text: 'text-emerald-300',
-    badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
-  },
+  critical: { dot: 'bg-red-400', border: 'border-red-500/50', text: 'text-red-300' },
+  warning: { dot: 'bg-amber-400', border: 'border-amber-500/50', text: 'text-amber-300' },
+  info: { dot: 'bg-sky-400', border: 'border-sky-500/50', text: 'text-sky-300' },
+  good: { dot: 'bg-emerald-400', border: 'border-emerald-500/50', text: 'text-emerald-300' },
 }
 
 const AD_STATUS_STYLE = {
@@ -100,17 +80,15 @@ function Stat({ label, value, hint }) {
   )
 }
 
-function InsightCard({ insight }) {
+function InsightRow({ insight }) {
   const style = SEVERITY_STYLE[insight.severity] || SEVERITY_STYLE.info
   return (
-    <div className={`pb-card border p-3.5 ${style.box}`}>
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <p className={`text-sm font-medium ${style.text}`}>{insight.title}</p>
-        <span className={`shrink-0 px-1.5 py-0.5 rounded-full border text-[9px] font-mono uppercase tracking-wide2 ${style.badge}`}>
-          {style.label}
-        </span>
-      </div>
-      <p className="text-xs text-pb-dim leading-relaxed">{insight.detail}</p>
+    <div className={`flex items-start gap-2.5 py-2 px-3 rounded border-l-2 bg-pb-surface2/30 ${style.border}`}>
+      <span className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${style.dot}`} />
+      <p className="text-xs leading-relaxed">
+        <span className={`font-medium ${style.text}`}>{insight.title}.</span>{' '}
+        <span className="text-pb-dim">{insight.detail}</span>
+      </p>
     </div>
   )
 }
@@ -298,6 +276,7 @@ export default function SuperMetaAds() {
 
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
+  const [showAllInsights, setShowAllInsights] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -425,17 +404,28 @@ export default function SuperMetaAds() {
           </div>
         ) : (
           <>
-            {/* Insights feed — the plain-English read of how the campaign is
-                actually going, sorted worst-first. This replaces the old
-                single recommendation banner. */}
-            <div className="mb-4">
-              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
-                What&rsquo;s happening
+            {/* Headlines — short, worst-first, only fires on something worth
+                a glance. Capped so this stays a quick scan, not a report. */}
+            {insights.length > 0 && (
+              <div className="mb-4">
+                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
+                  Headlines
+                </div>
+                <div className="space-y-1.5">
+                  {(showAllInsights ? insights : insights.slice(0, 3)).map((insight, i) => (
+                    <InsightRow key={i} insight={insight} />
+                  ))}
+                </div>
+                {insights.length > 3 && (
+                  <button
+                    onClick={() => setShowAllInsights((s) => !s)}
+                    className="mt-1.5 font-mono text-[9px] text-pb-faint hover:underline"
+                  >
+                    {showAllInsights ? 'Show fewer' : `+${insights.length - 3} more`}
+                  </button>
+                )}
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-                {insights.map((insight, i) => <InsightCard key={i} insight={insight} />)}
-              </div>
-            </div>
+            )}
 
             {/* KPI strip */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-1">
@@ -457,7 +447,10 @@ export default function SuperMetaAds() {
                 <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
                   {fmtNum(campaign.registrations)} actual
                   {campaign.leads_adjustment ? `, ${campaign.leads_adjustment > 0 ? '+' : ''}${campaign.leads_adjustment} manual` : ''}
-                  {' '}&middot; {fmtNum(campaign.leads)} Meta-reported
+                  {' '}&middot;{' '}
+                  <span title="Meta counts this the moment someone picks a club, not when they finish registering, and it can shift on its own. The actual figure above is the real number.">
+                    {fmtNum(campaign.leads)} Meta-reported
+                  </span>
                 </div>
                 <div className="flex items-center gap-1 mt-1.5">
                   <button

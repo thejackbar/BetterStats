@@ -61,10 +61,6 @@ _LEAD_ACTION_TYPES = {
 CAMPAIGN_BUDGET_AUD = 520.0
 CAMPAIGN_LENGTH_DAYS = 30
 
-# compute_recommendation()'s status vocabulary, mapped onto the insight feed's
-# four-way severity (critical/warning/info/good) used by build_insights().
-_REC_SEVERITY = {"keep_going": "good", "watch": "warning", "action_needed": "critical"}
-
 
 class MetaAdsError(Exception):
     """Typed error so the router/page can show a specific message."""
@@ -360,24 +356,15 @@ def compute_funnel(campaign: dict) -> list[dict]:
     return stages
 
 
-def build_insights(
-    campaign: dict, ads: list[dict], daily_history: list[dict],
-    campaign_budget: float, campaign_length_days: int,
-    recommendation: str | None = None, recommendation_status: str | None = None,
-) -> list[dict]:
-    """Plain-English, severity-ordered read of how the campaign is actually
-    going — the dashboard's headline feed, so a reader never has to interpret
-    the raw KPI numbers themselves. Each item is {severity, title, detail};
-    severity is critical / warning / info / good, and the list is returned
-    sorted worst-first."""
+def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
+                    campaign_budget: float, campaign_length_days: int) -> list[dict]:
+    """Short, severity-ordered headlines on how the campaign is actually
+    going, so a reader never has to interpret the raw KPI numbers themselves.
+    Deliberately terse (one line of detail, not a paragraph) and only fires
+    on something worth a glance — nothing "always on" here, so an empty list
+    is a valid, good result. Each item is {severity, title, detail}; severity
+    is critical / warning / info / good, list returned sorted worst-first."""
     insights: list[dict] = []
-
-    if recommendation:
-        insights.append({
-            "severity": _REC_SEVERITY.get(recommendation_status, "info"),
-            "title": "Overall campaign pace",
-            "detail": recommendation,
-        })
 
     spend = campaign.get("spend") or 0.0
     impressions = campaign.get("impressions") or 0.0
@@ -398,23 +385,14 @@ def build_insights(
             over_pct = round((projected / campaign_budget - 1) * 100)
             insights.append({
                 "severity": "warning",
-                "title": "On track to overspend the budget",
-                "detail": (
-                    f"At the current pace (${daily_rate:.2f}/day over {len(spend_days)} active day"
-                    f"{'s' if len(spend_days) != 1 else ''}), the campaign is projected to spend about "
-                    f"${projected:.0f} against a ${campaign_budget:.0f} budget over {campaign_length_days} days, "
-                    f"roughly {over_pct}% over. Trim the daily budget or pause the weaker ads below."
-                ),
+                "title": "Overspending the budget pace",
+                "detail": f"On track for ~${projected:.0f} of ${campaign_budget:.0f} by day {campaign_length_days} ({over_pct}% over). Trim spend or pause the weaker ads.",
             })
         elif projected < campaign_budget * 0.7 and len(spend_days) >= 2:
             insights.append({
                 "severity": "info",
                 "title": "Under-pacing the budget",
-                "detail": (
-                    f"At ${daily_rate:.2f}/day it's on track to use only about ${projected:.0f} of the "
-                    f"${campaign_budget:.0f} budget over {campaign_length_days} days. If the ads below are "
-                    "performing, there's room to raise the daily budget and reach more people."
-                ),
+                "detail": f"On track for only ~${projected:.0f} of ${campaign_budget:.0f} by day {campaign_length_days}. Room to spend more if the ads below are working.",
             })
 
     # Funnel bottlenecks — where the drop-off actually hurts.
@@ -422,31 +400,19 @@ def build_insights(
         insights.append({
             "severity": "critical",
             "title": "Very few people are clicking through",
-            "detail": (
-                f"Only {link_clicks:.0f} link clicks from {impressions:.0f} impressions "
-                f"({100 * link_clicks / impressions:.2f}%). The creative or targeting isn't landing. "
-                "Try a different image or headline, or narrow the audience."
-            ),
+            "detail": f"Just {100 * link_clicks / impressions:.2f}% of impressions click ({link_clicks:.0f} of {impressions:.0f}). Try a different creative or narrow the audience.",
         })
     if link_clicks >= 10 and lpv / link_clicks < 0.5:
         insights.append({
             "severity": "warning",
-            "title": "Over half of link clicks aren't reaching the landing page",
-            "detail": (
-                f"{lpv:.0f} landing page views from {link_clicks:.0f} link clicks "
-                f"({100 * lpv / link_clicks:.0f}%). That gap is usually a slow-loading page, a broken link, "
-                "or people bouncing before the page finishes loading. Worth checking /trial loads quickly "
-                "on mobile."
-            ),
+            "title": "Clicks aren't reaching the landing page",
+            "detail": f"Only {100 * lpv / link_clicks:.0f}% of link clicks become a landing page view. Check /trial loads fast on mobile.",
         })
     if lpv >= 5 and leads == 0:
         insights.append({
             "severity": "warning",
-            "title": "Landing page traffic isn't converting to leads",
-            "detail": (
-                f"{lpv:.0f} people have reached the trial page but none have picked a club yet. Worth "
-                "checking the page's call-to-action is visible and the club search works."
-            ),
+            "title": "Landing page traffic isn't converting",
+            "detail": f"{lpv:.0f} people reached the trial page, nobody's picked a club yet. Check the call-to-action and club search.",
         })
     if leads >= 2 and registrations == 0 and spend >= 15:
         # Small sample by design: Meta's own Lead count here is already
@@ -458,21 +424,13 @@ def build_insights(
         small_sample = leads < 8
         insights.append({
             "severity": "warning" if small_sample else "critical",
-            "title": "Visitors are starting registration but none are finishing",
+            "title": "Leads aren't turning into registrations",
             "detail": (
-                f"Meta has recorded {leads:.0f} people picking a club, but {registrations} have actually "
-                "completed a trial registration. The signup flow itself is proven working (other channels "
-                "complete it regularly), so this isn't necessarily a broken step. "
-                + (
-                    f"With only {leads:.0f} people this far into the funnel, and Meta's own Lead count able "
-                    "to shift on its own, it's too small a sample to call a real problem yet. Worth watching "
-                    "as spend and leads build up, and running a real test signup from a Meta ad click if "
-                    "that's easy to do."
-                    if small_sample else
-                    "Worth running a real test signup from a Meta ad click to check the flow end to end, and "
-                    "checking whether ad traffic specifically is dropping off at a particular step (club "
-                    "search, email code, or the details form)."
-                )
+                f"{leads:.0f} people picked a club, {registrations} finished registering. Too small a "
+                "sample to call a problem yet, worth watching as it builds up."
+                if small_sample else
+                f"{leads:.0f} people picked a club, {registrations} finished registering. The flow works "
+                "elsewhere, so try a real test signup from a Meta ad click to see where it drops off."
             ),
         })
 
@@ -485,23 +443,8 @@ def build_insights(
             insights.append({
                 "severity": "info",
                 "title": f"{best['name']} is your most efficient ad",
-                "detail": (
-                    f"${best['cost_per_lpv']:.2f} per landing page view, vs ${worst['cost_per_lpv']:.2f} for "
-                    f"{worst['name']} ({worst['cost_per_lpv'] / best['cost_per_lpv']:.1f}x more). Consider "
-                    f"shifting budget toward {best['name']} or pausing {worst['name']}."
-                ),
+                "detail": f"${best['cost_per_lpv']:.2f} vs ${worst['cost_per_lpv']:.2f} per view for {worst['name']}. Consider shifting budget its way.",
             })
-
-    insights.append({
-        "severity": "info",
-        "title": "Meta's own Lead/CompleteRegistration count is indicative only",
-        "detail": (
-            "It fires the moment someone picks their club (step 2 of a 5-step form), not when they finish "
-            "registering, and can shift as Meta reconciles data after the fact. \"Completed "
-            "registrations\" in the funnel above is the real number: actual clubs that finished signing "
-            "up, matched to this campaign by their own attribution tag."
-        ),
-    })
 
     severity_order = {"critical": 0, "warning": 1, "info": 2, "good": 3}
     insights.sort(key=lambda i: severity_order.get(i["severity"], 9))
@@ -746,11 +689,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     daily_history = await get_history(db, days=CAMPAIGN_LENGTH_DAYS + 5)
 
     campaign["funnel"] = compute_funnel(campaign)
-    insights = build_insights(
-        campaign, ads, daily_history, CAMPAIGN_BUDGET_AUD, CAMPAIGN_LENGTH_DAYS,
-        recommendation=campaign_row["recommendation"],
-        recommendation_status=campaign_row["recommendation_status"],
-    )
+    insights = build_insights(campaign, ads, daily_history, CAMPAIGN_BUDGET_AUD, CAMPAIGN_LENGTH_DAYS)
 
     return {
         "campaign": campaign,

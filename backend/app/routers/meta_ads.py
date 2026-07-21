@@ -97,10 +97,18 @@ async def leads_adjustments(db: AsyncSession = Depends(get_db), _: User = Depend
 @router.get("/ad-signups")
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow
-    (organisations.signup_source, migration 161), joined with its first-touch
-    ad attribution, what it's since done (trial/paid modules) and its cached
-    Twenty engagement score — "which ads produced our hottest leads" in one
-    table.
+    AND is attributed to one of THIS Meta campaign's own ads, joined with
+    what it's since done (trial/paid modules) and its cached Twenty
+    engagement score — "which ads produced our hottest leads" in one table.
+
+    `signup_source == 'self_serve_ad'` on its own is NOT specific to Meta —
+    it's set whenever getAttribution() saw ANY click signal, which an EDM
+    (email) send's own UTM-tagged link also carries. Scoped the same way
+    get_registration_count() scopes the KPI card's own "actual
+    registrations" number: signup_attribution.utm_content has to match one
+    of settings.meta_campaign_id's own ads, via
+    meta_ads._current_campaign_utm_contents(). Without this an EDM-driven
+    signup would show up on the Meta Ads page as if an ad produced it.
 
     The engagement score is the cached marketing_clubs value from the daily
     refresh (via the existing_org_id link), NOT a live _engagement() scan per
@@ -114,12 +122,18 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     and this report exists to show real prospects, not test data."""
     from app.services.twenty_sync import _module_split
 
+    utm_contents = meta_ads._current_campaign_utm_contents()
+
     orgs = (await db.execute(
         select(Organisation, MarketingClub.engagement_score, MarketingClub.engagement_scored_at)
         .outerjoin(MarketingClub, MarketingClub.existing_org_id == Organisation.id)
         .where(Organisation.signup_source.isnot(None), Organisation.archived_at.is_(None))
         .options(selectinload(Organisation.module_subscriptions))
     )).all()
+    orgs = [
+        (org, score, scored_at) for org, score, scored_at in orgs
+        if (org.signup_attribution or {}).get("utm_content") in utm_contents
+    ]
 
     # Registration timestamps come from the self-serve idempotency keys (the
     # org rows themselves carry no created_at).
