@@ -115,9 +115,26 @@ async def list_games(
     if finals_only:
         clauses.append("g.is_final = TRUE")
 
+    # g.result is ALSO relative to whichever club's sync wrote it first
+    # (classify_match_result computes it against that syncing org's own
+    # team) — the same single-column-can't-hold-two-perspectives issue
+    # opp_org_id had. g.winning_team is the actual winning team's name
+    # (neutral, not org-relative), so it's re-derived here against OUR
+    # home/away side instead of trusted as stored — falling back to the raw
+    # g.result when winning_team is NULL (a symmetric draw/tie/no-result, or
+    # a row where home_org_id/away_org_id can't place either side).
     result = await db.execute(
         text(f"""
-            SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
+            SELECT g.id, g.played_at, g.home_team, g.away_team,
+                   CASE
+                       WHEN g.winning_team IS NULL THEN g.result
+                       WHEN g.home_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.home_team THEN 'WIN'
+                       WHEN g.home_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.away_team THEN 'LOSS'
+                       WHEN g.away_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.away_team THEN 'WIN'
+                       WHEN g.away_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.home_team THEN 'LOSS'
+                       ELSE g.result
+                   END AS result,
+                   g.winning_team,
                    gr.id AS grade_id, COALESCE(gr.display_name_override, gr.name) AS grade_name,
                    gr.name AS grade_raw,
                    s.id AS season_id, s.name AS season_name, s.year AS season_year

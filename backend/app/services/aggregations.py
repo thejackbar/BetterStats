@@ -2536,7 +2536,25 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                             ELSE NULL
                         END
                     ) AS opp_name,
-                    g.result
+                    -- g.result is ALSO relative to whichever club's sync
+                    -- wrote it first (classify_match_result computes it
+                    -- against that syncing org's own team) — same
+                    -- single-column-can't-hold-two-perspectives issue as
+                    -- opp_org_id above. g.winning_team is the actual winning
+                    -- team's name (neutral), so it's re-derived against THIS
+                    -- player's own org/side rather than trusted as stored.
+                    CASE
+                        WHEN g.winning_team IS NULL THEN g.result
+                        WHEN g.home_org_id = po.organisation_id AND g.winning_team = g.home_team THEN 'WIN'
+                        WHEN g.home_org_id = po.organisation_id AND g.winning_team = g.away_team THEN 'LOSS'
+                        WHEN g.away_org_id = po.organisation_id AND g.winning_team = g.away_team THEN 'WIN'
+                        WHEN g.away_org_id = po.organisation_id AND g.winning_team = g.home_team THEN 'LOSS'
+                        WHEN ga.team_name = g.home_team AND g.winning_team = g.home_team THEN 'WIN'
+                        WHEN ga.team_name = g.home_team AND g.winning_team = g.away_team THEN 'LOSS'
+                        WHEN ga.team_name = g.away_team AND g.winning_team = g.away_team THEN 'WIN'
+                        WHEN ga.team_name = g.away_team AND g.winning_team = g.home_team THEN 'LOSS'
+                        ELSE g.result
+                    END AS result
                 FROM player_game_ids pgi
                 JOIN v_effective_games g ON g.id = pgi.game_id
                 CROSS JOIN player_org po
@@ -2779,20 +2797,40 @@ async def _club_results(
         )""")
         params["sids"] = season_ids
 
+    # g.result is ALSO relative to whichever club's sync wrote it first
+    # (classify_match_result computes it against that syncing org's own
+    # team) — the same single-column-can't-hold-two-perspectives issue
+    # opp_org_id had. g.winning_team is the actual winning team's name
+    # (neutral, not org-relative), so effective_result re-derives WIN/LOSS
+    # against OUR home/away side instead of trusting g.result as stored —
+    # falling back to g.result when winning_team is NULL (a symmetric
+    # draw/tie/no-result, or a row where home_org_id/away_org_id can't place
+    # either side, e.g. not yet backfilled).
     row = dict(
         (
             await session.execute(
                 text(
                     f"""
             SELECT
-                COUNT(*) FILTER (WHERE g.result IS NOT NULL)            AS total,
-                COUNT(*) FILTER (WHERE g.result = 'WIN')               AS wins,
-                COUNT(*) FILTER (WHERE g.result = 'LOSS')              AS losses,
-                COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE'))    AS draws
-            FROM v_effective_games g
-            LEFT JOIN grades gr ON gr.id = g.grade_id
-            LEFT JOIN seasons s ON s.id = gr.season_id
-            WHERE {' AND '.join(clauses)}
+                COUNT(*) FILTER (WHERE effective_result IS NOT NULL)         AS total,
+                COUNT(*) FILTER (WHERE effective_result = 'WIN')            AS wins,
+                COUNT(*) FILTER (WHERE effective_result = 'LOSS')           AS losses,
+                COUNT(*) FILTER (WHERE effective_result IN ('DRAW', 'TIE')) AS draws
+            FROM (
+                SELECT
+                    CASE
+                        WHEN g.winning_team IS NULL THEN g.result
+                        WHEN g.home_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.home_team THEN 'WIN'
+                        WHEN g.home_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.away_team THEN 'LOSS'
+                        WHEN g.away_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.away_team THEN 'WIN'
+                        WHEN g.away_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.home_team THEN 'LOSS'
+                        ELSE g.result
+                    END AS effective_result
+                FROM v_effective_games g
+                LEFT JOIN grades gr ON gr.id = g.grade_id
+                LEFT JOIN seasons s ON s.id = gr.season_id
+                WHERE {' AND '.join(clauses)}
+            ) sub
         """
                 ),
                 params,
