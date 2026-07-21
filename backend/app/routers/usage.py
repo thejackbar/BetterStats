@@ -51,7 +51,7 @@ ALLOWED_ROLES = ("super_admin", "club_admin", "club_member", "anon")
 # LATERAL so it picks one row per user; ordered super > admin > member.
 _USER_ROLE_JOIN = """
 LEFT JOIN LATERAL (
-    SELECT role
+    SELECT role, club_id
     FROM club_memberships
     WHERE user_id = ue.user_id
     ORDER BY CASE role
@@ -883,17 +883,21 @@ async def top_users(
                 u.email AS user_email,
                 u.display_name AS user_display_name,
                 cm.role AS user_role,
+                cm.club_id AS club_id,
+                o.name AS club_name,
+                o.slug AS club_slug,
                 COUNT(*) AS hits,
                 COUNT(DISTINCT COALESCE(ue.route, ue.path)) AS unique_routes,
                 MAX(ue.created_at) AS last_hit
             FROM usage_events ue
             LEFT JOIN users u ON u.id = ue.user_id
             {_USER_ROLE_JOIN}
+            LEFT JOIN organisations o ON o.id = cm.club_id
             WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
               AND ue.user_id IS NOT NULL
               {_role_filter(roles)}
               {search}
-            GROUP BY ue.user_id, u.email, u.display_name, cm.role
+            GROUP BY ue.user_id, u.email, u.display_name, cm.role, cm.club_id, o.name, o.slug
             ORDER BY hits DESC
             LIMIT :lim
             """
@@ -906,6 +910,13 @@ async def top_users(
             "user_email": r["user_email"],
             "user_display_name": r["user_display_name"],
             "user_role": r["user_role"],
+            # A super admin's own membership row points at whatever club they
+            # last acted as / were created under — not meaningful as "their
+            # club", so the frontend shows "BetterCricket" for that role
+            # instead; only club_admin/club_member rows carry a real club.
+            "club_id": str(r["club_id"]) if r["club_id"] and r["user_role"] != "super_admin" else None,
+            "club_name": r["club_name"] if r["user_role"] != "super_admin" else None,
+            "club_slug": r["club_slug"] if r["user_role"] != "super_admin" else None,
             "hits": int(r["hits"] or 0),
             "unique_routes": int(r["unique_routes"] or 0),
             "last_hit": r["last_hit"].isoformat() if r["last_hit"] else None,

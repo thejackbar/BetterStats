@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -779,6 +780,12 @@ function UtmMatchPanel() {
 }
 
 export default function SuperMarketing() {
+  // A deep link (e.g. a club utm_code/name clicked on the Usage page) seeds
+  // the search box so the linked club is filtered straight to the top —
+  // ?q=<utm_code or name>.
+  const [searchParams] = useSearchParams()
+  const initialQ = searchParams.get('q') || ''
+
   const [stats, setStats] = useState(null)
   const [status, setStatus] = useState(null)
   const [clubs, setClubs] = useState([])
@@ -792,7 +799,7 @@ export default function SuperMarketing() {
   const [countryOptions, setCountryOptions] = useState([])
   const PAGE = 100
   const [filters, setFilters] = useState({
-    q: '', state: '', association: '', associations: [], countries: [],
+    q: initialQ, state: '', association: '', associations: [], countries: [],
     postcode_from: '', postcode_to: '',
     contact: '', person: '',
     // Tri-state directory filters: '' (off) | 'include' | 'exclude'.
@@ -836,6 +843,13 @@ export default function SuperMarketing() {
 
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
+  // Auto-expand the single matching club when the page was opened via a
+  // deep link (?q=...) — otherwise a landed-on club is filtered to the top
+  // but still needs a click to open, which defeats the point of the link.
+  useEffect(() => {
+    if (initialQ && clubs.length === 1) setExpanded(clubs[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQ, clubs])
   useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
   useEffect(() => { api.mktCountries().then(setCountryOptions).catch(() => {}) }, [])

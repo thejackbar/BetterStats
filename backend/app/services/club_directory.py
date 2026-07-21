@@ -806,7 +806,8 @@ def club_filters(q: Optional[str] = None, state: Optional[str] = None,
     if q:
         like = f"%{q.lower()}%"
         conds.append(or_(func.lower(MarketingClub.name).like(like),
-                         func.lower(MarketingClub.association_name).like(like)))
+                         func.lower(MarketingClub.association_name).like(like),
+                         func.lower(MarketingClub.utm_code).like(like)))
     if association:
         a = f"%{association.lower()}%"
         # primary association OR any in the associations JSONB list OR (when the
