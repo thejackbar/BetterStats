@@ -77,8 +77,8 @@ containers on the same internal Docker network.
 
 1. **Generate a shared secret**: `openssl rand -hex 32` → this is
    `BACKUP_AGENT_SECRET`.
-2. **Add it to `/srv/docker/.env`** (or wherever `AGE_RECIPIENT`/`DB_PASSWORD`
-   already live): `BACKUP_AGENT_SECRET=...`
+2. **Add it to `/srv/docker/.env`** (or wherever `AGE_RECIPIENT`/
+   `BETTERSTATS_DB_PASSWORD` already live): `BACKUP_AGENT_SECRET=...`
 3. **Paste `ops/backup/agent/docker-compose.snippet.yaml`'s service into the
    central `/srv/docker/docker-compose.yaml`**, matching its `networks:` to
    whichever internal network `betterstats-backend` is already on.
@@ -206,6 +206,37 @@ plain `pg_restore`. `app/services/club_restore.py` (invoked via
   transaction across ~70 tables), so a failure partway through leaves a
   clearly diagnosable partial state rather than a long-held lock.
 
+## Live progress while a task runs
+
+Every backup or restore shows a progress bar on **Super Admin → Backups**
+while it's `running` — percentage complete, a message for the current stage
+("Processing players (4/13)..." or, for a per-club restore, "Processing
+batting_innings 3400 of 8912"), and a running tally of finished stages
+("Players: 876, Games: 3957, ..."). The page polls every 3s while anything
+is running or requested.
+
+Honest ceiling on what's achievable, by task type:
+- **Per-club restore** (`club_restore.py`) gets true **row-level** progress —
+  it writes rows itself in Python, in batches of 500, so it can report
+  "Processing X N of M" live as it goes.
+- **Whole-database backup and full restore** use `pg_dump`/`pg_restore`,
+  which only expose **table-level** progress (`--verbose` prints "now
+  dumping/restoring table X", never a row count within that table). So these
+  report which of a curated set of entities (organisations, seasons, grades,
+  players, games, and the per-game stat tables) is currently being
+  processed, filling in each entity's row count once it's known — during the
+  dump from a cheap `pg_stat_user_tables` estimate, or after a restore
+  finishes from a real `COUNT(*)` against the restored database. There's no
+  way to make pg_dump/pg_restore report "row 176 of 876" live within one
+  table — that's a hard tool limitation, not a shortcut taken here.
+
+Progress state lives in `backup_tasks.progress` (migration 167), written via
+`app/scripts/backup_task.py update-progress`/`mark-stage-done` (called from
+the shell scripts) or directly from `club_restore.py` (already in-process).
+Progress writes always happen on their OWN short-lived DB connection, never
+the restore's own transaction — so a progress update can never turn a clean
+"one transaction per table" restore into a partially-committed one.
+
 ## Per-club size and record-count stats
 
 Row counts per club are exact. Per-club *byte size* is an **estimate**:
@@ -221,7 +252,20 @@ club's data got 10x bigger overnight", not a billing-grade number.
   Run `restore-club ... ` WITHOUT `--apply` (the default) against a real
   bundle and sanity-check the reported row counts before ever passing
   `--apply` on production data. The dry-run path touches nothing, so it's
-  safe to rehearse repeatedly.
+  safe to rehearse repeatedly. In particular, the `pg_dump --verbose`/
+  `pg_restore --verbose` line-matching that drives progress reporting was
+  written against the documented output format for Postgres 15 (the version
+  this stack runs) — worth a first live look at `docker logs` /
+  `journalctl -u betterstats-backup` during an early run to confirm the
+  regex actually matches; if it doesn't, the backup/restore itself is
+  unaffected (progress silently stays at "Starting…"), only the progress bar
+  degrades.
+- `NETWORK_NAME` (default `docker-shared-net`) and `UPLOADS_VOLUME` (default
+  `${COMPOSE_PROJECT_NAME}_betterstats_uploads`) match this server's actual
+  central compose file — confirm the uploads volume name with `docker volume
+  ls | grep uploads` on the box before the first real restore, since that
+  one wasn't given explicitly and is inferred from the `betterstats_pgdata`
+  naming pattern.
 - **Restore buttons in the UI.** Deliberate, not a gap — see "Why restore has
   no UI button" above.
 - **Automatic offsite sync.** Deliberate, not a gap — per direct instruction

@@ -44,7 +44,16 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.models.db import async_session_maker
+from app.services import backup_progress
+
 logger = logging.getLogger(__name__)
+
+# Chunk size for progress-reporting inserts — small enough that a big table
+# (batting_innings etc. can run to tens of thousands of rows for an active
+# club) gives several progress updates rather than one silent multi-second
+# INSERT, large enough that the round trips don't dominate the run time.
+_BATCH_SIZE = 500
 
 
 async def _direct_org_tables(conn) -> list[str]:
@@ -115,6 +124,38 @@ async def _insert_rows(conn, table: str, cols: list[str], rows: list[dict]) -> i
     return len(rows)
 
 
+async def _insert_rows_with_progress(
+    session: AsyncSession, task_id: str, table: str, cols: list[str], rows: list[dict],
+) -> int:
+    """Same as _insert_rows, but in batches of _BATCH_SIZE with a live
+    progress update after each — this is the one place true row-level
+    "Processing X N of M" progress is possible, since we're writing the rows
+    ourselves rather than going through pg_dump/pg_restore's opaque
+    table-at-a-time streaming.
+
+    Progress is written on a SEPARATE, short-lived session/connection, not
+    ``session`` (which holds the table's restore transaction) — committing
+    ``session`` mid-restore to report progress would turn "one transaction
+    per table" into partial, uncommittable-as-a-whole batches, weakening the
+    exact safety property this module's docstring promises."""
+    total = len(rows)
+    if not total:
+        return 0
+    inserted = 0
+    for start in range(0, total, _BATCH_SIZE):
+        batch = rows[start:start + _BATCH_SIZE]
+        inserted += await _insert_rows(session, table, cols, batch)
+        try:
+            async with async_session_maker() as progress_session:
+                await backup_progress.set_progress(
+                    progress_session, task_id, stage=table, current=inserted, total=total,
+                    message=f"Processing {table} {inserted} of {total}",
+                )
+        except Exception as e:  # progress reporting must never break the actual restore
+            logger.warning("club_restore: progress update failed for %s: %s", table, e)
+    return inserted
+
+
 async def plan_and_run_club_restore(
     *,
     live_session: AsyncSession,
@@ -138,11 +179,22 @@ async def plan_and_run_club_restore(
     summary: dict = {"tables": {}, "apply": apply}
     snapshot: dict = {}
 
+    async def _report(stage: str, current: int, total: int, message: str) -> None:
+        try:
+            async with async_session_maker() as progress_session:
+                await backup_progress.set_progress(
+                    progress_session, task_id, stage=stage, current=current, total=total, message=message,
+                )
+        except Exception as e:
+            logger.warning("club_restore: progress update failed for %s: %s", stage, e)
+
     try:
         async with scratch_engine.connect() as scratch_conn:
             direct_tables = await _direct_org_tables(scratch_conn)
             game_tables = await _game_scoped_tables(scratch_conn)
             player_fks = await _player_fk_columns(scratch_conn)
+            total_tables = len(direct_tables) + len(game_tables)
+            table_idx = 0
 
             # The org's player ids AS OF THE BACKUP — player ids are
             # deterministic (uuid5(org, guid) or the raw guid, see the
@@ -157,6 +209,9 @@ async def plan_and_run_club_restore(
 
             # --- Direct tables --------------------------------------------------
             for table in direct_tables:
+                table_idx += 1
+                await _report(table, table_idx, total_tables,
+                              f"{'Analyzing' if not apply else 'Reading'} {table} ({table_idx}/{total_tables})...")
                 try:
                     cols, scratch_rows = await _fetch_rows(
                         scratch_conn, table, "organisation_id = :org", {"org": org_id}
@@ -179,13 +234,17 @@ async def plan_and_run_club_restore(
                         text(f'DELETE FROM {_quote_ident(table)} WHERE organisation_id = :org'),
                         {"org": org_id},
                     )
-                    restored = await _insert_rows(live_session, table, cols, scratch_rows)
+                    restored = await _insert_rows_with_progress(live_session, task_id, table, cols, scratch_rows)
                     await live_session.commit()
                     summary["tables"][table]["restored"] = restored
+                    await backup_progress.mark_stage_done(live_session, task_id, table, restored)
+                else:
+                    await backup_progress.mark_stage_done(live_session, task_id, table, len(scratch_rows))
 
             # --- Game-scoped tables, scoped via player FK columns ---------------
             if scratch_player_ids:
                 for table in game_tables:
+                    table_idx += 1
                     fk_cols = player_fks.get(table)
                     if not fk_cols:
                         logger.info(
@@ -195,6 +254,8 @@ async def plan_and_run_club_restore(
                             table,
                         )
                         continue
+                    await _report(table, table_idx, total_tables,
+                                  f"{'Analyzing' if not apply else 'Reading'} {table} ({table_idx}/{total_tables})...")
                     or_clause = " OR ".join(f'{_quote_ident(c)} = ANY(:pids)' for c in fk_cols)
                     try:
                         cols, scratch_rows = await _fetch_rows(
@@ -222,9 +283,12 @@ async def plan_and_run_club_restore(
                             text(f'DELETE FROM {_quote_ident(table)} WHERE {or_clause}'),
                             {"pids": scratch_player_ids},
                         )
-                        restored = await _insert_rows(live_session, table, cols, scratch_rows)
+                        restored = await _insert_rows_with_progress(live_session, task_id, table, cols, scratch_rows)
                         await live_session.commit()
                         summary["tables"][table]["restored"] = restored
+                        await backup_progress.mark_stage_done(live_session, task_id, table, restored)
+                    else:
+                        await backup_progress.mark_stage_done(live_session, task_id, table, len(scratch_rows))
     finally:
         await scratch_engine.dispose()
 

@@ -64,7 +64,7 @@ async def list_backup_tasks(
         SELECT t.id, t.task_type, t.status, t.scope_org_id, o.name AS scope_org_name,
                t.triggered_by, t.triggered_by_user_id, t.bundle_path, t.bundle_timestamp,
                t.started_at, t.completed_at, t.db_size_bytes, t.uploads_size_bytes,
-               t.total_row_count, t.club_stats, t.error_message
+               t.total_row_count, t.club_stats, t.error_message, t.progress
         FROM backup_tasks t
         LEFT JOIN organisations o ON o.id = t.scope_org_id
         {where_clause}
@@ -94,6 +94,7 @@ async def list_backup_tasks(
                 "total_row_count": r["total_row_count"],
                 "club_stats": r["club_stats"],
                 "error_message": r["error_message"],
+                "progress": r["progress"],
             }
             for r in rows
         ],

@@ -26,6 +26,42 @@ function fmtDateTime(iso) {
   })
 }
 
+// Live progress for a running task — percentage bar, current stage's
+// "Processing X N of M" message, plus a running tally of finished stages
+// ("Players: 876", "Games: 3957", ...). Table-level for a whole-DB
+// backup/restore (pg_dump/pg_restore don't expose row-level progress within
+// a table); true row-level for a per-club restore.
+function ProgressBar({ progress }) {
+  if (!progress) {
+    return <p className="font-mono text-[10px] text-pb-faint">Starting…</p>
+  }
+  const { stage, current, total, message, stage_results: stageResults } = progress
+  const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0
+  return (
+    <div className="space-y-2 max-w-xl">
+      <div className="flex items-center justify-between font-mono text-[10px] text-pb-faint">
+        <span>{message || (stage ? `Processing ${stage}` : 'Working…')}</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-pb-surface2 overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, background: 'var(--pb-accent)' }}
+        />
+      </div>
+      {stageResults && Object.keys(stageResults).length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-pb-dim">
+          {Object.entries(stageResults).map(([name, count]) => (
+            <span key={name}>
+              {name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ')}: {Number(count).toLocaleString()}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Downloads a bundle file (still age-encrypted, exactly as it sits on
 // disk — this app never sends backups anywhere on its own; a manual
 // download is the only way a copy leaves the server).
@@ -86,6 +122,14 @@ export default function SuperBackups() {
 
   useEffect(() => { loadTasks() }, [typeFilter, statusFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const hasRunning = tasks.some((t) => t.status === 'running' || t.status === 'requested')
+  useEffect(() => {
+    if (!hasRunning) return
+    const id = setInterval(loadTasks, 3000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRunning])
+
   useEffect(() => {
     setStatsLoading(true)
     api.superBackupStats().then(setStats).catch(() => {}).finally(() => setStatsLoading(false))
@@ -106,10 +150,11 @@ export default function SuperBackups() {
       if (res?.status === 'already_running') {
         setRunMsg('A backup is already running.')
       } else {
-        setRunMsg('Backup started — this can take a few minutes. Refresh below to see it complete.')
+        setRunMsg('Backup started — progress shows below as it runs.')
       }
       // give the new "running" row a moment to land, then refresh the list
-      setTimeout(loadTasks, 2000)
+      // (the polling effect takes over from there while it's running)
+      setTimeout(loadTasks, 1500)
     } catch (err) {
       setRunMsg(err.message || 'Could not start a backup.')
     } finally {
@@ -289,6 +334,13 @@ export default function SuperBackups() {
                         )}
                       </td>
                     </tr>
+                    {(t.status === 'running' || t.status === 'requested') && (
+                      <tr className="border-b pb-hairline bg-pb-surface2/20">
+                        <td colSpan={9} className="px-3 py-3">
+                          <ProgressBar progress={t.progress} />
+                        </td>
+                      </tr>
+                    )}
                     {expanded === t.id && t.club_stats && (
                       <tr className="border-b pb-hairline bg-pb-surface2/20">
                         <td colSpan={9} className="px-3 py-3">

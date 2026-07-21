@@ -7,7 +7,8 @@
 # volume, encrypts both, writes a dated bundle under BACKUP_ROOT, prunes
 # bundles older than the configured retention window, and logs the run into
 # the `backup_tasks` table (via app/scripts/backup_task.py in the backend
-# container) so it shows up on the Super Admin Backups page.
+# container) so it shows up on the Super Admin Backups page — including
+# LIVE progress while it runs (see "Progress reporting" below).
 #
 # Follows the same compose conventions as deploy.sh: run from /srv/docker,
 # COMPOSE_PROJECT_NAME=bltbox_docker_app set, only `docker compose ...`
@@ -27,6 +28,16 @@
 # Manual run: BACKUP_FORCE=1 ./backup.sh  (ignores the schedule check, still
 # respects "already ran today" — pass BACKUP_FORCE=2 to also ignore that).
 #
+# Progress reporting: pg_dump doesn't expose row-level progress within a
+# table — only "now starting table X" (--verbose). So this reports
+# TABLE-level progress for a curated list of the tables that actually matter
+# to a human watching (players, games, per-innings stats, ...), each shown
+# with its known row count (from pg_stat_user_tables — an estimate, cheap,
+# not a full COUNT(*) scan) once that table's dump starts. That's the
+# honest ceiling for a whole-database pg_dump; true live "row 176 of 876"
+# progress only exists for per-club restore (see club_restore.py), which
+# writes rows itself in Python and can count as it goes.
+#
 set -euo pipefail
 
 cd /srv/docker
@@ -38,7 +49,10 @@ DB_SERVICE="${DB_SERVICE:-betterstats-db}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-betterstats-backend}"
 POSTGRES_DB="${POSTGRES_DB:-betterstats}"
 POSTGRES_USER="${POSTGRES_USER:-cricket}"
-UPLOADS_VOLUME="${UPLOADS_VOLUME:-${COMPOSE_PROJECT_NAME}_uploads}"
+# Real volume name — confirm with `docker volume ls | grep uploads` on the box
+# and override if it doesn't match (this project's volumes so far follow
+# `<project>_betterstats_<name>`, e.g. betterstats_pgdata for the DB).
+UPLOADS_VOLUME="${UPLOADS_VOLUME:-${COMPOSE_PROJECT_NAME}_betterstats_uploads}"
 # age public key used to encrypt every bundle (age -R recipients file, or a
 # single -r KEY). Generate with `age-keygen`; keep the PRIVATE key offline —
 # it's only needed to restore, never to back up.
@@ -50,7 +64,7 @@ fail() { log "ERROR: $*"; [ -n "${TASK_ID:-}" ] && exec_backend python -m app.sc
 exec_backend() { docker compose exec -T "$BACKEND_SERVICE" "$@"; }
 
 if [ -z "$AGE_RECIPIENT" ]; then
-  fail "AGE_RECIPIENT is not set (see ops/backup/README.md — generate a keypair with age-keygen and set this to the public key)"
+  fail "AGE_RECIPIENT is not set (see docs/backup-system.md — generate a keypair with age-keygen and set this to the public key)"
 fi
 
 # --- Schedule check (skipped entirely with BACKUP_FORCE) ----------------------
@@ -90,14 +104,61 @@ START_TASK_ARGS=(python -m app.scripts.backup_task start-task --type backup --tr
 TASK_ID=$(exec_backend "${START_TASK_ARGS[@]}" | tr -d '\r')
 log "Started backup task $TASK_ID -> $BUNDLE_DIR"
 
+# --- Progress setup: the entities worth showing progress for, in the order
+# a human would expect (foundational data first, big per-game stat tables
+# last) --------------------------------------------------------------------
+ENTITY_TABLES=(organisations seasons grades players games batting_innings bowling_spells fielding_stats bowler_wickets game_appearances fall_of_wickets partnerships users)
+TOTAL_ENTITIES=${#ENTITY_TABLES[@]}
+
+declare -A TABLE_COUNTS
+while IFS=$'\t' read -r tbl cnt; do
+  [ -z "$tbl" ] && continue
+  TABLE_COUNTS["$tbl"]="$cnt"
+done < <(exec_backend python -m app.scripts.backup_task table-counts)
+
+# Reads pg_dump --verbose's stderr line by line; on each "dumping contents of
+# table" line for a tracked entity, marks the PREVIOUS tracked entity done
+# (we only find out a table is finished once the next one starts) and
+# reports the new current stage. Also echoes every line through to the host
+# log unchanged, so nothing about pg_dump's own output is lost.
+track_dump_progress() {
+  local prev_table="" prev_count=0 idx=0
+  local dump_line_pat='dumping contents of table "public\.([a-zA-Z0-9_]+)"'
+  while IFS= read -r line; do
+    echo "$line"
+    if [[ "$line" =~ $dump_line_pat ]]; then
+      local table="${BASH_REMATCH[1]}"
+      local is_tracked=0
+      for t in "${ENTITY_TABLES[@]}"; do [ "$t" = "$table" ] && is_tracked=1 && break; done
+      [ "$is_tracked" = "0" ] && continue
+      if [ -n "$prev_table" ]; then
+        exec_backend python -m app.scripts.backup_task mark-stage-done "$TASK_ID" --stage "$prev_table" --count "$prev_count" || true
+      fi
+      idx=$((idx + 1))
+      local count="${TABLE_COUNTS[$table]:-0}"
+      exec_backend python -m app.scripts.backup_task update-progress "$TASK_ID" \
+        --stage "$table" --current "$idx" --total "$TOTAL_ENTITIES" \
+        --message "Backing up $table ($idx/$TOTAL_ENTITIES) — $count records" || true
+      prev_table="$table"; prev_count="$count"
+    fi
+  done
+  if [ -n "$prev_table" ]; then
+    exec_backend python -m app.scripts.backup_task mark-stage-done "$TASK_ID" --stage "$prev_table" --count "$prev_count" || true
+  fi
+}
+
 # --- Postgres: MVCC-consistent dump, no lock, no downtime ---------------------
 log "Dumping database..."
-docker compose exec -T "$DB_SERVICE" pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB" \
+docker compose exec -T "$DB_SERVICE" pg_dump --verbose -Fc -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  2> >(track_dump_progress >&2) \
   | age -r "$AGE_RECIPIENT" -o "$BUNDLE_DIR/db.dump.age" \
   || fail "pg_dump failed"
 
 # --- uploads volume ------------------------------------------------------------
 log "Archiving uploads volume..."
+exec_backend python -m app.scripts.backup_task update-progress "$TASK_ID" \
+  --stage uploads --current "$TOTAL_ENTITIES" --total "$TOTAL_ENTITIES" \
+  --message "Archiving uploaded files..." || true
 docker run --rm -v "${UPLOADS_VOLUME}:/from:ro" -v "$BUNDLE_DIR:/to" alpine \
   tar -C /from -c . \
   | zstd -q \

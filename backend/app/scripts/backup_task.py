@@ -25,6 +25,15 @@ Usage:
   # prints "1" (has an already-completed backup task started today) or "0" —
   # lets the timer's frequent tick skip re-running once today's backup is done
   python -m app.scripts.backup_task has-run-today
+
+  # prints "table<TAB>approx_row_count" lines (from pg_stat_user_tables — an
+  # ESTIMATE, cheap, not a full COUNT(*) scan) so the calling shell script can
+  # build a progress reference before starting pg_dump/pg_restore
+  python -m app.scripts.backup_task table-counts
+
+  # live progress while a task is running — see app/services/backup_progress.py
+  python -m app.scripts.backup_task update-progress <task_id> --stage players --current 3 --total 70
+  python -m app.scripts.backup_task mark-stage-done <task_id> --stage players --count 876
 """
 import argparse
 import asyncio
@@ -35,7 +44,7 @@ import uuid
 from sqlalchemy import text
 
 from app.models.db import async_session_maker
-from app.services import backup_stats, platform_settings as ps
+from app.services import backup_progress, backup_stats, platform_settings as ps
 
 
 async def _get_schedule():
@@ -101,12 +110,46 @@ async def _has_run_today():
         print("1" if row else "0")
 
 
+async def _table_counts():
+    async with async_session_maker() as session:
+        rows = (await session.execute(text(
+            "SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY relname"
+        ))).all()
+        for name, count in rows:
+            print(f"{name}\t{max(count or 0, 0)}")
+
+
+async def _update_progress(task_id: str, stage: str, current: int, total: int, message: str | None):
+    async with async_session_maker() as session:
+        await backup_progress.set_progress(
+            session, task_id, stage=stage, current=current, total=total, message=message
+        )
+
+
+async def _mark_stage_done(task_id: str, stage: str, count: int):
+    async with async_session_maker() as session:
+        await backup_progress.mark_stage_done(session, task_id, stage, count)
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("get-schedule")
     sub.add_parser("has-run-today")
+    sub.add_parser("table-counts")
+
+    p_progress = sub.add_parser("update-progress")
+    p_progress.add_argument("task_id")
+    p_progress.add_argument("--stage", required=True)
+    p_progress.add_argument("--current", type=int, required=True)
+    p_progress.add_argument("--total", type=int, required=True)
+    p_progress.add_argument("--message", default=None)
+
+    p_stage_done = sub.add_parser("mark-stage-done")
+    p_stage_done.add_argument("task_id")
+    p_stage_done.add_argument("--stage", required=True)
+    p_stage_done.add_argument("--count", type=int, required=True)
 
     p_start = sub.add_parser("start-task")
     p_start.add_argument("--type", required=True, choices=["backup", "restore_full", "restore_club"])
@@ -137,6 +180,12 @@ def main():
     elif args.cmd == "finish-task":
         asyncio.run(_finish_task(args.task_id, args.status, args.bundle_path,
                                   args.uploads_size_bytes, args.error))
+    elif args.cmd == "table-counts":
+        asyncio.run(_table_counts())
+    elif args.cmd == "update-progress":
+        asyncio.run(_update_progress(args.task_id, args.stage, args.current, args.total, args.message))
+    elif args.cmd == "mark-stage-done":
+        asyncio.run(_mark_stage_done(args.task_id, args.stage, args.count))
 
 
 if __name__ == "__main__":

@@ -1027,6 +1027,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_backup_tasks_status ON backup_tasks(status)"
         ))
+        # Migration 167: live progress reporting for a running task (current
+        # table/entity, current/total, a human message, and a running tally
+        # of finished stages) — read by the Super Admin Backups page while
+        # polling a `running` task.
+        await conn.execute(text(
+            "ALTER TABLE backup_tasks ADD COLUMN IF NOT EXISTS progress JSONB"
+        ))
         # Login attempts — append-only audit of every sign-in attempt (success
         # or failure), so we can see which username/email is being tried, from
         # where, and whether it succeeded. IP is stored as a truncated SHA-256
