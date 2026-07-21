@@ -1,10 +1,11 @@
 # BetterStats backup system
 
-Phase 1 of the backup/restore plan: automated daily backups + a manual full
-restore, both host-level scripts, plus a Super Admin "Backups" page showing
+Automated daily backups, a manual full restore, and a manual per-club
+restore — all host-level scripts, plus a Super Admin "Backups" page showing
 run history and current database size stats. No downtime for backup; a full
-restore needs a brief app stop only at the final cutover step. Per-club
-restore is a later phase — see "Not built yet" below.
+restore needs a brief app stop only at the final cutover step; a per-club
+restore needs no downtime at all. "Run backup now" / "Restore" buttons in the
+UI are a later phase — see "Not built yet" below.
 
 ## What's backed up
 
@@ -74,11 +75,56 @@ BACKUP_FORCE=1 BACKUP_TRIGGERED_BY=manual /srv/docker/betterstats/ops/backup/bac
 
 # full restore into the live DB (asks for confirmation, briefly stops the app)
 /srv/docker/betterstats/ops/backup/restore.sh apply 2026-07-21T03-00-00Z
+
+# per-club restore — DRY RUN (default): reports what would change, writes nothing
+/srv/docker/betterstats/ops/backup/restore.sh restore-club 2026-07-21T03-00-00Z <org-id>
+
+# per-club restore — for real (asks for confirmation, no downtime, snapshots
+# the club's current data first so it can be undone)
+/srv/docker/betterstats/ops/backup/restore.sh restore-club 2026-07-21T03-00-00Z <org-id> --apply
+
+# undo a previous --apply club restore
+/srv/docker/betterstats/ops/backup/restore.sh rollback-club /srv/backups/betterstats/club-restores/<task_id>.json
 ```
 
 Every run — scheduled or manual — is logged to the `backup_tasks` table and
 shows up on **Super Admin → Backups**, along with the DB size / row count /
 per-club breakdown captured at completion.
+
+## Per-club restore — how it stays safe on a shared schema
+
+Every club's data lives in the same tables, so "restore club X" can't be a
+plain `pg_restore`. `app/services/club_restore.py` (invoked via
+`app/scripts/restore_club.py`) does it table-by-table instead:
+
+- **Direct tables** (an `organisation_id` column — players, settings,
+  sponsors, fixtures, comms, merch, fees structure, memberships, ...):
+  scoped straightforwardly by that column.
+- **Game-scoped tables** (`batting_innings`, `bowling_spells`,
+  `fielding_stats`, `bowler_wickets`, `game_appearances`, `fall_of_wickets`,
+  `partnerships`, `milestones`, ...): these have NO `organisation_id` of
+  their own, and — critically — a single game between two synced clubs
+  shares ONE `games.id` row carrying BOTH sides' per-innings data. Scoping by
+  `game_id` alone would restore or delete the *opponent's* rows for a shared
+  game too. Instead, rows are scoped through whichever column(s)
+  foreign-key-reference `players.id` (discovered live from
+  `information_schema`, not a hardcoded list), keeping only rows whose
+  linked player belongs to the target club. A fill-in row (no `player_id`,
+  free-text name — see the fill-in-players feature) has no club owner in the
+  row itself and is deliberately left untouched.
+- Tables the tool can't safely attribute to one club (e.g. `fee_match_days`,
+  which is member-scoped rather than player-scoped) are skipped and logged,
+  not guessed at.
+- **Dry-run by default.** Without `--apply`, nothing is written — it only
+  reports live-row-count vs bundle-row-count per table.
+- **Snapshot before write.** The FIRST thing `--apply` does is dump the
+  club's current live rows to
+  `/srv/backups/betterstats/club-restores/<task_id>.json` — same
+  backup-before-write precedent as `klubpro_migration.py`'s import tool —
+  before touching anything, so `rollback-club` can put it back.
+- Each table is deleted-then-reinserted inside its own transaction (not one
+  transaction across ~70 tables), so a failure partway through leaves a
+  clearly diagnosable partial state rather than a long-held lock.
 
 ## Per-club size and record-count stats
 
@@ -90,14 +136,12 @@ club's data got 10x bigger overnight", not a billing-grade number.
 
 ## Not built yet
 
-- **Per-club restore.** Structurally feasible (every table reaches back to
-  `organisations.id`, directly or via `seasons`/`grades`/`games`), but a real
-  tool, not a `pg_restore` flag: restore the bundle to a scratch DB, walk the
-  FK graph for one org, snapshot the club's *current* live rows (so the
-  restore is itself undoable, same pattern as `klubpro_migration.py`'s
-  backup-before-write), then upsert. Needs care around the FK-cascade drift
-  documented in CLAUDE.md's migration-142 post-mortem (the ORM's `ondelete=`
-  annotations weren't always the live schema's truth).
+- **This has not been run against a real database yet** — there's no
+  Postgres instance in the environment this was built in to test against.
+  Run `restore-club ... ` WITHOUT `--apply` (the default) against a real
+  bundle and sanity-check the reported row counts before ever passing
+  `--apply` on production data. The dry-run path touches nothing, so it's
+  safe to rehearse repeatedly.
 - **"Run backup now" / "Restore" buttons in the Super Admin UI.** Today,
   triggering a backup or restore means SSHing into the box and running the
   script directly (see "Manual runs" above). A UI button needs the backend to
