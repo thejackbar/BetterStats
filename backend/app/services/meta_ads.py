@@ -449,14 +449,30 @@ def build_insights(
             ),
         })
     if leads >= 2 and registrations == 0 and spend >= 15:
+        # Small sample by design: Meta's own Lead count here is already
+        # flagged elsewhere as unstable at low volume, and the self-serve
+        # flow (email OTP included) is proven working through other
+        # channels, so don't jump to "the flow is broken" on a couple of
+        # ad clicks. Only escalate to critical once there's enough volume
+        # that a genuine block would actually show up as a pattern.
+        small_sample = leads < 8
         insights.append({
-            "severity": "critical",
+            "severity": "warning" if small_sample else "critical",
             "title": "Visitors are starting registration but none are finishing",
             "detail": (
                 f"Meta has recorded {leads:.0f} people picking a club, but {registrations} have actually "
-                "completed a trial registration. The most common cause is the email verification step. If "
-                "the backend's email provider isn't configured (still on the console/no-send default), "
-                "visitors never receive their code and get stuck. Worth running a real test signup to check."
+                "completed a trial registration. The signup flow itself is proven working (other channels "
+                "complete it regularly), so this isn't necessarily a broken step. "
+                + (
+                    f"With only {leads:.0f} people this far into the funnel, and Meta's own Lead count able "
+                    "to shift on its own, it's too small a sample to call a real problem yet. Worth watching "
+                    "as spend and leads build up, and running a real test signup from a Meta ad click if "
+                    "that's easy to do."
+                    if small_sample else
+                    "Worth running a real test signup from a Meta ad click to check the flow end to end, and "
+                    "checking whether ad traffic specifically is dropping off at a particular step (club "
+                    "search, email code, or the details form)."
+                )
             ),
         })
 
