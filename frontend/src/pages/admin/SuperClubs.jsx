@@ -98,7 +98,6 @@ export default function SuperClubs() {
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [pmModalClub, setPmModalClub] = useState(null) // club object | null
-  const [mergeSourceClub, setMergeSourceClub] = useState(null) // club object | null
   // In-progress "Renews" date edits per module key, before blur — keeps the native
   // date input's own mid-typing state from being clobbered by an autosave+reload
   // on every keystroke (see setModuleRenewal).
@@ -1215,13 +1214,6 @@ export default function SuperClubs() {
                         Billing
                       </button>
                       <button
-                        onClick={() => setMergeSourceClub(club)}
-                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
-                        title="Fold this club's synced history into another club (real-world club mergers), then archive it"
-                      >
-                        Merge into…
-                      </button>
-                      <button
                         onClick={() => { setConfirmDelete(club.id); setArchiveConfirmText(''); setEditId(null) }}
                         className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
                       >
@@ -1487,137 +1479,6 @@ export default function SuperClubs() {
       {pmModalClub && (
         <ClubPaymentMethodsModal club={pmModalClub} onClose={() => setPmModalClub(null)} />
       )}
-      {mergeSourceClub && (
-        <ClubMergeModal
-          sourceClub={mergeSourceClub}
-          allClubs={clubs}
-          onClose={() => setMergeSourceClub(null)}
-          onDone={() => { setMergeSourceClub(null); load() }}
-        />
-      )}
     </AdminLayout>
-  )
-}
-
-// For real-world club mergers (e.g. two clubs' PlayHQ identities merging
-// into one) — folds a source club's whole synced history (players, seasons,
-// grades, games) into a target club, then archives the source. Preview
-// counts come from a cheap read-only endpoint so the operator sees the scale
-// of what they're about to do before committing (this isn't fully
-// reversible — see services/org_merge.py's docstring for what does and
-// doesn't have a built-in undo).
-function ClubMergeModal({ sourceClub, allClubs, onClose, onDone }) {
-  const [targetId, setTargetId] = useState('')
-  const [preview, setPreview] = useState(null)
-  const [loadingPreview, setLoadingPreview] = useState(false)
-  const [merging, setMerging] = useState(false)
-  const [confirmText, setConfirmText] = useState('')
-  const [error, setError] = useState('')
-  const [result, setResult] = useState(null)
-
-  const targets = allClubs.filter((c) => c.id !== sourceClub.id && !c.archived_at)
-
-  useEffect(() => {
-    setPreview(null); setError(''); setConfirmText('')
-    if (!targetId) return
-    setLoadingPreview(true)
-    api.superClubMergePreview(sourceClub.id, targetId)
-      .then(setPreview)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingPreview(false))
-  }, [targetId, sourceClub.id])
-
-  const targetClub = targets.find((c) => c.id === targetId)
-  const confirmPhrase = targetClub ? `MERGE ${sourceClub.name.toUpperCase()}` : ''
-  const canMerge = targetId && confirmText.trim() === confirmPhrase && !merging
-
-  const doMerge = async () => {
-    setMerging(true); setError('')
-    try {
-      const r = await api.superClubMerge(sourceClub.id, targetId)
-      setResult(r)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setMerging(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-pb-bg border pb-hairline rounded-lg max-w-lg w-full p-5 max-h-[85vh] overflow-y-auto">
-        <div className="font-mono text-[10px] tracking-wide2 text-pb-faint mb-1">CLUB MERGER</div>
-        <h2 className="font-display font-bold text-lg text-pb-text mb-3">Merge {sourceClub.name}</h2>
-
-        {result ? (
-          <div className="space-y-2">
-            <p className="text-sm text-pb-text">
-              Merged into <span className="font-semibold">{result.target_org_id === targetId ? targetClub?.name : ''}</span>.
-              {' '}{sourceClub.name} has been archived.
-            </p>
-            <ul className="font-mono text-[11px] text-pb-dim space-y-0.5">
-              <li>Seasons: {result.seasons_moved} moved, {result.seasons_merged} merged</li>
-              <li>Grades: {result.grades_moved} moved, {result.grades_merged} merged</li>
-              <li>Games repointed: {result.games_repointed}</li>
-              <li>Players: {result.players_moved} moved, {result.players_merged} merged</li>
-            </ul>
-            {result.skipped_player_conflicts?.length > 0 && (
-              <p className="text-[11px] text-amber-400">
-                {result.skipped_player_conflicts.length} player(s) hit a data conflict and were left
-                under the target club unmerged — reconcile them manually via Merge Players.
-              </p>
-            )}
-            <button onClick={onDone} className="mt-3 px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
-              DONE
-            </button>
-          </div>
-        ) : (
-          <>
-            <p className="text-[12px] text-pb-faint mb-4 leading-relaxed">
-              Every player, season, grade and game currently synced under <span className="text-pb-text">{sourceClub.name}</span> will
-              be moved onto (or merged with, where the same real competition/player already exists on both sides) the club you pick
-              below, and {sourceClub.name} will then be archived. Typical use: sync a since-merged predecessor club as its own temporary
-              club here first, then fold its history into the real, ongoing club with this tool.
-            </p>
-            <label className="font-mono text-[10px] text-pb-faint block mb-1">MERGE INTO</label>
-            <select value={targetId} onChange={(e) => setTargetId(e.target.value)}
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text mb-3">
-              <option value="">— select the target club —</option>
-              {targets.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-
-            {loadingPreview && <p className="font-mono text-[10px] text-pb-faint">loading…</p>}
-            {preview && (
-              <div className="rounded border pb-hairline p-3 mb-3 font-mono text-[11px] text-pb-dim space-y-0.5">
-                <div>{preview.seasons_total} seasons, {preview.grades_total} grades, {preview.games_total} games, {preview.players_total} players</div>
-                <div className="text-pb-faintest">will be reassigned from {sourceClub.name} onto {targetClub?.name}.</div>
-              </div>
-            )}
-            {error && <p className="text-[12px] text-pb-red mb-3">{error}</p>}
-
-            {targetId && (
-              <>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">
-                  Type <span className="text-pb-text">{confirmPhrase}</span> to confirm
-                </label>
-                <input type="text" value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
-                  className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text mb-4" />
-              </>
-            )}
-
-            <div className="flex justify-end gap-2">
-              <button onClick={onClose} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text px-3 py-2">
-                CANCEL
-              </button>
-              <button onClick={doMerge} disabled={!canMerge}
-                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-40"
-                style={{ background: 'var(--pb-red, #e05555)' }}>
-                {merging ? 'MERGING…' : 'MERGE & ARCHIVE'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
   )
 }

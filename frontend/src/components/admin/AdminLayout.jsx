@@ -96,6 +96,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/discount-report', label: 'Discount Report' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
   { to: '/admin/super/login-attempts', label: 'Login Attempts' },
+  { to: '/admin/super/merge-clubs', label: 'Merge Clubs' },
   { to: '/admin/super/meta-ads', label: 'Meta Ads' },
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },

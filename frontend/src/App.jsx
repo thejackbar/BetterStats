@@ -109,6 +109,7 @@ const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
 const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail'))
 const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
+const SuperClubMerge = lazy(() => import('./pages/admin/SuperClubMerge'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
 const SuperCoupons = lazy(() => import('./pages/admin/SuperCoupons'))
@@ -303,6 +304,7 @@ export default function App() {
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
           <Route path="/admin/super" element={<ProtectedRoute requireRole="super_admin"><SuperOverview /></ProtectedRoute>} />
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
+          <Route path="/admin/super/merge-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubMerge /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
           <Route path="/admin/super/coupons" element={<ProtectedRoute requireRole="super_admin"><SuperCoupons /></ProtectedRoute>} />
