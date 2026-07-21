@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import ClubLocationMap from '../../components/admin/ClubLocationMap'
 
 // PlayHQ stores the abbreviated state on the club (e.g. "WA", "NSW"), so the
 // filter value must be the abbreviation, not the full name.
@@ -598,6 +599,8 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                 {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
               </button>
             </div>
+            <ClubLocationMap latitude={club.latitude} longitude={club.longitude}
+              postcode={club.postcode} state={club.state} />
           </div>
         </div>
         <div className="space-y-2">
