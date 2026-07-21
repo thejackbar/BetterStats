@@ -2060,6 +2060,56 @@ a new table:
   `getCurrentUtm()` (a non-sticky parse of the CURRENT URL's own UTM params),
   which now wins over the first-touch snapshot whenever present.
 
+## Uploaded scorecard missing from the public Games page (migration 169, v8.76.1, Jul 2026)
+
+Reported: a scorecard uploaded via `/admin/upload-scorecard` for Legana
+Cricket Club never showed up on `/legana-cricket-club/games`.
+
+**Root cause**: the upload form (`AdminScorecardUpload.jsx`) lets Grade be
+left as "— none —" (Season is required, Grade isn't). `GET
+/organisations/{id}/results` (`organisations.py::get_org_results`, what
+`GamesPage.jsx` calls, and it always applies a season filter — it
+auto-selects the most recent season on load) derived season purely by
+joining `grades gr ON gr.id = g.grade_id` then `seasons s ON s.id =
+gr.season_id`. With `grade_id` NULL, both `gr` and `s` came back NULL, so the
+season filter (`s.id = :season_id ...`) could never match — even though
+`manual_games.season_id` itself is a required, always-set column. The row
+was silently excluded under every season, on every page load.
+
+**Also found while fixing it**: the same query's org-ownership check had a
+bare `g.source = 'manual'` clause with no organisation check at all, so
+literally any club's manual game read as "ours" on every other club's
+results/W-L-D headline — a cross-club data leak. `games.py::list_games`'s
+`api_games` sub-query had the identical clause even though manual games are
+already fetched separately and correctly (org-scoped) by
+`_fetch_manual_games_as_list` in the same function, so that endpoint doubly
+leaked (any org's manual games) and duplicated (this org's own manual games,
+once via each path). `manual_entries.py`'s upload-time duplicate-check
+(`check_scorecard_duplicate`) had the same grade-required join, so it also
+couldn't detect an existing grade-less manual game on re-upload.
+
+**Fix**: `v_effective_games` now carries `season_id`/`organisation_id`
+columns directly (migration 169 — for `games`, derived via
+grade→season same as before; for `manual_games`, its own always-set
+columns), appended at the end so no existing consumer (none `SELECT *`
+against this view) is affected. `get_org_results`, `_club_results`
+(aggregations.py, the headline W/L/D — explicitly mirrors `get_org_results`
+so the two agree) and `check_scorecard_duplicate` now join season off the
+view's own `season_id` and check `g.organisation_id = :org_id` instead of
+the blanket `g.source = 'manual'`. `list_games`'s `api_games` sub-query now
+scopes to `g.source = 'api'` only, since manual games are handled entirely
+by the separate, already-correct fetch. Verified end-to-end against a real
+local Postgres instance (base schema + the view + sample cross-org data)
+before shipping — confirmed the bug reproduced against the old query and no
+longer does against the new one, including a regression check that an
+ordinary graded API-synced game is unaffected.
+
+**Anti-pattern reminder**: a manual game can legitimately have no
+`grade_id` (Grade is optional on upload) but always has a `season_id` and
+`organisation_id` — don't derive either one by joining through `grade_id`
+for a `v_effective_games` row; read the view's own `season_id`/
+`organisation_id` columns instead.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

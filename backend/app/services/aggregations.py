@@ -2754,21 +2754,28 @@ async def _club_results(
     (the reliable per-club signal for a shared games.id row between two
     both-synced clubs — see migration 167), or the game's own grade belongs
     to our org, or one of our players has a recorded appearance in it, or
-    it's a manual game — mirrors ``get_org_results`` so the headline matches
-    the results list. grades/seasons are LEFT JOINed (not INNER) so a shared
-    game whose grade_id belongs to the OTHER club (whichever synced it first)
+    it's a manual game we created (checked via the view's own
+    `organisation_id`, migration 169 — a bare `g.source = 'manual'` used to
+    mean ANY club's manual game counted as "ours", a cross-club leak in the
+    W/L/D headline) — mirrors ``get_org_results`` so the headline matches
+    the results list. grades are LEFT JOINed (not INNER) so a shared game
+    whose grade_id belongs to the OTHER club (whichever synced it first)
     still counts — an INNER JOIN gated on s.organisation_id would otherwise
-    silently exclude it regardless of the appearance check. NOT matching the
-    org's name against the free-text home_team/away_team CA supplies, which
-    silently zeroed every game for a club whose CA-recorded team text doesn't
-    literally contain the org's first name-token (e.g. a hyphenated name like
-    "Bayswater-Postels" where CA spells it differently). Reads
-    ``v_effective_games`` (so it self-corrects with the cross-club views) and
-    replaces the retired PlayHQ Partner win/loss override.
+    silently exclude it regardless of the appearance check; season is
+    likewise joined off the view's own `season_id` rather than via
+    grade->season, so a manual game with no grade (the upload form allows
+    "— none —" for Grade) still resolves its season for the season_ids
+    filter. NOT matching the org's name against the free-text
+    home_team/away_team CA supplies, which silently zeroed every game for a
+    club whose CA-recorded team text doesn't literally contain the org's
+    first name-token (e.g. a hyphenated name like "Bayswater-Postels" where
+    CA spells it differently). Reads ``v_effective_games`` (so it
+    self-corrects with the cross-club views) and replaces the retired
+    PlayHQ Partner win/loss override.
     """
     clauses = [
         """(
-            g.source = 'manual'
+            g.organisation_id = CAST(:org_id AS UUID)
             OR g.home_org_id = CAST(:org_id AS UUID)
             OR g.away_org_id = CAST(:org_id AS UUID)
             OR s.organisation_id = CAST(:org_id AS UUID)
@@ -2828,7 +2835,7 @@ async def _club_results(
                     END AS effective_result
                 FROM v_effective_games g
                 LEFT JOIN grades gr ON gr.id = g.grade_id
-                LEFT JOIN seasons s ON s.id = gr.season_id
+                LEFT JOIN seasons s ON s.id = g.season_id
                 WHERE {' AND '.join(clauses)}
             ) sub
         """
