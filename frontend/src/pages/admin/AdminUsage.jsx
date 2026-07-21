@@ -64,6 +64,36 @@ function sourceMeta(s) {
   return SOURCE_STYLE[key] || { label: s, dot: 'var(--pb-accent)' }
 }
 
+// A "source" that isn't one of the known channels (Facebook, Google, Direct,
+// …) is a club's own utm_code, used as a self-attribution tag on their share
+// links — see sourceMeta's fallback branch. Those are the ones worth linking
+// through to the Club Directory.
+function isClubCode(source) {
+  if (!source) return false
+  return !SOURCE_STYLE[source.toLowerCase()]
+}
+
+function clubDirectoryUrl(code) {
+  return `/admin/super/marketing?q=${encodeURIComponent(code)}`
+}
+
+// Renders as a link to the matching club's Club Directory entry (new tab)
+// when `code` looks like a club utm_code/name, otherwise plain text/span —
+// same className either way so callers don't need to branch layout.
+function ClubCodeLink({ code, className = '', title, children }) {
+  if (!isClubCode(code)) {
+    return <span className={className} title={title}>{children}</span>
+  }
+  return (
+    <a href={clubDirectoryUrl(code)} target="_blank" rel="noopener noreferrer"
+      className={`${className} hover:text-pb-accent hover:underline`}
+      title={title ? `${title} · open in Club Directory` : 'Open in Club Directory'}
+      onClick={e => e.stopPropagation()}>
+      {children}
+    </a>
+  )
+}
+
 // ISO country code → flag emoji. A-Z maps to regional indicator symbols.
 function flagFor(cc) {
   if (!cc || cc.length !== 2) return ''
@@ -229,10 +259,10 @@ function Panel({ id, title, sub, defaultOpen = true, children }) {
 function SourceTag({ source }) {
   const m = sourceMeta(source)
   return (
-    <span className="inline-flex items-center gap-1">
+    <ClubCodeLink code={source} className="inline-flex items-center gap-1" title={m.label}>
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />
       {m.label}
-    </span>
+    </ClubCodeLink>
   )
 }
 
@@ -449,10 +479,10 @@ function LiveSection() {
                             {e.utm_source && <span className="text-pb-accent"> · {e.utm_source}{e.utm_campaign ? `/${e.utm_campaign}` : ''}</span>}
                           </a>
                         </div>
-                        <span className="inline-flex items-center gap-1 shrink-0" title={`Source: ${m.label}`}>
+                        <ClubCodeLink code={e.source} className="inline-flex items-center gap-1 shrink-0" title={`Source: ${m.label}`}>
                           <span className="w-2 h-2 rounded-full" style={{ background: m.dot }} />
                           <span className="font-mono text-[9px] text-pb-faint hidden sm:inline">{m.label}</span>
-                        </span>
+                        </ClubCodeLink>
                         <span className="font-mono text-[10px] text-pb-faint w-16 sm:w-24 text-right truncate shrink-0"
                           title={[e.city, e.region, e.country].filter(Boolean).join(', ')}>
                           {e.country ? `${flagFor(e.country)} ${e.city || e.country}` : ''}
@@ -479,7 +509,7 @@ function LiveSection() {
                     return (
                       <div key={i} className="flex items-center gap-2 py-1">
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: m.dot }} />
-                        <div className="w-20 truncate text-[12px] text-pb-text" title={m.label}>{m.label}</div>
+                        <ClubCodeLink code={s.source} className="w-20 truncate text-[12px] text-pb-text inline-block" title={m.label}>{m.label}</ClubCodeLink>
                         <div className="flex-1 h-3 bg-pb-surface2 rounded overflow-hidden">
                           <div className="h-full rounded" style={{ width: `${Math.round((s.visitors / srcMax) * 100)}%`, background: m.dot }} />
                         </div>
@@ -502,7 +532,8 @@ function LiveSection() {
                     <div key={i} className="flex items-center gap-2 py-1">
                       <div className="flex-1 min-w-0">
                         <div className="font-mono text-[11px] text-pb-text truncate">
-                          {u.utm_source}{u.utm_campaign ? <span className="text-pb-faint"> / {u.utm_campaign}</span> : ''}
+                          <ClubCodeLink code={u.utm_source}>{u.utm_source}</ClubCodeLink>
+                          {u.utm_campaign ? <span className="text-pb-faint"> / {u.utm_campaign}</span> : ''}
                         </div>
                         {u.utm_medium && <div className="font-mono text-[9px] text-pb-faintest">{u.utm_medium}</div>}
                       </div>
@@ -1221,6 +1252,13 @@ export default function AdminUsage() {
                       <div className="text-pb-text text-sm truncate flex items-center gap-2">
                         {userLabel(u)}
                         <RoleBadge role={u.user_role} />
+                        {u.user_role === 'super_admin' ? (
+                          <span className="font-mono text-[10px] text-pb-faintest">- BetterCricket</span>
+                        ) : u.club_name ? (
+                          <span className="font-mono text-[10px] text-pb-faintest whitespace-nowrap">
+                            - <ClubCodeLink code={u.club_slug || u.club_name} title={u.club_name}>{u.club_name}</ClubCodeLink>
+                          </span>
+                        ) : null}
                       </div>
                       <div className="font-mono text-[9px] text-pb-faintest">{u.unique_routes} routes · last {fmtTime(u.last_hit)}</div>
                     </div>
