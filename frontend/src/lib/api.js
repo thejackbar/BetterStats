@@ -506,6 +506,8 @@ export const api = {
     request(`/club-admin/marketing/clubs/${clubId}/visits`),
   mktClubLoginIntent: (clubId) =>
     request(`/club-admin/marketing/clubs/${clubId}/login-intent`),
+  mktClubBoundary: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/boundary`),
   mktUtmValues: () => request('/club-admin/marketing/utm-values'),
   mktSetUtmAlias: (body) =>
     request('/club-admin/marketing/utm-aliases', { method: 'PUT', body: JSON.stringify(body) }),

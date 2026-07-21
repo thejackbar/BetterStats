@@ -312,6 +312,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_scored_at "
             "TIMESTAMPTZ"))
+        # Migration 166: cached suburb boundary polygon for the directory's location
+        # map, fetched on demand from OpenStreetMap/Nominatim and cached forever —
+        # see services/nominatim_client.py.
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS boundary_geojson JSONB"))
         # Self-serve trial registration admin-details form (migration 135) — nothing
         # downstream reads these yet, defensive idempotent add so the API boots even
         # if alembic lags.

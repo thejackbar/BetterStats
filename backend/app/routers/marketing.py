@@ -626,6 +626,16 @@ async def club_login_intent(club_id: str, db: AsyncSession = Depends(get_db),
     return await cd.club_login_intent_detail(db, club.id)
 
 
+@router.get("/clubs/{club_id}/boundary")
+async def club_boundary(club_id: str, db: AsyncSession = Depends(get_db),
+                        _=Depends(require_super_admin)):
+    """A club's suburb boundary polygon (GeoJSON), fetched from OpenStreetMap on
+    first request and cached forever after — the free-tier stand-in for a real
+    postcode-area shape. `geojson: null` when nothing was found."""
+    geo = await cd.get_or_fetch_boundary(db, club_id)
+    return {"geojson": geo}
+
+
 @router.get("/utm-values")
 async def utm_values(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
     """Every raw UTM value seen on a site visit, with how it currently resolves —

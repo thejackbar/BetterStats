@@ -56,6 +56,7 @@ from app.config.settings import settings
 from app.models.db import (
     MarketingClub, MarketingClubContact, Organisation, CommsContact,
 )
+from app.services import nominatim_client
 from app.services import playhq_directory_client as phq
 from app.services.marketing_org import get_outreach_org
 
@@ -1240,6 +1241,26 @@ async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dic
     club.updated_at = func.now()
     await session.commit()
     return {"id": str(club.id), "utm_code": club.utm_code}
+
+
+async def get_or_fetch_boundary(session: AsyncSession, club_id: str) -> Optional[dict]:
+    """A club's suburb boundary polygon for the directory's location map,
+    fetched once from OpenStreetMap/Nominatim and cached on the row forever.
+
+    Returns None if the club isn't found OR nothing was found (both the
+    "never looked up" and "looked up, nothing found" cases resolve the same
+    way to the caller — the boundary just isn't shown). ``boundary_geojson``
+    already being set (even to ``{}``) short-circuits a re-fetch.
+    """
+    club = await session.get(MarketingClub, club_id)
+    if club is None:
+        return None
+    if club.boundary_geojson is not None:
+        return club.boundary_geojson or None
+    geo = await nominatim_client.find_suburb_boundary(club.suburb, club.state)
+    club.boundary_geojson = geo or {}
+    await session.commit()
+    return geo
 
 
 async def list_associations(session: AsyncSession) -> list[dict]:
