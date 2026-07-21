@@ -65,9 +65,16 @@ async def list_games(
         db, uuid.UUID(org_id), season_id, grade_id, finals_only,
     )
 
-    # Recent games come from our own synced data (DB-first). We restrict to the
-    # club's OWN games via an ID-based check — a manual game is always ours;
-    # an API-synced game is ours if we're recorded as home_org_id/away_org_id
+    # Recent games come from our own synced data (DB-first). Manual games are
+    # NOT part of this query — they're already fetched above by
+    # _fetch_manual_games_as_list (correctly org-scoped off
+    # ManualGame.organisation_id) and merged in below. This query used to also
+    # match `g.source = 'manual'` with no organisation check at all, which (a)
+    # leaked every OTHER club's manual games in here too, and (b) duplicated
+    # this club's own manual games (once from this query via
+    # v_effective_games, once from _fetch_manual_games_as_list) — fixed by
+    # restricting this query to `g.source = 'api'` (see migration 169).
+    # An API-synced game is ours if we're recorded as home_org_id/away_org_id
     # on the row (the reliable per-club signal for a shared games.id row
     # between two both-synced clubs, set at sync time — see migration 167),
     # or the game's own grade belongs to our org, or one of our own players
@@ -84,14 +91,16 @@ async def list_games(
     # doesn't literally contain the org's first name-token.
     clauses = [
         """(
-            g.source = 'manual'
-            OR g.home_org_id = CAST(:org_id AS UUID)
-            OR g.away_org_id = CAST(:org_id AS UUID)
-            OR s.organisation_id = CAST(:org_id AS UUID)
-            OR EXISTS (
-                SELECT 1 FROM game_appearances ga
-                JOIN players p ON p.id = ga.player_id
-                WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org_id AS UUID)
+            g.source = 'api'
+            AND (
+                g.home_org_id = CAST(:org_id AS UUID)
+                OR g.away_org_id = CAST(:org_id AS UUID)
+                OR s.organisation_id = CAST(:org_id AS UUID)
+                OR EXISTS (
+                    SELECT 1 FROM game_appearances ga
+                    JOIN players p ON p.id = ga.player_id
+                    WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org_id AS UUID)
+                )
             )
         )""",
     ]

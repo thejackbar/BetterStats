@@ -445,27 +445,35 @@ async def get_org_results(
     # (b) the game's own grade belongs to our org (the ordinary, non-shared
     # case), (c) one of our players has a recorded appearance in it
     # (belt-and-suspenders for a shared row synced before its home/away org id
-    # was backfilled), or (d) it's a manual game. NOT purely grade-ownership —
-    # a shared grade's game.grade_id belongs to whichever club's sync created
-    # the row first, so a club that synced second would otherwise never see
-    # its own wins at all (the historical bug: an INNER JOIN through
-    # grade->season->org silently excluded these before the WHERE clause's
-    # appearance check was even reached). Matching the org's name against the
-    # free-text home_team/away_team CA supplies is deliberately avoided —
-    # silently zeroes every result for a club whose CA-recorded team text
-    # doesn't literally contain the org's first name-token (e.g. a hyphenated
-    # name like "Bayswater-Postels" spelled differently by CA). Mirrors
-    # ``_club_results`` so the headline matches this list.
+    # was backfilled), or (d) it's a manual game we created (checked via the
+    # view's own `organisation_id` — see migration 169; a bare `g.source =
+    # 'manual'` here used to mean ANY club's manual game read as "ours" on
+    # every other club's results, a cross-club leak). NOT purely
+    # grade-ownership — a shared grade's game.grade_id belongs to whichever
+    # club's sync created the row first, so a club that synced second would
+    # otherwise never see its own wins at all (the historical bug: an INNER
+    # JOIN through grade->season->org silently excluded these before the
+    # WHERE clause's appearance check was even reached). Matching the org's
+    # name against the free-text home_team/away_team CA supplies is
+    # deliberately avoided — silently zeroes every result for a club whose
+    # CA-recorded team text doesn't literally contain the org's first
+    # name-token (e.g. a hyphenated name like "Bayswater-Postels" spelled
+    # differently by CA). Mirrors ``_club_results`` so the headline matches
+    # this list.
     #
-    # grade_id/season_id are LEFT JOINed (not INNER) so a shared game whose
-    # grade_id belongs to the OTHER club still returns a row — grade_name/
-    # season_name then describe whichever club's grade/season row is actually
-    # attached, which is fine since they're just descriptive text for the
-    # same real competition/season. A grade_id/season_id filter still needs
-    # to match a shared game under a foreign grade row, so it compares via
-    # grassroots_id (the raw CA guid, shared across every club's per-club
-    # grade/season rows for the same real grade/season — see migration 067)
-    # rather than requiring the literal id to match.
+    # grade_id is LEFT JOINed (not INNER) so a shared game whose grade_id
+    # belongs to the OTHER club still returns a row — grade_name then
+    # describes whichever club's grade row is actually attached, which is
+    # fine since it's just descriptive text for the same real competition.
+    # season is now joined off the view's own `season_id` (migration 169),
+    # not via grade->season — a manual game always has `season_id` set even
+    # when it has no grade (the upload form allows "— none —" for Grade), so
+    # this is what actually fixed those games disappearing from this page. A
+    # grade_id/season_id filter still needs to match a shared game under a
+    # foreign grade row, so it compares via grassroots_id (the raw CA guid,
+    # shared across every club's per-club grade/season rows for the same
+    # real grade/season — see migration 067) rather than requiring the
+    # literal id to match.
     # g.result is ALSO relative to whichever club's sync wrote it first
     # (classify_match_result computes it against that syncing org's own
     # team) — the exact same single-column-can't-hold-two-perspectives issue
@@ -492,9 +500,9 @@ async def get_org_results(
                s.id AS season_id, s.name AS season_name
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
-        LEFT JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN seasons s ON s.id = g.season_id
         WHERE (
-            g.source = 'manual'
+            g.organisation_id = CAST(:org_id AS UUID)
             OR g.home_org_id = CAST(:org_id AS UUID)
             OR g.away_org_id = CAST(:org_id AS UUID)
             OR s.organisation_id = CAST(:org_id AS UUID)
