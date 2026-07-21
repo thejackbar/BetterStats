@@ -3048,6 +3048,75 @@ async def restore_club(
     return {"status": "restored", "id": club_id}
 
 
+@router.get("/super/clubs/{club_id}/merge-preview")
+async def preview_club_merge(
+    club_id: str,
+    target_id: str,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cheap counts for the confirm dialog before an actual merge — how much
+    of `club_id` (source) would move vs collide-and-merge into `target_id`."""
+    try:
+        source_uuid, target_uuid = uuid.UUID(club_id), uuid.UUID(target_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid club id")
+    source_org = await db.get(Organisation, source_uuid)
+    target_org = await db.get(Organisation, target_uuid)
+    if not source_org or not target_org:
+        raise HTTPException(status_code=404, detail="Club not found")
+
+    counts = {}
+    for label, table in (("seasons", "seasons"), ("grades", "grades"), ("players", "players")):
+        counts[f"{label}_total"] = (await db.execute(
+            _text(
+                f"SELECT COUNT(*) FROM {table} t "
+                + ("WHERE t.organisation_id = :sid" if table != "grades"
+                   else "JOIN seasons s ON s.id = t.season_id WHERE s.organisation_id = :sid")
+            ),
+            {"sid": str(source_uuid)},
+        )).scalar_one()
+    games_total = (await db.execute(
+        _text(
+            "SELECT COUNT(*) FROM games g JOIN grades gr ON gr.id = g.grade_id "
+            "JOIN seasons s ON s.id = gr.season_id WHERE s.organisation_id = :sid"
+        ),
+        {"sid": str(source_uuid)},
+    )).scalar_one()
+    return {
+        "source_org": {"id": str(source_org.id), "name": source_org.name},
+        "target_org": {"id": str(target_org.id), "name": target_org.name},
+        **counts,
+        "games_total": games_total,
+    }
+
+
+@router.post("/super/clubs/{club_id}/merge-into/{target_id}")
+async def merge_club(
+    club_id: str,
+    target_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-reassign a club merger's synced history: `club_id` (the SOURCE —
+    e.g. a temp org synced just to pull in a since-merged predecessor club's
+    PlayHQ/CA history) is folded into `target_id` (the real, ongoing club),
+    then archived. See services/org_merge.py for the full mechanics and its
+    documented reversibility limits — this is not a fully-undoable operation
+    the way archive/restore is."""
+    try:
+        source_uuid, target_uuid = uuid.UUID(club_id), uuid.UUID(target_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid club id")
+
+    from app.services.org_merge import merge_organisation
+    try:
+        result = await merge_organisation(db, source_uuid, target_uuid, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
 @router.delete("/super/clubs/{club_id}")
 async def delete_club(
     club_id: str,

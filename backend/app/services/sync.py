@@ -1801,6 +1801,19 @@ async def sync_grassroots_game_level_data(
                 if raw_guid:
                     our_team_roster_guids.add(raw_guid)
 
+        # Home/away team names, resolved up front (ahead of the game-exists
+        # check below, not just at Game-insert time) — needed both for a new
+        # Game() row and to self-heal home_org_id/away_org_id on an
+        # ALREADY-fully-synced existing row, which otherwise never reaches
+        # this code again once our_appearances_done short-circuits it below,
+        # meaning an ordinary Sync Now would never retroactively populate the
+        # columns for the bulk of a club's existing games.
+        summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
+        home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
+        away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
+        our_is_home = bool(our_team_name) and our_team_name == home_team_name
+        our_is_away = bool(our_team_name) and our_team_name == away_team_name
+
         # Open a fresh per-game session.
         try:
             async with async_session_maker() as session:
@@ -1819,6 +1832,26 @@ async def sync_grassroots_game_level_data(
                 )
                 existing_row = existing.fetchone()
                 game_exists = existing_row is not None
+
+                # Self-heal home_org_id/away_org_id on every sync, unconditionally
+                # (not gated behind our_appearances_done below) — an
+                # already-fully-synced game is the common case and would
+                # otherwise never reach this again, so the fix would only ever
+                # take effect for brand-new matches instead of retroactively
+                # fixing a club's existing missing-games/wrong-opponent history
+                # on their next ordinary Sync Now. Idempotent CASE, cheap
+                # single-row update by PK.
+                if game_exists and (our_is_home or our_is_away):
+                    await session.execute(
+                        text("""
+                            UPDATE games
+                            SET home_org_id = CASE WHEN :is_home THEN CAST(:org_id AS UUID) ELSE home_org_id END,
+                                away_org_id = CASE WHEN :is_away THEN CAST(:org_id AS UUID) ELSE away_org_id END
+                            WHERE id = :gid
+                        """),
+                        {"is_home": our_is_home, "is_away": our_is_away, "org_id": org_id_str, "gid": match_id_str},
+                    )
+                    await session.commit()
 
                 our_appearances_done = True
                 if game_exists and our_team_pids:
@@ -1936,9 +1969,8 @@ async def sync_grassroots_game_level_data(
                         if _pid and _name:
                             pid_to_short_name[_pid] = _name
 
-                summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
-                home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
-                away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
+                # (summary_teams / home_team_name / away_team_name computed
+                # earlier, before the game-exists check)
                 winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
                 result_text = classify_match_result(scorecard, org_id_str)
 
@@ -1958,6 +1990,8 @@ async def sync_grassroots_game_level_data(
                         away_club=strip_team_suffix(away_team_name),
                         opp_org_id=_opp_id,
                         opp_club_name=_opp_name,
+                        home_org_id=(org_uuid if our_is_home else None),
+                        away_org_id=(org_uuid if our_is_away else None),
                         result=result_text,
                         winning_team=winner_name,
                         is_final=match_to_is_final.get(match_id_str, False),

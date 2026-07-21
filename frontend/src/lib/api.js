@@ -453,6 +453,9 @@ export const api = {
   importList: () => request('/club-admin/imports'),
   importUndo: (batchId) =>
     request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
+  importUndoPlayer: (batchId, playerId) =>
+    request(`/club-admin/imports/${batchId}/undo-player/${playerId}`, { method: 'POST' }),
+  importListPlayers: (batchId) => request(`/club-admin/imports/${batchId}/players`),
   // ─── BetterImport (profiles) — bulk player contact/profile CSV import ────────
   playerImportPreview: (file) => uploadFile('/club-admin/player-import/preview', file),
   playerImportResolve: (payload) =>
@@ -996,6 +999,12 @@ export const api = {
     request(`/club-admin/super/clubs/${clubId}/archive`, { method: 'POST' }),
   superRestoreClub: (clubId) =>
     request(`/club-admin/super/clubs/${clubId}/restore`, { method: 'POST' }),
+  // Club merger — fold a source club's synced history into a target club,
+  // then archive the source (services/org_merge.py).
+  superClubMergePreview: (sourceClubId, targetClubId) =>
+    request(`/club-admin/super/clubs/${sourceClubId}/merge-preview?target_id=${targetClubId}`),
+  superClubMerge: (sourceClubId, targetClubId) =>
+    request(`/club-admin/super/clubs/${sourceClubId}/merge-into/${targetClubId}`, { method: 'POST' }),
   // Pause Sync / Cancel Sync / Continue Sync for a club's current Full Sync
   // (migration 160) — All Clubs row actions.
   superClubSyncControl: (clubId, action) =>

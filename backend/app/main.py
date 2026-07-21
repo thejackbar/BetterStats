@@ -2809,6 +2809,48 @@ async def lifespan(app: FastAPI):
             seeded = await seed_org_definitions(conn, str(acc["id"]), APPLECROSS_TEMPLATE)
             if seeded:
                 logger.info(f"Seeded {seeded} award definitions for Applecross")
+    # Migration 167: per-side organisation id on shared game rows — lets each
+    # of two both-synced clubs record which side of a shared games.id row it
+    # was on, independently of the other club's write. See migration 167 for
+    # the missing-games/mislabeled-opponent background this fixes.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS home_org_id UUID"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS away_org_id UUID"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_games_home_org_id ON games(home_org_id) WHERE home_org_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_games_away_org_id ON games(away_org_id) WHERE away_org_id IS NOT NULL"
+        ))
+
+    # Migration 168: club-merger audit log — see services/org_merge.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_merge_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_org_id UUID REFERENCES organisations(id) ON DELETE SET NULL,
+                source_org_name TEXT NOT NULL,
+                target_org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                performed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                seasons_moved INTEGER NOT NULL DEFAULT 0,
+                seasons_merged INTEGER NOT NULL DEFAULT 0,
+                grades_moved INTEGER NOT NULL DEFAULT 0,
+                grades_merged INTEGER NOT NULL DEFAULT 0,
+                games_repointed INTEGER NOT NULL DEFAULT 0,
+                players_moved INTEGER NOT NULL DEFAULT 0,
+                players_merged INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_org_merge_logs_target "
+            "ON org_merge_logs(target_org_id, performed_at DESC)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

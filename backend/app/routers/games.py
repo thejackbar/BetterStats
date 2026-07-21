@@ -66,17 +66,28 @@ async def list_games(
     )
 
     # Recent games come from our own synced data (DB-first). We restrict to the
-    # club's OWN games via an ID-based check (a manual game is always ours; an
-    # API-synced game is ours if one of our own players has a recorded
-    # appearance in it) — the same rule get_org_results uses — since a shared
-    # grade can hold other clubs' games. Matching the org's name against the
-    # free-text home_team/away_team CA supplies used to silently drop every
-    # game for a club whose CA-recorded team text doesn't literally contain
-    # the org's first name-token.
+    # club's OWN games via an ID-based check — a manual game is always ours;
+    # an API-synced game is ours if we're recorded as home_org_id/away_org_id
+    # on the row (the reliable per-club signal for a shared games.id row
+    # between two both-synced clubs, set at sync time — see migration 167),
+    # or the game's own grade belongs to our org, or one of our own players
+    # has a recorded appearance in it — the same rule get_org_results uses,
+    # since a shared grade can hold other clubs' games under a grade_id that
+    # belongs to whichever club synced it first. grades/seasons are LEFT
+    # JOINed (not INNER) so a shared game under a foreign grade_id still
+    # returns a row; a season_id/grade_id filter then matches via
+    # grassroots_id (the raw CA guid shared across every club's per-club
+    # grade/season rows for the same real grade/season) so it still finds a
+    # shared game physically attached to the OTHER club's grade row. Matching
+    # the org's name against the free-text home_team/away_team CA supplies
+    # used to silently drop every game for a club whose CA-recorded team text
+    # doesn't literally contain the org's first name-token.
     clauses = [
-        "s.organisation_id = CAST(:org_id AS UUID)",
         """(
             g.source = 'manual'
+            OR g.home_org_id = CAST(:org_id AS UUID)
+            OR g.away_org_id = CAST(:org_id AS UUID)
+            OR s.organisation_id = CAST(:org_id AS UUID)
             OR EXISTS (
                 SELECT 1 FROM game_appearances ga
                 JOIN players p ON p.id = ga.player_id
@@ -86,10 +97,20 @@ async def list_games(
     ]
     params: dict = {"org_id": org_id, "limit": limit}
     if season_id:
-        clauses.append("s.id = CAST(:season_id AS UUID)")
+        clauses.append("""(
+            s.id = CAST(:season_id AS UUID)
+            OR (s.grassroots_id IS NOT NULL AND s.grassroots_id = (
+                SELECT grassroots_id FROM seasons WHERE id = CAST(:season_id AS UUID)
+            ))
+        )""")
         params["season_id"] = season_id
     if grade_id:
-        clauses.append("gr.id = CAST(:grade_id AS UUID)")
+        clauses.append("""(
+            gr.id = CAST(:grade_id AS UUID)
+            OR (gr.grassroots_id IS NOT NULL AND gr.grassroots_id = (
+                SELECT grassroots_id FROM grades WHERE id = CAST(:grade_id AS UUID)
+            ))
+        )""")
         params["grade_id"] = grade_id
     if finals_only:
         clauses.append("g.is_final = TRUE")
@@ -101,8 +122,8 @@ async def list_games(
                    gr.name AS grade_raw,
                    s.id AS season_id, s.name AS season_name, s.year AS season_year
             FROM v_effective_games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN seasons s ON s.id = gr.season_id
             WHERE {' AND '.join(clauses)}
             ORDER BY g.played_at DESC NULLS LAST
             LIMIT :limit
@@ -117,8 +138,8 @@ async def list_games(
             "away_team": r.away_team,
             "result": r.result,
             "winning_team": r.winning_team,
-            "grade": {"id": str(r.grade_id), "name": r.grade_name, "raw_name": r.grade_raw},
-            "season": {"id": str(r.season_id), "name": r.season_name, "year": r.season_year},
+            "grade": {"id": str(r.grade_id) if r.grade_id else None, "name": r.grade_name, "raw_name": r.grade_raw},
+            "season": {"id": str(r.season_id) if r.season_id else None, "name": r.season_name, "year": r.season_year},
         }
         for r in result
     ]

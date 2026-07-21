@@ -439,39 +439,70 @@ async def get_org_results(
     db: AsyncSession = Depends(get_db),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
-    # A game is 'ours' when one of the org's own players has a recorded
-    # appearance in it (a manual game is always ours). ID-based rather than
-    # matching the org's name against the free-text home_team/away_team CA
-    # supplies — a shared grade holds every club's games, and text matching
-    # silently zeroed every result for a club whose CA-recorded team text
+    # A game is 'ours' if any of: (a) we're recorded as home_org_id/away_org_id
+    # on the row itself — the reliable per-club signal set at sync time (see
+    # migration 167) for a shared games.id row between two both-synced clubs,
+    # (b) the game's own grade belongs to our org (the ordinary, non-shared
+    # case), (c) one of our players has a recorded appearance in it
+    # (belt-and-suspenders for a shared row synced before its home/away org id
+    # was backfilled), or (d) it's a manual game. NOT purely grade-ownership —
+    # a shared grade's game.grade_id belongs to whichever club's sync created
+    # the row first, so a club that synced second would otherwise never see
+    # its own wins at all (the historical bug: an INNER JOIN through
+    # grade->season->org silently excluded these before the WHERE clause's
+    # appearance check was even reached). Matching the org's name against the
+    # free-text home_team/away_team CA supplies is deliberately avoided —
+    # silently zeroes every result for a club whose CA-recorded team text
     # doesn't literally contain the org's first name-token (e.g. a hyphenated
     # name like "Bayswater-Postels" spelled differently by CA). Mirrors
     # ``_club_results`` so the headline matches this list.
+    #
+    # grade_id/season_id are LEFT JOINed (not INNER) so a shared game whose
+    # grade_id belongs to the OTHER club still returns a row — grade_name/
+    # season_name then describe whichever club's grade/season row is actually
+    # attached, which is fine since they're just descriptive text for the
+    # same real competition/season. A grade_id/season_id filter still needs
+    # to match a shared game under a foreign grade row, so it compares via
+    # grassroots_id (the raw CA guid, shared across every club's per-club
+    # grade/season rows for the same real grade/season — see migration 067)
+    # rather than requiring the literal id to match.
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                gr.id AS grade_id,
                s.id AS season_id, s.name AS season_name
         FROM v_effective_games g
-        JOIN grades gr ON gr.id = g.grade_id
-        JOIN seasons s ON s.id = gr.season_id
-        WHERE s.organisation_id = :org_id
-          AND (
-              g.source = 'manual'
-              OR EXISTS (
-                  SELECT 1 FROM game_appearances ga
-                  JOIN players p ON p.id = ga.player_id
-                  WHERE ga.game_id = g.id AND p.organisation_id = :org_id
-              )
-          )
+        LEFT JOIN grades gr ON gr.id = g.grade_id
+        LEFT JOIN seasons s ON s.id = gr.season_id
+        WHERE (
+            g.source = 'manual'
+            OR g.home_org_id = CAST(:org_id AS UUID)
+            OR g.away_org_id = CAST(:org_id AS UUID)
+            OR s.organisation_id = CAST(:org_id AS UUID)
+            OR EXISTS (
+                SELECT 1 FROM game_appearances ga
+                JOIN players p ON p.id = ga.player_id
+                WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org_id AS UUID)
+            )
+        )
     """
     params: dict = {"org_id": org_id}
 
     if season_id:
-        query += " AND s.id = :season_id"
+        query += """ AND (
+            s.id = CAST(:season_id AS UUID)
+            OR (s.grassroots_id IS NOT NULL AND s.grassroots_id = (
+                SELECT grassroots_id FROM seasons WHERE id = CAST(:season_id AS UUID)
+            ))
+        )"""
         params["season_id"] = season_id
     if grade_id:
-        query += " AND gr.id = :grade_id"
+        query += """ AND (
+            gr.id = CAST(:grade_id AS UUID)
+            OR (gr.grassroots_id IS NOT NULL AND gr.grassroots_id = (
+                SELECT grassroots_id FROM grades WHERE id = CAST(:grade_id AS UUID)
+            ))
+        )"""
         params["grade_id"] = grade_id
     if finals_only:
         query += " AND g.is_final = TRUE"
@@ -486,8 +517,8 @@ async def get_org_results(
             "result": r.result,
             "winning_team": r.winning_team,
             "grade_name": r.grade_name,
-            "grade_id": str(r.grade_id),
-            "season_id": str(r.season_id),
+            "grade_id": str(r.grade_id) if r.grade_id else None,
+            "season_id": str(r.season_id) if r.season_id else None,
             "season_name": r.season_name,
         }
         for r in rows
