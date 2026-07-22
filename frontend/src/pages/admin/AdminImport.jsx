@@ -224,6 +224,15 @@ export default function AdminImport() {
   function setSOverride(label, val) {
     setSeasonOverrides(o => { const n = { ...o }; if (val === '') delete n[label]; else n[label] = val; return n })
   }
+  // A hand-kept historical sheet often predates anything the club has synced —
+  // there's no existing season to match "1972/73" to, so the match-seasons step
+  // needs a way to mint one on the spot rather than folding every pre-sync
+  // decade into the single "Career summary" bucket.
+  async function createSeason(data) {
+    const s = await api.adminCreateManualSeason(data)
+    setAllSeasons(prev => [...prev, s])
+    return s
+  }
 
   // Season is only required when the sheet is season-by-season — career totals
   // have no season column to map.
@@ -449,7 +458,7 @@ export default function AdminImport() {
               return ''
             }}
             onChange={(r, v) => setSOverride(r.raw_label, v)}
-            cell={cell}
+            cell={cell} onCreateSeason={createSeason}
             nextLabel="NEXT: REVIEW →" onNext={() => setStep('review')} onBack={() => setStep('players')}
           />
         )}
@@ -540,9 +549,14 @@ function valueLabel(value, idName, kind) {
   return idName.get(value) || '(selected)'
 }
 
-function SearchSelect({ value, idName, candidates, options, onChange, kind, cell }) {
+function SearchSelect({ value, idName, candidates, options, onChange, kind, cell, onCreateSeason }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newYear, setNewYear] = useState('')
+  const [creatingBusy, setCreatingBusy] = useState(false)
+  const [createErr, setCreateErr] = useState(null)
   const ref = useRef(null)
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase()
@@ -550,6 +564,19 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
     return base.slice(0, 25)
   }, [q, options])
   const pick = v => { onChange(v); setOpen(false); setQ('') }
+  const closeAll = () => { setOpen(false); setCreating(false); setCreateErr(null) }
+
+  async function submitNewSeason() {
+    const n = newName.trim()
+    if (!n) { setCreateErr('Name is required'); return }
+    setCreatingBusy(true); setCreateErr(null)
+    try {
+      const s = await onCreateSeason({ name: n, year: newYear ? parseInt(newYear, 10) : null })
+      setNewName(''); setNewYear('')
+      pick(s.id)
+    } catch (e) { setCreateErr(e.message) } finally { setCreatingBusy(false) }
+  }
+
   const item = 'block w-full text-left px-2 py-1 text-[12px] text-pb-dim hover:bg-pb-surface2 hover:text-pb-text rounded'
   const unresolved = !value
   return (
@@ -562,39 +589,68 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
       <Dropdown
         anchorRef={ref}
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closeAll}
         align="start"
         width={288}
         maxHeight={288}
         className="bg-pb-surface border pb-hairline rounded shadow-xl p-1"
       >
-        <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
-          {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
-        </button>
-        <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
-        {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
-        {(candidates || []).map(c => (
-          <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
-            <span className="flex items-center justify-between gap-2">
-              <span className="truncate">{c.name}</span>
-              {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
-            </span>
-            {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
-          </button>
-        ))}
-        <div className="px-1 pt-2 pb-1 sticky top-0">
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search all ${kind === 'player' ? 'players' : 'seasons'}…`}
-            className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
-        </div>
-        {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
-        {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
+        {kind === 'season' && creating ? (
+          <div className="p-2">
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              <input autoFocus placeholder="e.g. Summer 1972/73" value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
+                className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+              <input placeholder="Year" value={newYear}
+                onChange={e => setNewYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
+                className="w-16 shrink-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={submitNewSeason} disabled={creatingBusy}
+                className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+                {creatingBusy ? 'ADDING…' : 'ADD SEASON'}
+              </button>
+              <button type="button" onClick={() => { setCreating(false); setCreateErr(null) }}
+                className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Cancel</button>
+            </div>
+            {createErr && <p className="text-[10px] text-pb-red/70 mt-1.5">{createErr}</p>}
+          </div>
+        ) : (
+          <>
+            <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
+              {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
+            </button>
+            {kind === 'season' && (
+              <button className={item} onClick={() => setCreating(true)}>+ Create new season</button>
+            )}
+            <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
+            {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
+            {(candidates || []).map(c => (
+              <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate">{c.name}</span>
+                  {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
+                </span>
+                {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
+              </button>
+            ))}
+            <div className="px-1 pt-2 pb-1 sticky top-0">
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search all ${kind === 'player' ? 'players' : 'seasons'}…`}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+            </div>
+            {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
+            {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
+          </>
+        )}
       </Dropdown>
     </div>
   )
 }
 
 // ── shared match table for players + seasons (filter + paginate for scale) ────
-function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, cell, nextLabel, onNext, onBack, loading }) {
+function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, cell, nextLabel, onNext, onBack, loading, onCreateSeason }) {
   const [onlyReview, setOnlyReview] = useState(true)
   const [page, setPage] = useState(0)
 
@@ -672,7 +728,7 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                     <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
                     <td className="py-2 pr-2">
                       <SearchSelect value={value} idName={idName} candidates={candidates} options={allOptions}
-                        onChange={v => onChange(r, v)} kind={kind} cell={cell} />
+                        onChange={v => onChange(r, v)} kind={kind} cell={cell} onCreateSeason={onCreateSeason} />
                     </td>
                   </tr>
                 )
