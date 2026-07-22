@@ -2877,6 +2877,157 @@ class MarketingClubContact(Base):
     club = relationship("MarketingClub", back_populates="contacts")
 
 
+# ─── BetterCRM — People/Contacts + the internal & club-facing Deal pipeline ──
+# (migration 173). One schema, two scopes: 'platform' (BetterCricket's own
+# sales pipeline — organisation_id NULL, usually linked to a MarketingClub
+# prospect row) and 'club' (the BetterAdmin CRM module — organisation_id set,
+# gated by the "crm" entitlement key + MANAGE_CRM). See services/crm.py.
+
+class CrmPerson(Base):
+    """A generic contact — player, parent, coach, committee member, volunteer,
+    sponsor contact, association official… — one row per real person, tagged
+    with roles via CrmPersonRole rather than a table per role. ``player_id``
+    is a nullable bridge to the existing per-club Player identity (additive
+    only; the Player table's own uuid5-on-collision scheme is untouched) so a
+    future unified profile has somewhere to anchor without a migration."""
+    __tablename__ = "crm_people"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    full_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    roles = relationship("CrmPersonRole", cascade="all, delete-orphan", passive_deletes=True)
+
+
+class CrmPersonRole(Base):
+    """One role a Person holds — a Person can have several (a parent who is
+    also a volunteer and a sponsor contact), each with its own tenure."""
+    __tablename__ = "crm_person_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    role = Column(Text, nullable=False)
+    title = Column(Text, nullable=True)
+    started_at = Column(Date, nullable=True)
+    ended_at = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CrmPipeline(Base):
+    """A stage-ordered pipeline. 'platform' scope has exactly one (Better
+    Cricket's sales pipeline); a club can in principle run more than one
+    (e.g. Sponsorship vs Grants) though only a default is seeded today."""
+    __tablename__ = "crm_pipelines"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope = Column(Text, nullable=False, server_default="club", default="club")
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    name = Column(Text, nullable=False)
+    is_default = Column(Boolean, nullable=False, server_default="false", default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    stages = relationship("CrmStage", cascade="all, delete-orphan", passive_deletes=True,
+                          order_by="CrmStage.position")
+
+
+class CrmStage(Base):
+    """A pipeline stage. ``key`` is a stable slug the app looks up by (auto
+    stage-advance hooks, the Won/Lost buttons) — ``name`` is the display label
+    a super admin / club admin can freely rename without breaking those
+    lookups. ``default_probability`` is what a deal shows unless it carries
+    its own override."""
+    __tablename__ = "crm_stages"
+    __table_args__ = (
+        UniqueConstraint("pipeline_id", "key", name="uq_crm_stages_pipeline_key"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pipeline_id = Column(UUID(as_uuid=True), ForeignKey("crm_pipelines.id", ondelete="CASCADE"), nullable=False)
+    key = Column(Text, nullable=False)
+    name = Column(Text, nullable=False)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    default_probability = Column(Integer, nullable=False, server_default="0", default=0)
+    is_won = Column(Boolean, nullable=False, server_default="false", default=False)
+    is_lost = Column(Boolean, nullable=False, server_default="false", default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CrmDeal(Base):
+    """One Opportunity/Deal. ``value_cents``/``module_keys`` mirror the public
+    pricing vocabulary (see billing_pricing.py) for a platform deal's product
+    interest; a club deal (sponsorship renewal, grant application…) leaves
+    module_keys empty and just uses value_cents + title/notes/activities."""
+    __tablename__ = "crm_deals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope = Column(Text, nullable=False, server_default="club", default="club")
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
+    pipeline_id = Column(UUID(as_uuid=True), ForeignKey("crm_pipelines.id", ondelete="CASCADE"), nullable=False)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("crm_stages.id", ondelete="RESTRICT"), nullable=False)
+    title = Column(Text, nullable=False)
+    value_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    currency = Column(Text, nullable=False, server_default="AUD", default="AUD")
+    probability = Column(Integer, nullable=True)  # NULL = use the stage's default_probability
+    module_keys = Column(JSONB, nullable=False, server_default="[]", default=list)
+    expected_close_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="open", default="open")  # open | won | lost
+    lost_reason = Column(Text, nullable=True)
+    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial
+    archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    closed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    stage = relationship("CrmStage")
+    contacts = relationship("CrmDealContact", cascade="all, delete-orphan", passive_deletes=True)
+
+
+class CrmDealContact(Base):
+    """Links a Person to a Deal (the people involved — decision maker,
+    influencer, the officer who first enquired…)."""
+    __tablename__ = "crm_deal_contacts"
+    __table_args__ = (
+        UniqueConstraint("deal_id", "person_id", name="uq_crm_deal_contacts"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("crm_deals.id", ondelete="CASCADE"), nullable=False)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="CASCADE"), nullable=False)
+    role_on_deal = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    person = relationship("CrmPerson")
+
+
+class CrmActivity(Base):
+    """One timeline entry — a call, email, meeting or note against a Deal
+    and/or a Person. ``meta`` carries structured detail for system-logged
+    entries (e.g. the engagement score that triggered an auto stage-move)."""
+    __tablename__ = "crm_activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("crm_deals.id", ondelete="CASCADE"), nullable=True)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="CASCADE"), nullable=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    type = Column(Text, nullable=False, server_default="note", default="note")
+    body = Column(Text, nullable=True)
+    occurred_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    meta = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ─── KlubPro → BetterStats migration audit + rollback (migration 072) ─────────
 # These live in BetterStats (not KlubPro) so the before-images and the audit
 # survive even if the KlubPro database is later decommissioned, and a rollback

@@ -444,6 +444,55 @@ export const api = {
     request('/club-admin/merch/square/settings', { method: 'POST', body: JSON.stringify(data) }),
   merchSquareSync: () => request('/club-admin/merch/square/sync', { method: 'POST' }),
   merchSquareDisconnect: () => request('/club-admin/merch/square/disconnect', { method: 'POST' }),
+  // ─── BetterCRM — club-scope (BetterAdmin module) ─────────────────────────────
+  crmPipeline: () => request('/club-admin/crm/pipeline'),
+  crmStages: () => request('/club-admin/crm/stages'),
+  crmListDeals: ({ status, includeArchived } = {}) => {
+    const p = new URLSearchParams()
+    if (status) p.set('status', status)
+    if (includeArchived) p.set('include_archived', 'true')
+    const qs = p.toString()
+    return request(`/club-admin/crm/deals${qs ? `?${qs}` : ''}`)
+  },
+  crmCreateDeal: (data) => request('/club-admin/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
+  crmGetDeal: (id) => request(`/club-admin/crm/deals/${id}`),
+  crmUpdateDeal: (id, data) => request(`/club-admin/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  crmMoveDealStage: (id, data) => request(`/club-admin/crm/deals/${id}/stage`, { method: 'POST', body: JSON.stringify(data) }),
+  crmCloseDeal: (id, data) => request(`/club-admin/crm/deals/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
+  crmArchiveDeal: (id) => request(`/club-admin/crm/deals/${id}`, { method: 'DELETE' }),
+  crmListActivities: (dealId) => request(`/club-admin/crm/deals/${dealId}/activities`),
+  crmAddActivity: (dealId, data) => request(`/club-admin/crm/deals/${dealId}/activities`, { method: 'POST', body: JSON.stringify(data) }),
+  crmListDealContacts: (dealId) => request(`/club-admin/crm/deals/${dealId}/contacts`),
+  crmLinkContact: (dealId, data) => request(`/club-admin/crm/deals/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  crmUnlinkContact: (dealId, personId) => request(`/club-admin/crm/deals/${dealId}/contacts/${personId}`, { method: 'DELETE' }),
+  crmListPeople: (q) => request(`/club-admin/crm/people${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  crmCreatePerson: (data) => request('/club-admin/crm/people', { method: 'POST', body: JSON.stringify(data) }),
+  crmUpdatePerson: (id, data) => request(`/club-admin/crm/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  crmAddPersonRole: (id, data) => request(`/club-admin/crm/people/${id}/roles`, { method: 'POST', body: JSON.stringify(data) }),
+  // ─── BetterCRM — platform scope (BetterCricket's own sales pipeline) ────────
+  superCrmPipeline: () => request('/club-admin/super/crm/pipeline'),
+  superCrmStages: () => request('/club-admin/super/crm/stages'),
+  superCrmListDeals: ({ status, includeArchived } = {}) => {
+    const p = new URLSearchParams()
+    if (status) p.set('status', status)
+    if (includeArchived) p.set('include_archived', 'true')
+    const qs = p.toString()
+    return request(`/club-admin/super/crm/deals${qs ? `?${qs}` : ''}`)
+  },
+  superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
+  superCrmGetDeal: (id) => request(`/club-admin/super/crm/deals/${id}`),
+  superCrmUpdateDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superCrmMoveDealStage: (id, data) => request(`/club-admin/super/crm/deals/${id}/stage`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmCloseDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmArchiveDeal: (id) => request(`/club-admin/super/crm/deals/${id}`, { method: 'DELETE' }),
+  superCrmListActivities: (dealId) => request(`/club-admin/super/crm/deals/${dealId}/activities`),
+  superCrmAddActivity: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/activities`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmListDealContacts: (dealId) => request(`/club-admin/super/crm/deals/${dealId}/contacts`),
+  superCrmLinkContact: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmUnlinkContact: (dealId, personId) => request(`/club-admin/super/crm/deals/${dealId}/contacts/${personId}`, { method: 'DELETE' }),
+  superCrmListPeople: (q) => request(`/club-admin/super/crm/people${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  superCrmConvertClub: (marketingClubId, data) =>
+    request(`/club-admin/super/crm/from-club/${marketingClubId}`, { method: 'POST', body: JSON.stringify(data) }),
   // ─── BetterImport — overlap-safe historical CSV/XLSX import ──────────────────
   importPreview: (file) => uploadFile('/club-admin/imports/preview', file),
   importResolve: (payload) =>

@@ -44,6 +44,7 @@ MANAGE_IQ = "manage_iq"                       # BetterIQ: opposition analysis + 
 MANAGE_COMMS = "manage_comms"                 # BetterComms: contacts + bulk email campaigns
 MANAGE_MERCH = "manage_merch"                 # BetterMerch: stock register (apparel, equipment, food/drink)
 MANAGE_FANTASY = "manage_fantasy"             # BetterFantasyCricket: fantasy season setup, leagues, settlement
+MANAGE_CRM = "manage_crm"                     # BetterCRM: deals/pipeline, contacts, activities
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -68,6 +69,7 @@ ALL_CAPABILITIES = (
     MANAGE_COMMS,
     MANAGE_MERCH,
     MANAGE_FANTASY,
+    MANAGE_CRM,
 )
 
 

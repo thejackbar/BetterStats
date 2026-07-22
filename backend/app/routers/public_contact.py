@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import ClubOnboardingRequest, get_db
 from app.services import meta_capi
+from app.services.crm import sync_deal_for_enquiry
 from app.services.login_audit import client_ip
 from app.services.twenty_sync import mark_contact_source, push_onboarding_enquiry
 from app.services.usage_tracker import record_event_bg
@@ -131,6 +132,11 @@ async def submit_contact(
     # Company + Lead at a forced Hot (100) engagement score, regardless of
     # whether it was already exported. Backgrounded; never raises.
     background.add_task(push_onboarding_enquiry, club_name=club, contact_name=name,
+                        email=email, phone=payload.phone)
+    # Same enquiry, the local CRM pipeline's equivalent of the Twenty push
+    # above — ensures a New Lead deal exists (or advances an existing one) so
+    # the pipeline stays in step with the same trigger. Best-effort.
+    background.add_task(sync_deal_for_enquiry, club_name=club, contact_name=name,
                         email=email, phone=payload.phone)
     # Server-side Lead event (Meta Conversions API), sharing the browser pixel's
     # event_id so Meta dedupes the pair. Best-effort + backgrounded — a CAPI

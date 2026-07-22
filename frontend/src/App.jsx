@@ -103,6 +103,10 @@ const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
 const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity'))
 const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
 const MerchSquare = lazy(() => import('./pages/admin/bettermerch/MerchSquare'))
+const BetterCrmHome = lazy(() => import('./pages/admin/bettercrm/BetterCrmHome'))
+const BetterCrmDeals = lazy(() => import('./pages/admin/bettercrm/BetterCrmDeals'))
+const BetterCrmPeople = lazy(() => import('./pages/admin/bettercrm/BetterCrmPeople'))
+const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
@@ -289,6 +293,10 @@ export default function App() {
           <Route path="/admin/merch/activity" element={<ProtectedRoute requireModule="merch"><MerchActivity /></ProtectedRoute>} />
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
+          <Route path="/admin/crm" element={<ProtectedRoute requireModule="crm"><BetterCrmHome /></ProtectedRoute>} />
+          <Route path="/admin/crm/deals" element={<ProtectedRoute requireModule="crm"><BetterCrmDeals /></ProtectedRoute>} />
+          <Route path="/admin/crm/people" element={<ProtectedRoute requireModule="crm"><BetterCrmPeople /></ProtectedRoute>} />
+          <Route path="/admin/super/crm" element={<ProtectedRoute requireRole="super_admin"><SuperCrm /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />

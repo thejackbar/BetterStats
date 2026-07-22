@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -2895,6 +2895,125 @@ async def lifespan(app: FastAPI):
             "ON org_merge_logs(target_org_id, performed_at DESC)"
         ))
 
+    # Migration 173: BetterCRM — People/Contacts + the internal & club-facing
+    # Deal pipeline. See services/crm.py; one schema, two scopes (platform =
+    # BetterCricket's own sales pipeline, club = the BetterAdmin CRM module).
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_people (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE,
+                marketing_club_id UUID REFERENCES marketing_clubs(id) ON DELETE SET NULL,
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                full_name TEXT NOT NULL,
+                email TEXT,
+                phone TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_people_org ON crm_people(organisation_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_people_marketing_club ON crm_people(marketing_club_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_people_email ON crm_people(lower(email))"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_person_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                person_id UUID NOT NULL REFERENCES crm_people(id) ON DELETE CASCADE,
+                organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                title TEXT,
+                started_at DATE,
+                ended_at DATE,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_person_roles_person ON crm_person_roles(person_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_person_roles_org_role ON crm_person_roles(organisation_id, role)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_pipelines (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scope TEXT NOT NULL DEFAULT 'club',
+                organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                is_default BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_pipelines_scope_org ON crm_pipelines(scope, organisation_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_stages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                pipeline_id UUID NOT NULL REFERENCES crm_pipelines(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                default_probability INTEGER NOT NULL DEFAULT 0,
+                is_won BOOLEAN NOT NULL DEFAULT false,
+                is_lost BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_crm_stages_pipeline_key UNIQUE (pipeline_id, key)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_stages_pipeline_position ON crm_stages(pipeline_id, position)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_deals (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scope TEXT NOT NULL DEFAULT 'club',
+                organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE,
+                marketing_club_id UUID REFERENCES marketing_clubs(id) ON DELETE SET NULL,
+                pipeline_id UUID NOT NULL REFERENCES crm_pipelines(id) ON DELETE CASCADE,
+                stage_id UUID NOT NULL REFERENCES crm_stages(id) ON DELETE RESTRICT,
+                title TEXT NOT NULL,
+                value_cents INTEGER NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'AUD',
+                probability INTEGER,
+                module_keys JSONB NOT NULL DEFAULT '[]',
+                expected_close_date DATE,
+                status TEXT NOT NULL DEFAULT 'open',
+                lost_reason TEXT,
+                owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                source TEXT,
+                archived_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                closed_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_deals_scope_org ON crm_deals(scope, organisation_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_deals_marketing_club ON crm_deals(marketing_club_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_deals_pipeline_stage ON crm_deals(pipeline_id, stage_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_deals_status ON crm_deals(status)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_deal_contacts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                deal_id UUID NOT NULL REFERENCES crm_deals(id) ON DELETE CASCADE,
+                person_id UUID NOT NULL REFERENCES crm_people(id) ON DELETE CASCADE,
+                role_on_deal TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_crm_deal_contacts UNIQUE (deal_id, person_id)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_deal_contacts_person ON crm_deal_contacts(person_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_activities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                deal_id UUID REFERENCES crm_deals(id) ON DELETE CASCADE,
+                person_id UUID REFERENCES crm_people(id) ON DELETE CASCADE,
+                organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE,
+                type TEXT NOT NULL DEFAULT 'note',
+                body TEXT,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                meta JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_deal ON crm_activities(deal_id, occurred_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_person ON crm_activities(person_id, occurred_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_org ON crm_activities(organisation_id, occurred_at DESC)"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3087,6 +3206,7 @@ app.include_router(imports.router)  # BetterImport — overlap-safe historical C
 app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import
 app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
 app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)
+app.include_router(crm.super_router)  # BetterCRM — BetterCricket's own internal sales pipeline (super-admin)
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
@@ -3103,6 +3223,7 @@ app.include_router(backup_admin.router)  # Backup/restore task history + DB size
 app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees (BetterAdmin)
 app.include_router(comms.router, dependencies=[Depends(require_module("comms"))])         # BetterComms (BetterAdmin)
 app.include_router(merch.router, dependencies=[Depends(require_module("merch"))])         # BetterMerch (BetterAdmin)
+app.include_router(crm.router, dependencies=[Depends(require_module("crm"))])             # BetterCRM (BetterAdmin)
 app.include_router(fixtures.router, dependencies=[Depends(require_module("select"))])     # BetterSelect
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
