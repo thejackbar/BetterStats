@@ -356,6 +356,54 @@ def compute_funnel(campaign: dict) -> list[dict]:
     return stages
 
 
+# Ordered checkpoints the public registration wizard beacons through (see
+# routers/public_self_serve.py FUNNEL_STEPS, which this must stay in sync
+# with — each key here must also be in that allowlist or its beacon 422s).
+REGISTRATION_STEP_ORDER = [
+    ("club_prepared", "Club selected"),
+    ("admin_details_completed", "Admin details completed"),
+    ("email_code_sent", "Verification code sent"),
+    ("email_verified", "Email verified"),
+    ("acknowledgements_accepted", "Terms & privacy accepted"),
+    ("submit_attempted", "Submit attempted"),
+    ("registration_completed", "Registration completed"),
+]
+
+
+async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> list[dict]:
+    """In-app breakdown of WHERE within the registration wizard visitors drop
+    off — the detail Meta's own reporting can't give us, since it only ever
+    sees a Lead (fired at the very first step) and a CompleteRegistration
+    (fired only on a fully successful last step). Counts distinct visitors
+    reaching each step (see public_self_serve.py's /track-step beacon and
+    SelfServeTrialModal.jsx's trackFunnelStep calls), same
+    key/label/value/pct_of_top/pct_of_prev shape as compute_funnel() so the
+    frontend can reuse the same FunnelChart component."""
+    rows = (await db.execute(text("""
+        SELECT route, COUNT(DISTINCT visitor_id) AS n
+        FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND visitor_id IS NOT NULL
+        GROUP BY route
+    """), {"days": days})).mappings().all()
+    counts = {r["route"]: int(r["n"]) for r in rows}
+
+    top = counts.get(REGISTRATION_STEP_ORDER[0][0], 0)
+    stages: list[dict] = []
+    prev: int | None = None
+    for key, label in REGISTRATION_STEP_ORDER:
+        value = counts.get(key, 0)
+        pct_of_top = round(100 * value / top, 1) if top else 0.0
+        pct_of_prev = 100.0 if prev is None else (round(100 * value / prev, 1) if prev else 0.0)
+        stages.append({
+            "key": key, "label": label, "value": value,
+            "pct_of_top": pct_of_top, "pct_of_prev": pct_of_prev,
+        })
+        prev = value
+    return stages
+
+
 def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
                     campaign_budget: float, campaign_length_days: int) -> list[dict]:
     """Short, severity-ordered headlines on how the campaign is actually

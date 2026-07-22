@@ -96,6 +96,15 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   const formStartedAtRef = useRef(Date.now())
   const [honeypot, setHoneypot] = useState('')
 
+  // Best-effort step beacon for the registration-funnel breakdown (public
+  // mode only — internal Super Admin trial creation isn't part of the ad
+  // campaign this feeds). Never awaited/blocks the UI; a beacon failure is
+  // silently dropped, same posture as the Meta pixel calls elsewhere here.
+  const trackFunnelStep = (stepName) => {
+    if (!publicMode) return
+    api.publicSelfServeTrackStep(stepName, getVisitorId()).catch(() => {})
+  }
+
   useEffect(() => {
     previouslyFocused.current = document.activeElement
     closeBtnRef.current?.focus()
@@ -152,6 +161,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
       .then((prepared) => {
         if (!alive) return
         setPreparedClub(prepared)
+        trackFunnelStep('club_prepared')
         if (publicMode && typeof window !== 'undefined' && typeof window.fbq === 'function') {
           window.fbq('track', 'Lead', {
             content_name: 'Self-serve trial started',
@@ -307,6 +317,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     try {
       await calls.sendCode(adminForm.email)
       setCodeSent(true)
+      trackFunnelStep('email_code_sent')
     } catch (e) {
       setSendError(e?.message || 'Could not send the verification email.')
     } finally {
@@ -320,6 +331,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     try {
       await calls.checkCode(adminForm.email, verifyCode.trim())
       setVerified(true)
+      trackFunnelStep('email_verified')
     } catch (e) {
       setVerifyError(e?.message || 'Incorrect code.')
     } finally {
@@ -330,12 +342,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   // ─── Step 4: acknowledgements (Phase 7) ─────────────────────────────────
   const [ackTerms, setAckTerms] = useState(false)
   const [ackPrivacy, setAckPrivacy] = useState(false)
-  const [ackAuthority, setAckAuthority] = useState(false)
   const [ackSubmitting, setAckSubmitting] = useState(false)
   const [ackError, setAckError] = useState('')
   const [ackAccepted, setAckAccepted] = useState(false)
 
-  const allAckChecked = ackTerms && ackPrivacy && ackAuthority
+  const allAckChecked = ackTerms && ackPrivacy
 
   const confirmAcknowledgements = async () => {
     setAckSubmitting(true)
@@ -346,9 +357,9 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
         club_name: preparedClub?.name || '',
         accept_terms: ackTerms,
         accept_privacy: ackPrivacy,
-        confirm_authority: ackAuthority,
       })
       setAckAccepted(true)
+      trackFunnelStep('acknowledgements_accepted')
       setStep('submit')
     } catch (e) {
       setAckError(e?.message || 'Could not record acknowledgements.')
@@ -399,6 +410,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   const submitRegistration = async () => {
     setSubmitting(true)
     setSubmitError('')
+    trackFunnelStep('submit_attempted')
     // Public mode: one event_id shared between the browser pixel's
     // CompleteRegistration (fired on success below) and the backend's
     // server-side copy, so Meta dedupes the pair.
@@ -428,6 +440,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
       if (result?.status === 'completed') {
         setSubmitResult(result)
         setSubmitted(true)
+        trackFunnelStep('registration_completed')
         if (publicMode) {
           // The registration IS the campaign conversion — browser pixel +
           // GA4, then straight into the new club's own dashboard (the public
@@ -871,15 +884,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 </span>
               </label>
 
-              <label className="flex items-start gap-2 font-mono text-[11px] text-pb-faint">
-                <input type="checkbox" className="mt-0.5" checked={ackAuthority}
-                  onChange={(e) => setAckAuthority(e.target.checked)} />
-                <span>
-                  I confirm that I am associated with {preparedClub?.name || 'this club'} and I
-                  understand that this is a request to evaluate BetterCricket for my club.
-                </span>
-              </label>
-
               {ackError && <p className="font-mono text-[10px] text-pb-red">{ackError}</p>}
             </div>
           )}
@@ -1050,7 +1054,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
             )}
             {step === 'admin' && (
               <button
-                onClick={() => setStep('verify')}
+                onClick={() => { trackFunnelStep('admin_details_completed'); setStep('verify') }}
                 disabled={!adminValid}
                 title={adminValid ? '' : 'Fix the highlighted fields first'}
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
@@ -1074,7 +1078,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
               <button
                 onClick={confirmAcknowledgements}
                 disabled={!allAckChecked || ackSubmitting}
-                title={allAckChecked ? '' : 'Accept all three to continue'}
+                title={allAckChecked ? '' : 'Accept both to continue'}
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
                 style={{ background: 'var(--pb-accent)' }}
               >

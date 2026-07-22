@@ -93,13 +93,13 @@ function InsightRow({ insight }) {
   )
 }
 
-function FunnelChart({ stages }) {
+function FunnelChart({ stages, title = 'Funnel: impressions to a completed registration' }) {
   if (!stages?.length) return null
   const top = stages[0]?.value || 0
   return (
     <div className="pb-card p-4">
       <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
-        Funnel: impressions to a completed registration
+        {title}
       </div>
       <div className="space-y-2.5">
         {stages.map((s, i) => {
@@ -273,6 +273,7 @@ export default function SuperMetaAds() {
 
   const [attribution, setAttribution] = useState(null)
   const [adSignups, setAdSignups] = useState(null)
+  const [registrationFunnel, setRegistrationFunnel] = useState(null)
 
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
@@ -287,6 +288,7 @@ export default function SuperMetaAds() {
     api.metaAdsLeadAdjustments().then((d) => setAdjustments(d.adjustments || [])).catch(() => {})
     api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
+    api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -519,6 +521,17 @@ export default function SuperMetaAds() {
             <div className="mb-4">
               <FunnelChart stages={campaign.funnel} />
             </div>
+
+            {/* Registration-wizard step breakdown — fills in the gap between
+                Meta's own Lead and CompleteRegistration events. */}
+            {registrationFunnel?.some((s) => s.value > 0) && (
+              <div className="mb-4">
+                <FunnelChart
+                  stages={registrationFunnel}
+                  title="Registration wizard: where visitors drop off (last 30 days)"
+                />
+              </div>
+            )}
 
             {/* Per-ad comparison, with click-to-drill-down trend */}
             <div className="mb-4">

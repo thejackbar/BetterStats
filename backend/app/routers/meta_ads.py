@@ -94,6 +94,19 @@ async def leads_adjustments(db: AsyncSession = Depends(get_db), _: User = Depend
     return {"adjustments": await meta_ads.get_lead_adjustments(db)}
 
 
+@router.get("/registration-funnel")
+async def registration_funnel(
+    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Step-by-step breakdown of the registration wizard itself (club
+    selected → admin details → email verified → acknowledgements → submit →
+    completed), filling in the gap between Meta's own Lead and
+    CompleteRegistration events."""
+    return {"funnel": await meta_ads.get_registration_step_funnel(db, days)}
+
+
 @router.get("/ad-signups")
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow
