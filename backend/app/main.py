@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -1000,6 +1000,44 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_type_created "
             "ON usage_events(visitor_id, event_type, created_at) WHERE visitor_id IS NOT NULL"
+        ))
+        # Backup/restore task tracking (migration 170) — one row per backup or
+        # restore run (scheduled via the host systemd timer, or triggered on
+        # demand from Super Admin), so the Backups page can show a history plus
+        # the size/row-count stats captured at the time. Written by
+        # app/scripts/backup_task.py, not the ORM.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backup_tasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'requested',
+                scope_org_id UUID REFERENCES organisations(id) ON DELETE SET NULL,
+                triggered_by TEXT NOT NULL DEFAULT 'scheduled',
+                triggered_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                bundle_path TEXT,
+                bundle_timestamp TIMESTAMPTZ,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                db_size_bytes BIGINT,
+                uploads_size_bytes BIGINT,
+                total_row_count BIGINT,
+                club_stats JSONB,
+                error_message TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_backup_tasks_created ON backup_tasks(created_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_backup_tasks_status ON backup_tasks(status)"
+        ))
+        # Migration 171: live progress reporting for a running task (current
+        # table/entity, current/total, a human message, and a running tally
+        # of finished stages) — read by the Super Admin Backups page while
+        # polling a `running` task.
+        await conn.execute(text(
+            "ALTER TABLE backup_tasks ADD COLUMN IF NOT EXISTS progress JSONB"
         ))
         # Login attempts — append-only audit of every sign-in attempt (success
         # or failure), so we can see which username/email is being tried, from
@@ -2567,6 +2605,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "UPDATE meta_lead_adjustments SET campaign_id = '120249237210710121' WHERE campaign_id IS NULL"
         ))
+        # Meta Ads — real delivery status per ad (migration 170). Insights
+        # fields never carry an ad's ACTIVE/PAUSED state, so the HQ dashboard's
+        # performance badge used to keep showing stale "Winner"/"On track"
+        # labels on an ad that had actually been paused (e.g. via the Meta Ads
+        # MCP). Stored on ad-level snapshot rows only.
+        await conn.execute(text("ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS delivery_status TEXT"))
         # Fill-in names on partnerships/fielding + a per-club toggle to show them
         # (migration 147) — mirrors FallOfWicket.batter_name for whichever side of
         # a partnership, or which fielder, has no linkable `players` row. Defensive
@@ -3050,6 +3094,7 @@ app.include_router(self_serve_trial.router)  # Self-serve club trial registratio
 app.include_router(public_self_serve.router)  # Public self-serve trial registration (unauthenticated, same flag — the /trial ad-campaign landing page)
 app.include_router(onboarding_wizard.router)  # Club onboarding wizard (flag-gated — see docs/self-serve-trial-onboarding-plan.md Phase 15)
 app.include_router(wizard_analytics.router)  # Setup Wizard analytics (super-admin) — where clubs get stuck/skip
+app.include_router(backup_admin.router)  # Backup/restore task history + DB size stats (super-admin)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

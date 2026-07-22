@@ -867,6 +867,14 @@ export const api = {
   adminUndoManualEntry: (logId) =>
     request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
+  adminCreateManualSeason: (data) =>
+    request('/club-admin/manual-entries/seasons', { method: 'POST', body: JSON.stringify(data) }),
+  adminDeleteManualSeason: (id) =>
+    request(`/club-admin/manual-entries/seasons/${id}`, { method: 'DELETE' }),
+  adminCreateManualGrade: (data) =>
+    request('/club-admin/manual-entries/grades', { method: 'POST', body: JSON.stringify(data) }),
+  adminDeleteManualGrade: (id) =>
+    request(`/club-admin/manual-entries/grades/${id}`, { method: 'DELETE' }),
   adminListManualEntryKnownValues: () => request('/club-admin/manual-entries/known-values'),
   adminCheckScorecardDuplicate: (playedAt, opponent = '', excludeId = '') =>
     request(`/club-admin/manual-entries/scorecard/check-duplicate?played_at=${encodeURIComponent(playedAt)}&opponent=${encodeURIComponent(opponent)}${excludeId ? `&exclude_id=${encodeURIComponent(excludeId)}` : ''}`),
@@ -954,6 +962,17 @@ export const api = {
   superGetGeneralSettings: () => request('/club-admin/super/general-settings'),
   superUpdateGeneralSettings: (data) =>
     request('/club-admin/super/general-settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Backup/restore task history + current DB size stats (super admin).
+  superListBackupTasks: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/club-admin/super/backups${q ? `?${q}` : ''}`)
+  },
+  superBackupStats: () => request('/club-admin/super/backups/stats'),
+  superRunBackupNow: () => request('/club-admin/super/backups/run', { method: 'POST' }),
+  // Manual, on-demand download of a backup bundle file — still age-encrypted
+  // in transit, same as it sits on disk (no offsite auto-sync anywhere).
+  superDownloadBackupFile: (taskId, file) =>
+    fetch(`${BASE}/club-admin/super/backups/${taskId}/download?file=${file}`, { credentials: 'include' }),
   // Self-serve club trial registration (internal, flag-gated — see
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),

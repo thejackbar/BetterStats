@@ -486,7 +486,8 @@ class AcknowledgeRequest(BaseModel):
 @router.post("/acknowledge")
 async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Records ToS + Privacy acceptance. Both are mandatory — this endpoint
-    only succeeds once every box is ticked. IP is stored hashed
+    only succeeds once every box is ticked, matching the source document's
+    "required acknowledgements" list. IP is stored hashed
     (services/usage_tracker.hash_ip), same privacy-conscious approach
     login_attempts already uses — never the raw address."""
     email = (data.email or "").strip().lower()

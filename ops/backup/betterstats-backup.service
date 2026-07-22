@@ -1,0 +1,11 @@
+[Unit]
+Description=BetterStats backup tick (checks the configured schedule, backs up if due)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/docker
+EnvironmentFile=-/srv/docker/.env
+EnvironmentFile=-/srv/docker/betterstats/backup.env
+ExecStart=/srv/docker/betterstats/ops/backup/backup.sh
