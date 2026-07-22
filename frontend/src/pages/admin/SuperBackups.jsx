@@ -62,6 +62,19 @@ function ProgressBar({ progress }) {
   )
 }
 
+// Clickable, sortable column header — shows an arrow when it's the active sort.
+function SortTh({ label, sortKey, activeKey, dir, onClick, className = '' }) {
+  const active = activeKey === sortKey
+  return (
+    <th
+      className={`px-3 py-2 cursor-pointer select-none hover:text-pb-text ${className}`}
+      onClick={() => onClick(sortKey)}
+    >
+      {label} {active && (dir === 'asc' ? '▲' : '▼')}
+    </th>
+  )
+}
+
 // Downloads a bundle file (still age-encrypted, exactly as it sits on
 // disk — this app never sends backups anywhere on its own; a manual
 // download is the only way a copy leaves the server).
@@ -108,6 +121,18 @@ export default function SuperBackups() {
   const [expanded, setExpanded] = useState(null)
   const [running, setRunning] = useState(false)
   const [runMsg, setRunMsg] = useState('')
+  const [clubQuery, setClubQuery] = useState('')
+  const [clubSortKey, setClubSortKey] = useState('size_bytes') // 'name' | 'rows' | 'size_bytes'
+  const [clubSortDir, setClubSortDir] = useState('desc')
+
+  const toggleClubSort = (key) => {
+    if (clubSortKey === key) {
+      setClubSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setClubSortKey(key)
+      setClubSortDir(key === 'name' ? 'asc' : 'desc')
+    }
+  }
 
   const loadTasks = () => {
     setLoading(true)
@@ -137,10 +162,19 @@ export default function SuperBackups() {
 
   const topClubs = useMemo(() => {
     if (!stats?.club_stats) return []
-    return Object.entries(stats.club_stats)
-      .map(([id, v]) => ({ id, ...v }))
-      .sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0))
+    return Object.entries(stats.club_stats).map(([id, v]) => ({ id, ...v }))
   }, [stats])
+
+  const visibleClubs = useMemo(() => {
+    let rows = topClubs
+    const q = clubQuery.trim().toLowerCase()
+    if (q) rows = rows.filter((c) => (c.name || '').toLowerCase().includes(q))
+    const dir = clubSortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      if (clubSortKey === 'name') return dir * String(a.name || '').localeCompare(b.name || '')
+      return dir * ((a[clubSortKey] || 0) - (b[clubSortKey] || 0))
+    })
+  }, [topClubs, clubQuery, clubSortKey, clubSortDir])
 
   const runNow = async () => {
     setRunning(true)
@@ -220,23 +254,35 @@ export default function SuperBackups() {
                 Per-club size is an estimate (rows are exact; bytes are each table's on-disk
                 size split proportionally by row share) — see docs/backup-system.md.
               </p>
+              <input
+                type="text"
+                value={clubQuery}
+                onChange={(e) => setClubQuery(e.target.value)}
+                placeholder="Search clubs…"
+                className="w-full max-w-xs mb-3 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+              />
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
-                      <th className="px-3 py-2">Club</th>
-                      <th className="px-3 py-2">Records</th>
-                      <th className="px-3 py-2">Size (est.)</th>
+                      <SortTh label="Club" sortKey="name" activeKey={clubSortKey} dir={clubSortDir} onClick={toggleClubSort} />
+                      <SortTh label="Records" sortKey="rows" activeKey={clubSortKey} dir={clubSortDir} onClick={toggleClubSort} />
+                      <SortTh label="Size (est.)" sortKey="size_bytes" activeKey={clubSortKey} dir={clubSortDir} onClick={toggleClubSort} />
                     </tr>
                   </thead>
                   <tbody>
-                    {topClubs.map((c) => (
+                    {visibleClubs.map((c) => (
                       <tr key={c.id} className="border-b pb-hairline">
                         <td className="px-3 py-1.5 text-pb-text">{c.name}</td>
                         <td className="px-3 py-1.5 text-pb-dim">{(c.rows || 0).toLocaleString()}</td>
                         <td className="px-3 py-1.5 text-pb-dim">{fmtBytes(c.size_bytes)}</td>
                       </tr>
                     ))}
+                    {visibleClubs.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-3 text-pb-faint text-center">No clubs match "{clubQuery}"</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

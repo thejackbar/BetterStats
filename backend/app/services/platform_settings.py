@@ -338,15 +338,23 @@ async def update_bundle_discount_schedule(db: AsyncSession, schedule: dict) -> d
 # legitimately be 0, so this can't reuse the generic _INT_KEYS validator
 # (which treats 0 as "unset") — same reasoning as the bundle discount schedule
 # above having its own dedicated getter/setter.
+#
+# Stored and enforced here (and by backup.sh, which reads the host's clock) in
+# UTC — the General Settings UI is what converts to/from Perth, WA time
+# (AWST, UTC+8, no daylight saving) for display, since that's what a super
+# admin actually thinks in. DEFAULT_BACKUP_HOUR = 19 UTC = 03:00 Perth, an
+# off-peak default for a club's admin activity.
 
-DEFAULT_BACKUP_HOUR = 3
+DEFAULT_BACKUP_HOUR = 19
 DEFAULT_BACKUP_MINUTE = 0
 DEFAULT_BACKUP_RETENTION_DAYS = 30
 
 
 async def get_backup_schedule(db: AsyncSession) -> dict:
-    """The configured daily backup time (24h, server/UTC clock) and retention
-    window in days. Falls back to 03:00 / 30 days when unset or malformed."""
+    """The configured daily backup time (24h, UTC — the General Settings UI
+    converts to/from Perth, WA time for display) and retention window in
+    days. Falls back to 19:00 UTC (03:00 Perth) / 30 days when unset or
+    malformed."""
     settings = await get_settings(db)
     raw = settings.get("backup_schedule")
     raw = raw if isinstance(raw, dict) else {}

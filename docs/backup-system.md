@@ -78,8 +78,12 @@ changes rarely and shouldn't live in a daily-rotated, app-readable bundle.
    install age zstd coreutils` on Debian/Ubuntu).
 
 6. Set the schedule and retention from **Super Admin → All Clubs → General
-   Settings → Backups** (defaults to 03:00 UTC, 30 days if you don't touch
-   it) — no config file edit or redeploy needed to change either.
+   Settings → Backups** (defaults to 03:00 Perth/AWST time — stored as 19:00
+   UTC on the server, converted for display in the UI — 30 days retention if
+   you don't touch it) — no config file edit or redeploy needed to change
+   either. The host script itself (`backup.sh`) always compares against the
+   UTC server clock; Perth time only exists as a display convenience in the
+   General Settings form.
 
 7. **(Optional) Set up the backup-agent** so Super Admin gets a "Run backup
    now" button instead of needing SSH for a manual run — see the next

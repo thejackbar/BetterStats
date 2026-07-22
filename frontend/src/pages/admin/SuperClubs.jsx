@@ -82,6 +82,15 @@ const normalizeBundleSchedule = (raw) => {
   return out
 }
 
+// Backup schedule is stored/read by the host script in UTC (server clock),
+// but a super admin thinks in Perth, WA time — so the General Settings form
+// converts at the load/save boundary, once, rather than carrying a timezone
+// concept through the whole stack. WA doesn't observe daylight saving, so a
+// flat +8 offset is always correct, no DST table needed.
+const PERTH_UTC_OFFSET_HOURS = 8
+const utcHourToPerth = (h) => (Number(h) + PERTH_UTC_OFFSET_HOURS) % 24
+const perthHourToUtc = (h) => (((Number(h) - PERTH_UTC_OFFSET_HOURS) % 24) + 24) % 24
+
 export default function SuperClubs() {
   const [clubs, setClubs] = useState([])
   const [showCreate, setShowCreate] = useState(false)
@@ -187,7 +196,8 @@ export default function SuperClubs() {
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
         billing_checkout_enabled: !!s?.billing_checkout_enabled,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
-        backup_hour: s?.backup_schedule?.hour ?? 3,
+        // Stored/returned by the API in UTC — shown to the admin in Perth time.
+        backup_hour: utcHourToPerth(s?.backup_schedule?.hour ?? 19), // 19:00 UTC = 03:00 Perth
         backup_minute: s?.backup_schedule?.minute ?? 0,
         backup_retention_days: s?.backup_schedule?.retention_days ?? 30,
       })
@@ -210,7 +220,8 @@ export default function SuperClubs() {
         bundle_discount_schedule: Object.fromEntries(
           BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
         ),
-        backup_hour: Math.min(23, Math.max(0, Number(settingsForm.backup_hour) || 0)),
+        // Convert the admin's Perth-time entry back to UTC for storage.
+        backup_hour: perthHourToUtc(Math.min(23, Math.max(0, Number(settingsForm.backup_hour) || 0))),
         backup_minute: Math.min(59, Math.max(0, Number(settingsForm.backup_minute) || 0)),
         backup_retention_days: Math.max(1, Number(settingsForm.backup_retention_days) || 30),
       })
@@ -779,14 +790,14 @@ export default function SuperClubs() {
                   Backups
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  When the daily automated backup runs (server clock is UTC) and how many days
-                  of daily backups are kept before the oldest is deleted. Read by the host
-                  backup script on every check — no redeploy needed to change either. See the
-                  Backups page for run history and current database size.
+                  When the daily automated backup runs (Perth, WA time) and how many days
+                  of daily backups are kept before the oldest is deleted. Stored as UTC on the
+                  server and converted for display here — no redeploy needed to change either.
+                  See the Backups page for run history and current database size.
                 </p>
                 <div className="flex items-end gap-3">
                   <label className="font-mono text-[10px] text-pb-faint">
-                    <span className="block mb-1">Hour (UTC)</span>
+                    <span className="block mb-1">Hour (Perth time)</span>
                     <input type="number" min="0" max="23" value={settingsForm.backup_hour}
                       onChange={e => setSettingsForm(f => ({ ...f, backup_hour: e.target.value }))}
                       className={INPUT_CLS + ' w-16'} />
