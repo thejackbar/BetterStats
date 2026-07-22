@@ -1963,6 +1963,7 @@ async def get_general_settings(
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
         "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
+        "backup_schedule": await ps.get_backup_schedule(db),
     }
 
 
@@ -1977,6 +1978,11 @@ class GeneralSettingsUpdate(BaseModel):
     # discount. See platform_settings.update_bundle_discount_schedule — this
     # REPLACES the whole table, it's not a merge.
     bundle_discount_schedule: Optional[dict] = None
+    # Daily automated backup — read by the host backup script on every timer
+    # tick (see ops/backup/backup.sh), not enforced by anything in-process.
+    backup_hour: Optional[int] = None
+    backup_minute: Optional[int] = None
+    backup_retention_days: Optional[int] = None
 
 
 @router.patch("/super/general-settings")
@@ -1988,10 +1994,17 @@ async def patch_general_settings(
     from app.services import platform_settings as ps
     patch = body.model_dump(exclude_unset=True)
     schedule = patch.pop("bundle_discount_schedule", None)
+    backup_hour = patch.pop("backup_hour", None)
+    backup_minute = patch.pop("backup_minute", None)
+    backup_retention_days = patch.pop("backup_retention_days", None)
     try:
         await ps.update_settings(db, patch)
         if schedule is not None:
             await ps.update_bundle_discount_schedule(db, schedule)
+        if backup_hour is not None or backup_minute is not None or backup_retention_days is not None:
+            await ps.update_backup_schedule(
+                db, hour=backup_hour, minute=backup_minute, retention_days=backup_retention_days,
+            )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return {
@@ -2002,6 +2015,7 @@ async def patch_general_settings(
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
         "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
+        "backup_schedule": await ps.get_backup_schedule(db),
     }
 
 

@@ -331,6 +331,78 @@ async def update_bundle_discount_schedule(db: AsyncSession, schedule: dict) -> d
     return await get_bundle_discount_schedule(db)
 
 
+# ─── Backup schedule (daily automated backup — host systemd timer reads this) ─
+# The host-level backup script has no UI of its own; it reads its schedule and
+# retention window from here on every tick (see ops/backup/backup.sh) so a
+# super admin can change either without touching the server. hour/minute can
+# legitimately be 0, so this can't reuse the generic _INT_KEYS validator
+# (which treats 0 as "unset") — same reasoning as the bundle discount schedule
+# above having its own dedicated getter/setter.
+
+DEFAULT_BACKUP_HOUR = 3
+DEFAULT_BACKUP_MINUTE = 0
+DEFAULT_BACKUP_RETENTION_DAYS = 30
+
+
+async def get_backup_schedule(db: AsyncSession) -> dict:
+    """The configured daily backup time (24h, server/UTC clock) and retention
+    window in days. Falls back to 03:00 / 30 days when unset or malformed."""
+    settings = await get_settings(db)
+    raw = settings.get("backup_schedule")
+    raw = raw if isinstance(raw, dict) else {}
+    try:
+        hour = int(raw.get("hour", DEFAULT_BACKUP_HOUR))
+        hour = hour if 0 <= hour <= 23 else DEFAULT_BACKUP_HOUR
+    except (TypeError, ValueError):
+        hour = DEFAULT_BACKUP_HOUR
+    try:
+        minute = int(raw.get("minute", DEFAULT_BACKUP_MINUTE))
+        minute = minute if 0 <= minute <= 59 else DEFAULT_BACKUP_MINUTE
+    except (TypeError, ValueError):
+        minute = DEFAULT_BACKUP_MINUTE
+    try:
+        retention_days = int(raw.get("retention_days", DEFAULT_BACKUP_RETENTION_DAYS))
+        retention_days = retention_days if retention_days > 0 else DEFAULT_BACKUP_RETENTION_DAYS
+    except (TypeError, ValueError):
+        retention_days = DEFAULT_BACKUP_RETENTION_DAYS
+    return {"hour": hour, "minute": minute, "retention_days": retention_days}
+
+
+async def update_backup_schedule(db: AsyncSession, *, hour=None, minute=None,
+                                  retention_days=None) -> dict:
+    """Set any of the backup schedule fields. Commits. Raises ValueError on a
+    bad request."""
+    current = await get_backup_schedule(db)
+    out = dict(current)
+    if hour is not None:
+        try:
+            h = int(hour)
+        except (TypeError, ValueError):
+            raise ValueError("hour must be an integer 0-23")
+        if not (0 <= h <= 23):
+            raise ValueError("hour must be between 0 and 23")
+        out["hour"] = h
+    if minute is not None:
+        try:
+            m = int(minute)
+        except (TypeError, ValueError):
+            raise ValueError("minute must be an integer 0-59")
+        if not (0 <= m <= 59):
+            raise ValueError("minute must be between 0 and 59")
+        out["minute"] = m
+    if retention_days is not None:
+        out["retention_days"] = _pos_int(retention_days, "retention_days")
+    s = await get_settings(db)
+    merged = dict(s)
+    merged["backup_schedule"] = out
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(merged)},
+    )
+    await db.commit()
+    return await get_backup_schedule(db)
+
+
 # ─── SES send rates ──────────────────────────────────────────────────────────
 
 def _as_int(value, fallback: int) -> int:

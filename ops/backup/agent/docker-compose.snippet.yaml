@@ -1,0 +1,30 @@
+# Paste this service into the CENTRAL /srv/docker/docker-compose.yaml
+# (the project every other container on the box is defined in — see
+# CLAUDE.md's deploy rules). It's not auto-applied by anything; add it by
+# hand, once, then `docker compose up -d --no-deps betterstats-backup-agent`
+# from /srv/docker with COMPOSE_PROJECT_NAME=bltbox_docker_app set (same as
+# every other deploy on this box).
+#
+# Deliberately NOT on any nginx-proxy-manager-routed network — this
+# container must never be reachable from the public internet. Match
+# `networks:` below to whichever internal network betterstats-backend is
+# already on (docker-shared-net per CLAUDE.md's routing notes) so the
+# backend can reach it by container name; do not add a second network that
+# also reaches nginx-proxy-manager.
+
+services:
+  betterstats-backup-agent:
+    build: ./betterstats/ops/backup/agent
+    container_name: betterstats-backup-agent
+    restart: unless-stopped
+    environment:
+      BACKUP_AGENT_SECRET: ${BACKUP_AGENT_SECRET}
+      AGE_RECIPIENT: ${AGE_RECIPIENT}
+      BACKUP_ROOT: /mnt/media/bettercricket/backup
+      COMPOSE_PROJECT_NAME: bltbox_docker_app
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/docker:/srv/docker
+      - /mnt/media/bettercricket/backup:/mnt/media/bettercricket/backup
+    networks:
+      - docker-shared-net   # match betterstats-backend's network

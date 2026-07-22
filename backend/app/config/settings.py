@@ -69,6 +69,18 @@ class Settings(BaseSettings):
     square_environment: str = "production"  # 'sandbox' | 'production'
     square_api_version: str = ""
 
+    # ─── Backup system — "Run backup now" via the backup-agent sidecar ─────────
+    # The backend itself has no Docker socket / host filesystem access (by
+    # design — see CLAUDE.md's container-safety rules), so a Super Admin's
+    # "Run backup now" button proxies to a small dedicated
+    # betterstats-backup-agent container instead, which DOES have that
+    # access (see ops/backup/agent/). Blank url = the button is disabled with
+    # "not configured yet" rather than failing at click time. Restore is
+    # deliberately NOT exposed this way — it needs the age PRIVATE key, which
+    # docs/backup-system.md says to keep offline; restore stays SSH-only.
+    backup_agent_url: str = ""       # e.g. http://betterstats-backup-agent:8080
+    backup_agent_secret: str = ""    # shared secret, same value as BACKUP_AGENT_SECRET on the agent
+
     # ─── BetterFees — Xero bank transaction import (reconciliation only) ───────
     # A club connects its own Xero organisation via OAuth. Register ONE Xero
     # app (developer.xero.com/app/manage) as a "Web app" (NOT a Custom

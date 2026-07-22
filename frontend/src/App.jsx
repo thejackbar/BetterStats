@@ -112,6 +112,7 @@ const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperClubMerge = lazy(() => import('./pages/admin/SuperClubMerge'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
+const SuperBackups = lazy(() => import('./pages/admin/SuperBackups'))
 const SuperCoupons = lazy(() => import('./pages/admin/SuperCoupons'))
 const SuperDiscountReport = lazy(() => import('./pages/admin/SuperDiscountReport'))
 const SuperWizardAnalytics = lazy(() => import('./pages/admin/SuperWizardAnalytics'))
@@ -307,6 +308,7 @@ export default function App() {
           <Route path="/admin/super/merge-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubMerge /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
+          <Route path="/admin/super/backups" element={<ProtectedRoute requireRole="super_admin"><SuperBackups /></ProtectedRoute>} />
           <Route path="/admin/super/coupons" element={<ProtectedRoute requireRole="super_admin"><SuperCoupons /></ProtectedRoute>} />
           <Route path="/admin/super/discount-report" element={<ProtectedRoute requireRole="super_admin"><SuperDiscountReport /></ProtectedRoute>} />
           <Route path="/admin/super/wizard-analytics" element={<ProtectedRoute requireRole="super_admin"><SuperWizardAnalytics /></ProtectedRoute>} />
