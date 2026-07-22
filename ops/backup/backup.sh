@@ -147,23 +147,47 @@ track_dump_progress() {
   fi
 }
 
+# Grabs the most useful lines out of a captured stderr log for the task's
+# error_message (so a failure is diagnosable from the Backups page alone,
+# not just "pg_dump failed" with the real reason only in the host/agent
+# logs) — prefers actual error/fatal lines, falls back to the raw tail.
+_extract_err() {
+  local log_file="$1" detail
+  detail="$(grep -iE 'error|fatal|could not|permission denied|no such|no space' "$log_file" 2>/dev/null | tail -3 | tr '\n' ' ' | cut -c1-400)"
+  if [ -z "$detail" ]; then
+    detail="$(tail -c 400 "$log_file" 2>/dev/null | tr '\n' ' ')"
+  fi
+  echo "${detail:-no stderr captured}"
+}
+
 # --- Postgres: MVCC-consistent dump, no lock, no downtime ---------------------
 log "Dumping database..."
-docker compose exec -T "$DB_SERVICE" pg_dump --verbose -Fc -U "$POSTGRES_USER" "$POSTGRES_DB" \
-  2> >(track_dump_progress >&2) \
-  | age -r "$AGE_RECIPIENT" -o "$BUNDLE_DIR/db.dump.age" \
-  || fail "pg_dump failed"
+DUMP_STDERR_LOG="$(mktemp)"
+if ! docker compose exec -T "$DB_SERVICE" pg_dump --verbose -Fc -U "$POSTGRES_USER" "$POSTGRES_DB" \
+      2> >(tee "$DUMP_STDERR_LOG" | track_dump_progress >&2) \
+    | age -r "$AGE_RECIPIENT" -o "$BUNDLE_DIR/db.dump.age"; then
+  ERR_DETAIL="$(_extract_err "$DUMP_STDERR_LOG")"
+  rm -f "$DUMP_STDERR_LOG"
+  fail "pg_dump/age failed: $ERR_DETAIL"
+fi
+rm -f "$DUMP_STDERR_LOG"
 
 # --- uploads volume ------------------------------------------------------------
 log "Archiving uploads volume..."
 exec_backend python -m app.scripts.backup_task update-progress "$TASK_ID" \
   --stage uploads --current "$TOTAL_ENTITIES" --total "$TOTAL_ENTITIES" \
   --message "Archiving uploaded files..." || true
-docker run --rm -v "${UPLOADS_VOLUME}:/from:ro" -v "$BUNDLE_DIR:/to" alpine \
-  tar -C /from -c . \
-  | zstd -q \
-  | age -r "$AGE_RECIPIENT" -o "$BUNDLE_DIR/uploads.tar.zst.age" \
-  || fail "uploads archive failed"
+UPLOADS_STDERR_LOG="$(mktemp)"
+if ! docker run --rm -v "${UPLOADS_VOLUME}:/from:ro" -v "$BUNDLE_DIR:/to" alpine \
+      tar -C /from -c . \
+    2>"$UPLOADS_STDERR_LOG" \
+    | zstd -q \
+    | age -r "$AGE_RECIPIENT" -o "$BUNDLE_DIR/uploads.tar.zst.age"; then
+  ERR_DETAIL="$(_extract_err "$UPLOADS_STDERR_LOG")"
+  rm -f "$UPLOADS_STDERR_LOG"
+  fail "uploads archive failed: $ERR_DETAIL"
+fi
+rm -f "$UPLOADS_STDERR_LOG"
 
 # --- migration head, for a restore's compatibility check -----------------------
 docker compose exec -T "$BACKEND_SERVICE" alembic current 2>/dev/null | tee "$BUNDLE_DIR/alembic_version.txt" >/dev/null || true
