@@ -330,12 +330,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   // ─── Step 4: acknowledgements (Phase 7) ─────────────────────────────────
   const [ackTerms, setAckTerms] = useState(false)
   const [ackPrivacy, setAckPrivacy] = useState(false)
-  const [ackAuthority, setAckAuthority] = useState(false)
   const [ackSubmitting, setAckSubmitting] = useState(false)
   const [ackError, setAckError] = useState('')
   const [ackAccepted, setAckAccepted] = useState(false)
 
-  const allAckChecked = ackTerms && ackPrivacy && ackAuthority
+  const allAckChecked = ackTerms && ackPrivacy
 
   const confirmAcknowledgements = async () => {
     setAckSubmitting(true)
@@ -346,7 +345,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
         club_name: preparedClub?.name || '',
         accept_terms: ackTerms,
         accept_privacy: ackPrivacy,
-        confirm_authority: ackAuthority,
       })
       setAckAccepted(true)
       setStep('submit')
@@ -871,15 +869,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 </span>
               </label>
 
-              <label className="flex items-start gap-2 font-mono text-[11px] text-pb-faint">
-                <input type="checkbox" className="mt-0.5" checked={ackAuthority}
-                  onChange={(e) => setAckAuthority(e.target.checked)} />
-                <span>
-                  I confirm that I am associated with {preparedClub?.name || 'this club'} and I
-                  understand that this is a request to evaluate BetterCricket for my club.
-                </span>
-              </label>
-
               {ackError && <p className="font-mono text-[10px] text-pb-red">{ackError}</p>}
             </div>
           )}
@@ -1074,7 +1063,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
               <button
                 onClick={confirmAcknowledgements}
                 disabled={!allAckChecked || ackSubmitting}
-                title={allAckChecked ? '' : 'Accept all three to continue'}
+                title={allAckChecked ? '' : 'Accept both to continue'}
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
                 style={{ background: 'var(--pb-accent)' }}
               >

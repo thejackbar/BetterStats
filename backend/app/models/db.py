@@ -105,7 +105,7 @@ class SelfServeEmailVerification(Base):
 
 
 class SelfServeAcknowledgement(Base):
-    """Terms of Service / Privacy Policy / club-authority acceptance for the
+    """Terms of Service / Privacy Policy acceptance for the
     self-serve trial registration flow (migration 137, Phase 7 — see
     docs/self-serve-trial-onboarding-plan.md). Keyed by email, same reasoning as
     SelfServeEmailVerification (no user/org exists yet). ``ip_hash`` mirrors
