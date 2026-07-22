@@ -1110,11 +1110,15 @@ ORDINAL_MAP = {
 
 
 def _normalise_name(name: str) -> str:
+    """'Last, First' → 'first last'. Splits on a bare comma (not the literal ", "
+    substring) and strips each side before rejoining, so a stray space before the
+    comma ("Smith , John") doesn't leave a trailing space baked into the key that
+    silently fails to match a correctly-typed "Smith, John"."""
     name = name.strip()
-    if ", " in name:
-        parts = name.split(", ", 1)
-        name = f"{parts[1]} {parts[0]}"
-    return re.sub(r"\s+", " ", name).lower()
+    if "," in name:
+        parts = name.split(",", 1)
+        name = f"{parts[1].strip()} {parts[0].strip()}".strip()
+    return re.sub(r"\s+", " ", name).strip().lower()
 
 
 def _parse_xlsx_partnerships(content: bytes) -> list[dict]:

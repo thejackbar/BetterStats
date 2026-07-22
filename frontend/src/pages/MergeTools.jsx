@@ -291,9 +291,13 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
 
   return (
     <div className="pb-card p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">POSSIBLE DUPLICATE</span>
-        <span className="font-mono text-[10px] text-pb-faintest">"{pair.normalised_name}"</span>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">
+          {pair.kind === 'fuzzy' ? 'POSSIBLE SPELLING MISTAKE' : 'POSSIBLE DUPLICATE'}
+        </span>
+        {pair.kind === 'fuzzy'
+          ? <span className="font-mono text-[10px] text-pb-faintest">{Math.round((pair.confidence || 0) * 100)}% similar name</span>
+          : <span className="font-mono text-[10px] text-pb-faintest">"{pair.normalised_name}"</span>}
         {pair.redacted && (
           <span
             className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
@@ -301,6 +305,15 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
             title="A CA-redacted name (********) — this pair is excluded from Bulk Approve"
           >
             Manual review only
+          </span>
+        )}
+        {pair.kind === 'fuzzy' && (
+          <span
+            className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
+            style={{ borderColor: 'var(--pb-amber)' }}
+            title="Names are close but not identical — could be two different people (e.g. Steve vs Steven). Excluded from Bulk Approve."
+          >
+            Check it's the same person
           </span>
         )}
       </div>
@@ -482,16 +495,16 @@ export default function MergeTools({ embeddedOrgId }) {
   useEffect(() => { load() }, [orgId])
 
   const visible = candidates?.filter(c => !skipped.has(`${c.player_a.id}:${c.player_b.id}`)) ?? []
-  const bulkEligible = visible.filter(c => !c.redacted)
-  const bulkRedactedCount = visible.length - bulkEligible.length
+  const bulkEligible = visible.filter(c => !c.redacted && c.kind !== 'fuzzy')
+  const bulkReviewCount = visible.length - bulkEligible.length
 
   async function handleBulkApprove() {
     if (bulkEligible.length === 0) return
-    const redactedNote = bulkRedactedCount > 0
-      ? ` ${bulkRedactedCount} redacted-name pair${bulkRedactedCount !== 1 ? 's' : ''} will be left for manual review.`
+    const reviewNote = bulkReviewCount > 0
+      ? ` ${bulkReviewCount} pair${bulkReviewCount !== 1 ? 's' : ''} will be left for manual review (redacted names or a spelling guess).`
       : ''
     if (!window.confirm(
-      `Bulk merge ${bulkEligible.length} exact-name-match pair${bulkEligible.length !== 1 ? 's' : ''}?${redactedNote}`
+      `Bulk merge ${bulkEligible.length} exact-name-match pair${bulkEligible.length !== 1 ? 's' : ''}?${reviewNote}`
     )) return
 
     setBulkMerging(true)
@@ -517,7 +530,7 @@ export default function MergeTools({ embeddedOrgId }) {
       setBulkProgress(p => ({ ...p, done: p.done + 1 }))
     }
 
-    setBulkResult({ merged, skipped: bulkRedactedCount, failed })
+    setBulkResult({ merged, skipped: bulkReviewCount, failed })
     if (merged > 0) {
       setMergedCount(c => c + merged)
       setHistoryKey(k => k + 1)
@@ -534,7 +547,9 @@ export default function MergeTools({ embeddedOrgId }) {
       <div className="mb-8">
         <h1 className="font-display font-bold text-3xl text-pb-text tracking-tight mb-2">Merge Duplicates</h1>
         <p className="text-pb-faint text-sm leading-relaxed">
-          Players with the same name from different data sources are shown below. Use Manual Merge for name changes (e.g. after marriage).
+          Players with the same name from different data sources are shown below, along with names that are close
+          but not identical (a likely typo somewhere, e.g. "Malcolm" vs "Malcom") for you to check by hand. Use
+          Manual Merge for name changes (e.g. after marriage).
         </p>
       </div>
 
@@ -553,7 +568,7 @@ export default function MergeTools({ embeddedOrgId }) {
       {bulkResult && (
         <div className="mb-4 font-mono text-[11px] border pb-hairline rounded px-4 py-3 text-pb-dim">
           Bulk approve: {bulkResult.merged} merged
-          {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} skipped (redacted names)` : ''}
+          {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} skipped (redacted names or a spelling guess)` : ''}
           {bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}.
         </div>
       )}
@@ -569,7 +584,7 @@ export default function MergeTools({ embeddedOrgId }) {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <p className="font-mono text-[11px] text-pb-faint">
                 {visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found
-                {bulkRedactedCount > 0 ? ` (${bulkRedactedCount} need manual review)` : ''}.
+                {bulkReviewCount > 0 ? ` (${bulkReviewCount} need manual review)` : ''}.
               </p>
               <button
                 onClick={handleBulkApprove}

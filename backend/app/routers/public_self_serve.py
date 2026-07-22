@@ -69,9 +69,20 @@ PREPARE_LIMIT, PREPARE_WINDOW = 15, 3600
 SEND_LIMIT, SEND_WINDOW = 10, 3600           # OTP emails — internal adds 5/hour/email
 CHECK_LIMIT, CHECK_WINDOW = 30, 900          # OTP guesses — internal adds 5-fail/email lockout
 SUBMIT_LIMIT, SUBMIT_WINDOW = 5, 3600
+STEP_LIMIT, STEP_WINDOW = 60, 3600  # several beacons per genuine registration attempt
 # A real registrant can't finish 5 steps INCLUDING an email OTP round trip in
 # under this many milliseconds; a form-filler bot can.
 MIN_FILL_MS = 4000
+
+# Ordered checkpoints the wizard beacons through — see meta_ads.py
+# REGISTRATION_STEP_ORDER for the labels/ordering used to report on these.
+# Kept as an allowlist so /track-step can't be used to write arbitrary
+# strings into usage_events.
+FUNNEL_STEPS = {
+    "club_prepared", "admin_details_completed", "email_code_sent",
+    "email_verified", "acknowledgements_accepted", "submit_attempted",
+    "registration_completed",
+}
 
 # ─── Pass-throughs: public behaviour is identical, re-register the internal
 #     handlers untouched (FastAPI resolves their Depends normally). ──────────
@@ -102,6 +113,39 @@ async def search_clubs(q: str = "", request: Request = None, db: AsyncSession = 
         detail="Too many searches. Slow down and try again shortly.",
     )
     return await sst.search_clubs(q=q, db=db)
+
+
+class TrackStepRequest(BaseModel):
+    step: str
+    visitor_id: Optional[str] = None
+
+
+@router.post("/track-step")
+async def track_step(data: TrackStepRequest, request: Request):
+    """Fire-and-forget beacon the wizard sends at each step transition, so the
+    registration drop-off (currently a single opaque gap between Meta's own
+    Lead and CompleteRegistration events) can be broken down step by step on
+    the Meta Ads dashboard. Written into usage_events like every other
+    beacon — no dedicated table. `step` is checked against an allowlist so
+    this can't be used to write arbitrary strings."""
+    rate_limit.enforce(
+        f"pubss:step:{client_ip(request)}", STEP_LIMIT, STEP_WINDOW,
+        detail="Too many requests.",
+    )
+    step = (data.step or "").strip()
+    if step not in FUNNEL_STEPS:
+        raise HTTPException(status_code=422, detail="Unknown step")
+    record_event_bg(
+        event_type="self_serve_step",
+        method="POST",
+        path="/public/self-serve/track-step",
+        route=step,
+        status=200,
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        visitor_id=(data.visitor_id or "").strip()[:64] or None,
+    )
+    return {"ok": True}
 
 
 class PublicSubmitMeta(BaseModel):

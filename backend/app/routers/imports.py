@@ -37,7 +37,7 @@ from app.models.db import (
     ImportBatch, ImportedStat, Organisation, Player, Season, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.routers.manual_entries import _log_edit
+from app.routers.manual_entries import _log_edit, _recompute_milestones
 from app.services import import_ingest as ingest
 from app.services import import_reconcile as recon
 
@@ -474,6 +474,7 @@ async def commit(
     await db.commit()
 
     written = await recon.reconcile_imported_totals(str(club.id))
+    await _recompute_milestones(db, club.id, pids)
 
     return {
         "batch_id": str(batch.id),

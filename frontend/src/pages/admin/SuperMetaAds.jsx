@@ -27,6 +27,7 @@ const AD_STATUS_STYLE = {
   winner: { label: 'Winner', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
   laggard: { label: 'Laggard', cls: 'bg-red-500/15 text-red-300 border-red-500/40' },
   on_track: { label: 'On track', cls: 'bg-pb-surface2 text-pb-faint border-pb-hairline' },
+  paused: { label: 'Paused', cls: 'bg-slate-500/15 text-slate-400 border-slate-500/40' },
 }
 
 function fmtMoney(n) {
@@ -93,13 +94,13 @@ function InsightRow({ insight }) {
   )
 }
 
-function FunnelChart({ stages }) {
+function FunnelChart({ stages, title = 'Funnel: impressions to a completed registration' }) {
   if (!stages?.length) return null
   const top = stages[0]?.value || 0
   return (
     <div className="pb-card p-4">
       <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
-        Funnel: impressions to a completed registration
+        {title}
       </div>
       <div className="space-y-2.5">
         {stages.map((s, i) => {
@@ -219,11 +220,12 @@ function AdTrendMini({ adId, days }) {
 
 function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays }) {
   const style = AD_STATUS_STYLE[ad.status] || AD_STATUS_STYLE.on_track
+  const paused = ad.status === 'paused'
   const barPct = ad.cost_per_lpv && maxCostPerLpv ? Math.min(100, (ad.cost_per_lpv / maxCostPerLpv) * 100) : 0
-  const barColor = ad.status === 'winner' ? 'bg-emerald-500' : ad.status === 'laggard' ? 'bg-red-500' : 'bg-pb-accent'
+  const barColor = paused ? 'bg-slate-500' : ad.status === 'winner' ? 'bg-emerald-500' : ad.status === 'laggard' ? 'bg-red-500' : 'bg-pb-accent'
 
   return (
-    <div className={`pb-card border overflow-hidden ${selected ? 'border-pb-accent' : 'border-pb-hairline'}`}>
+    <div className={`pb-card border overflow-hidden ${selected ? 'border-pb-accent' : 'border-pb-hairline'} ${paused ? 'opacity-70' : ''}`}>
       <button onClick={onSelect} className="w-full text-left p-3.5 hover:bg-pb-surface2/40">
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="text-sm font-medium text-pb-text">{ad.name}</div>
@@ -273,6 +275,7 @@ export default function SuperMetaAds() {
 
   const [attribution, setAttribution] = useState(null)
   const [adSignups, setAdSignups] = useState(null)
+  const [registrationFunnel, setRegistrationFunnel] = useState(null)
 
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
@@ -287,6 +290,7 @@ export default function SuperMetaAds() {
     api.metaAdsLeadAdjustments().then((d) => setAdjustments(d.adjustments || [])).catch(() => {})
     api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
+    api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -519,6 +523,17 @@ export default function SuperMetaAds() {
             <div className="mb-4">
               <FunnelChart stages={campaign.funnel} />
             </div>
+
+            {/* Registration-wizard step breakdown — fills in the gap between
+                Meta's own Lead and CompleteRegistration events. */}
+            {registrationFunnel?.some((s) => s.value > 0) && (
+              <div className="mb-4">
+                <FunnelChart
+                  stages={registrationFunnel}
+                  title="Registration wizard: where visitors drop off (last 30 days)"
+                />
+              </div>
+            )}
 
             {/* Per-ad comparison, with click-to-drill-down trend */}
             <div className="mb-4">

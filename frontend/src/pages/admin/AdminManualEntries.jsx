@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
@@ -162,6 +163,109 @@ function NumberField({ label, value, onChange, step = 1, min = 0, allowDecimal =
   )
 }
 
+// A season/grade dropdown with a "+ New" inline form, for historical data with
+// no CA equivalent (e.g. a pre-2000 season) — the sync never creates these, so
+// without this an admin has no way to enter a match from an era that isn't
+// already in the season list.
+function SeasonSelect({ seasons, value, onChange, onCreated, emptyLabel = '— Choose a season —' }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [year, setYear] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const submit = async () => {
+    const n = name.trim()
+    if (!n) { setErr('Name is required'); return }
+    setBusy(true); setErr(null)
+    try {
+      const s = await api.adminCreateManualSeason({ name: n, year: year ? parseInt(year, 10) : null })
+      onCreated(s)
+      onChange(s.id)
+      setAdding(false); setName(''); setYear('')
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  if (adding) {
+    return (
+      <div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input
+            autoFocus placeholder="e.g. Summer 1962/63" value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submit() }}
+            className={SMALL_INPUT} style={{ maxWidth: 170 }}
+          />
+          <input
+            placeholder="Year" value={year}
+            onChange={e => setYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            onKeyDown={e => { if (e.key === 'Enter') submit() }}
+            className={SMALL_INPUT} style={{ maxWidth: 70 }}
+          />
+          <button type="button" onClick={submit} disabled={busy} className={BTN_SECONDARY}>{busy ? 'Adding…' : 'Add'}</button>
+          <button type="button" onClick={() => { setAdding(false); setErr(null) }} className={BTN_SECONDARY}>Cancel</button>
+        </div>
+        {err && <p className="text-[10px] text-red-400 mt-1">{err}</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <select className={INPUT_CLS} value={value} onChange={e => onChange(e.target.value)}>
+        <option value="">{emptyLabel}</option>
+        {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
+      </select>
+      <button type="button" onClick={() => setAdding(true)} className="text-[11px] text-pb-accent whitespace-nowrap hover:underline">+ New</button>
+    </div>
+  )
+}
+
+function GradeSelect({ grades, seasonId, value, onChange, onCreated, emptyLabel = 'All grades (any)' }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const submit = async () => {
+    const n = name.trim()
+    if (!n) { setErr('Name is required'); return }
+    setBusy(true); setErr(null)
+    try {
+      const g = await api.adminCreateManualGrade({ season_id: seasonId, name: n })
+      onCreated(g)
+      onChange(g.id)
+      setAdding(false); setName('')
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  if (adding) {
+    return (
+      <div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input
+            autoFocus placeholder="e.g. 3rd Grade" value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submit() }}
+            className={SMALL_INPUT} style={{ maxWidth: 170 }}
+          />
+          <button type="button" onClick={submit} disabled={busy} className={BTN_SECONDARY}>{busy ? 'Adding…' : 'Add'}</button>
+          <button type="button" onClick={() => { setAdding(false); setErr(null) }} className={BTN_SECONDARY}>Cancel</button>
+        </div>
+        {err && <p className="text-[10px] text-red-400 mt-1">{err}</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <select className={INPUT_CLS} value={value} onChange={e => onChange(e.target.value)} disabled={!seasonId}>
+        <option value="">{emptyLabel}</option>
+        {grades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
+      </select>
+      <button type="button" onClick={() => setAdding(true)} disabled={!seasonId} className="text-[11px] text-pb-accent whitespace-nowrap hover:underline disabled:opacity-30 disabled:pointer-events-none">+ New</button>
+    </div>
+  )
+}
+
 function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
   const set = (k) => (v) => setForm({ ...form, [k]: v === '' ? '' : v })
   return (
@@ -280,7 +384,7 @@ function emptySpreadsheetRow() {
   return r
 }
 
-function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) {
+function InlineSpreadsheet({ players, seasons, grades, onImported, onPending, onSeasonCreated, onGradeCreated }) {
   const [seasonId, setSeasonId] = useState('')
   const [gradeId, setGradeId] = useState('')
   const [section, setSection] = useState('all')
@@ -388,17 +492,22 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
           <label className={LABEL_CLS}>Season</label>
-          <select className={INPUT_CLS} value={seasonId} onChange={e => { setSeasonId(e.target.value); setGradeId('') }}>
-            <option value="">— Choose a season —</option>
-            {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
-          </select>
+          <SeasonSelect
+            seasons={seasons}
+            value={seasonId}
+            onChange={id => { setSeasonId(id); setGradeId('') }}
+            onCreated={onSeasonCreated}
+          />
         </div>
         <div>
           <label className={LABEL_CLS}>Grade (optional)</label>
-          <select className={INPUT_CLS} value={gradeId} onChange={e => setGradeId(e.target.value)} disabled={!seasonId}>
-            <option value="">All grades (any)</option>
-            {seasonGrades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
-          </select>
+          <GradeSelect
+            grades={seasonGrades}
+            seasonId={seasonId}
+            value={gradeId}
+            onChange={setGradeId}
+            onCreated={onGradeCreated}
+          />
         </div>
       </div>
 
@@ -595,7 +704,7 @@ function normalizeAggregatePayload(form) {
 
 // ─── Season adjustments tab ─────────────────────────────────────────────────
 
-function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending }) {
+function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending, onSeasonCreated, onGradeCreated }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_SEASON_FORM)
@@ -715,6 +824,8 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
         grades={grades}
         onImported={() => { refresh(); refreshAll() }}
         onPending={onPending}
+        onSeasonCreated={onSeasonCreated}
+        onGradeCreated={onGradeCreated}
       />
 
       <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
@@ -728,20 +839,26 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
           </div>
           <div>
             <label className={LABEL_CLS}>Season (optional)</label>
-            <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
-              <option value="">— Career only (no specific season) —</option>
-              {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
-            </select>
+            <SeasonSelect
+              seasons={seasons}
+              value={form.season_id}
+              onChange={id => setForm({ ...form, season_id: id, grade_id: '' })}
+              onCreated={onSeasonCreated}
+              emptyLabel="— Career only (no specific season) —"
+            />
             {isCareerMode && (
               <p className="text-[10px] text-pb-faint mt-1">Will save as a career-only adjustment.</p>
             )}
           </div>
           <div>
             <label className={LABEL_CLS}>Grade (optional)</label>
-            <select className={INPUT_CLS} value={form.grade_id || ''} onChange={e => setForm({ ...form, grade_id: e.target.value })} disabled={!form.season_id}>
-              <option value="">All grades (any)</option>
-              {seasonGrades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
-            </select>
+            <GradeSelect
+              grades={seasonGrades}
+              seasonId={form.season_id}
+              value={form.grade_id || ''}
+              onChange={id => setForm({ ...form, grade_id: id })}
+              onCreated={onGradeCreated}
+            />
             {form.season_id && seasonGrades.length === 0 && (
               <p className="text-[10px] text-pb-faintest mt-1">No grades defined for this season yet.</p>
             )}
@@ -949,7 +1066,7 @@ const GAME_FORM_SECTIONS = [
   { key: 'fielding', label: 'Fielding' },
 ]
 
-function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onPending }) {
+function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onPending, onSeasonCreated, onGradeCreated }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_GAME_FORM)
@@ -1075,6 +1192,11 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         </h3>
         <p className="text-xs text-pb-faint mb-3">
           Date, opposition and venue can be left blank if unknown. At least one batting / bowling / fielding row is required.
+          {' '}Got a typed or printed scorecard to photograph instead of typing it in?{' '}
+          <Link to="/admin/upload-scorecard" className="text-pb-accent underline hover:opacity-80">
+            Upload Historical Scorecard
+          </Link>{' '}
+          reads it for you.
         </p>
 
         <div className="flex flex-wrap gap-1 mb-3 border-b pb-hairline">
@@ -1098,17 +1220,23 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         {formSection === 'match' && <><div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className={LABEL_CLS}>Season *</label>
-            <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
-              <option value="">— Choose a season —</option>
-              {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
-            </select>
+            <SeasonSelect
+              seasons={seasons}
+              value={form.season_id}
+              onChange={id => setForm({ ...form, season_id: id, grade_id: '' })}
+              onCreated={onSeasonCreated}
+            />
           </div>
           <div>
             <label className={LABEL_CLS}>Grade (optional)</label>
-            <select className={INPUT_CLS} value={form.grade_id || ''} onChange={e => setForm({ ...form, grade_id: e.target.value })} disabled={!form.season_id}>
-              <option value="">— None —</option>
-              {seasonGrades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
-            </select>
+            <GradeSelect
+              grades={seasonGrades}
+              seasonId={form.season_id}
+              value={form.grade_id || ''}
+              onChange={id => setForm({ ...form, grade_id: id })}
+              onCreated={onGradeCreated}
+              emptyLabel="— None —"
+            />
           </div>
           <div>
             <label className={LABEL_CLS}>Date (optional)</label>
@@ -1386,6 +1514,12 @@ export default function AdminManualEntries() {
   const [tick, setTick] = useState(0)
 
   const refreshAll = useCallback(() => setTick(t => t + 1), [])
+  // Update the shared season/grade lists in place (no tick bump — bumping
+  // tick remounts the active tab via its `key`, which would wipe whatever
+  // the admin is mid-typing in the rest of the form they just created a
+  // season/grade from).
+  const onSeasonCreated = useCallback((s) => setSeasons(prev => [...prev, s]), [])
+  const onGradeCreated = useCallback((g) => setGrades(prev => [...prev, g]), [])
 
   useEffect(() => {
     ;(async () => {
@@ -1440,10 +1574,10 @@ export default function AdminManualEntries() {
         <p className="text-xs text-pb-faintest mb-4">{TABS.find(t => t.key === activeTab)?.hint}</p>
 
         {activeTab === 'season' && (
-          <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
+          <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}
         {activeTab === 'game' && (
-          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} />
+          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}
         {activeTab === 'audit' && (
           <AuditTab key={tick + ':audit'} refreshAll={refreshAll} onPending={onPending} />
