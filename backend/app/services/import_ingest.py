@@ -307,12 +307,22 @@ def row_to_truth(values: dict) -> tuple:
 # ── name + season matching ────────────────────────────────────────────────────
 
 def _normalise_name(name: str) -> str:
-    """Mirror admin._normalise: 'Last, First' → 'first last', collapse spaces."""
+    """Mirror admin._normalise: 'Last, First' → 'first last', collapse spaces.
+
+    Splits on a bare comma (not the literal ", " substring) and strips each side
+    before rejoining — a stray space before the comma ("Hampton , Neil", a real
+    typo found in a club's 50-year stats sheet) used to leave a trailing space
+    baked into the normalised key ("neil hampton "), silently failing to match
+    the correctly-typed "Hampton, Neil" elsewhere in the same sheet and minting
+    a duplicate player instead. A comma with nothing after it (a surname-only
+    historical row, e.g. "Bartley, ") now collapses to just the surname instead
+    of keeping the stray comma character.
+    """
     name = (name or "").strip()
-    if ", " in name:
-        last, first = name.split(", ", 1)
-        name = f"{first} {last}"
-    return re.sub(r"\s+", " ", name).lower()
+    if "," in name:
+        last, first = name.split(",", 1)
+        name = f"{first.strip()} {last.strip()}".strip()
+    return re.sub(r"\s+", " ", name).strip().lower()
 
 
 def _parse_initial_form(name: str):
