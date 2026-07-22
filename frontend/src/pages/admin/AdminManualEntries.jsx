@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
@@ -1075,6 +1076,11 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         </h3>
         <p className="text-xs text-pb-faint mb-3">
           Date, opposition and venue can be left blank if unknown. At least one batting / bowling / fielding row is required.
+          {' '}Got a typed or printed scorecard to photograph instead of typing it in?{' '}
+          <Link to="/admin/upload-scorecard" className="text-pb-accent underline hover:opacity-80">
+            Upload Historical Scorecard
+          </Link>{' '}
+          reads it for you.
         </p>
 
         <div className="flex flex-wrap gap-1 mb-3 border-b pb-hairline">
