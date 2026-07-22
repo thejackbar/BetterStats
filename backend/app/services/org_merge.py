@@ -73,6 +73,8 @@ async def merge_organisation(
         "grades_moved": 0, "grades_merged": 0,
         "games_repointed": 0,
         "players_moved": 0, "players_merged": 0,
+        "season_stats_repointed": 0, "grade_stats_repointed": 0,
+        "manual_games_moved": 0,
     }
 
     # ── Seasons ──────────────────────────────────────────────────────────
@@ -142,6 +144,84 @@ async def merge_organisation(
             {"tgid": str(target_grade_id), "sgid": str(source_grade_id)},
         )
         counts["games_repointed"] += result.rowcount or 0
+
+    # ── Leaf per-player-season stats ────────────────────────────────────────
+    # player_season_stats / player_season_grade_stats reference season_id (and
+    # grade_id) directly by FK — NOT via the game/grade chain — so a MERGED
+    # (collided) season or grade leaves these rows silently pointing at the
+    # OLD source-org season/grade row forever: it's never deleted (only a
+    # MOVED season/grade updates its own organisation_id in place; a MERGED
+    # one is left as-is, only recorded in season_redirect/grade_redirect for
+    # the games repoint above). A player whose stats hang off a merged season
+    # then has an org mismatch (their own organisation_id is now the target,
+    # but their season's organisation_id is still the archived source) that
+    # the cross-club-safety view (v_effective_player_season_stats) uses to
+    # decide what's "theirs" — so the player's whole season of stats vanishes
+    # from every view-based summary while remaining visible to any reader
+    # that queries player_season_stats directly without checking the season's
+    # org (e.g. a raw per-player analysis query). Must run before the Players
+    # section below, since _merge_players_core reads/merges these rows by
+    # season_id and needs the corrected value to detect a genuine same-season
+    # collision (rather than silently duplicating a season under a stale id).
+    if season_redirect:
+        for source_season_id, target_season_id in season_redirect.items():
+            result = await db.execute(
+                text("""
+                    UPDATE player_season_stats pss
+                    SET season_id = :tid
+                    FROM players p
+                    WHERE pss.player_id = p.id
+                      AND p.organisation_id = :source_org_id
+                      AND pss.season_id = :sid
+                """),
+                {"tid": str(target_season_id), "sid": str(source_season_id), "source_org_id": str(source_org_id)},
+            )
+            counts["season_stats_repointed"] += result.rowcount or 0
+            await db.execute(
+                text("""
+                    UPDATE player_season_grade_stats pgs
+                    SET season_id = :tid
+                    FROM players p
+                    WHERE pgs.player_id = p.id
+                      AND p.organisation_id = :source_org_id
+                      AND pgs.season_id = :sid
+                """),
+                {"tid": str(target_season_id), "sid": str(source_season_id), "source_org_id": str(source_org_id)},
+            )
+    if grade_redirect:
+        for source_grade_id, target_grade_id in grade_redirect.items():
+            result = await db.execute(
+                text("""
+                    UPDATE player_season_grade_stats pgs
+                    SET grade_id = :tid
+                    FROM players p
+                    WHERE pgs.player_id = p.id
+                      AND p.organisation_id = :source_org_id
+                      AND pgs.grade_id = :gid
+                """),
+                {"tid": str(target_grade_id), "gid": str(source_grade_id), "source_org_id": str(source_org_id)},
+            )
+            counts["grade_stats_repointed"] += result.rowcount or 0
+
+    # ── Manual (photo-upload / hand-typed) games ─────────────────────────────
+    # manual_games carries organisation_id/season_id/grade_id directly (it
+    # isn't reached via grades → games at all), so it needs the same move +
+    # redirect treatment as the synced Games above or it's silently orphaned
+    # under the archived source org forever.
+    source_manual_games = (await db.execute(
+        text("SELECT id, season_id, grade_id FROM manual_games WHERE organisation_id = :oid"),
+        {"oid": str(source_org_id)},
+    )).all()
+    for mgid, season_id, grade_id in source_manual_games:
+        effective_season_id = season_redirect.get(season_id, season_id)
+        effective_grade_id = grade_redirect.get(grade_id, grade_id) if grade_id else None
+        await db.execute(
+            text(
+                "UPDATE manual_games SET organisation_id = :tid, season_id = :sid, grade_id = :gid WHERE id = :mgid"
+            ),
+            {"tid": str(target_org_id), "sid": str(effective_season_id), "gid": str(effective_grade_id) if effective_grade_id else None, "mgid": str(mgid)},
+        )
+        counts["manual_games_moved"] += 1
 
     # ── Players ──────────────────────────────────────────────────────────
     from app.routers.admin import _merge_players_core
@@ -240,3 +320,133 @@ async def merge_organisation(
         **counts,
         "skipped_player_conflicts": skipped_player_conflicts,
     }
+
+
+async def repair_organisation_merge_stats(
+    db: AsyncSession, org_id: uuid.UUID, current_user: User,
+) -> dict:
+    """Retroactively fix the orphaned-season/grade-stats bug for a club that
+    was already merged via `merge_organisation` before that repoint existed
+    (or for any other reason ended up with this exact shape of stale row).
+
+    Finds every `player_season_stats` / `player_season_grade_stats` row for a
+    player CURRENTLY in `org_id` whose season (or grade) belongs to a
+    DIFFERENT organisation — the state `merge_organisation` used to leave
+    behind for a MERGED (collided) season/grade, since only the games repoint
+    used the redirect; these per-player stat rows were never touched, so they
+    silently point at the old, now-archived source org's season/grade forever
+    and vanish from every view that checks the season's own org (while
+    remaining visible to a raw, non-scoped reader — the exact "stats show in
+    one tab but not another" symptom this repairs).
+
+    Repointed via `grassroots_id` (the shared CA season/grade GUID) — the
+    same identity `merge_organisation`/a live sync already use. A row with no
+    same-GUID counterpart under `org_id` is left alone and reported (nothing
+    to redirect it onto; needs a manual look). Idempotent — running it again
+    finds nothing left to fix. Safe on a club that was never merged (no-op).
+    """
+    counts = {"season_stats_repointed": 0, "season_stats_deduped": 0,
+              "grade_stats_repointed": 0, "grade_stats_deduped": 0}
+    unresolved: list[dict] = []
+
+    # ── player_season_stats ─────────────────────────────────────────────────
+    orphan_pss = (await db.execute(
+        text("""
+            SELECT pss.id, pss.player_id, pss.season_id, s.grassroots_id
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :oid AND s.organisation_id <> :oid
+        """),
+        {"oid": str(org_id)},
+    )).all()
+    for pss_id, player_id, old_season_id, grassroots_id in orphan_pss:
+        target_season_id = None
+        if grassroots_id:
+            target_season_id = (await db.execute(
+                text("SELECT id FROM seasons WHERE organisation_id = :oid AND grassroots_id = :gid LIMIT 1"),
+                {"oid": str(org_id), "gid": grassroots_id},
+            )).scalar_one_or_none()
+        if not target_season_id:
+            unresolved.append({"table": "player_season_stats", "id": pss_id, "player_id": str(player_id)})
+            continue
+        clash = (await db.execute(
+            text("SELECT 1 FROM player_season_stats WHERE player_id = :pid AND season_id = :sid"),
+            {"pid": str(player_id), "sid": str(target_season_id)},
+        )).scalar_one_or_none()
+        if clash:
+            # A proper row for the corrected season already exists (e.g. a
+            # regular sync since re-created it) — the orphan is now a stale
+            # duplicate of already-correct data, not new information.
+            await db.execute(text("DELETE FROM player_season_stats WHERE id = :id"), {"id": pss_id})
+            counts["season_stats_deduped"] += 1
+        else:
+            await db.execute(
+                text("UPDATE player_season_stats SET season_id = :sid WHERE id = :id"),
+                {"sid": str(target_season_id), "id": pss_id},
+            )
+            counts["season_stats_repointed"] += 1
+
+    # ── player_season_grade_stats ───────────────────────────────────────────
+    orphan_pgs = (await db.execute(
+        text("""
+            SELECT pgs.id, pgs.player_id, pgs.season_id, pgs.grade_id,
+                   s.grassroots_id AS season_gid, gr.grassroots_id AS grade_gid,
+                   (s.organisation_id <> :oid) AS season_wrong,
+                   (grs.organisation_id <> :oid) AS grade_wrong
+            FROM player_season_grade_stats pgs
+            JOIN players p ON p.id = pgs.player_id
+            JOIN seasons s ON s.id = pgs.season_id
+            JOIN grades gr ON gr.id = pgs.grade_id
+            JOIN seasons grs ON grs.id = gr.season_id
+            WHERE p.organisation_id = :oid
+              AND (s.organisation_id <> :oid OR grs.organisation_id <> :oid)
+        """),
+        {"oid": str(org_id)},
+    )).all()
+    for pgs_id, player_id, old_season_id, old_grade_id, season_gid, grade_gid, season_wrong, grade_wrong in orphan_pgs:
+        target_season_id = old_season_id
+        if season_wrong:
+            target_season_id = None
+            if season_gid:
+                target_season_id = (await db.execute(
+                    text("SELECT id FROM seasons WHERE organisation_id = :oid AND grassroots_id = :gid LIMIT 1"),
+                    {"oid": str(org_id), "gid": season_gid},
+                )).scalar_one_or_none()
+        target_grade_id = old_grade_id
+        if grade_wrong and target_season_id:
+            target_grade_id = None
+            if grade_gid:
+                target_grade_id = (await db.execute(
+                    text("SELECT id FROM grades WHERE season_id = :sid AND grassroots_id = :gid LIMIT 1"),
+                    {"sid": str(target_season_id), "gid": grade_gid},
+                )).scalar_one_or_none()
+        if not target_season_id or not target_grade_id:
+            unresolved.append({"table": "player_season_grade_stats", "id": pgs_id, "player_id": str(player_id)})
+            continue
+        clash = (await db.execute(
+            text(
+                "SELECT 1 FROM player_season_grade_stats "
+                "WHERE player_id = :pid AND season_id = :sid AND grade_id = :gid"
+            ),
+            {"pid": str(player_id), "sid": str(target_season_id), "gid": str(target_grade_id)},
+        )).scalar_one_or_none()
+        if clash:
+            await db.execute(text("DELETE FROM player_season_grade_stats WHERE id = :id"), {"id": pgs_id})
+            counts["grade_stats_deduped"] += 1
+        else:
+            await db.execute(
+                text("UPDATE player_season_grade_stats SET season_id = :sid, grade_id = :gid WHERE id = :id"),
+                {"sid": str(target_season_id), "gid": str(target_grade_id), "id": pgs_id},
+            )
+            counts["grade_stats_repointed"] += 1
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=org_id, user_id=current_user.id,
+        action="repair_organisation_merge_stats", target_type="organisation", target_id=str(org_id),
+        details={**counts, "unresolved": len(unresolved)},
+    )
+
+    await db.commit()
+    return {"organisation_id": str(org_id), **counts, "unresolved": unresolved}

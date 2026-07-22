@@ -28,6 +28,11 @@ export default function SuperClubMerge() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
 
+  const [repairId, setRepairId] = useState('')
+  const [repairing, setRepairing] = useState(false)
+  const [repairError, setRepairError] = useState('')
+  const [repairResult, setRepairResult] = useState(null)
+
   useEffect(() => {
     api.superListClubs(false).then((cs) => {
       setClubs([...cs].sort((a, b) => a.name.localeCompare(b.name)))
@@ -64,6 +69,19 @@ export default function SuperClubMerge() {
 
   const reset = () => {
     setSourceId(''); setTargetId(''); setPreview(null); setConfirmText(''); setResult(null); setError('')
+  }
+
+  const repairClub = clubs.find((c) => c.id === repairId)
+  const doRepair = async () => {
+    setRepairing(true); setRepairError(''); setRepairResult(null)
+    try {
+      const r = await api.superClubRepairMergeStats(repairId)
+      setRepairResult(r)
+    } catch (e) {
+      setRepairError(e.message)
+    } finally {
+      setRepairing(false)
+    }
   }
 
   return (
@@ -147,6 +165,45 @@ export default function SuperClubMerge() {
             )}
           </div>
         )}
+
+        <div className="mt-8">
+          <h2 className="text-base font-semibold text-pb-text">Repair a previous merge</h2>
+          <p className="text-sm text-pb-dim mt-1 leading-relaxed">
+            A merge run before player-season-stats repointing was added could leave some of a player's seasons
+            still pointing at the archived predecessor club's copy of that season — they disappear from the
+            player's summary while still turning up in raw/analysis views. Safe to run on any club, including one
+            that's never been merged (does nothing), and safe to run more than once.
+          </p>
+          <div className="pb-card p-5 mt-3">
+            {loadingClubs ? (
+              <p className="font-mono text-[10px] text-pb-faint">loading clubs…</p>
+            ) : (
+              <>
+                <label className={LABEL_CLS}>Club to repair (the target it was merged INTO)</label>
+                <select value={repairId} onChange={(e) => { setRepairId(e.target.value); setRepairResult(null); setRepairError('') }}
+                  className={`${SELECT_CLS} mb-4`}>
+                  <option value="">— select a club —</option>
+                  {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {repairError && <p className="text-[12px] text-pb-red mb-3">{repairError}</p>}
+                {repairResult && (
+                  <div className="rounded border pb-hairline p-3 mb-4 font-mono text-[11px] text-pb-dim space-y-0.5">
+                    <div>Season stats: {repairResult.season_stats_repointed} repointed, {repairResult.season_stats_deduped} deduped</div>
+                    <div>Grade stats: {repairResult.grade_stats_repointed} repointed, {repairResult.grade_stats_deduped} deduped</div>
+                    {repairResult.unresolved?.length > 0 && (
+                      <div className="text-amber-400">{repairResult.unresolved.length} row(s) had no matching season/grade in this club and were left as-is.</div>
+                    )}
+                  </div>
+                )}
+                <button onClick={doRepair} disabled={!repairId || repairing}
+                  className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-40"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  {repairing ? 'REPAIRING…' : `REPAIR ${repairClub?.name?.toUpperCase() || 'CLUB'}`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </AdminLayout>
   )

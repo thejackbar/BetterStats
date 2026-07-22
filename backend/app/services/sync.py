@@ -1694,7 +1694,16 @@ async def sync_grassroots_game_level_data(
             if opp_team_m:
                 opp_org = opp_team_m.get("owningOrganisation") or {}
                 opp_id = opp_org.get("id")
-                opp_name = (
+                # opp_org's own name/displayName is already club-level; the
+                # team-display fallbacks (used when the owning org has no name
+                # of its own) are the literal per-grade team name — e.g. "X
+                # 2nd XI" — which varies by grade and, when opp_id is also
+                # absent (opponent never synced as its own org), fragments a
+                # single real club into several distinct opp_key entries in
+                # the opposition list (one per grade/team suffix) instead of
+                # one. strip_team_suffix normalises it down to the club name,
+                # same as home_club/away_club already do.
+                opp_name = strip_team_suffix(
                     opp_org.get("name")
                     or opp_org.get("displayName")
                     or opp_team_m.get("displayName")

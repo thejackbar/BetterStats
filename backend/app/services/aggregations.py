@@ -2494,7 +2494,21 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 UNION
                 SELECT manual_game_id AS game_id FROM manual_fielding_stats WHERE player_id = CAST(:pid AS UUID)
             ),
-            player_games AS (
+            excluded_orgs AS (
+                -- A game whose opp_key resolves to the player's OWN org, or to
+                -- a predecessor club folded into it via the club-merger tool
+                -- (services/org_merge.py — e.g. a derby played against a club
+                -- before a real-world merger), isn't a real opponent any more.
+                -- The predecessor org is soft-archived, not deleted, so its id
+                -- stays resolvable in opp_org_id forever unless excluded here.
+                SELECT organisation_id::text AS oid FROM player_org
+                UNION
+                SELECT oml.source_org_id::text
+                FROM org_merge_logs oml
+                JOIN player_org po ON po.organisation_id = oml.target_org_id
+                WHERE oml.source_org_id IS NOT NULL
+            ),
+            player_games_raw AS (
                 -- opp_key/opp_name priority: home_org_id/away_org_id FIRST —
                 -- the reliable, per-club signal set at sync time (migration
                 -- 167) for which side of a shared games.id row is OUR
@@ -2559,6 +2573,10 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 JOIN v_effective_games g ON g.id = pgi.game_id
                 CROSS JOIN player_org po
                 LEFT JOIN game_appearances ga ON ga.game_id = pgi.game_id AND ga.player_id = CAST(:pid AS UUID)
+            ),
+            player_games AS (
+                SELECT * FROM player_games_raw
+                WHERE opp_key IS NULL OR opp_key NOT IN (SELECT oid FROM excluded_orgs)
             ),
             opp_display AS (
                 -- Most recently seen display name for each opp_key.
