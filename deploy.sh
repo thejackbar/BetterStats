@@ -13,8 +13,10 @@
 # steals the betterstats-* container names from the real one. That is the exact
 # June 2026 outage — see CLAUDE.md "June 2026 Production Outage — Post-Mortem".
 #
-# Safe by construction: only the two betterstats services are rebuilt/recreated.
-# The database (betterstats-db) and the other ~24 apps on the box are never touched.
+# Safe by construction: only betterstats-backend/-frontend, and (if it's been set
+# up — see docs/backup-system.md) the optional betterstats-backup-agent sidecar,
+# are rebuilt/recreated. The database (betterstats-db) and the other ~24 apps on
+# the box are never touched.
 #
 set -euo pipefail
 
@@ -42,31 +44,43 @@ export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 export LANGFLOW_SUPERUSER="${LANGFLOW_SUPERUSER:-}"
 export LANGFLOW_SUPERUSER_PASSWORD="${LANGFLOW_SUPERUSER_PASSWORD:-}"
 
-echo "==> [1/5] Pulling latest main into /srv/docker/betterstats"
+echo "==> [1/6] Pulling latest main into /srv/docker/betterstats"
 git -C /srv/docker/betterstats pull origin main
 
-echo "==> [2/5] Rebuilding betterstats images (no cache)"
-docker compose build --no-cache betterstats-backend betterstats-frontend
+# betterstats-backup-agent (see docs/backup-system.md) is an OPTIONAL sidecar —
+# not every deploy of this box will have added it to the central compose file
+# yet. Detect whether it's actually defined there before trying to build/recreate
+# it, so this script doesn't break for anyone who hasn't set it up (it would
+# otherwise fail with "no such service").
+AGENT_SVC=""
+if docker compose config --services 2>/dev/null | grep -qx betterstats-backup-agent; then
+  AGENT_SVC="betterstats-backup-agent"
+fi
 
-echo "==> [3/5] Recreating betterstats only (db + other services untouched)"
+echo "==> [2/6] Rebuilding betterstats images (no cache)"
+docker compose build --no-cache betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
+
+echo "==> [3/6] Recreating betterstats only (db + other services untouched)"
 # Why rm+up instead of `up --force-recreate`:
-# The central file pins fixed container_names (betterstats-frontend / -backend).
-# With a fixed name, `--force-recreate` does a fragile rename dance — it renames
-# the old container to <shortid>_betterstats-frontend, creates the new one, then
-# removes the temp. If a past run left that temp container behind (it keeps the
-# compose service label AND still holds the /betterstats-frontend name), the next
-# --force-recreate dies with:
+# The central file pins fixed container_names (betterstats-frontend / -backend /
+# betterstats-backup-agent). With a fixed name, `--force-recreate` does a fragile
+# rename dance — it renames the old container to <shortid>_betterstats-frontend,
+# creates the new one, then removes the temp. If a past run left that temp
+# container behind (it keeps the compose service label AND still holds the
+# /betterstats-frontend name), the next --force-recreate dies with:
 #   "Error when allocating new name: Conflict. The container name
 #    /betterstats-frontend is already in use by <shortid>_betterstats-frontend"
 # — which is exactly the failure that forces a second deploy. Explicitly removing
-# the two services first frees the names (rm -sf also clears any leftover
-# <shortid>_ orphans of these services, since they carry the same service label),
-# so `up` always creates clean containers on the FIRST run. Only the two named
-# services are touched — db and the other ~24 apps are never affected.
-docker compose rm -sf betterstats-backend betterstats-frontend || true
-docker compose up -d --no-deps betterstats-backend betterstats-frontend
+# the services first frees the names (rm -sf also clears any leftover <shortid>_
+# orphans of these services, since they carry the same service label), so `up`
+# always creates clean containers on the FIRST run. Only these named services are
+# touched — db and the other ~24 apps are never affected. The agent has no
+# published port and isn't behind nginx-proxy-manager, so recreating it never
+# needs the DNS-refresh dance step [4/6] does for the frontend.
+docker compose rm -sf betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC} || true
+docker compose up -d --no-deps betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
 
-echo "==> [4/5] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
+echo "==> [4/6] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
 # Recreating betterstats-frontend gives it a NEW Docker IP. nginx-proxy-manager
 # caches the old DNS result per worker and then 502s with
 #   "betterstats-frontend could not be resolved (2: Server failure)"
@@ -97,8 +111,8 @@ else
   echo "    no proxy service found in this compose project — skipping proxy refresh"
 fi
 
-echo "==> [5/5] Backend API health check (end-to-end through the proxy)"
-# [4/5] only checks the frontend, which serves its static files even when the API
+echo "==> [5/6] Backend API health check (end-to-end through the proxy)"
+# [4/6] only checks the frontend, which serves its static files even when the API
 # is dead — so a backend that fails to boot (e.g. 'alembic upgrade head' errors, so
 # uvicorn never starts) sails through as a green deploy while login and every club
 # page hang on "Loading club data…". Hit a real API endpoint and confirm BetterStats
@@ -116,7 +130,7 @@ if [ -n "$api_ok" ]; then
 else
   echo ""
   echo "    ✗✗ BACKEND API IS DOWN — login and club data will fail."
-  echo "       (The frontend still serves static files, which is why [4/5] looked green.)"
+  echo "       (The frontend still serves static files, which is why [4/6] looked green.)"
   echo "    --- betterstats-backend container state ---"
   docker compose ps betterstats-backend || true
   echo "    --- betterstats-backend last 50 log lines ---"
@@ -128,8 +142,27 @@ else
   exit 1
 fi
 
+echo "==> [6/6] Backup-agent health check (optional — never blocks the deploy)"
+# Unlike [5/6], a bad agent doesn't take down login or club data — it only
+# means the Backups page's "Run backup now" button 502s. So this WARNS, it
+# never exits non-zero. Skipped entirely if the service isn't defined yet.
+if [ -n "$AGENT_SVC" ]; then
+  code="$(docker compose exec -T "$AGENT_SVC" curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health 2>/dev/null || echo 000)"
+  if [ "$code" = "200" ]; then
+    echo "    backup-agent healthy ✓"
+  else
+    echo "    ⚠ backup-agent did not respond healthy (got '$code') — 'Run backup now' will 502 until this is fixed."
+    echo "    --- $AGENT_SVC container state ---"
+    docker compose ps "$AGENT_SVC" || true
+    echo "    --- $AGENT_SVC last 30 log lines ---"
+    docker compose logs --tail=30 "$AGENT_SVC" 2>&1 | tail -30 || true
+  fi
+else
+  echo "    betterstats-backup-agent isn't defined in the compose file yet — skipping (see docs/backup-system.md)"
+fi
+
 echo "==> Status:"
-docker compose ps betterstats-backend betterstats-frontend
+docker compose ps betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
 
 cat <<'NOTE'
 
