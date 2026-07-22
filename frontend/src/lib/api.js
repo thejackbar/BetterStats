@@ -1033,6 +1033,11 @@ export const api = {
     request(`/club-admin/super/clubs/${sourceClubId}/merge-preview?target_id=${targetClubId}`),
   superClubMerge: (sourceClubId, targetClubId) =>
     request(`/club-admin/super/clubs/${sourceClubId}/merge-into/${targetClubId}`, { method: 'POST' }),
+  // Retroactive fix for a club merged before season/grade-stats repointing
+  // was added to merge_organisation — repoints orphaned player_season_stats/
+  // player_season_grade_stats rows left on the old predecessor's season/grade.
+  superClubRepairMergeStats: (clubId) =>
+    request(`/club-admin/super/clubs/${clubId}/repair-merge-stats`, { method: 'POST' }),
   // Pause Sync / Cancel Sync / Continue Sync for a club's current Full Sync
   // (migration 160) — All Clubs row actions.
   superClubSyncControl: (clubId, action) =>

@@ -29,7 +29,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, delete as sa_delete, func
+from sqlalchemy import select, delete as sa_delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
@@ -54,6 +54,7 @@ class ResolveRequest(BaseModel):
     granularity: str = "career"         # career | season
     player_overrides: dict = {}         # raw_name -> player_id | "__new__" | "__skip__"
     season_overrides: dict = {}         # raw_label -> season_id | "__prior__"
+    grade_overrides: dict = {}          # raw_label -> grade_name | "__none__"
 
 
 class CommitRequest(ResolveRequest):
@@ -94,6 +95,62 @@ async def _org_seasons(db: AsyncSession, org_id) -> list:
     return [(str(s.id), s.name or "", s.year) for s in rows]
 
 
+async def _org_grade_options(db: AsyncSession, org_id) -> list:
+    """This org's distinct, merge-resolved grade names — the same name-space
+    ``aggregations._GRADE_MATCH`` groups by — with rough games/players/runs so
+    the matching step can show "does this look right" context. Mirrors the
+    canonical-resolution walk ``admin.py::list_grades_with_stats`` already does
+    for the (unrelated) grade-merge admin tool; kept as its own small copy here
+    rather than a shared import so the two features stay decoupled.
+    """
+    raw = (await db.execute(
+        text("""
+            SELECT gr.name AS grade_name,
+                   COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
+                   COUNT(DISTINCT g.id) AS games,
+                   COUNT(DISTINCT bi.player_id) AS players,
+                   COALESCE(SUM(bi.runs), 0) AS runs
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN v_effective_games g ON g.grade_id = gr.id
+            LEFT JOIN v_effective_batting_innings bi ON bi.game_id = g.id
+            WHERE s.organisation_id = :org_id
+            GROUP BY gr.name
+        """),
+        {"org_id": str(org_id)},
+    )).mappings().all()
+    if not raw:
+        return []
+
+    log_rows = (await db.execute(
+        text("SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org_id AND undone_at IS NULL"),
+        {"org_id": str(org_id)},
+    )).mappings().all()
+    alias_to_canonical = {r["alias_name"]: r["canonical_name"] for r in log_rows}
+
+    def _resolve_canonical(name):
+        seen = set()
+        cur = name
+        while cur in alias_to_canonical and cur not in seen:
+            seen.add(cur)
+            cur = alias_to_canonical[cur]
+        return cur
+
+    display_name_by_raw = {row["grade_name"]: row["display_name"] for row in raw}
+    bucket: dict = {}
+    for row in raw:
+        canonical = _resolve_canonical(row["grade_name"])
+        slot = bucket.setdefault(canonical, {
+            "name": display_name_by_raw.get(canonical, canonical),
+            "games": 0, "players": 0, "runs": 0,
+        })
+        slot["games"] += int(row["games"] or 0)
+        slot["players"] = max(slot["players"], int(row["players"] or 0))
+        slot["runs"] += int(row["runs"] or 0)
+
+    return sorted(bucket.values(), key=lambda d: (d["name"] or "").lower())
+
+
 def _apply_player_overrides(matches: dict, overrides: dict) -> None:
     for name, choice in (overrides or {}).items():
         if name not in matches:
@@ -116,6 +173,31 @@ def _apply_season_overrides(matches: dict, overrides: dict) -> None:
             matches[label].update(season_id=str(choice), is_prior=False, status="manual")
 
 
+def _apply_grade_overrides(matches: dict, overrides: dict) -> None:
+    for label, choice in (overrides or {}).items():
+        if label not in matches:
+            matches[label] = {"candidates": []}
+        if choice == "__none__":
+            # Explicit confirm: no matching online grade — group under the
+            # sheet's own literal label (the pre-fix behaviour), now opt-in.
+            matches[label].update(grade_name=label, status="own")
+        elif choice:
+            matches[label].update(grade_name=str(choice), status="manual")
+
+
+def _resolved_grade_label(raw_label: Optional[str], gmatch: dict) -> Optional[str]:
+    """The canonical grade name to group/store for a raw sheet label, or None.
+
+    None means "leave ungraded" — the row folds into the safe whole-career GR
+    comparison instead of being scoped to a grade GR has no matched coverage
+    under (the exact failure mode this matching step exists to close).
+    """
+    if not raw_label:
+        return None
+    info = gmatch.get(raw_label) or {}
+    return info.get("grade_name")
+
+
 async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     """Shared core of /resolve and /commit: match + build the reconciliation
     preview. Returns everything the wizard's review screen needs, plus an
@@ -128,6 +210,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
 
     names = []
     labels = []
+    raw_grade_labels = []
     for r in req.rows:
         nm = str(r.get(name_col, "")).strip()
         if nm and nm not in names:
@@ -136,13 +219,20 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             lb = str(r.get(season_col, "")).strip()
             if lb and lb not in labels:
                 labels.append(lb)
+        if grade_col:
+            gl = str(r.get(grade_col, "")).strip()
+            if gl and gl not in raw_grade_labels:
+                raw_grade_labels.append(gl)
 
     players = await _org_players(db, org_id)
     seasons = await _org_seasons(db, org_id)
+    grade_options = await _org_grade_options(db, org_id) if grade_col else []
     pmatch = ingest.match_players(names, players)
     _apply_player_overrides(pmatch, req.player_overrides)
     smatch = ingest.match_seasons(labels, seasons) if season_col else {}
     _apply_season_overrides(smatch, req.season_overrides)
+    gmatch = ingest.match_grades(raw_grade_labels, [g["name"] for g in grade_options]) if grade_col else {}
+    _apply_grade_overrides(gmatch, req.grade_overrides)
 
     # Columns + names we'll summarise straight from the sheet, so the close-review
     # can show "this is what your sheet holds for this name" next to each
@@ -175,11 +265,13 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
                 scope, season_id = "season", sm["season_id"]
             else:
                 scope, season_id = "season", None  # unmatched → folds into residual
+        raw_grade = str(r.get(grade_col, "")).strip() if grade_col else None
         return {
             "scope": scope, "season_id": (uuid.UUID(season_id) if season_id else None),
             "is_prior_bucket": is_prior, "metrics": _truth_metrics(truth),
             "season_label": (str(r.get(season_col, "")).strip() if season_col else None),
-            "grade_label": (str(r.get(grade_col, "")).strip() if grade_col else None),
+            "grade_label": _resolved_grade_label(raw_grade, gmatch),
+            "raw_grade_label": raw_grade,
             "truth": truth,
         }
 
@@ -307,13 +399,24 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     exceed = [p["player_name"] for p in preview if p["gr_exceeds"]]
     if exceed:
         warnings.append("Online (GR) data already shows more than your sheet for: "
-                        + ", ".join(exceed[:5]) + " — we'll show the higher GR figure.")
+                        + ", ".join(exceed[:5]) + " — we'll show the higher online figure.")
+    grade_unresolved = [lb for lb, m in gmatch.items() if m.get("status") in ("fuzzy", "none")]
+    if grade_unresolved:
+        warnings.append(
+            f"{len(grade_unresolved)} grade/team label(s) aren't matched to an online grade: "
+            + ", ".join(grade_unresolved[:8]) + ("…" if len(grade_unresolved) > 8 else "")
+            + " — for now that part is compared against the player's whole career instead of just "
+              "that grade (safe, but can under-count). Match them on the Grades step, or confirm "
+              "‘no online equivalent’ if the grade genuinely predates online records."
+        )
 
     return {
         "granularity": "season" if is_season else "career",
         "columns_used": {f: _col(req.mapping, f) for f in ingest.ALL_FIELDS if _col(req.mapping, f)},
         "players": [{"raw_name": n, **m} for n, m in pmatch.items()],
         "seasons": [{"raw_label": lb, **m} for lb, m in smatch.items()],
+        "grades": [{"raw_label": lb, **m} for lb, m in gmatch.items()],
+        "grade_options": grade_options,
         "preview": preview,
         "rounding_notes": sorted(rounding)[:50],
         "warnings": warnings,
@@ -326,6 +429,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         },
         "_items_by_player": items_by_player,
         "_new_names": [n for n, m in pmatch.items() if m.get("status") == "new"],
+        "_grade_matches": gmatch,
     }
 
 
@@ -372,6 +476,7 @@ async def resolve(
     out = await _resolve(db, club.id, req)
     out.pop("_items_by_player", None)
     out.pop("_new_names", None)
+    out.pop("_grade_matches", None)
     return out
 
 
@@ -388,6 +493,7 @@ async def commit(
     resolved = await _resolve(db, club.id, req)
     items_by_player = resolved["_items_by_player"]
     new_names = set(resolved["_new_names"])
+    gmatch = resolved["_grade_matches"]
 
     batch = ImportBatch(
         id=uuid.uuid4(), organisation_id=club.id,
@@ -431,11 +537,12 @@ async def commit(
                     scope, season_id = "season", sm["season_id"]
                 else:
                     scope, season_id = "season", None
+            raw_grade = str(r.get(grade_col, "")).strip() if grade_col else None
             items_by_player.setdefault(new_pid_by_name[nm], []).append(
                 {"scope": scope, "season_id": (uuid.UUID(season_id) if season_id else None),
                  "is_prior_bucket": is_prior, "metrics": metrics,
                  "season_label": (str(r.get(season_col, "")).strip() if season_col else None),
-                 "grade_label": (str(r.get(grade_col, "")).strip() if grade_col else None),
+                 "grade_label": _resolved_grade_label(raw_grade, gmatch),
                  "truth": truth})
 
     if not items_by_player:

@@ -535,3 +535,50 @@ def match_seasons(labels: list, seasons: list, threshold: float = 0.84) -> dict:
         else:
             out[label] = {"season_id": None, "status": "none", "auto_status": "none", "is_prior": False, "candidates": cands}
     return out
+
+
+def match_grades(labels: list, grade_names: list, threshold: float = 0.72) -> dict:
+    """Sheet grade/team labels -> a real, GR-synced grade name (or no match).
+
+    ``grade_names`` is the org's own distinct, merge-resolved grade names (what
+    ``aggregations._GRADE_MATCH`` groups by) — NOT the club's shorthand. A club's
+    historical sheet often uses terse internal codes ("1A", "B", "A/R") that
+    never literally equal the real CA-synced grade name, so this must be an
+    explicit matching step rather than the exact-string comparison the
+    reconciler itself uses (see the "grade-scoped BetterImport" investigation:
+    an unmatched grade silently read as "GR has zero coverage here", so the
+    club's whole sheet got added on top of data that was already synced).
+
+    Unlike players/seasons, there is deliberately **no silent auto-default for
+    an unresolved label** — the caller must leave it unresolved (folds into the
+    safe whole-career comparison) or have the admin explicitly confirm "no
+    online equivalent" (folds into its own free-text bucket, the pre-fix
+    behaviour, now opt-in). ``status``: 'exact' (normalised name match,
+    auto-accept), 'fuzzy' (candidates, needs confirmation), 'none' (no
+    confident candidate).
+    """
+    name_map = {_norm_season(nm): nm for nm in grade_names}
+    out: dict = {}
+    for label in labels:
+        if label in out:
+            continue
+        if not str(label).strip():
+            out[label] = {"grade_name": None, "status": "none", "auto_status": "none",
+                          "confidence": 0.0, "candidates": []}
+            continue
+        ln = _norm_season(label)
+        if ln in name_map:
+            nm = name_map[ln]
+            out[label] = {"grade_name": nm, "matched_name": nm, "status": "exact",
+                          "auto_status": "exact", "confidence": 1.0, "candidates": []}
+            continue
+        scored = sorted(
+            ((SequenceMatcher(None, ln, _norm_season(nm)).ratio(), nm) for nm in grade_names),
+            key=lambda t: t[0], reverse=True,
+        )
+        top = scored[0][0] if scored else 0.0
+        cands = [{"grade_name": nm, "name": nm, "confidence": round(sc, 2)} for sc, nm in scored[:5] if sc >= 0.4]
+        status = "fuzzy" if top >= threshold else "none"
+        out[label] = {"grade_name": None, "status": status, "auto_status": status,
+                      "confidence": round(top, 2), "candidates": cands}
+    return out

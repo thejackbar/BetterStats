@@ -102,6 +102,28 @@ async def _held_org_keys(session: AsyncSession) -> set[str]:
     return keys
 
 
+async def _self_and_absorbed_org_ids(session: AsyncSession, org_id: str) -> set[str]:
+    """This org's own id, plus any predecessor club folded INTO it via the
+    club-merger tool (``services/org_merge.py``).
+
+    A game against one of these is no longer a real opponent — it's this same
+    club's own former identity from before a real-world merger (e.g. a derby
+    the target club played against the predecessor while they were still two
+    separate clubs; see the org_merge module docstring). The predecessor org
+    isn't deleted (soft-archived), so its id stays perfectly resolvable in
+    ``opp_org_id``/``organisations`` forever unless explicitly excluded here —
+    otherwise a merged club would show up scouting a version of itself.
+    """
+    res = await session.execute(
+        text(
+            "SELECT source_org_id::text FROM org_merge_logs "
+            "WHERE target_org_id = CAST(:org_id AS UUID) AND source_org_id IS NOT NULL"
+        ),
+        {"org_id": org_id},
+    )
+    return {org_id} | {r[0] for r in res.fetchall()}
+
+
 async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     """Opponents we have history against + upcoming fixtures to scout.
 
@@ -110,6 +132,7 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     fixtures (from BetterSelect's ``fixtures`` table) get an ``opp_key`` resolved
     by name so the UI can link "scout this opponent" straight to a report.
     """
+    excluded = await _self_and_absorbed_org_ids(session, org_id)
     res = await session.execute(
         text(
             f"""
@@ -134,6 +157,8 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     opponents = []
     for r in res.mappings():
         opp_key = r["opp_key"]
+        if opp_key in excluded:
+            continue
         opponents.append(
             {
                 "opp_key": opp_key,
@@ -170,6 +195,8 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
         {"org_id": org_id},
     )
     for r in sib.mappings():
+        if r["opp_key"] in excluded:
+            continue
         nm = (r["name"] or "").strip().lower()
         if r["opp_key"] in existing_keys or (nm and nm in existing_names):
             continue

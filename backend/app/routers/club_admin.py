@@ -3135,6 +3135,27 @@ async def merge_club(
     return result
 
 
+@router.post("/super/clubs/{club_id}/repair-merge-stats")
+async def repair_club_merge_stats(
+    club_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retroactively fix player_season_stats/player_season_grade_stats rows
+    left pointing at a now-archived predecessor org's season/grade by an
+    earlier run of merge-into (see services/org_merge.py, which now does this
+    repoint automatically for any NEW merge — this endpoint is for a club
+    merged before that fix shipped). Safe to run on any club; a no-op if
+    there's nothing to repair."""
+    try:
+        org_uuid = uuid.UUID(club_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid club id")
+
+    from app.services.org_merge import repair_organisation_merge_stats
+    return await repair_organisation_merge_stats(db, org_uuid, current_user)
+
+
 @router.delete("/super/clubs/{club_id}")
 async def delete_club(
     club_id: str,
