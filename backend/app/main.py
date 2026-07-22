@@ -1001,7 +1001,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_type_created "
             "ON usage_events(visitor_id, event_type, created_at) WHERE visitor_id IS NOT NULL"
         ))
-        # Backup/restore task tracking (migration 166) — one row per backup or
+        # Backup/restore task tracking (migration 170) — one row per backup or
         # restore run (scheduled via the host systemd timer, or triggered on
         # demand from Super Admin), so the Backups page can show a history plus
         # the size/row-count stats captured at the time. Written by
@@ -1032,7 +1032,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_backup_tasks_status ON backup_tasks(status)"
         ))
-        # Migration 167: live progress reporting for a running task (current
+        # Migration 171: live progress reporting for a running task (current
         # table/entity, current/total, a human message, and a running tally
         # of finished stages) — read by the Super Admin Backups page while
         # polling a `running` task.

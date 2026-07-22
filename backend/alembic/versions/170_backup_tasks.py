@@ -12,15 +12,15 @@ app.scripts.backup_task ...``), and read by ``routers/backup_admin.py`` for
 the Super Admin "Backups" page. It has no FK to a specific per-game table —
 just an optional ``scope_org_id`` for a club-level restore task.
 
-Revision ID: 166
-Revises: 165
+Revision ID: 170
+Revises: 169
 Create Date: 2026-07-21
 """
 from alembic import op
 
 
-revision = '166'
-down_revision = '165'
+revision = '170'
+down_revision = '169'
 branch_labels = None
 depends_on = None
 

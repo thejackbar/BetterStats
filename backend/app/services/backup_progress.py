@@ -1,6 +1,6 @@
 """Live progress reporting for a running backup/restore task.
 
-Writes into `backup_tasks.progress` (migration 167), a small JSONB blob:
+Writes into `backup_tasks.progress` (migration 171), a small JSONB blob:
   {"stage": "players", "current": 176, "total": 876,
    "message": "Processing Player 176 of 876",
    "stage_results": {"players": 876, "games": 3957, ...}}

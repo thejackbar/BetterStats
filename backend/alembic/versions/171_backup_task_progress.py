@@ -7,15 +7,15 @@ running tally of finished stages ("Players: 876, Games: 3957, ..."). Updated
 throughout a run by backup_task.py / club_restore.py, polled by the Super
 Admin Backups page while a task is `running`.
 
-Revision ID: 167
-Revises: 166
+Revision ID: 171
+Revises: 170
 Create Date: 2026-07-21
 """
 from alembic import op
 
 
-revision = '167'
-down_revision = '166'
+revision = '171'
+down_revision = '170'
 branch_labels = None
 depends_on = None
 

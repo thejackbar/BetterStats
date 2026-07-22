@@ -251,7 +251,7 @@ Honest ceiling on what's achievable, by task type:
   way to make pg_dump/pg_restore report "row 176 of 876" live within one
   table — that's a hard tool limitation, not a shortcut taken here.
 
-Progress state lives in `backup_tasks.progress` (migration 167), written via
+Progress state lives in `backup_tasks.progress` (migration 171), written via
 `app/scripts/backup_task.py update-progress`/`mark-stage-done` (called from
 the shell scripts) or directly from `club_restore.py` (already in-process).
 Progress writes always happen on their OWN short-lived DB connection, never
