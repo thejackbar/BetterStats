@@ -635,6 +635,16 @@ export default function AdminScorecardUpload() {
             card. Check what it read, match our players, pick the season and opponent,
             then import it as a manual game. Both teams show on the match page.
           </p>
+          <p className="text-xs text-pb-faint max-w-2xl mt-2">
+            Handwritten scorebook, or a stack of them? The photo reader is built for
+            typed/printed cards — for handwritten pages, or digitising a whole season at
+            once, use{' '}
+            <Link to="/admin/manual-entries" className="text-pb-accent underline hover:opacity-80">
+              Manual Games
+            </Link>{' '}
+            to type a match in directly, or its CSV template to bulk-upload many matches
+            from a spreadsheet in one go.
+          </p>
         </div>
 
         {err && <div className="mb-4 px-3 py-2 rounded bg-red-500/10 border border-red-400/30 text-red-300 text-sm">{err}</div>}

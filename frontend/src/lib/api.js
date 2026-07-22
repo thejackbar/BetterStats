@@ -867,6 +867,14 @@ export const api = {
   adminUndoManualEntry: (logId) =>
     request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
+  adminCreateManualSeason: (data) =>
+    request('/club-admin/manual-entries/seasons', { method: 'POST', body: JSON.stringify(data) }),
+  adminDeleteManualSeason: (id) =>
+    request(`/club-admin/manual-entries/seasons/${id}`, { method: 'DELETE' }),
+  adminCreateManualGrade: (data) =>
+    request('/club-admin/manual-entries/grades', { method: 'POST', body: JSON.stringify(data) }),
+  adminDeleteManualGrade: (id) =>
+    request(`/club-admin/manual-entries/grades/${id}`, { method: 'DELETE' }),
   adminListManualEntryKnownValues: () => request('/club-admin/manual-entries/known-values'),
   adminCheckScorecardDuplicate: (playedAt, opponent = '', excludeId = '') =>
     request(`/club-admin/manual-entries/scorecard/check-duplicate?played_at=${encodeURIComponent(playedAt)}&opponent=${encodeURIComponent(opponent)}${excludeId ? `&exclude_id=${encodeURIComponent(excludeId)}` : ''}`),

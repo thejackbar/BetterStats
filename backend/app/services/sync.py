@@ -2286,10 +2286,21 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     for pid in player_ids:
         pid_str = str(pid)
 
-        # Scope to this org's seasons only. A CA participant GUID is shared
-        # across clubs, so a dual-club player can have player_season_stats rows
-        # under another club's seasons; counting them all would mint inflated
-        # career milestones (mirrors the v_effective view guard, migration 060).
+        # Read the same v_effective_player_season_stats view every other career-
+        # totals surface reads (records, leaderboards, profiles) — not the raw
+        # synced-only player_season_stats table. Historical data entered via
+        # manual games/adjustments or the BetterImport CSV/XLSX tool never runs
+        # through this org's PlayHQ/Grassroots sync job (the only caller of this
+        # function), so reading the raw table meant a club's imported/manual
+        # career history could never cross a milestone threshold. Season-scoped
+        # rows still filter to this org's own seasons (a CA participant GUID is
+        # shared across clubs, so a dual-club player can have rows under another
+        # club's seasons; counting them all would mint inflated career
+        # milestones — mirrors the v_effective view guard, migration 060).
+        # Career-level rows (manual_career_adjustments, BetterImport's prior-
+        # seasons bucket) carry a NULL season_id and already belong to one org
+        # by construction, so they're kept without a seasons join — same pattern
+        # aggregations.get_upcoming_milestones_for_org uses.
         totals_res = await session.execute(
             text("""
                 SELECT
@@ -2297,9 +2308,10 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
                     COALESCE(SUM(pss.wickets), 0) AS wickets,
                     COALESCE(SUM(pss.matches), 0) AS matches,
                     COALESCE(SUM(pss.catches), 0) AS catches
-                FROM player_season_stats pss
-                JOIN seasons s ON s.id = pss.season_id
-                WHERE pss.player_id = :pid AND s.organisation_id = :org_id
+                FROM v_effective_player_season_stats pss
+                LEFT JOIN seasons s ON s.id = pss.season_id
+                WHERE pss.player_id = :pid
+                  AND (pss.season_id IS NULL OR s.organisation_id = :org_id)
             """),
             {"pid": pid_str, "org_id": str(org_id)}
         )

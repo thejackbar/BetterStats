@@ -48,6 +48,8 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services.grade_labels import suggest_category
+from app.services.sync import _compute_milestones
 
 router = APIRouter(prefix="/club-admin/manual-entries", tags=["manual-entries"])
 
@@ -197,6 +199,60 @@ async def _assert_grade_in_season(db: AsyncSession, grade_id: uuid.UUID, season_
     return grade
 
 
+async def _season_in_use(db: AsyncSession, season_id: uuid.UUID) -> bool:
+    res = await db.execute(_t("""
+        SELECT
+            EXISTS(SELECT 1 FROM grades WHERE season_id = :sid) AS has_grades,
+            EXISTS(SELECT 1 FROM games g JOIN grades gr ON gr.id = g.grade_id WHERE gr.season_id = :sid) AS has_games,
+            EXISTS(SELECT 1 FROM manual_games WHERE season_id = :sid) AS has_manual_games,
+            EXISTS(SELECT 1 FROM manual_season_adjustments WHERE season_id = :sid) AS has_adjustments
+    """), {"sid": str(season_id)})
+    row = res.mappings().first()
+    return bool(row and any(row.values()))
+
+
+async def _grade_in_use(db: AsyncSession, grade_id: uuid.UUID) -> bool:
+    res = await db.execute(_t("""
+        SELECT
+            EXISTS(SELECT 1 FROM games WHERE grade_id = :gid) AS has_games,
+            EXISTS(SELECT 1 FROM manual_games WHERE grade_id = :gid) AS has_manual_games,
+            EXISTS(SELECT 1 FROM manual_season_adjustments WHERE grade_id = :gid) AS has_adjustments
+    """), {"gid": str(grade_id)})
+    row = res.mappings().first()
+    return bool(row and any(row.values()))
+
+
+async def _recompute_milestones(db: AsyncSession, org_id: uuid.UUID, player_ids) -> None:
+    """Manual/historical entries change a player's career totals just like a
+    CA sync does, so re-run the same milestone-crossing check (500 runs, 50
+    wickets, etc.) the sync job runs — otherwise a club with no CA sync (or a
+    player whose history is entirely manual/imported) never mints these badges.
+    Safe to call with a superset of affected players: it only adds newly-
+    crossed thresholds, never removes anything.
+    """
+    ids = sorted({pid for pid in player_ids if pid}, key=str)
+    if ids:
+        await _compute_milestones(db, ids, org_id)
+
+
+def _extract_player_ids(rows) -> list:
+    """Pull `.player_id` (ORM rows) or `["player_id"]` (plain dicts) from a list,
+    parsing strings to UUID and skipping anything unparseable."""
+    out = []
+    for r in rows or []:
+        raw = r.player_id if hasattr(r, "player_id") else r.get("player_id")
+        if raw is None:
+            continue
+        if isinstance(raw, uuid.UUID):
+            out.append(raw)
+        else:
+            try:
+                out.append(uuid.UUID(str(raw)))
+            except Exception:
+                continue
+    return out
+
+
 def _row_to_dict(row) -> dict:
     """Convert an SQLAlchemy row's __dict__ to a JSON-serializable dict.
 
@@ -330,6 +386,155 @@ async def list_grades_with_season(
     ]
 
 
+class SeasonCreateIn(BaseModel):
+    name: str
+    year: Optional[int] = None
+
+
+@router.post("/seasons")
+async def create_manual_season(
+    data: SeasonCreateIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a season with no CA/Grassroots equivalent — the only path for
+    an era sync never covered (e.g. a 1960s season). Leaves grassroots_id
+    NULL, which is itself the "not from a sync" marker: every synced season
+    always carries the raw CA GUID there (migration 062-era backfill), so a
+    manually-created row is naturally distinguishable without a new column.
+    """
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Season name is required")
+    existing = await db.execute(
+        select(Season).where(
+            Season.organisation_id == club.id,
+            func.lower(Season.name) == name.lower(),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"A season named '{name}' already exists — pick it from the list instead.")
+
+    season = Season(
+        id=uuid.uuid4(),
+        organisation_id=club.id,
+        grassroots_id=None,
+        name=name,
+        year=data.year,
+    )
+    db.add(season)
+    await db.flush()
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="create",
+        target_table="seasons", target_id=str(season.id),
+        summary=f"Added season '{name}'", before=None, after=_row_to_dict(season),
+    )
+    await db.commit()
+    return {"id": str(season.id), "name": season.name, "year": season.year}
+
+
+@router.delete("/seasons/{season_id}")
+async def delete_manual_season(
+    season_id: str,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a manually-created season. Guarded to only ever touch a season
+    with no CA origin and nothing recorded against it yet, so this can never
+    reach a synced season or discard real data — a season with any games,
+    adjustments or grades has to have those removed (or reassigned) first."""
+    sid = _to_uuid(season_id, "season")
+    season = await db.get(Season, sid)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Season not found")
+    if season.grassroots_id is not None:
+        raise HTTPException(status_code=400, detail="This season came from the CA sync — it can't be deleted here.")
+    if await _season_in_use(db, sid):
+        raise HTTPException(status_code=400, detail="This season has data recorded against it — remove that first.")
+    await db.delete(season)
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="delete",
+        target_table="seasons", target_id=season_id,
+        summary=f"Deleted season '{season.name}'", before=_row_to_dict(season), after=None,
+    )
+    await db.commit()
+    return {"deleted": True}
+
+
+class GradeCreateIn(BaseModel):
+    season_id: str
+    name: str
+
+
+@router.post("/grades")
+async def create_manual_grade(
+    data: GradeCreateIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season_id = _to_uuid(data.season_id, "season")
+    await _assert_season_in_org(db, season_id, club.id)
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Grade name is required")
+    existing = await db.execute(
+        select(Grade).where(
+            Grade.season_id == season_id,
+            func.lower(Grade.name) == name.lower(),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"A grade named '{name}' already exists in this season — pick it from the list instead.")
+
+    grade = Grade(
+        id=uuid.uuid4(),
+        season_id=season_id,
+        grassroots_id=None,
+        name=name,
+        category=suggest_category(name),
+    )
+    db.add(grade)
+    await db.flush()
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="create",
+        target_table="grades", target_id=str(grade.id),
+        summary=f"Added grade '{name}'", before=None, after=_row_to_dict(grade),
+    )
+    await db.commit()
+    return {"id": str(grade.id), "name": grade.name, "season_id": str(grade.season_id)}
+
+
+@router.delete("/grades/{grade_id}")
+async def delete_manual_grade(
+    grade_id: str,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    gid = _to_uuid(grade_id, "grade")
+    grade = await db.get(Grade, gid)
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    if grade.grassroots_id is not None:
+        raise HTTPException(status_code=400, detail="This grade came from the CA sync — it can't be deleted here.")
+    if await _grade_in_use(db, gid):
+        raise HTTPException(status_code=400, detail="This grade has data recorded against it — remove that first.")
+    await db.delete(grade)
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="delete",
+        target_table="grades", target_id=grade_id,
+        summary=f"Deleted grade '{grade.name}'", before=_row_to_dict(grade), after=None,
+    )
+    await db.commit()
+    return {"deleted": True}
+
+
 # ─── Season adjustments ──────────────────────────────────────────────────────
 
 
@@ -412,6 +617,7 @@ async def create_season_adjustment(
         after=_row_to_dict(adj),
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, [player_id])
     return _row_to_dict(adj)
 
 
@@ -452,6 +658,7 @@ async def update_season_adjustment(
         after=_row_to_dict(adj),
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, [adj.player_id])
     return _row_to_dict(adj)
 
 
@@ -466,6 +673,7 @@ async def delete_season_adjustment(
     if not adj or adj.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Adjustment not found")
     before = _row_to_dict(adj)
+    affected_player_id = adj.player_id
     player = await db.get(Player, adj.player_id)
     season = await db.get(Season, adj.season_id)
     summary = f"Deleted season adjustment for {_player_display_name(player)} ({season.name})"
@@ -483,6 +691,7 @@ async def delete_season_adjustment(
         after=None,
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, [affected_player_id])
     return {"deleted": True}
 
 
@@ -551,6 +760,7 @@ async def create_career_adjustment(
         after=_row_to_dict(adj),
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, [player_id])
     return _row_to_dict(adj)
 
 
@@ -586,6 +796,7 @@ async def update_career_adjustment(
         after=_row_to_dict(adj),
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, [adj.player_id])
     return _row_to_dict(adj)
 
 
@@ -600,6 +811,7 @@ async def delete_career_adjustment(
     if not adj or adj.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Adjustment not found")
     before = _row_to_dict(adj)
+    affected_player_id = adj.player_id
     player = await db.get(Player, adj.player_id)
     summary = f"Deleted career adjustment for {_player_display_name(player)}"
     await db.delete(adj)
@@ -616,6 +828,7 @@ async def delete_career_adjustment(
         after=None,
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, [affected_player_id])
     return {"deleted": True}
 
 
@@ -1163,6 +1376,9 @@ async def create_manual_game(
         after=after,
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, _extract_player_ids(
+        data.batting_innings + data.bowling_spells + data.fielding_stats
+    ))
     return _row_to_dict(game)
 
 
@@ -1194,6 +1410,9 @@ async def update_manual_game(
         "bowling_spells": [_row_to_dict(r) for r in old_bowling],
         "fielding_stats": [_row_to_dict(r) for r in old_fielding],
     }
+    # Extracted now (plain UUIDs, not ORM-bound) — _replace_game_children below
+    # deletes these rows, and the objects are expired after the final commit.
+    old_player_ids = _extract_player_ids(list(old_batting) + list(old_bowling) + list(old_fielding))
 
     season_id = _to_uuid(data.season_id, "season")
     grade_id = _to_uuid(data.grade_id, "grade") if data.grade_id else None
@@ -1246,6 +1465,10 @@ async def update_manual_game(
         after=after,
     )
     await db.commit()
+    await _recompute_milestones(
+        db, club.id,
+        old_player_ids + _extract_player_ids(data.batting_innings + data.bowling_spells + data.fielding_stats)
+    )
     return after
 
 
@@ -1275,6 +1498,7 @@ async def delete_manual_game(
         "bowling_spells": [_row_to_dict(r) for r in old_bowling],
         "fielding_stats": [_row_to_dict(r) for r in old_fielding],
     }
+    affected_player_ids = _extract_player_ids(list(old_batting) + list(old_bowling) + list(old_fielding))
     summary = f"Deleted manual game ({game.played_at or 'date unknown'})"
     await db.delete(game)  # cascade wipes children
     await db.flush()
@@ -1290,6 +1514,7 @@ async def delete_manual_game(
         after=None,
     )
     await db.commit()
+    await _recompute_milestones(db, club.id, affected_player_ids)
     return {"deleted": True}
 
 
@@ -1397,21 +1622,52 @@ async def undo_edit(
     table = log.target_table
     action = log.action
     target_id = log.target_id
+    # Every branch below records which players' career totals it touched, so
+    # the milestone recompute after commit covers exactly what changed —
+    # same reasoning as the create/update/delete/import endpoints above: an
+    # undo changes career totals just like the original edit did.
+    undo_player_ids: set = set()
+
+    async def _game_children_player_ids(gid) -> set:
+        b = (await db.execute(select(ManualBattingInnings.player_id).where(ManualBattingInnings.manual_game_id == gid))).scalars().all()
+        o = (await db.execute(select(ManualBowlingSpell.player_id).where(ManualBowlingSpell.manual_game_id == gid))).scalars().all()
+        f = (await db.execute(select(ManualFieldingStat.player_id).where(ManualFieldingStat.manual_game_id == gid))).scalars().all()
+        return {pid for pid in (list(b) + list(o) + list(f)) if pid}
 
     if action == "create":
         # Undo create → delete the row
         if table == "manual_season_adjustments":
             row = await db.get(ManualSeasonAdjustment, int(target_id))
             if row and row.organisation_id == club.id:
+                undo_player_ids.add(row.player_id)
                 await db.delete(row)
         elif table == "manual_career_adjustments":
             row = await db.get(ManualCareerAdjustment, int(target_id))
             if row and row.organisation_id == club.id:
+                undo_player_ids.add(row.player_id)
                 await db.delete(row)
         elif table == "manual_games":
-            row = await db.get(ManualGame, _to_uuid(target_id, "manual game"))
+            gid = _to_uuid(target_id, "manual game")
+            row = await db.get(ManualGame, gid)
             if row and row.organisation_id == club.id:
+                undo_player_ids |= await _game_children_player_ids(gid)
                 await db.delete(row)
+        elif table == "seasons":
+            sid = _to_uuid(target_id, "season")
+            row = await db.get(Season, sid)
+            if row and row.organisation_id == club.id:
+                if await _season_in_use(db, sid):
+                    raise HTTPException(status_code=400, detail="This season now has data recorded against it — remove that first.")
+                await db.delete(row)
+        elif table == "grades":
+            gid2 = _to_uuid(target_id, "grade")
+            row = await db.get(Grade, gid2)
+            if row:
+                season = await db.get(Season, row.season_id)
+                if season and season.organisation_id == club.id:
+                    if await _grade_in_use(db, gid2):
+                        raise HTTPException(status_code=400, detail="This grade now has data recorded against it — remove that first.")
+                    await db.delete(row)
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo create on {table}")
     elif action == "import":
@@ -1425,12 +1681,15 @@ async def undo_edit(
             for rid in ids:
                 row = await db.get(ManualSeasonAdjustment, int(rid))
                 if row and row.organisation_id == club.id:
+                    undo_player_ids.add(row.player_id)
                     await db.delete(row)
         elif table == "manual_games":
             ids = after.get("created_game_ids") or []
             for rid in ids:
-                row = await db.get(ManualGame, _to_uuid(rid, "manual game"))
+                gid = _to_uuid(rid, "manual game")
+                row = await db.get(ManualGame, gid)
                 if row and row.organisation_id == club.id:
+                    undo_player_ids |= await _game_children_player_ids(gid)
                     await db.delete(row)
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo import on {table}")
@@ -1440,11 +1699,52 @@ async def undo_edit(
             raise HTTPException(status_code=400, detail="No snapshot available for this entry")
         snap = dict(log.before_json)
         if table == "manual_season_adjustments":
+            if snap.get("player_id"):
+                undo_player_ids.add(uuid.UUID(str(snap["player_id"])))
             await _restore_aggregate(db, ManualSeasonAdjustment, target_id, snap, club.id)
         elif table == "manual_career_adjustments":
+            if snap.get("player_id"):
+                undo_player_ids.add(uuid.UUID(str(snap["player_id"])))
             await _restore_aggregate(db, ManualCareerAdjustment, target_id, snap, club.id)
         elif table == "manual_games":
+            undo_player_ids |= set(_extract_player_ids(
+                (snap.get("children") or {}).get("batting_innings", [])
+                + (snap.get("children") or {}).get("bowling_spells", [])
+                + (snap.get("children") or {}).get("fielding_stats", [])
+            ))
             await _restore_manual_game(db, snap, club.id)
+        elif table == "seasons":
+            if snap.get("organisation_id") != str(club.id):
+                raise HTTPException(status_code=403, detail="Audit row belongs to a different org")
+            existing = await db.execute(
+                select(Season).where(
+                    Season.organisation_id == club.id,
+                    func.lower(Season.name) == (snap.get("name") or "").strip().lower(),
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="A season with this name already exists — nothing to restore.")
+            db.add(Season(
+                id=uuid.UUID(snap["id"]), organisation_id=club.id,
+                grassroots_id=None, name=snap.get("name"), year=snap.get("year"),
+            ))
+        elif table == "grades":
+            season_id = _to_uuid(snap.get("season_id"), "season") if snap.get("season_id") else None
+            season = await db.get(Season, season_id) if season_id else None
+            if not season or season.organisation_id != club.id:
+                raise HTTPException(status_code=404, detail="The grade's season no longer exists")
+            existing = await db.execute(
+                select(Grade).where(
+                    Grade.season_id == season_id,
+                    func.lower(Grade.name) == (snap.get("name") or "").strip().lower(),
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="A grade with this name already exists in this season — nothing to restore.")
+            db.add(Grade(
+                id=uuid.UUID(snap["id"]), season_id=season_id, grassroots_id=None,
+                name=snap.get("name"), category=snap.get("category") or suggest_category(snap.get("name") or ""),
+            ))
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo delete on {table}")
     elif action == "update":
@@ -1456,6 +1756,7 @@ async def undo_edit(
             row = await db.get(ManualSeasonAdjustment, int(target_id))
             if not row or row.organisation_id != club.id:
                 raise HTTPException(status_code=404, detail="Target row no longer exists")
+            undo_player_ids.add(row.player_id)
             for k, v in snap.items():
                 if k in {"id", "created_at", "updated_at", "organisation_id", "player_id", "season_id", "grade_id"}:
                     continue
@@ -1465,6 +1766,7 @@ async def undo_edit(
             row = await db.get(ManualCareerAdjustment, int(target_id))
             if not row or row.organisation_id != club.id:
                 raise HTTPException(status_code=404, detail="Target row no longer exists")
+            undo_player_ids.add(row.player_id)
             for k, v in snap.items():
                 if k in {"id", "created_at", "updated_at", "organisation_id", "player_id"}:
                     continue
@@ -1475,6 +1777,10 @@ async def undo_edit(
             if not row or row.organisation_id != club.id:
                 raise HTTPException(status_code=404, detail="Target row no longer exists")
             children = snap.pop("children", {}) or {}
+            undo_player_ids |= await _game_children_player_ids(row.id)
+            undo_player_ids |= set(_extract_player_ids(
+                children.get("batting_innings", []) + children.get("bowling_spells", []) + children.get("fielding_stats", [])
+            ))
             from datetime import date
             for k, v in snap.items():
                 if k in {"id", "created_at", "updated_at", "organisation_id"}:
@@ -1518,6 +1824,7 @@ async def undo_edit(
     log.undone_at = datetime.now(timezone.utc)
     log.undone_by_user_id = current_user.id
     await db.commit()
+    await _recompute_milestones(db, club.id, undo_player_ids)
     return {"undone": True}
 
 
@@ -1683,6 +1990,7 @@ async def import_season_adjustments(
     errors: list[dict] = []
     created_ids: list[int] = []
     updated_ids: list[int] = []
+    affected_player_ids: set = set()
 
     for row_num, raw in enumerate(reader, start=2):  # row 1 = header
         try:
@@ -1746,6 +2054,7 @@ async def import_season_adjustments(
                 db.add(row)
                 await db.flush()
                 created_ids.append(row.id)
+            affected_player_ids.add(player.id)
         except Exception as e:
             errors.append({"row": row_num, "error": str(e), "data": raw})
 
@@ -1768,6 +2077,7 @@ async def import_season_adjustments(
             after={"created_ids": created_ids, "updated_ids": updated_ids, "errors": errors[:20]},
         )
         await db.commit()
+        await _recompute_milestones(db, club.id, affected_player_ids)
     return summary
 
 
@@ -1853,6 +2163,7 @@ async def import_manual_games(
         by_game.setdefault(gk, []).append((row_num, raw))
 
     created_game_ids: list[str] = []
+    affected_player_ids: set = set()
 
     for game_key, group in by_game.items():
         first_row_num, first = group[0]
@@ -1900,6 +2211,7 @@ async def import_manual_games(
 
         # Children
         game_had_error = False
+        game_player_ids: set = set()
         for row_num, raw in group:
             try:
                 pname = (raw.get("player_name") or "").strip()
@@ -1956,6 +2268,7 @@ async def import_manual_games(
                         run_outs=_parse_int(fro),
                         stumpings=_parse_int(fstump),
                     ))
+                game_player_ids.add(player.id)
             except Exception as e:
                 errors.append({"row": row_num, "error": f"Game '{game_key}', player '{raw.get('player_name')}': {e}", "data": raw})
                 game_had_error = True
@@ -1971,6 +2284,7 @@ async def import_manual_games(
             await db.flush()
         else:
             created_game_ids.append(str(game.id))
+            affected_player_ids |= game_player_ids
 
     summary = {
         "games_created": len(created_game_ids),
@@ -1990,4 +2304,5 @@ async def import_manual_games(
             after={"created_game_ids": created_game_ids, "errors": errors[:20]},
         )
         await db.commit()
+        await _recompute_milestones(db, club.id, affected_player_ids)
     return summary
