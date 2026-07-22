@@ -48,6 +48,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services.grade_labels import suggest_category
 from app.services.sync import _compute_milestones
 
 router = APIRouter(prefix="/club-admin/manual-entries", tags=["manual-entries"])
@@ -196,6 +197,29 @@ async def _assert_grade_in_season(db: AsyncSession, grade_id: uuid.UUID, season_
     if not grade or grade.season_id != season_id:
         raise HTTPException(status_code=404, detail="Grade not in the chosen season")
     return grade
+
+
+async def _season_in_use(db: AsyncSession, season_id: uuid.UUID) -> bool:
+    res = await db.execute(_t("""
+        SELECT
+            EXISTS(SELECT 1 FROM grades WHERE season_id = :sid) AS has_grades,
+            EXISTS(SELECT 1 FROM games g JOIN grades gr ON gr.id = g.grade_id WHERE gr.season_id = :sid) AS has_games,
+            EXISTS(SELECT 1 FROM manual_games WHERE season_id = :sid) AS has_manual_games,
+            EXISTS(SELECT 1 FROM manual_season_adjustments WHERE season_id = :sid) AS has_adjustments
+    """), {"sid": str(season_id)})
+    row = res.mappings().first()
+    return bool(row and any(row.values()))
+
+
+async def _grade_in_use(db: AsyncSession, grade_id: uuid.UUID) -> bool:
+    res = await db.execute(_t("""
+        SELECT
+            EXISTS(SELECT 1 FROM games WHERE grade_id = :gid) AS has_games,
+            EXISTS(SELECT 1 FROM manual_games WHERE grade_id = :gid) AS has_manual_games,
+            EXISTS(SELECT 1 FROM manual_season_adjustments WHERE grade_id = :gid) AS has_adjustments
+    """), {"gid": str(grade_id)})
+    row = res.mappings().first()
+    return bool(row and any(row.values()))
 
 
 async def _recompute_milestones(db: AsyncSession, org_id: uuid.UUID, player_ids) -> None:
@@ -360,6 +384,155 @@ async def list_grades_with_season(
         }
         for g, s in rows.all()
     ]
+
+
+class SeasonCreateIn(BaseModel):
+    name: str
+    year: Optional[int] = None
+
+
+@router.post("/seasons")
+async def create_manual_season(
+    data: SeasonCreateIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a season with no CA/Grassroots equivalent — the only path for
+    an era sync never covered (e.g. a 1960s season). Leaves grassroots_id
+    NULL, which is itself the "not from a sync" marker: every synced season
+    always carries the raw CA GUID there (migration 062-era backfill), so a
+    manually-created row is naturally distinguishable without a new column.
+    """
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Season name is required")
+    existing = await db.execute(
+        select(Season).where(
+            Season.organisation_id == club.id,
+            func.lower(Season.name) == name.lower(),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"A season named '{name}' already exists — pick it from the list instead.")
+
+    season = Season(
+        id=uuid.uuid4(),
+        organisation_id=club.id,
+        grassroots_id=None,
+        name=name,
+        year=data.year,
+    )
+    db.add(season)
+    await db.flush()
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="create",
+        target_table="seasons", target_id=str(season.id),
+        summary=f"Added season '{name}'", before=None, after=_row_to_dict(season),
+    )
+    await db.commit()
+    return {"id": str(season.id), "name": season.name, "year": season.year}
+
+
+@router.delete("/seasons/{season_id}")
+async def delete_manual_season(
+    season_id: str,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a manually-created season. Guarded to only ever touch a season
+    with no CA origin and nothing recorded against it yet, so this can never
+    reach a synced season or discard real data — a season with any games,
+    adjustments or grades has to have those removed (or reassigned) first."""
+    sid = _to_uuid(season_id, "season")
+    season = await db.get(Season, sid)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Season not found")
+    if season.grassroots_id is not None:
+        raise HTTPException(status_code=400, detail="This season came from the CA sync — it can't be deleted here.")
+    if await _season_in_use(db, sid):
+        raise HTTPException(status_code=400, detail="This season has data recorded against it — remove that first.")
+    await db.delete(season)
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="delete",
+        target_table="seasons", target_id=season_id,
+        summary=f"Deleted season '{season.name}'", before=_row_to_dict(season), after=None,
+    )
+    await db.commit()
+    return {"deleted": True}
+
+
+class GradeCreateIn(BaseModel):
+    season_id: str
+    name: str
+
+
+@router.post("/grades")
+async def create_manual_grade(
+    data: GradeCreateIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season_id = _to_uuid(data.season_id, "season")
+    await _assert_season_in_org(db, season_id, club.id)
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Grade name is required")
+    existing = await db.execute(
+        select(Grade).where(
+            Grade.season_id == season_id,
+            func.lower(Grade.name) == name.lower(),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"A grade named '{name}' already exists in this season — pick it from the list instead.")
+
+    grade = Grade(
+        id=uuid.uuid4(),
+        season_id=season_id,
+        grassroots_id=None,
+        name=name,
+        category=suggest_category(name),
+    )
+    db.add(grade)
+    await db.flush()
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="create",
+        target_table="grades", target_id=str(grade.id),
+        summary=f"Added grade '{name}'", before=None, after=_row_to_dict(grade),
+    )
+    await db.commit()
+    return {"id": str(grade.id), "name": grade.name, "season_id": str(grade.season_id)}
+
+
+@router.delete("/grades/{grade_id}")
+async def delete_manual_grade(
+    grade_id: str,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    gid = _to_uuid(grade_id, "grade")
+    grade = await db.get(Grade, gid)
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    if grade.grassroots_id is not None:
+        raise HTTPException(status_code=400, detail="This grade came from the CA sync — it can't be deleted here.")
+    if await _grade_in_use(db, gid):
+        raise HTTPException(status_code=400, detail="This grade has data recorded against it — remove that first.")
+    await db.delete(grade)
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="delete",
+        target_table="grades", target_id=grade_id,
+        summary=f"Deleted grade '{grade.name}'", before=_row_to_dict(grade), after=None,
+    )
+    await db.commit()
+    return {"deleted": True}
 
 
 # ─── Season adjustments ──────────────────────────────────────────────────────
@@ -1479,6 +1652,22 @@ async def undo_edit(
             if row and row.organisation_id == club.id:
                 undo_player_ids |= await _game_children_player_ids(gid)
                 await db.delete(row)
+        elif table == "seasons":
+            sid = _to_uuid(target_id, "season")
+            row = await db.get(Season, sid)
+            if row and row.organisation_id == club.id:
+                if await _season_in_use(db, sid):
+                    raise HTTPException(status_code=400, detail="This season now has data recorded against it — remove that first.")
+                await db.delete(row)
+        elif table == "grades":
+            gid2 = _to_uuid(target_id, "grade")
+            row = await db.get(Grade, gid2)
+            if row:
+                season = await db.get(Season, row.season_id)
+                if season and season.organisation_id == club.id:
+                    if await _grade_in_use(db, gid2):
+                        raise HTTPException(status_code=400, detail="This grade now has data recorded against it — remove that first.")
+                    await db.delete(row)
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo create on {table}")
     elif action == "import":
@@ -1524,6 +1713,38 @@ async def undo_edit(
                 + (snap.get("children") or {}).get("fielding_stats", [])
             ))
             await _restore_manual_game(db, snap, club.id)
+        elif table == "seasons":
+            if snap.get("organisation_id") != str(club.id):
+                raise HTTPException(status_code=403, detail="Audit row belongs to a different org")
+            existing = await db.execute(
+                select(Season).where(
+                    Season.organisation_id == club.id,
+                    func.lower(Season.name) == (snap.get("name") or "").strip().lower(),
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="A season with this name already exists — nothing to restore.")
+            db.add(Season(
+                id=uuid.UUID(snap["id"]), organisation_id=club.id,
+                grassroots_id=None, name=snap.get("name"), year=snap.get("year"),
+            ))
+        elif table == "grades":
+            season_id = _to_uuid(snap.get("season_id"), "season") if snap.get("season_id") else None
+            season = await db.get(Season, season_id) if season_id else None
+            if not season or season.organisation_id != club.id:
+                raise HTTPException(status_code=404, detail="The grade's season no longer exists")
+            existing = await db.execute(
+                select(Grade).where(
+                    Grade.season_id == season_id,
+                    func.lower(Grade.name) == (snap.get("name") or "").strip().lower(),
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="A grade with this name already exists in this season — nothing to restore.")
+            db.add(Grade(
+                id=uuid.UUID(snap["id"]), season_id=season_id, grassroots_id=None,
+                name=snap.get("name"), category=snap.get("category") or suggest_category(snap.get("name") or ""),
+            ))
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo delete on {table}")
     elif action == "update":
