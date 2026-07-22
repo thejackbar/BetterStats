@@ -87,12 +87,16 @@ function StatusBadge({ status }) {
     new: ['NEW PLAYER', 'text-pb-accent border-pb-accent/40'],
     skip: ['SKIP', 'text-pb-faint border-pb-faint/30'],
     prior: ['PRIOR/ADJ', 'text-pb-accent border-pb-accent/40'],
+    own: ['NO ONLINE EQUIV.', 'text-pb-accent border-pb-accent/40'],
   }
   const [label, tone] = map[status] || [status?.toUpperCase() || '—', 'text-pb-faint border-pb-faint/30']
   return <span className={`font-mono text-[9px] tracking-wide2 border rounded px-1.5 py-0.5 ${tone}`}>{label}</span>
 }
 
-const STEP_LABELS = { upload: 'Upload', map: 'Columns', players: 'Players', seasons: 'Seasons', review: 'Review' }
+// player/season/grade rows each key their match-to id differently.
+function idField(kind) { return kind === 'player' ? 'player_id' : kind === 'season' ? 'season_id' : 'grade_name' }
+
+const STEP_LABELS = { upload: 'Upload', map: 'Columns', players: 'Players', seasons: 'Seasons', grades: 'Grades', review: 'Review' }
 
 // One column-mapping row. Reads left-to-right as "BetterStats field ← your
 // column": the field name is green (what we hold), the picker is white (your
@@ -125,6 +129,7 @@ export default function AdminImport() {
   const [granularity, setGranularity] = useState('career')
   const [playerOverrides, setPlayerOverrides] = useState({})
   const [seasonOverrides, setSeasonOverrides] = useState({})
+  const [gradeOverrides, setGradeOverrides] = useState({})
   const [resolved, setResolved] = useState(null)
   const [resolving, setResolving] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -145,10 +150,14 @@ export default function AdminImport() {
     loadHistory()
   }, [loadHistory])
 
-  const steps = useMemo(
-    () => granularity === 'season' ? ['upload', 'map', 'players', 'seasons', 'review'] : ['upload', 'map', 'players', 'review'],
-    [granularity],
-  )
+  const hasGradeCol = !!mapping.grade_label
+  const steps = useMemo(() => {
+    const s = ['upload', 'map', 'players']
+    if (granularity === 'season') s.push('seasons')
+    if (hasGradeCol) s.push('grades')
+    s.push('review')
+    return s
+  }, [granularity, hasGradeCol])
 
   // Keep the reconciliation preview fresh whenever the mapping or matches change.
   useEffect(() => {
@@ -158,6 +167,7 @@ export default function AdminImport() {
     const payload = {
       rows: parsed.rows, mapping, granularity,
       player_overrides: playerOverrides, season_overrides: seasonOverrides,
+      grade_overrides: gradeOverrides,
     }
     const t = setTimeout(() => {
       api.importResolve(payload)
@@ -167,7 +177,7 @@ export default function AdminImport() {
     }, 200)
     return () => { cancelled = true; clearTimeout(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, JSON.stringify(mapping), granularity, JSON.stringify(playerOverrides), JSON.stringify(seasonOverrides)])
+  }, [parsed, JSON.stringify(mapping), granularity, JSON.stringify(playerOverrides), JSON.stringify(seasonOverrides), JSON.stringify(gradeOverrides)])
 
   // No-match names default to "create new player" — so the No-match bucket is
   // pre-filled and you never scroll past 1,000 players to add one.
@@ -202,7 +212,7 @@ export default function AdminImport() {
   async function runParse() {
     if (!file) return
     setParsing(true); setParsed(null); setResolved(null); setCommitted(null)
-    setPlayerOverrides({}); setSeasonOverrides({})
+    setPlayerOverrides({}); setSeasonOverrides({}); setGradeOverrides({})
     try {
       const p = await api.importPreview(file)
       const m = {}, c = {}
@@ -223,6 +233,9 @@ export default function AdminImport() {
   function setPOverridesBulk(patch) { setPlayerOverrides(o => ({ ...o, ...patch })) }
   function setSOverride(label, val) {
     setSeasonOverrides(o => { const n = { ...o }; if (val === '') delete n[label]; else n[label] = val; return n })
+  }
+  function setGOverride(label, val) {
+    setGradeOverrides(o => { const n = { ...o }; if (val === '') delete n[label]; else n[label] = val; return n })
   }
   // A hand-kept historical sheet often predates anything the club has synced —
   // there's no existing season to match "1972/73" to, so the match-seasons step
@@ -246,6 +259,7 @@ export default function AdminImport() {
       const res = await api.importCommit({
         rows: parsed.rows, mapping, granularity, filename: file?.name,
         player_overrides: playerOverrides, season_overrides: seasonOverrides,
+        grade_overrides: gradeOverrides,
       })
       setCommitted(res)
       loadHistory()
@@ -290,7 +304,7 @@ export default function AdminImport() {
 
   function reset() {
     setStep('upload'); setFile(null); setParsed(null); setResolved(null); setCommitted(null)
-    setMapping({}); setPlayerOverrides({}); setSeasonOverrides({})
+    setMapping({}); setPlayerOverrides({}); setSeasonOverrides({}); setGradeOverrides({})
   }
 
   return (
@@ -438,8 +452,8 @@ export default function AdminImport() {
             rows={(resolved?.players) || []} allPlayers={allPlayers}
             overrides={playerOverrides} setOverride={setPOverride} setOverridesBulk={setPOverridesBulk}
             loading={resolving} cell={cell}
-            nextLabel={granularity === 'season' ? 'NEXT: SEASONS →' : 'NEXT: REVIEW →'}
-            onNext={() => setStep(granularity === 'season' ? 'seasons' : 'review')}
+            nextLabel={granularity === 'season' ? 'NEXT: SEASONS →' : hasGradeCol ? 'NEXT: GRADES →' : 'NEXT: REVIEW →'}
+            onNext={() => setStep(granularity === 'season' ? 'seasons' : hasGradeCol ? 'grades' : 'review')}
             onBack={() => setStep('map')}
           />
         )}
@@ -459,7 +473,29 @@ export default function AdminImport() {
             }}
             onChange={(r, v) => setSOverride(r.raw_label, v)}
             cell={cell} onCreateSeason={createSeason}
-            nextLabel="NEXT: REVIEW →" onNext={() => setStep('review')} onBack={() => setStep('players')}
+            nextLabel={hasGradeCol ? 'NEXT: GRADES →' : 'NEXT: REVIEW →'}
+            onNext={() => setStep(hasGradeCol ? 'grades' : 'review')} onBack={() => setStep('players')}
+          />
+        )}
+
+        {/* ── Step: Match grades/teams ── */}
+        {step === 'grades' && (
+          <MatchTable
+            title="Match grades / teams"
+            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club — that's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If a grade genuinely predates online records, confirm “no online equivalent” so it's kept as its own historical figure."
+            rows={(resolved?.grades) || []} kind="grade"
+            allOptions={(resolved?.grade_options || []).map(g => ({ id: g.name, name: g.name, games: g.games, players: g.players, runs: g.runs }))}
+            loading={resolving}
+            valueFor={(r) => {
+              const ov = gradeOverrides[r.raw_label]
+              if (ov) return ov
+              if (r.grade_name) return r.grade_name
+              return ''
+            }}
+            onChange={(r, v) => setGOverride(r.raw_label, v)}
+            cell={cell}
+            nextLabel="NEXT: REVIEW →" onNext={() => setStep('review')}
+            onBack={() => setStep(granularity === 'season' ? 'seasons' : 'players')}
           />
         )}
 
@@ -467,7 +503,8 @@ export default function AdminImport() {
         {step === 'review' && (
           <ReviewStep
             resolved={resolved} resolving={resolving} committing={committing} committed={committed}
-            unresolved={unresolved} onCommit={commit} onBack={() => setStep(granularity === 'season' ? 'seasons' : 'players')}
+            unresolved={unresolved} onCommit={commit}
+            onBack={() => setStep(hasGradeCol ? 'grades' : granularity === 'season' ? 'seasons' : 'players')}
             onReset={reset} num={num}
           />
         )}
@@ -538,14 +575,15 @@ export default function AdminImport() {
 
 // ── searchable picker — renders only a handful of options at a time, so it
 //    scales to thousands of players without freezing the page ─────────────────
-const RESOLVED_STATUSES = ['exact', 'manual', 'matched']
+const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
 const PAGE_SIZE = 50
 
 function valueLabel(value, idName, kind) {
-  if (!value) return '— Unresolved (skipped) —'
+  if (!value) return kind === 'grade' ? '— Unresolved (compared to whole career) —' : '— Unresolved (skipped) —'
   if (value === '__new__') return '+ Create new player'
   if (value === '__skip__') return 'Skip'
   if (value === '__prior__') return '↪ Career summary (no season)'
+  if (value === '__none__') return '↪ No online equivalent (its own historical grade)'
   return idName.get(value) || '(selected)'
 }
 
@@ -619,13 +657,20 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
           </div>
         ) : (
           <>
-            <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
-              {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
-            </button>
+            {kind !== 'grade' && (
+              <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
+                {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
+              </button>
+            )}
             {kind === 'season' && (
               <button className={item} onClick={() => setCreating(true)}>+ Create new season</button>
             )}
-            <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
+            {kind === 'grade' && (
+              <button className={item} onClick={() => pick('__none__')}>↪ No online equivalent (its own historical grade)</button>
+            )}
+            {kind !== 'grade' && (
+              <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
+            )}
             {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
             {(candidates || []).map(c => (
               <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
@@ -637,10 +682,17 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
               </button>
             ))}
             <div className="px-1 pt-2 pb-1 sticky top-0">
-              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search all ${kind === 'player' ? 'players' : 'seasons'}…`}
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search all ${kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'}…`}
                 className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
             </div>
-            {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
+            {filtered.map(o => (
+              <button key={o.id} className={item} onClick={() => pick(o.id)}>
+                {o.name}
+                {kind === 'grade' && o.games != null && (
+                  <span className="block text-[10px] text-pb-faint mt-0.5">{o.games} games · {o.players} players · {o.runs} runs</span>
+                )}
+              </button>
+            ))}
             {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
           </>
         )}
@@ -656,10 +708,11 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
 
   const idName = useMemo(() => {
     const m = new Map()
+    const idf = idField(kind)
     allOptions.forEach(o => m.set(o.id, o.name))
     rows.forEach(r => {
-      (r.candidates || []).forEach(c => m.set(kind === 'player' ? c.player_id : c.season_id, c.name))
-      if (r.matched_name) m.set(kind === 'player' ? r.player_id : r.season_id, r.matched_name)
+      (r.candidates || []).forEach(c => m.set(c[idf], c.name))
+      if (r.matched_name) m.set(r[idf], r.matched_name)
     })
     return m
   }, [allOptions, rows, kind])
@@ -707,7 +760,7 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
           <table className="w-full text-[12px] min-w-[600px]">
             <thead>
               <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left">
-                <th className="py-2 pr-2">{kind === 'player' ? 'NAME IN SHEET' : 'SEASON LABEL'}</th>
+                <th className="py-2 pr-2">{kind === 'player' ? 'NAME IN SHEET' : kind === 'grade' ? 'GRADE/TEAM LABEL' : 'SEASON LABEL'}</th>
                 <th className="py-2 pr-2 w-28">STATUS</th>
                 <th className="py-2 pr-2">MATCH TO</th>
               </tr>
@@ -716,8 +769,9 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
               {pageRows.map((r, i) => {
                 const label = kind === 'player' ? r.raw_name : r.raw_label
                 const value = valueFor(r)
+                const idf = idField(kind)
                 const candidates = (r.candidates || []).map(c => ({
-                  id: kind === 'player' ? c.player_id : c.season_id, name: c.name, confidence: c.confidence,
+                  id: c[idf], name: c.name, confidence: c.confidence,
                 }))
                 return (
                   <tr key={(label || '') + i} className="pb-hairline-t align-middle">
@@ -734,11 +788,11 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                 )
               })}
               {loading && rows.length === 0 && (
-                <tr><td colSpan={3} className="py-8 text-center"><PbSpinner message={`Matching ${kind === 'player' ? 'players' : 'seasons'}…`} /></td></tr>
+                <tr><td colSpan={3} className="py-8 text-center"><PbSpinner message={`Matching ${kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'}…`} /></td></tr>
               )}
               {!loading && rows.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-pb-dim text-[12px]">Nothing to match.</td></tr>}
               {!loading && rows.length > 0 && shown.length === 0 && (
-                <tr><td colSpan={3} className="py-4 text-center text-green-300 text-[12px]">All {kind === 'player' ? 'players' : 'seasons'} matched — nothing to review.</td></tr>
+                <tr><td colSpan={3} className="py-4 text-center text-green-300 text-[12px]">All {kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'} matched — nothing to review.</td></tr>
               )}
             </tbody>
           </table>
