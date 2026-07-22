@@ -481,15 +481,14 @@ class AcknowledgeRequest(BaseModel):
     club_name: str
     accept_terms: bool = False
     accept_privacy: bool = False
-    confirm_authority: bool = False
 
 
 @router.post("/acknowledge")
 async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    """Records ToS + Privacy + club-authority acceptance. All three are
-    mandatory — this endpoint only succeeds once every box is ticked, matching
-    the source document's "required acknowledgements" list. IP is stored
-    hashed (services/usage_tracker.hash_ip), same privacy-conscious approach
+    """Records ToS + Privacy acceptance. Both are mandatory — this endpoint
+    only succeeds once every box is ticked, matching the source document's
+    "required acknowledgements" list. IP is stored hashed
+    (services/usage_tracker.hash_ip), same privacy-conscious approach
     login_attempts already uses — never the raw address."""
     email = (data.email or "").strip().lower()
     if not email or not _EMAIL_RE.match(email):
@@ -504,8 +503,6 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
         missing.append("Terms of Service")
     if not data.accept_privacy:
         missing.append("Privacy Policy")
-    if not data.confirm_authority:
-        missing.append("club authority statement")
     if missing:
         raise HTTPException(status_code=422, detail=f"Please accept: {', '.join(missing)}")
 
