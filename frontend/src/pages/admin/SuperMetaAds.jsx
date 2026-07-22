@@ -27,6 +27,7 @@ const AD_STATUS_STYLE = {
   winner: { label: 'Winner', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
   laggard: { label: 'Laggard', cls: 'bg-red-500/15 text-red-300 border-red-500/40' },
   on_track: { label: 'On track', cls: 'bg-pb-surface2 text-pb-faint border-pb-hairline' },
+  paused: { label: 'Paused', cls: 'bg-slate-500/15 text-slate-400 border-slate-500/40' },
 }
 
 function fmtMoney(n) {
@@ -219,11 +220,12 @@ function AdTrendMini({ adId, days }) {
 
 function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays }) {
   const style = AD_STATUS_STYLE[ad.status] || AD_STATUS_STYLE.on_track
+  const paused = ad.status === 'paused'
   const barPct = ad.cost_per_lpv && maxCostPerLpv ? Math.min(100, (ad.cost_per_lpv / maxCostPerLpv) * 100) : 0
-  const barColor = ad.status === 'winner' ? 'bg-emerald-500' : ad.status === 'laggard' ? 'bg-red-500' : 'bg-pb-accent'
+  const barColor = paused ? 'bg-slate-500' : ad.status === 'winner' ? 'bg-emerald-500' : ad.status === 'laggard' ? 'bg-red-500' : 'bg-pb-accent'
 
   return (
-    <div className={`pb-card border overflow-hidden ${selected ? 'border-pb-accent' : 'border-pb-hairline'}`}>
+    <div className={`pb-card border overflow-hidden ${selected ? 'border-pb-accent' : 'border-pb-hairline'} ${paused ? 'opacity-70' : ''}`}>
       <button onClick={onSelect} className="w-full text-left p-3.5 hover:bg-pb-surface2/40">
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="text-sm font-medium text-pb-text">{ad.name}</div>

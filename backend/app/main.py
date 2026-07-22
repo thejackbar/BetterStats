@@ -2605,6 +2605,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "UPDATE meta_lead_adjustments SET campaign_id = '120249237210710121' WHERE campaign_id IS NULL"
         ))
+        # Meta Ads — real delivery status per ad (migration 170). Insights
+        # fields never carry an ad's ACTIVE/PAUSED state, so the HQ dashboard's
+        # performance badge used to keep showing stale "Winner"/"On track"
+        # labels on an ad that had actually been paused (e.g. via the Meta Ads
+        # MCP). Stored on ad-level snapshot rows only.
+        await conn.execute(text("ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS delivery_status TEXT"))
         # Fill-in names on partnerships/fielding + a per-club toggle to show them
         # (migration 147) — mirrors FallOfWicket.batter_name for whichever side of
         # a partnership, or which fielder, has no linkable `players` row. Defensive

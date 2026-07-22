@@ -175,6 +175,26 @@ async def fetch_campaign_totals() -> dict:
     return _parse_row(data[0])
 
 
+async def fetch_ad_delivery_statuses() -> dict[str, str]:
+    """Current Meta-side `effective_status` (ACTIVE/PAUSED/ADSET_PAUSED/
+    CAMPAIGN_PAUSED/ARCHIVED/DELETED/...) per ad in the campaign. Insights
+    rows never carry this — it's a separate, lightweight call against the
+    ads edge (no date range, no metrics). Best-effort: returns {} on any
+    Meta error so a transient failure here only means the dashboard falls
+    back to pure performance-based badges, same as before this existed,
+    rather than breaking the whole per-ad fetch."""
+    try:
+        body = await _get(f"/act_{settings.meta_ad_account_id}/ads", {
+            "fields": "id,effective_status",
+            "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+            "limit": 200,
+        })
+    except MetaAdsError:
+        logger.exception("Meta Ads: could not fetch per-ad delivery status")
+        return {}
+    return {row["id"]: row.get("effective_status") for row in (body.get("data") or []) if row.get("id")}
+
+
 async def fetch_per_ad() -> list[dict]:
     """Per-ad totals (level=ad) for the campaign."""
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
@@ -184,11 +204,13 @@ async def fetch_per_ad() -> list[dict]:
         "date_preset": "maximum",
     })
     rows = [_parse_row(r) for r in (body.get("data") or [])]
+    delivery_statuses = await fetch_ad_delivery_statuses()
     for r in rows:
         meta = AD_DESTINATIONS.get(r["ad_id"], {})
         r["name"] = r.get("ad_name") or meta.get("name") or r["ad_id"]
         r["destination"] = meta.get("destination")
         r["utm_content"] = meta.get("utm_content")
+        r["delivery_status"] = delivery_statuses.get(r["ad_id"])
     return rows
 
 
@@ -278,7 +300,15 @@ def compute_recommendation(campaign: dict) -> tuple[str, str]:
 
 
 def ad_status(ad: dict, all_ads: list[dict]) -> str:
-    """§6 per-ad status chip: winner / laggard / on_track."""
+    """§6 per-ad status chip: paused / winner / laggard / on_track.
+
+    A real Meta-side pause (or the parent ad set/campaign being paused)
+    takes priority over every performance label — an ad that's stopped
+    spending shouldn't keep reading as a live "Winner"/"Laggard"/"On track"
+    verdict, which is only meaningful while it's still delivering."""
+    if ad.get("delivery_status") and ad["delivery_status"] != "ACTIVE":
+        return "paused"
+
     spend = ad.get("spend") or 0.0
     ctr = ad.get("link_ctr") or 0.0
     lpv = ad.get("landing_page_views") or 0.0
@@ -303,6 +333,16 @@ def ad_note(ad: dict, all_ads: list[dict]) -> str:
     status = ad.get("status")
     cost_per_lpv = ad.get("cost_per_lpv")
     lpv = ad.get("landing_page_views") or 0.0
+
+    if status == "paused":
+        label = {
+            "PAUSED": "Paused",
+            "ADSET_PAUSED": "Paused (its ad set is paused)",
+            "CAMPAIGN_PAUSED": "Paused (the campaign is paused)",
+            "ARCHIVED": "Archived",
+            "DELETED": "Deleted",
+        }.get(ad.get("delivery_status"), "No longer active")
+        return f"{label} — not spending any more. Figures shown are its lifetime-to-date totals."
 
     if spend < 3:
         return "Too little spend yet to judge. Give it more time before acting on it."
@@ -460,10 +500,12 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
     await db.execute(text("""
         INSERT INTO meta_ad_snapshots
             (snapshot_date, level, ad_id, ad_name, campaign_id, spend, impressions, link_clicks,
-             link_ctr, landing_page_views, cost_per_lpv, leads, recommendation, recommendation_status)
+             link_ctr, landing_page_views, cost_per_lpv, leads, recommendation, recommendation_status,
+             delivery_status)
         VALUES
             (:snapshot_date, :level, :ad_id, :ad_name, :campaign_id, :spend, :impressions, :link_clicks,
-             :link_ctr, :landing_page_views, :cost_per_lpv, :leads, :recommendation, :recommendation_status)
+             :link_ctr, :landing_page_views, :cost_per_lpv, :leads, :recommendation, :recommendation_status,
+             :delivery_status)
         ON CONFLICT (snapshot_date, level, COALESCE(ad_id, ''), COALESCE(campaign_id, ''))
         DO UPDATE SET
             ad_name = EXCLUDED.ad_name,
@@ -475,7 +517,8 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
             cost_per_lpv = EXCLUDED.cost_per_lpv,
             leads = EXCLUDED.leads,
             recommendation = COALESCE(EXCLUDED.recommendation, meta_ad_snapshots.recommendation),
-            recommendation_status = COALESCE(EXCLUDED.recommendation_status, meta_ad_snapshots.recommendation_status)
+            recommendation_status = COALESCE(EXCLUDED.recommendation_status, meta_ad_snapshots.recommendation_status),
+            delivery_status = EXCLUDED.delivery_status
     """), {
         "snapshot_date": snapshot_date,
         "level": level,
@@ -491,6 +534,7 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
         "leads": row.get("leads") or 0,
         "recommendation": recommendation,
         "recommendation_status": recommendation_status,
+        "delivery_status": row.get("delivery_status"),
     })
 
 
@@ -660,6 +704,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
             "landing_page_views": float(r["landing_page_views"]),
             "cost_per_lpv": float(r["cost_per_lpv"]) if r["cost_per_lpv"] is not None else None,
             "leads": float(r["leads"]),
+            "delivery_status": r["delivery_status"],
         }
 
     registrations = await get_registration_count(db)
