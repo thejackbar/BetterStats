@@ -7,6 +7,7 @@ import uuid
 import re
 import json
 import logging
+from difflib import SequenceMatcher
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +26,19 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _normalise(name: str) -> str:
-    """Normalise 'Last, First' → 'first last' and strip extra spaces for comparison."""
+    """Normalise 'Last, First' → 'first last' and strip extra spaces for comparison.
+
+    Splits on a bare comma rather than requiring the literal ", " substring, and
+    strips each side before rejoining — a stray space before the comma ("Smith ,
+    John") used to leave a trailing space baked into the key, so it silently
+    failed to match a correctly-typed "Smith, John" and was missed as a
+    duplicate here.
+    """
     name = name.strip()
-    if ", " in name:
-        parts = name.split(", ", 1)
-        name = f"{parts[1]} {parts[0]}"
-    return re.sub(r"\s+", " ", name).lower()
+    if "," in name:
+        parts = name.split(",", 1)
+        name = f"{parts[1].strip()} {parts[0].strip()}".strip()
+    return re.sub(r"\s+", " ", name).strip().lower()
 
 
 _REDACTED_NAME_RE = re.compile(r"^\*+$")
@@ -71,9 +79,55 @@ async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depend
     return await _enrich_player(db, p)
 
 
+FUZZY_MERGE_THRESHOLD = 0.90
+MAX_FUZZY_PAIRS = 500
+
+
+def _fuzzy_name_pairs(players: list, ignored: set) -> list:
+    """Near-miss spelling pairs the exact-name grouping above can't see — e.g. a
+    club's hand-kept 50-year stats sheet has "Taylor, Malcolm" in one season and
+    a typo'd "Taylor, Malcom" in another, minting two player records that never
+    share an exact normalised-name key. Blocked by the first character of the
+    normalised name (same trick ``import_ingest.match_players`` uses) so this
+    stays fast on a large roster. Returned separately from the exact-match pairs
+    above and never bulk-mergeable — a spelling guess always needs a human to
+    confirm it's the same person, not two genuinely different club members
+    (e.g. "Steve"/"Steven" or "Brendan"/"Brendon" are often two different people).
+    """
+    blocks: dict[str, list] = {}
+    for p in players:
+        key = _normalise(p.name)
+        if not key or _is_redacted_name(p.name):
+            continue
+        blocks.setdefault(key[:1], []).append((p, key))
+
+    seen_pairs: set = set()
+    scored = []
+    for block in blocks.values():
+        for i in range(len(block)):
+            p1, k1 = block[i]
+            for j in range(i + 1, len(block)):
+                p2, k2 = block[j]
+                if k1 == k2 or abs(len(k1) - len(k2)) > 3:
+                    continue
+                ratio = SequenceMatcher(None, k1, k2).ratio()
+                if ratio < FUZZY_MERGE_THRESHOLD:
+                    continue
+                pair_key = tuple(sorted([str(p1.id), str(p2.id)]))
+                if pair_key in ignored or pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                scored.append((ratio, p1, p2))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return scored[:MAX_FUZZY_PAIRS]
+
+
 @router.get("/merge-candidates")
 async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    """Return pairs of players within an org that look like duplicates."""
+    """Return pairs of players within an org that look like duplicates: exact
+    normalised-name matches (``kind: "exact"``, safe for Bulk Approve) plus,
+    tagged separately, near-miss spelling pairs (``kind: "fuzzy"``) that only
+    ever reach a manual Confirm."""
     result = await db.execute(
         select(Player).where(Player.organisation_id == uuid.UUID(org_id))
     )
@@ -104,11 +158,23 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
                 if pair_key in ignored:
                     continue
                 candidate_pairs.append({
+                    "kind": "exact",
                     "normalised_name": key,
                     "redacted": _is_redacted_name(enriched[i]["name"]) or _is_redacted_name(enriched[j]["name"]),
                     "player_a": enriched[i],
                     "player_b": enriched[j],
                 })
+
+    for ratio, p1, p2 in _fuzzy_name_pairs(players, ignored):
+        a, b = await _enrich_player(db, p1), await _enrich_player(db, p2)
+        candidate_pairs.append({
+            "kind": "fuzzy",
+            "confidence": round(ratio, 2),
+            "normalised_name": None,
+            "redacted": False,
+            "player_a": a,
+            "player_b": b,
+        })
 
     return candidate_pairs
 
