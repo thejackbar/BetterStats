@@ -6,6 +6,7 @@ import BetterCrmLayout from '../../../components/admin/BetterCrmLayout'
 import { PbSpinner } from '../../../lib/presskit'
 import PipelineBoard from '../../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../../components/admin/crm/DealDetailModal'
+import { SPONSOR_TERMS } from './terms'
 
 const clubClient = {
   getDeal: api.crmGetDeal,
@@ -27,7 +28,7 @@ export default function BetterCrmHome() {
   const [openDealId, setOpenDealId] = useState(null)
 
   const load = useCallback(() => {
-    api.crmPipeline().then(setBoard).catch(e => toast.error(e.message || 'Could not load pipeline')).finally(() => setLoading(false))
+    api.crmPipeline().then(setBoard).catch(e => toast.error(e.message || 'Could not load sponsors')).finally(() => setLoading(false))
   }, [toast])
 
   useEffect(() => { load() }, [load])
@@ -35,14 +36,14 @@ export default function BetterCrmHome() {
   const stages = board?.stages || []
 
   return (
-    <BetterCrmLayout title="BetterCRM"
-      actions={<Link to="/admin/crm/deals" className="text-[12px] font-mono text-pb-faint hover:text-pb-accent">Deals list →</Link>}>
-      {loading ? <PbSpinner message="Loading pipeline…" /> : !board ? null : (
-        <PipelineBoard board={board} onOpenDeal={setOpenDealId} />
+    <BetterCrmLayout title="Sponsors"
+      actions={<Link to="/admin/crm/list" className="text-[12px] font-mono text-pb-faint hover:text-pb-accent">All sponsors →</Link>}>
+      {loading ? <PbSpinner message="Loading sponsors…" /> : !board ? null : (
+        <PipelineBoard board={board} onOpenDeal={setOpenDealId} terms={SPONSOR_TERMS} />
       )}
       <DealDetailModal
         dealId={openDealId} open={!!openDealId} onClose={() => setOpenDealId(null)}
-        stages={stages} client={clubClient} onChanged={load}
+        stages={stages} client={clubClient} onChanged={load} terms={SPONSOR_TERMS}
       />
     </BetterCrmLayout>
   )

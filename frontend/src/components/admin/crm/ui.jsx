@@ -81,6 +81,14 @@ export function Kpi({ label, value, accent, warn }) {
   )
 }
 
+// Vocabulary the Kanban board + deal detail modal render with — deliberately
+// overridable per surface. The platform-scope sales pipeline keeps the
+// Pipedrive-style "Won/Lost/deal" language a sales team expects; the
+// club-facing module (currently scoped to Sponsors) overrides it to plain
+// words a volunteer club officer already uses, so the SAME components serve
+// both without either audience seeing the other's jargon.
+export const DEFAULT_CRM_TERMS = { won: 'Won', lost: 'Lost', itemSingular: 'deal', itemPlural: 'deals', titleLabel: 'Title' }
+
 export function Pill({ children, tone = 'faint' }) {
   const tones = {
     faint: 'bg-pb-surface2 text-pb-faint',

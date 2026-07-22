@@ -294,7 +294,7 @@ export default function App() {
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
           <Route path="/admin/crm" element={<ProtectedRoute requireModule="crm"><BetterCrmHome /></ProtectedRoute>} />
-          <Route path="/admin/crm/deals" element={<ProtectedRoute requireModule="crm"><BetterCrmDeals /></ProtectedRoute>} />
+          <Route path="/admin/crm/list" element={<ProtectedRoute requireModule="crm"><BetterCrmDeals /></ProtectedRoute>} />
           <Route path="/admin/crm/people" element={<ProtectedRoute requireModule="crm"><BetterCrmPeople /></ProtectedRoute>} />
           <Route path="/admin/super/crm" element={<ProtectedRoute requireRole="super_admin"><SuperCrm /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />

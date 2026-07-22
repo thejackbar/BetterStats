@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput } from './ui'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput, DEFAULT_CRM_TERMS } from './ui'
 
 // Deal detail/edit — used by BOTH the club CRM module and the platform-scope
 // Super Admin sales pipeline. `client` bundles the scope-specific api.js calls
-// (club vs platform) so this component itself is scope-agnostic.
-export default function DealDetailModal({ dealId, open, onClose, stages, client, onChanged, moduleOptions }) {
+// (club vs platform) so this component itself is scope-agnostic. `terms`
+// swaps the Won/Lost/"deal" sales language for the club-facing module's own
+// vocabulary (see ui.jsx's DEFAULT_CRM_TERMS).
+export default function DealDetailModal({ dealId, open, onClose, stages, client, onChanged, moduleOptions, terms }) {
   const toast = useToast()
+  const t = { ...DEFAULT_CRM_TERMS, ...terms }
   const [deal, setDeal] = useState(null)
   const [activities, setActivities] = useState([])
   const [contacts, setContacts] = useState([])
@@ -24,7 +27,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     setLoading(true)
     Promise.all([client.getDeal(dealId), client.listActivities(dealId), client.listContacts(dealId)])
       .then(([d, a, c]) => { setDeal(d); setActivities(a.activities || []); setContacts(c.contacts || []) })
-      .catch(e => toast.error(e.message || 'Could not load deal'))
+      .catch(e => toast.error(e.message || `Could not load ${t.itemSingular}`))
       .finally(() => setLoading(false))
   }, [dealId, client, toast])
 
@@ -60,11 +63,11 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
       setDeal(updated)
       setShowLostBox(false)
       onChanged?.()
-    } catch (e) { toast.error(e.message || 'Could not close deal') } finally { setSaving(false) }
+    } catch (e) { toast.error(e.message || `Could not close ${t.itemSingular}`) } finally { setSaving(false) }
   }
 
   const archive = async () => {
-    if (!window.confirm('Archive this deal? It will drop off the board.')) return
+    if (!window.confirm(`Archive this ${t.itemSingular}? It will drop off the board.`)) return
     try {
       await client.archiveDeal(dealId)
       onChanged?.()
@@ -104,21 +107,21 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   }
 
   return (
-    <Modal open={open} onClose={onClose} wide title={deal ? deal.title : 'Deal'}
+    <Modal open={open} onClose={onClose} wide title={deal ? deal.title : (t.itemSingular[0].toUpperCase() + t.itemSingular.slice(1))}
       footer={deal && deal.status === 'open' ? (
         <>
           <Btn variant="danger" onClick={archive}>Archive</Btn>
-          <Btn variant="danger" onClick={() => closeDeal('lost')}>Mark Lost</Btn>
-          <Btn variant="primary" onClick={() => closeDeal('won')}>Mark Won</Btn>
+          <Btn variant="danger" onClick={() => closeDeal('lost')}>Mark {t.lost}</Btn>
+          <Btn variant="primary" onClick={() => closeDeal('won')}>Mark {t.won}</Btn>
         </>
       ) : deal ? <Btn variant="ghost" onClick={archive}>Archive</Btn> : null}>
       {loading || !deal ? <p className="text-pb-faint text-sm">Loading…</p> : (
         <div className="space-y-5">
           {deal.status !== 'open' && (
-            <Pill tone={deal.status === 'won' ? 'green' : 'red'}>{deal.status === 'won' ? 'WON' : 'LOST'}</Pill>
+            <Pill tone={deal.status === 'won' ? 'green' : 'red'}>{(deal.status === 'won' ? t.won : t.lost).toUpperCase()}</Pill>
           )}
           <div className="flex flex-wrap gap-3">
-            <Field label="Title" half>
+            <Field label={t.titleLabel} half>
               <TextInput defaultValue={deal.title} onBlur={e => e.target.value !== deal.title && patch({ title: e.target.value })} />
             </Field>
             <Field label="Value ($)" half>
@@ -144,7 +147,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           </div>
 
           {showLostBox && (
-            <Field label="Reason lost">
+            <Field label={`Reason ${t.lost.toLowerCase()}`}>
               <div className="flex gap-2">
                 <TextInput value={lostReason} onChange={e => setLostReason(e.target.value)} placeholder="e.g. went with a competitor" />
                 <Btn variant="danger" onClick={() => closeDeal('lost')}>Confirm</Btn>

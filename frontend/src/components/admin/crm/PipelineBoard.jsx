@@ -1,12 +1,13 @@
-import { money, Pill } from './ui'
+import { money, Pill, DEFAULT_CRM_TERMS } from './ui'
 
 // A Kanban-style pipeline board — one column per stage, cards inside. Stage
 // changes happen from the deal detail modal's stage dropdown (opened by
 // clicking a card) rather than drag-and-drop, which keeps this reliable with
 // no browser-only interaction to get right without live testing.
-export default function PipelineBoard({ board, onOpenDeal }) {
+export default function PipelineBoard({ board, onOpenDeal, terms }) {
   if (!board) return null
   const { stages, totals } = board
+  const t = { ...DEFAULT_CRM_TERMS, ...terms }
 
   return (
     <div className="space-y-4">
@@ -20,7 +21,7 @@ export default function PipelineBoard({ board, onOpenDeal }) {
           <div className="font-display font-bold text-xl">{money(totals.weighted_value_cents)}</div>
         </div>
         <div className="pb-card px-4 py-3">
-          <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Open deals</div>
+          <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Open {t.itemPlural}</div>
           <div className="font-display font-bold text-xl">{totals.open_count}</div>
         </div>
       </div>
@@ -37,7 +38,7 @@ export default function PipelineBoard({ board, onOpenDeal }) {
             </div>
             <div className="space-y-2 min-h-[60px]">
               {stage.deals.length === 0 && (
-                <div className="pb-card px-3 py-4 text-center text-[11.5px] text-pb-faintest border-dashed">No deals</div>
+                <div className="pb-card px-3 py-4 text-center text-[11.5px] text-pb-faintest border-dashed">No {t.itemPlural}</div>
               )}
               {stage.deals.map(deal => (
                 <button key={deal.id} onClick={() => onOpenDeal(deal.id)}
@@ -54,8 +55,8 @@ export default function PipelineBoard({ board, onOpenDeal }) {
                       {deal.module_keys.map(k => <Pill key={k} tone="accent">{k}</Pill>)}
                     </div>
                   )}
-                  {deal.status === 'won' && <Pill tone="green">Won</Pill>}
-                  {deal.status === 'lost' && <Pill tone="red">Lost</Pill>}
+                  {deal.status === 'won' && <Pill tone="green">{t.won}</Pill>}
+                  {deal.status === 'lost' && <Pill tone="red">{t.lost}</Pill>}
                 </button>
               ))}
             </div>

@@ -5,6 +5,7 @@ import BetterCrmLayout from '../../../components/admin/BetterCrmLayout'
 import { PbSpinner } from '../../../lib/presskit'
 import DealDetailModal from '../../../components/admin/crm/DealDetailModal'
 import { Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money } from '../../../components/admin/crm/ui'
+import { SPONSOR_TERMS } from './terms'
 
 const clubClient = {
   getDeal: api.crmGetDeal,
@@ -19,7 +20,12 @@ const clubClient = {
   unlinkContact: api.crmUnlinkContact,
 }
 
-function NewDealModal({ open, onClose, stages, onCreated }) {
+// Status filter chips + table pill labels — mirrors the stage names
+// (Signed / Not Proceeding) rather than the generic Won/Lost the platform
+// sales pipeline uses.
+const STATUS_LABELS = { open: 'Active', won: 'Signed', lost: 'Not proceeding', '': 'All' }
+
+function NewSponsorModal({ open, onClose, stages, onCreated }) {
   const toast = useToast()
   const [title, setTitle] = useState('')
   const [valueDollars, setValueDollars] = useState('')
@@ -39,20 +45,20 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
       })
       onCreated()
       onClose()
-    } catch (e2) { toast.error(e2.message || 'Could not create deal') } finally { setSaving(false) }
+    } catch (e2) { toast.error(e2.message || 'Could not add sponsor') } finally { setSaving(false) }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New deal">
+    <Modal open={open} onClose={onClose} title="New sponsor">
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Title"><TextInput autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. ABC Plumbing — annual sponsorship" /></Field>
+        <Field label={SPONSOR_TERMS.titleLabel}><TextInput autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. ABC Plumbing — annual sponsorship" /></Field>
         <Field label="Value ($)"><NumberInput min={0} value={valueDollars} onChange={e => setValueDollars(e.target.value)} /></Field>
         <Field label="Stage">
           <Select value={stageId} onChange={e => setStageId(e.target.value)}>
             {(stages || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
         </Field>
-        <div className="flex justify-end pt-2"><Btn type="submit" variant="primary" disabled={saving}>Create deal</Btn></div>
+        <div className="flex justify-end pt-2"><Btn type="submit" variant="primary" disabled={saving}>Add sponsor</Btn></div>
       </form>
     </Modal>
   )
@@ -71,7 +77,7 @@ export default function BetterCrmDeals() {
     setLoading(true)
     Promise.all([api.crmListDeals({ status: status || undefined }), api.crmStages()])
       .then(([d, s]) => { setDeals(d.deals || []); setStages(s.stages || []) })
-      .catch(e => toast.error(e.message || 'Could not load deals'))
+      .catch(e => toast.error(e.message || 'Could not load sponsors'))
       .finally(() => setLoading(false))
   }, [status, toast])
 
@@ -80,23 +86,23 @@ export default function BetterCrmDeals() {
   const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
 
   return (
-    <BetterCrmLayout title="Deals"
-      actions={<Btn variant="primary" sm onClick={() => setShowNew(true)}>New deal</Btn>}>
+    <BetterCrmLayout title="All Sponsors"
+      actions={<Btn variant="primary" sm onClick={() => setShowNew(true)}>New sponsor</Btn>}>
       <div className="flex items-center gap-2 mb-4">
         {['open', 'won', 'lost', ''].map(s => (
           <button key={s || 'all'} onClick={() => setStatus(s)}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
               status === s ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
-            {s ? s[0].toUpperCase() + s.slice(1) : 'All'}
+            {STATUS_LABELS[s]}
           </button>
         ))}
       </div>
-      {loading ? <PbSpinner message="Loading deals…" /> : (
+      {loading ? <PbSpinner message="Loading sponsors…" /> : (
         <div className="pb-card overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
               <tr className="text-left text-pb-faint border-b border-pb-hairline">
-                <th className="px-3 py-2 font-normal">Title</th>
+                <th className="px-3 py-2 font-normal">Sponsor</th>
                 <th className="px-3 py-2 font-normal">Stage</th>
                 <th className="px-3 py-2 font-normal text-right">Value</th>
                 <th className="px-3 py-2 font-normal text-right">Weighted</th>
@@ -105,7 +111,7 @@ export default function BetterCrmDeals() {
             </thead>
             <tbody>
               {deals.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-pb-faintest">No deals yet.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-6 text-center text-pb-faintest">No sponsors yet.</td></tr>
               )}
               {deals.map(d => (
                 <tr key={d.id} onClick={() => setOpenDealId(d.id)} className="border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer">
@@ -114,9 +120,9 @@ export default function BetterCrmDeals() {
                   <td className="px-3 py-2.5 text-right">{money(d.value_cents)}</td>
                   <td className="px-3 py-2.5 text-right text-pb-faint">{money(d.weighted_value_cents)}</td>
                   <td className="px-3 py-2.5">
-                    {d.status === 'won' && <Pill tone="green">Won</Pill>}
-                    {d.status === 'lost' && <Pill tone="red">Lost</Pill>}
-                    {d.status === 'open' && <Pill>Open</Pill>}
+                    {d.status === 'won' && <Pill tone="green">{STATUS_LABELS.won}</Pill>}
+                    {d.status === 'lost' && <Pill tone="red">{STATUS_LABELS.lost}</Pill>}
+                    {d.status === 'open' && <Pill>{STATUS_LABELS.open}</Pill>}
                   </td>
                 </tr>
               ))}
@@ -124,10 +130,10 @@ export default function BetterCrmDeals() {
           </table>
         </div>
       )}
-      <NewDealModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
+      <NewSponsorModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
       <DealDetailModal
         dealId={openDealId} open={!!openDealId} onClose={() => setOpenDealId(null)}
-        stages={stages} client={clubClient} onChanged={load}
+        stages={stages} client={clubClient} onChanged={load} terms={SPONSOR_TERMS}
       />
     </BetterCrmLayout>
   )

@@ -64,14 +64,20 @@ PLATFORM_DEFAULT_STAGES = [
     ("won", "Won", 100, True, False),
     ("lost", "Lost", 0, False, True),
 ]
+# Club scope launches scoped to Sponsors — the one relationship-tracking need
+# with the clearest demand and the one thing TidyHQ conspicuously doesn't do
+# (its own sponsorship handling is a static public listing page, not a
+# tracked pipeline). Stage names are sponsorship-flavoured, not generic sales
+# stages, on purpose — see the "Pipeline/Deals" terminology discussion this
+# module's naming came out of. "Renewal Due" sits after Signed: a club moves a
+# signed sponsor back into it when it's time to renew, re-opening the record.
 CLUB_DEFAULT_STAGES = [
-    ("new", "New", 10, False, False),
+    ("prospect", "Prospect", 10, False, False),
     ("contacted", "Contacted", 25, False, False),
-    ("qualified", "Qualified", 40, False, False),
-    ("proposal", "Proposal", 65, False, False),
-    ("negotiation", "Negotiation", 85, False, False),
-    ("won", "Won", 100, True, False),
-    ("lost", "Lost", 0, False, True),
+    ("proposal_sent", "Proposal Sent", 50, False, False),
+    ("signed", "Signed", 100, True, False),
+    ("renewal_due", "Renewal Due", 60, False, False),
+    ("not_proceeding", "Not Proceeding", 0, False, True),
 ]
 
 
@@ -91,7 +97,7 @@ async def ensure_pipeline(session: AsyncSession, scope: str, organisation_id=Non
         return pipeline
     pipeline = CrmPipeline(
         scope=scope, organisation_id=organisation_id,
-        name="BetterCricket Sales" if scope == SCOPE_PLATFORM else "Club Pipeline",
+        name="BetterCricket Sales" if scope == SCOPE_PLATFORM else "Sponsors",
         is_default=True,
     )
     session.add(pipeline)
