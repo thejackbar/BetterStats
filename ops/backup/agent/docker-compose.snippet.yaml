@@ -19,12 +19,12 @@ services:
     restart: unless-stopped
     environment:
       BACKUP_AGENT_SECRET: ${BACKUP_AGENT_SECRET}
-      DB_PASSWORD: ${DB_PASSWORD}
       AGE_RECIPIENT: ${AGE_RECIPIENT}
+      BACKUP_ROOT: /mnt/media/bettercricket/backup
       COMPOSE_PROJECT_NAME: bltbox_docker_app
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/docker:/srv/docker
-      - /srv/backups:/srv/backups
+      - /mnt/media/bettercricket/backup:/mnt/media/bettercricket/backup
     networks:
       - docker-shared-net   # match betterstats-backend's network

@@ -43,8 +43,29 @@ changes rarely and shouldn't live in a daily-rotated, app-readable bundle.
    `/srv/docker/betterstats/backup.env`:
    ```bash
    AGE_RECIPIENT=age1qyourpublickeyhere...
-   BACKUP_ROOT=/srv/backups/betterstats
+   BACKUP_ROOT=/mnt/media/bettercricket/backup
    ```
+   Create the directory first: `mkdir -p /mnt/media/bettercricket/backup`
+   (this is the mounted media volume, not `/srv/docker` — confirm it's
+   actually mounted with enough free space before relying on it, e.g.
+   `df -h /mnt/media`).
+
+3a. **Give `betterstats-backend` the same path, read-write.** `backup.sh`/
+    `restore.sh` themselves run on the HOST and only need `BACKUP_ROOT` in
+    their own environment (set above) — but per-club restore's snapshot
+    file (the thing `rollback-club` reads back) is written by
+    `app/scripts/restore_club.py`, which runs INSIDE the
+    `betterstats-backend` container via `docker compose exec`. Without this
+    mount, that snapshot only exists inside the container's ephemeral
+    filesystem and disappears the next time the container is recreated
+    (every deploy). Add to the central `/srv/docker/docker-compose.yaml`'s
+    `betterstats-backend` service:
+    ```yaml
+      betterstats-backend:
+        volumes:
+          - uploads:/app/uploads   # existing
+          - /mnt/media/bettercricket/backup:/mnt/media/bettercricket/backup
+    ```
 
 4. **Install the systemd units**:
    ```bash
@@ -148,7 +169,7 @@ BACKUP_FORCE=1 BACKUP_TRIGGERED_BY=manual /srv/docker/betterstats/ops/backup/bac
 /srv/docker/betterstats/ops/backup/restore.sh restore-club 2026-07-21T03-00-00Z <org-id> --apply
 
 # undo a previous --apply club restore
-/srv/docker/betterstats/ops/backup/restore.sh rollback-club /srv/backups/betterstats/club-restores/<task_id>.json
+/srv/docker/betterstats/ops/backup/restore.sh rollback-club /mnt/media/bettercricket/backup/club-restores/<task_id>.json
 ```
 
 Every run — scheduled or manual — is logged to the `backup_tasks` table and
@@ -199,7 +220,7 @@ plain `pg_restore`. `app/services/club_restore.py` (invoked via
   reports live-row-count vs bundle-row-count per table.
 - **Snapshot before write.** The FIRST thing `--apply` does is dump the
   club's current live rows to
-  `/srv/backups/betterstats/club-restores/<task_id>.json` — same
+  `/mnt/media/bettercricket/backup/club-restores/<task_id>.json` — same
   backup-before-write precedent as `klubpro_migration.py`'s import tool —
   before touching anything, so `rollback-club` can put it back.
 - Each table is deleted-then-reinserted inside its own transaction (not one

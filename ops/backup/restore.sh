@@ -40,7 +40,7 @@ cd /srv/docker
 export COMPOSE_PROJECT_NAME=bltbox_docker_app
 export COMPOSE_IGNORE_ORPHANS=1
 
-BACKUP_ROOT="${BACKUP_ROOT:-/srv/backups/betterstats}"
+BACKUP_ROOT="${BACKUP_ROOT:-/mnt/media/bettercricket/backup}"
 DB_SERVICE="${DB_SERVICE:-betterstats-db}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-betterstats-backend}"
 POSTGRES_DB="${POSTGRES_DB:-betterstats}"
@@ -221,7 +221,7 @@ if [ "$cmd" = "restore-club" ]; then
 
   drop_scratch
   finish_task "$TASK_ID" completed
-  log "Club restore complete. Snapshot of the pre-restore data is under /srv/backups/betterstats/club-restores/ — keep it until you're sure you don't need to roll back."
+  log "Club restore complete. Snapshot of the pre-restore data is under /mnt/media/bettercricket/backup/club-restores/ — keep it until you're sure you don't need to roll back."
   exit 0
 fi
 

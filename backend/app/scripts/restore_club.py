@@ -13,7 +13,7 @@ Usage (normally invoked BY restore.sh, not run by hand):
   python -m app.scripts.restore_club <org_id> --scratch-dsn ... --apply
 
   # undo a previous --apply run
-  python -m app.scripts.restore_club --rollback /srv/backups/betterstats/club-restores/<task_id>.json
+  python -m app.scripts.restore_club --rollback /mnt/media/bettercricket/backup/club-restores/<task_id>.json
 """
 import argparse
 import asyncio
@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--scratch-dsn", help="asyncpg DSN for the scratch Postgres holding the restored bundle")
     parser.add_argument("--apply", action="store_true", help="Actually write (default is dry-run/report-only)")
     parser.add_argument("--task-id", default="manual", help="backup_tasks.id this run is logged against")
-    parser.add_argument("--snapshot-dir", default="/srv/backups/betterstats/club-restores")
+    parser.add_argument("--snapshot-dir", default="/mnt/media/bettercricket/backup/club-restores")
     parser.add_argument("--rollback", metavar="SNAPSHOT_JSON", help="Undo a previous --apply run from its snapshot file")
     args = parser.parse_args()
 

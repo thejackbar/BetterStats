@@ -37,7 +37,7 @@ app = FastAPI(title="betterstats-backup-agent")
 
 AGENT_SECRET = os.environ.get("BACKUP_AGENT_SECRET", "")
 BACKUP_SCRIPT = os.environ.get("BACKUP_SCRIPT", "/srv/docker/betterstats/ops/backup/backup.sh")
-BACKUP_ROOT = Path(os.environ.get("BACKUP_ROOT", "/srv/backups/betterstats"))
+BACKUP_ROOT = Path(os.environ.get("BACKUP_ROOT", "/mnt/media/bettercricket/backup"))
 
 # Bundle directory names are always backup.sh's own `date -u +%Y-%m-%dT%H-%M-%SZ`
 # stamp — validating against this shape (rather than just checking the

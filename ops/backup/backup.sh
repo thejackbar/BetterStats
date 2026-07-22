@@ -44,7 +44,7 @@ cd /srv/docker
 export COMPOSE_PROJECT_NAME=bltbox_docker_app
 export COMPOSE_IGNORE_ORPHANS=1
 
-BACKUP_ROOT="${BACKUP_ROOT:-/srv/backups/betterstats}"
+BACKUP_ROOT="${BACKUP_ROOT:-/mnt/media/bettercricket/backup}"
 DB_SERVICE="${DB_SERVICE:-betterstats-db}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-betterstats-backend}"
 POSTGRES_DB="${POSTGRES_DB:-betterstats}"

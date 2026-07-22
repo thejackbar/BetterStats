@@ -17,7 +17,7 @@ Usage:
   # marks a task completed, stamping the current DB/per-club stats plus
   # whatever the shell script measured on disk
   python -m app.scripts.backup_task finish-task <task_id> --status completed \\
-      --bundle-path /srv/backups/betterstats/2026-07-21T03-00-00Z --uploads-size-bytes 12345
+      --bundle-path /mnt/media/bettercricket/backup/2026-07-21T03-00-00Z --uploads-size-bytes 12345
 
   # marks a task failed
   python -m app.scripts.backup_task finish-task <task_id> --status failed --error "pg_dump exited 1"
