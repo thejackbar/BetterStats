@@ -109,6 +109,165 @@ function DownloadLink({ taskId, file, label }) {
   )
 }
 
+const RESTORE_CONFIRM_WORD = 'RESTORE'
+
+// Restore (full or per-club), triggered from the web instead of SSH. Two
+// independent gates, in order: (1) type the confirmation word back exactly,
+// checked entirely client-side/server-side before step 2 ever appears; (2)
+// paste the age PRIVATE key, sent fresh with this one request and never
+// stored anywhere — the backup-agent cryptographically verifies it's the
+// real matching key before the restore is allowed to proceed. Plain SSH
+// restore (ops/backup/restore.sh) remains fully available alongside this.
+function RestoreModal({ task, mode, onClose, onStarted }) {
+  const [step, setStep] = useState(1)
+  const [confirmInput, setConfirmInput] = useState('')
+  const [orgId, setOrgId] = useState('')
+  const [clubs, setClubs] = useState([])
+  const [clubsLoading, setClubsLoading] = useState(false)
+  const [privateKey, setPrivateKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    if (mode !== 'club') return
+    setClubsLoading(true)
+    api.superListClubs().then((cs) => setClubs(cs || [])).catch(() => {}).finally(() => setClubsLoading(false))
+  }, [mode])
+
+  const bundle = (task.bundle_path || '').split('/').filter(Boolean).pop() || task.bundle_path
+
+  const goToStep2 = () => {
+    if (confirmInput !== RESTORE_CONFIRM_WORD) return
+    setStep(2)
+  }
+
+  const submit = async () => {
+    if (mode === 'club' && !orgId) {
+      setMsg('Pick a club first.')
+      return
+    }
+    setBusy(true)
+    setMsg('')
+    try {
+      const res = mode === 'full'
+        ? await api.superBackupRestoreFull(task.id, confirmInput, privateKey)
+        : await api.superBackupRestoreClub(task.id, orgId, confirmInput, privateKey)
+      if (res?.status === 'already_running') {
+        setMsg(`Another operation is already running (${res.operation || 'unknown'}) — try again once it finishes.`)
+      } else {
+        onStarted()
+        return // onStarted closes the modal
+      }
+    } catch (err) {
+      setMsg(err.message || 'Could not start the restore.')
+    } finally {
+      // The private key never outlives this one request, success or failure.
+      setPrivateKey('')
+      setBusy(false)
+    }
+  }
+
+  const close = () => {
+    setPrivateKey('')
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-y-auto" onClick={close}>
+      <div className="pb-card w-full max-w-lg bg-pb-surface mt-16" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 pb-0">
+          <h2 className="font-display font-bold text-lg text-pb-text">
+            {mode === 'full' ? 'Restore — whole platform' : 'Restore — one club'}
+          </h2>
+          <p className="font-mono text-[10px] text-pb-faintest mt-1">Bundle: {bundle}</p>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {mode === 'full' ? (
+            <p className="text-sm text-pb-dim">
+              This REPLACES every club's live data with this bundle and briefly stops the app
+              for every club. Only do this for genuine disaster recovery.
+            </p>
+          ) : (
+            <p className="text-sm text-pb-dim">
+              This restores ONE club's data from this bundle. No downtime, no effect on any
+              other club. The club's current data is snapshotted first, so it can be undone
+              (see docs/backup-system.md's rollback-club command).
+            </p>
+          )}
+
+          {step === 1 ? (
+            <div className="space-y-2">
+              <label className="font-mono text-[10px] text-pb-faint block">
+                Type <span className="text-pb-text font-bold">{RESTORE_CONFIRM_WORD}</span> to continue
+              </label>
+              <input
+                type="text" value={confirmInput} autoFocus
+                onChange={(e) => setConfirmInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && goToStep2()}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+              />
+            </div>
+          ) : (
+            <>
+              {mode === 'club' && (
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Club</label>
+                  {clubsLoading ? (
+                    <p className="text-sm text-pb-dim">Loading clubs…</p>
+                  ) : (
+                    <select value={orgId} onChange={(e) => setOrgId(e.target.value)}
+                      className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                      <option value="">Select a club…</option>
+                      {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">
+                  Private key (age identity — never stored, used once for this restore only)
+                </label>
+                <textarea
+                  value={privateKey} onChange={(e) => setPrivateKey(e.target.value)}
+                  rows={4} spellCheck={false} autoComplete="off"
+                  placeholder="AGE-SECRET-KEY-1..."
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs font-mono focus:outline-none focus:border-pb-accent"
+                />
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  Rejected outright unless it's the real matching private key for this
+                  server's configured public key — verified cryptographically before anything
+                  is restored.
+                </p>
+              </div>
+            </>
+          )}
+
+          {msg && <p className="text-sm text-red-400">{msg}</p>}
+        </div>
+
+        <div className="flex gap-2 p-5 pt-3 border-t pb-hairline">
+          {step === 1 ? (
+            <button onClick={goToStep2} disabled={confirmInput !== RESTORE_CONFIRM_WORD}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 uppercase font-semibold transition disabled:opacity-40 text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}>
+              Continue
+            </button>
+          ) : (
+            <button onClick={submit} disabled={busy || !privateKey.trim() || (mode === 'club' && !orgId)}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 uppercase font-semibold transition disabled:opacity-40 bg-red-500 text-white">
+              {busy ? 'Starting…' : 'Restore now'}
+            </button>
+          )}
+          <button onClick={close} className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SuperBackups() {
   const [tasks, setTasks] = useState([])
   const [total, setTotal] = useState(0)
@@ -124,6 +283,7 @@ export default function SuperBackups() {
   const [clubQuery, setClubQuery] = useState('')
   const [clubSortKey, setClubSortKey] = useState('size_bytes') // 'name' | 'rows' | 'size_bytes'
   const [clubSortDir, setClubSortDir] = useState('desc')
+  const [restoreModal, setRestoreModal] = useState(null) // { task, mode: 'full'|'club' } | null
 
   const toggleClubSort = (key) => {
     if (clubSortKey === key) {
@@ -207,12 +367,13 @@ export default function SuperBackups() {
               are set from General Settings → Backups.
             </p>
             <p className="text-xs text-pb-faint mt-2 max-w-2xl">
-              Backup runs as a host-level script (see docs/backup-system.md) — this page proxies
-              "Run backup now" to it, then shows what it logged. Restore (full or per-club) is
-              deliberately NOT triggerable from here — it needs the backup encryption key, which
-              is kept offline for safety, so it's always run by an operator directly on the
-              server. Backups are never sent anywhere automatically — every DB/Uploads download
-              below is a manual, on-demand copy of the still-encrypted file, nothing more.
+              Backup and restore both run as host-level scripts (see docs/backup-system.md) —
+              this page proxies to them and shows what they logged. Restore is available both
+              here and over SSH: from here it needs the private key pasted in fresh each time
+              (never stored) plus a typed confirmation, verified cryptographically before
+              anything is touched. Backups are never sent anywhere automatically — every
+              DB/Uploads download below is a manual, on-demand copy of the still-encrypted
+              file, nothing more.
             </p>
           </div>
           <div className="text-right shrink-0">
@@ -373,10 +534,26 @@ export default function SuperBackups() {
                           </button>
                         )}
                         {t.task_type === 'backup' && t.status === 'completed' && (
-                          <div className="flex gap-2">
-                            <DownloadLink taskId={t.id} file="db" label="DB" />
-                            <DownloadLink taskId={t.id} file="uploads" label="Uploads" />
-                          </div>
+                          <>
+                            <div className="flex gap-2">
+                              <DownloadLink taskId={t.id} file="db" label="DB" />
+                              <DownloadLink taskId={t.id} file="uploads" label="Uploads" />
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setRestoreModal({ task: t, mode: 'full' })}
+                                className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-red-400"
+                              >
+                                Restore (full)
+                              </button>
+                              <button
+                                onClick={() => setRestoreModal({ task: t, mode: 'club' })}
+                                className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-red-400"
+                              >
+                                Restore (club)
+                              </button>
+                            </div>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -424,6 +601,19 @@ export default function SuperBackups() {
           </div>
         )}
       </div>
+
+      {restoreModal && (
+        <RestoreModal
+          task={restoreModal.task}
+          mode={restoreModal.mode}
+          onClose={() => setRestoreModal(null)}
+          onStarted={() => {
+            setRestoreModal(null)
+            setRunMsg(`Restore started — progress shows in the task list below.`)
+            setTimeout(loadTasks, 1500)
+          }}
+        />
+      )}
     </AdminLayout>
   )
 }

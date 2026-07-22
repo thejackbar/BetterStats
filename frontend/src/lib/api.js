@@ -973,6 +973,18 @@ export const api = {
   // in transit, same as it sits on disk (no offsite auto-sync anywhere).
   superDownloadBackupFile: (taskId, file) =>
     fetch(`${BASE}/club-admin/super/backups/${taskId}/download?file=${file}`, { credentials: 'include' }),
+  // Restore is available both over SSH (ops/backup/restore.sh, unchanged) and
+  // here — gated by a typed confirmation word plus the private key itself,
+  // entered fresh every time and never stored (see backup_admin.py's module
+  // docstring for the full safety model).
+  superBackupRestoreFull: (taskId, confirmWord, privateKey) =>
+    request(`/club-admin/super/backups/${taskId}/restore-full`, {
+      method: 'POST', body: JSON.stringify({ confirm_word: confirmWord, private_key: privateKey }),
+    }),
+  superBackupRestoreClub: (taskId, orgId, confirmWord, privateKey) =>
+    request(`/club-admin/super/backups/${taskId}/restore-club`, {
+      method: 'POST', body: JSON.stringify({ org_id: orgId, confirm_word: confirmWord, private_key: privateKey }),
+    }),
   // Self-serve club trial registration (internal, flag-gated — see
   // docs/self-serve-trial-onboarding-plan.md). 404s while the platform flag is off.
   selfServeTrialStatus: () => request('/self-serve-trial/status'),

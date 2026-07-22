@@ -34,6 +34,16 @@
 # Python and reports true row-level progress ("Processing player 176 of
 # 876") as it goes.
 #
+# Also runnable from the Super Admin Backups page (see
+# ops/backup/agent/app.py's /run-restore-full and /run-restore-club) — that
+# path types the confirmation and supplies the private key over the network
+# for that ONE run only (never stored), so it sets AGE_IDENTITY_FILE to a
+# temp file it deletes immediately after, and ASSUME_YES=1 to skip the
+# interactive `read` prompts below (the UI's own confirm-word + key-match
+# step already IS the confirmation). Plain SSH use is unaffected — this
+# script behaves exactly as before when invoked interactively with neither
+# variable set.
+#
 set -euo pipefail
 
 cd /srv/docker
@@ -57,6 +67,17 @@ NETWORK_NAME="${NETWORK_NAME:-docker-shared-net}"
 # Real volume name — confirm with `docker volume ls | grep uploads` on the
 # box (must match backup.sh's UPLOADS_VOLUME) and override if it differs.
 UPLOADS_VOLUME="${UPLOADS_VOLUME:-${COMPOSE_PROJECT_NAME}_betterstats_uploads}"
+# Where the age PRIVATE key lives for THIS run. Defaults to the fixed offline
+# path an SSH operator is expected to place it at temporarily. The web-restore
+# path (ops/backup/agent/app.py) overrides this to a per-request temp file
+# instead, deleted the moment the run finishes — never this default path.
+AGE_IDENTITY_FILE="${AGE_IDENTITY_FILE:-/root/.age/backup-key.txt}"
+# Set to 1 ONLY by the agent, after it has already verified the confirmation
+# word and that the supplied private key matches the configured public key —
+# skips the interactive `read` prompts below, which would otherwise hang
+# forever with no attached terminal. Never set this by hand over SSH; the
+# interactive prompt is the whole safety mechanism for that path.
+ASSUME_YES="${ASSUME_YES:-0}"
 
 ENTITY_TABLES=(organisations seasons grades players games batting_innings bowling_spells fielding_stats bowler_wickets game_appearances fall_of_wickets partnerships users)
 TOTAL_ENTITIES=${#ENTITY_TABLES[@]}
@@ -132,7 +153,7 @@ restore_to_scratch() {
   done
 
   log "Restoring dump into scratch..."
-  age -d -i /root/.age/backup-key.txt "$BUNDLE_DIR/db.dump.age" \
+  age -d -i "$AGE_IDENTITY_FILE" "$BUNDLE_DIR/db.dump.age" \
     | docker exec -i "$SCRATCH_CONTAINER" pg_restore --verbose -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --clean --if-exists \
       2> >(track_restore_progress >&2)
 
@@ -208,12 +229,14 @@ if [ "$cmd" = "restore-club" ]; then
   echo "About to restore club $ORG_ID's data from bundle $STAMP into the LIVE database."
   echo "This does NOT stop the app and does NOT touch any other club's data."
   echo "The club's current data is snapshotted first, so this can be undone (see: $0 rollback-club <snapshot path>)."
-  read -r -p "Type the org id to confirm: " confirm
-  if [ "$confirm" != "$ORG_ID" ]; then
-    echo "Confirmation did not match — aborting. Nothing was changed." >&2
-    finish_task "$TASK_ID" failed "operator did not confirm"
-    drop_scratch
-    exit 1
+  if [ "$ASSUME_YES" != "1" ]; then
+    read -r -p "Type the org id to confirm: " confirm
+    if [ "$confirm" != "$ORG_ID" ]; then
+      echo "Confirmation did not match — aborting. Nothing was changed." >&2
+      finish_task "$TASK_ID" failed "operator did not confirm"
+      drop_scratch
+      exit 1
+    fi
   fi
 
   docker compose exec -T "$BACKEND_SERVICE" python -m app.scripts.restore_club "$ORG_ID" \
@@ -241,12 +264,14 @@ fi
 echo
 echo "About to REPLACE the live betterstats-db data with bundle $STAMP."
 echo "This requires briefly stopping betterstats-backend / betterstats-frontend."
-read -r -p "Type the bundle timestamp to confirm: " confirm
-if [ "$confirm" != "$STAMP" ]; then
-  echo "Confirmation did not match — aborting. Nothing was changed." >&2
-  finish_task "$TASK_ID" failed "operator did not confirm"
-  drop_scratch
-  exit 1
+if [ "$ASSUME_YES" != "1" ]; then
+  read -r -p "Type the bundle timestamp to confirm: " confirm
+  if [ "$confirm" != "$STAMP" ]; then
+    echo "Confirmation did not match — aborting. Nothing was changed." >&2
+    finish_task "$TASK_ID" failed "operator did not confirm"
+    drop_scratch
+    exit 1
+  fi
 fi
 
 log "Stopping app services..."
@@ -254,12 +279,12 @@ docker compose stop betterstats-backend betterstats-frontend
 
 log "Restoring into live betterstats-db..."
 progress "live-restore" 0 "$TOTAL_ENTITIES" "Restoring into the live database..."
-age -d -i /root/.age/backup-key.txt "$BUNDLE_DIR/db.dump.age" \
+age -d -i "$AGE_IDENTITY_FILE" "$BUNDLE_DIR/db.dump.age" \
   | docker compose exec -T "$DB_SERVICE" pg_restore --verbose -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --clean --if-exists \
     2> >(track_restore_progress >&2)
 
 log "Restoring uploads volume..."
-age -d -i /root/.age/backup-key.txt "$BUNDLE_DIR/uploads.tar.zst.age" | zstd -d \
+age -d -i "$AGE_IDENTITY_FILE" "$BUNDLE_DIR/uploads.tar.zst.age" | zstd -d \
   | docker run --rm -i -v "${UPLOADS_VOLUME}:/to" alpine sh -c 'rm -rf /to/* && tar -C /to -x'
 
 log "Starting app services..."

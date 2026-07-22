@@ -8,10 +8,21 @@ exposes ONE write action: "run a backup now". That action proxies to the
 doing anything itself — this process has no Docker socket or host filesystem
 access, by design, so it can't run backup.sh directly.
 
-Restore is deliberately NOT triggerable from here, at all — full or per-club,
-it stays an SSH-to-the-box operation (``ops/backup/restore.sh``). Restoring
-needs the age PRIVATE key, which docs/backup-system.md says to keep OFFLINE;
-exposing it to a network-reachable agent would defeat that.
+Restore (full or per-club) is available BOTH ways: as an SSH-run operation
+(``ops/backup/restore.sh``, unchanged) and from this page. The web path is
+gated by two independent things, not one:
+  1. Typing a literal confirmation word back (``RESTORE_CONFIRM_WORD``
+     below) — the same "type it back" friction restore.sh's own interactive
+     prompt already used for an SSH operator, just moved into this request.
+  2. The age PRIVATE key itself, entered fresh on every single restore
+     request — never stored anywhere in this app (not in the DB, not
+     logged). It's forwarded to the backup-agent, which cryptographically
+     verifies it's the real matching private half of the configured public
+     key before the restore is allowed to proceed (see
+     ops/backup/agent/app.py's ``_write_and_verify_key``), then shreds its
+     temp copy the moment the restore process exits. This process (the
+     backend) never sees or holds the key any longer than the single
+     request/response cycle needed to relay it onward.
 
 Downloading a backup FILE is different from restoring one — it's offered as
 a manual, on-demand option (there's no automatic offsite sync, per direct
@@ -28,6 +39,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +49,13 @@ from app.routers.auth import require_super_admin
 from app.services import backup_stats
 
 router = APIRouter(prefix="/club-admin/super/backups", tags=["backup-admin"])
+
+# The word a Super Admin must type back, verbatim, before a web-triggered
+# restore is even attempted — checked here, server-side, BEFORE the private
+# key is ever asked for or forwarded anywhere. Deliberately not
+# case-insensitive or fuzzy-matched; this is meant to be a genuine typed
+# confirmation, not a checkbox.
+RESTORE_CONFIRM_WORD = "RESTORE"
 
 
 @router.get("")
@@ -159,6 +178,119 @@ _DOWNLOADABLE_FILES = {
 _BUNDLE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$")
 
 
+async def _resolve_bundle(db: AsyncSession, task_id: str) -> str:
+    """Looks up a completed backup task's bundle directory name (e.g.
+    "2026-07-22T13-49-02Z"), validated against the fixed timestamp shape
+    backup.sh always produces. Shared by download/restore-full/restore-club
+    so there's one place that decides "is this task a real, restorable
+    backup" rather than three slightly different checks."""
+    row = (await db.execute(
+        text("SELECT bundle_path, task_type, status FROM backup_tasks WHERE id = :id"),
+        {"id": task_id},
+    )).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such backup task")
+    bundle_path, task_type, task_status = row
+    if task_type != "backup" or task_status != "completed" or not bundle_path:
+        raise HTTPException(status_code=400, detail="Only a completed backup task can be used here")
+    bundle = bundle_path.rstrip("/").rsplit("/", 1)[-1]
+    if not _BUNDLE_RE.match(bundle):
+        raise HTTPException(status_code=500, detail="Unexpected bundle path recorded for this task")
+    return bundle
+
+
+def _require_agent_configured():
+    if not settings.backup_agent_url:
+        raise HTTPException(
+            status_code=503,
+            detail="The backup agent isn't configured on this server yet "
+                   "(BACKUP_AGENT_URL unset) — see docs/backup-system.md.",
+        )
+
+
+def _require_confirm_word(confirm_word: str):
+    if confirm_word != RESTORE_CONFIRM_WORD:
+        raise HTTPException(
+            status_code=400,
+            detail=f'Confirmation word did not match — type "{RESTORE_CONFIRM_WORD}" exactly.',
+        )
+
+
+async def _post_to_agent(path: str, json_body: dict) -> dict:
+    """POSTs to the agent and returns its JSON body, or raises a clean
+    HTTPException. Used by both restore endpoints — restore requests can
+    legitimately take a while to even ACK (the agent verifies the key before
+    responding), so this uses a longer timeout than the plain /run-backup
+    call, but the restore itself still runs in the background regardless."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{settings.backup_agent_url.rstrip('/')}{path}",
+                headers={"X-Agent-Secret": settings.backup_agent_secret},
+                json=json_body,
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach the backup agent: {e}")
+    if resp.status_code == 403:
+        # The agent's own cryptographic key-match check failed — surface its
+        # message as-is (it never includes the key itself, see app.py).
+        raise HTTPException(status_code=403, detail=resp.json().get("detail", "Private key rejected by the agent."))
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Backup agent returned {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
+
+
+class RestoreFullRequest(BaseModel):
+    confirm_word: str
+    private_key: str
+
+
+class RestoreClubRequest(BaseModel):
+    confirm_word: str
+    org_id: str
+    private_key: str
+
+
+@router.post("/{task_id}/restore-full")
+async def restore_full_now(
+    task_id: str,
+    body: RestoreFullRequest,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restores the WHOLE platform from this task's backup bundle — replaces
+    every club's live data, briefly stops the app. Gated by the typed
+    confirmation word (checked here) and the private key (checked
+    cryptographically by the agent — see module docstring). Fire-and-forget:
+    poll the task list for a new `restore_full` task's progress, same as any
+    other run."""
+    _require_confirm_word(body.confirm_word)
+    _require_agent_configured()
+    bundle = await _resolve_bundle(db, task_id)
+    return await _post_to_agent("/run-restore-full", {"bundle": bundle, "private_key": body.private_key})
+
+
+@router.post("/{task_id}/restore-club")
+async def restore_club_now(
+    task_id: str,
+    body: RestoreClubRequest,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restores ONE club's data from this task's backup bundle — no
+    downtime, never touches another club's data (see
+    app/services/club_restore.py for exactly how a row is attributed to one
+    club). Snapshots the club's current live data first, so it's undoable
+    via the existing rollback-club SSH command. Same two-gate model as
+    restore-full."""
+    _require_confirm_word(body.confirm_word)
+    _require_agent_configured()
+    bundle = await _resolve_bundle(db, task_id)
+    return await _post_to_agent(
+        "/run-restore-club", {"bundle": bundle, "org_id": body.org_id, "private_key": body.private_key}
+    )
+
+
 @router.get("/{task_id}/download")
 async def download_backup_file(
     task_id: str,
@@ -172,26 +304,8 @@ async def download_backup_file(
     only; there's no automatic offsite sync of these files anywhere."""
     if file not in _DOWNLOADABLE_FILES:
         raise HTTPException(status_code=400, detail=f"file must be one of {sorted(_DOWNLOADABLE_FILES)}")
-    if not settings.backup_agent_url:
-        raise HTTPException(
-            status_code=503,
-            detail="The backup agent isn't configured on this server yet "
-                   "(BACKUP_AGENT_URL unset) — see docs/backup-system.md.",
-        )
-
-    row = (await db.execute(
-        text("SELECT bundle_path, task_type, status FROM backup_tasks WHERE id = :id"),
-        {"id": task_id},
-    )).first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="No such backup task")
-    bundle_path, task_type, task_status = row
-    if task_type != "backup" or task_status != "completed" or not bundle_path:
-        raise HTTPException(status_code=400, detail="Only a completed backup task has files to download")
-
-    bundle = bundle_path.rstrip("/").rsplit("/", 1)[-1]
-    if not _BUNDLE_RE.match(bundle):
-        raise HTTPException(status_code=500, detail="Unexpected bundle path recorded for this task")
+    _require_agent_configured()
+    bundle = await _resolve_bundle(db, task_id)
 
     client = httpx.AsyncClient(timeout=None)
     try:

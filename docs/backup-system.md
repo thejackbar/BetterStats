@@ -138,16 +138,43 @@ encrypted bundle files back for manual download (see "Manual download"
 below) — it has no restore endpoint. See "Why restore has no UI button"
 below.
 
-## Why restore has no UI button
+## Restore from the web — how it stays safe without storing the private key
 
-Restoring (full or per-club) needs the age **private** key, and step 1 above
-says to keep that key OFFLINE — not on the box at all, let alone in a
-container the backend can reach over the network. Wiring restore into the
-agent would mean putting that key somewhere network-reachable, which defeats
-the point of keeping it offline. So restore — both `restore.sh apply` and
-`restore.sh restore-club` — stays an operator-runs-it-over-SSH action. The
-Super Admin Backups page shows restore tasks (logged the same way backups
-are) but never a button to start one.
+Restore (full or per-club) is available two ways now: SSH (`restore.sh`,
+completely unchanged) and a button on the Super Admin Backups page, next to
+any completed backup. Both call the exact same script underneath.
+
+The web path is gated by two independent things, not a login session alone:
+
+1. **Type the confirmation word back** — a modal asks you to type `RESTORE`
+   exactly before it even shows the private-key field. Checked server-side
+   (`routers/backup_admin.py`'s `RESTORE_CONFIRM_WORD`) before the private
+   key is asked for or sent anywhere.
+2. **Paste the private key, fresh, every single time** — never stored in
+   the database, never logged, never kept between requests. It's sent to
+   the backup-agent, which:
+   - writes it to a private (`0600`) temp file on its OWN container
+     filesystem (`/tmp` — not a bind mount, unlike `/srv/docker` or
+     `BACKUP_ROOT`, so it never touches the host disk);
+   - runs `age-keygen -y` on it to derive the **public** key and compares
+     that against this server's configured `AGE_RECIPIENT` — a wrong,
+     unrelated, or garbled key is rejected outright, cryptographically, not
+     just trusted from whatever the browser sent;
+   - only then runs `restore.sh` (with `ASSUME_YES=1`, since the UI's own
+     two gates above already are the confirmation `restore.sh`'s
+     interactive prompt exists for), passing the temp file via
+     `AGE_IDENTITY_FILE`;
+   - shreds the temp file the moment the restore process exits — success
+     or failure, always, in a `finally` block.
+
+So a compromised **web session** still can't decrypt anything on its own —
+it can start a restore only if the person doing it also supplies the real
+private key at that exact moment, same as they would over SSH; the
+difference is just where they type it. Whoever holds the private key (kept
+offline per step 1 above) is still the one actual gate on decryption.
+
+Progress for a web-triggered restore shows exactly like an SSH one — it's
+the same `backup_tasks` row, same progress bar, same per-entity counts.
 
 ## Manual runs
 
@@ -291,8 +318,15 @@ club's data got 10x bigger overnight", not a billing-grade number.
   ls | grep uploads` on the box before the first real restore, since that
   one wasn't given explicitly and is inferred from the `betterstats_pgdata`
   naming pattern.
-- **Restore buttons in the UI.** Deliberate, not a gap — see "Why restore has
-  no UI button" above.
+- **This has not been tested against a real restore either** — the web
+  restore path (confirm word → private key → `age-keygen -y` verification →
+  `restore.sh` with `ASSUME_YES=1`) has the same "no Postgres available to
+  test against" caveat as everything else in this list, and unlike the SSH
+  `restore-club` command it always runs the real `--apply` restore (there's
+  no dry-run option in the modal). Before trusting it on production data,
+  rehearse with the SSH dry-run first (`restore-club <bundle> <org-id>`,
+  no `--apply`) against a real bundle to sanity-check the reported row
+  counts, then do a first live web restore on a low-stakes club if possible.
 - **Automatic offsite sync.** Deliberate, not a gap — per direct instruction
   this system doesn't commit to an offsite storage provider. Manual download
   (see above) is the intended way a copy leaves the server.
