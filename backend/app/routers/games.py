@@ -731,8 +731,13 @@ async def get_scorecard(
             #                 isOnStrike, isOnNonStrike, highlight
             _teams_raw = gr_data.get("teams") or []
 
-            # Pass 1: team id -> (display name, members, DB-overlap count).
+            # Pass 1: team id -> (display name, logo, members, DB-overlap count).
+            # Logo field name isn't contractually documented on this endpoint —
+            # same defensive fallback chain already used for the BetterSocials
+            # match-import (`admin.py::build_team`) and confirmed on the
+            # ladders endpoint (`ladders.py`) as `logoUrl`.
             gr_team_name_by_id: dict[str, str] = {}
+            gr_team_logo_by_id: dict[str, str] = {}
             _team_members: dict[str, list] = {}
             _team_overlap: dict[str, int] = {}
             for _team in _teams_raw:
@@ -741,12 +746,30 @@ async def get_scorecard(
                     continue
                 _members = (_team.get("players") or []) + (_team.get("nonPlayingMembers") or [])
                 gr_team_name_by_id[_tid] = _team.get("displayName") or _team.get("name") or ""
+                # The team object itself (a grade-level side, e.g. a sponsor
+                # name) carries no logo — it's the parent club's, nested under
+                # owningOrganisation.logoUrl (confirmed against a live payload).
+                # The bare fallback keys are kept in case a differently-shaped
+                # response ever puts it directly on the team.
+                _owner = _team.get("owningOrganisation") or {}
+                gr_team_logo_by_id[_tid] = (_owner.get("logoUrl") or _owner.get("logo") or
+                                             _team.get("logoUrl") or _team.get("logo") or
+                                             _team.get("imageUrl") or _team.get("image") or None)
                 _team_members[_tid] = _members
                 _team_overlap[_tid] = sum(
                     1 for _pl in _members
                     if _name_key(_pl.get("playerShortName") or _pl.get("displayName") or
                                  _pl.get("name") or "") in _existing_game_names
                 )
+
+            # Our own club's own uploaded logo (same precedence
+            # social_rounds.py::_club_dict uses: an external URL if set, else
+            # our own served endpoint if we hold the actual image bytes)
+            # takes priority over GR's when this side is ours — a controlled,
+            # always-available source beats an unconfirmed upstream field.
+            _our_logo = None
+            if org:
+                _our_logo = org.logo_url or (f"/images/organisations/{org.id}/logo" if org.logo_data else None)
 
             # Pass 2: decide which team id is ours, DB-overlap first.
             if any(_team_overlap.values()):
@@ -810,6 +833,7 @@ async def get_scorecard(
                     "wickets": 0,
                     "extras": inn.get("totalExtras") or 0,
                     "batting_team": gr_team_name_by_id.get(bt_id) or (our_display_name if _bt_is_ours else opp_display_name),
+                    "logo_url": (_our_logo if _bt_is_ours else None) or gr_team_logo_by_id.get(bt_id),
                 }
 
                 for row in (inn.get("batting") or []):
@@ -938,7 +962,7 @@ async def get_scorecard(
             # team total) here would double-count them.
             for inn_num, gr_tot in gr_inn_totals.items():
                 totals = new_innings_totals.setdefault(
-                    inn_num, {"runs": 0, "wickets": 0, "extras": 0, "batting_team": None})
+                    inn_num, {"runs": 0, "wickets": 0, "extras": 0, "batting_team": None, "logo_url": None})
                 if gr_tot.get("wickets") is not None:
                     totals["wickets"] = gr_tot["wickets"]
                 if gr_tot.get("extras") is not None:

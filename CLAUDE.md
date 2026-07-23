@@ -1610,6 +1610,37 @@ Expansion" note elsewhere in this file on why toss isn't captured from the AU
   matching CA's own display, opponent bowling nested correctly under each
   team with no duplicate rows.
 
+### Club crests + match-summary header restored (v8.79.1, Jul 2026)
+
+Two follow-ups on the SC3 redesign above, per direct request.
+
+- **Team logos, live from Grassroots.** `get_scorecard`'s existing GR-merge
+  already fetches `teams[]` for roster/name matching — it now also pulls a
+  logo per team into `gr_team_logo_by_id`. The team object itself carries no
+  logo field; a live payload check found it nested under
+  `owningOrganisation.logoUrl` (the grade-level "team" — often a sponsor name
+  — is owned by the actual club, which holds the crest). A bare
+  `logoUrl`/`logo`/`imageUrl`/`image` fallback chain is kept on the team
+  object itself too, matching the existing precedent in
+  `admin.py::build_team` (the BetterSocials match-import) for a
+  differently-shaped response. For whichever side is ours, our own uploaded
+  org logo (`org.logo_url`, else `/images/organisations/{id}/logo` if we
+  hold the raw bytes — same precedence `social_rounds.py::_club_dict` uses)
+  takes priority over GR's, since it's controlled and always-available when
+  set. Threaded onto `innings_totals[n].logo_url` alongside the existing
+  `batting_team` name, so the frontend reads it the same way. Neither source
+  is guaranteed present — a hotlinked hit can 404 — so `TeamBadge.jsx`'s
+  `<img>` falls back to an initials badge on `onError`, the same graceful
+  degradation BetterSocials' own share-card templates already rely on.
+- **`MatchHeader` restored to a full match-summary strip** — the 3-column
+  HOME/RESULT/AWAY hero from before the SC3 rewrite, kept alongside the
+  competition line and computed winning margin the rewrite added. Each side
+  now also carries its crest (`TeamBadge`, shared with the per-team cards
+  below) next to the team name. The per-team `TeamCard`s are unchanged; the
+  header duplicating their score is intentional, not a regression — the
+  reference site itself (play.cricket.com.au) shows the same score both in
+  its top summary and again in the innings detail below.
+
 ## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
 
 Yearbook generation was previously **100% manual** — two separate admin

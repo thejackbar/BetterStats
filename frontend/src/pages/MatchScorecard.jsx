@@ -78,6 +78,39 @@ function marginText(game, innings1, innings2) {
   return null
 }
 
+// A club crest pulled live from Grassroots (nested under a GR team's
+// owningOrganisation.logoUrl — the grade-level "team" itself carries no
+// logo, only its parent club does) or, for our own side, our own uploaded
+// org logo. Neither is guaranteed present, and a hotlinked CA/Cloudinary URL
+// can 404 — falls back to an initials badge either way, same as BetterSocials'
+// share-card templates do for the same reason.
+function TeamBadge({ name, logoUrl, size = 36 }) {
+  const [failed, setFailed] = useState(false)
+  const initials = (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  if (logoUrl && !failed) {
+    return (
+      <img
+        src={logoUrl}
+        alt=""
+        onError={() => setFailed(true)}
+        className="shrink-0 rounded-lg object-contain bg-pb-surface2"
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+  return (
+    <div
+      className="shrink-0 rounded-lg grid place-items-center font-display font-bold tracking-tight"
+      style={{
+        width: size, height: size, fontSize: Math.round(size * 0.36),
+        background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)',
+      }}
+    >
+      {initials}
+    </div>
+  )
+}
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
@@ -89,31 +122,70 @@ function MatchHeader({ game, innings }) {
     const batsRuns = t.runs ?? inn.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
     const runs = batsRuns != null ? batsRuns + (t.extras ?? 0) : null
     const wickets = t.runs != null ? t.wickets : inn.batting.filter(r => !r.not_out && r.dismissal_type).length
-    return { ...inn, runs, wickets, battingTeam: t.batting_team || '' }
+    const balls = sumOversBalls(inn.bowling)
+    const oversStr = ballsToOversStr(balls)
+    const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
+    return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null }
   })
   const margin = marginText(game, inningsData[0], inningsData[1])
   const competition = [game.grade?.name, game.season?.name].filter(Boolean).join(' · ')
 
-  return (
-    <div className="pb-card overflow-hidden mb-5 px-5 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-      <div>
-        {competition && (
-          <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">{competition}</div>
-        )}
-        <div className="flex items-center gap-3 flex-wrap">
-          <ResultPill result={game.result || 'N/R'} />
-          {game.winning_team && (
-            <span className="font-display font-bold text-[16px] sm:text-[19px] text-pb-text tracking-tight">
-              {game.winning_team}{margin ? ` ${margin}` : ''}
-            </span>
-          )}
+  // Map innings to home/away using batting_team where available, same
+  // matching the team cards below use — the away side bats first as often
+  // as home does, so innings order alone can't be trusted.
+  const homeTeam = game.home_team || ''
+  const awayTeam = game.away_team || ''
+  let homeInn = inningsData[0], awayInn = inningsData[1]
+  if (homeInn?.battingTeam && homeTeam && !teamsMatch(homeInn.battingTeam, homeTeam) && awayInn) {
+    homeInn = inningsData[1]
+    awayInn = inningsData[0]
+  }
+  const winner = (game.winning_team || '').trim()
+  const homeWon = !!winner && !!homeTeam && teamsMatch(winner, homeTeam)
+  const awayWon = !!winner && !homeWon
+
+  const Side = ({ label, teamName, inn, won, align }) => (
+    <div className={`px-3 sm:px-6 py-4 flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'} gap-1`}>
+      <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">{label}</div>
+      <div className={`flex items-center gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+        <TeamBadge name={teamName} logoUrl={inn?.logoUrl} size={32} />
+        <div className="font-display font-bold text-[14px] sm:text-[18px] text-pb-text tracking-tight leading-tight">
+          {teamName || '—'}
         </div>
       </div>
-      {(dateStr || venue) && (
-        <div className="font-mono text-[10.5px] text-pb-faint text-right">
-          {dateStr}{venue ? ` · ${venue}` : ''}
+      {inn && fmtScore(inn.runs, inn.wickets) != null && (
+        <div className="font-mono font-bold text-[26px] sm:text-[38px] leading-none" style={{ color: won ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
+          {fmtScore(inn.runs, inn.wickets)}
         </div>
       )}
+      {inn?.oversStr && (
+        <div className="font-mono text-[10px] text-pb-faint tracking-wide2">
+          {inn.oversStr} overs{inn.rr ? ` · RR ${inn.rr}` : ''}
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="pb-card overflow-hidden mb-5">
+      {competition && (
+        <div className="px-5 pt-3 font-mono text-[10px] tracking-wide3 text-pb-faint">{competition}</div>
+      )}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 px-2 sm:px-4 py-1">
+        <Side label="HOME" teamName={homeTeam} inn={homeInn} won={homeWon} align="left" />
+        <div className="flex flex-col items-center justify-center gap-1.5 px-2 min-w-[90px] sm:min-w-[130px]">
+          <ResultPill result={game.result || 'N/R'} />
+          {margin && (
+            <div className="font-mono text-[10px] text-pb-faint text-center leading-snug">{margin}</div>
+          )}
+          {(dateStr || venue) && (
+            <div className="font-mono text-[9px] tracking-wide2 text-pb-faintest text-center mt-1">
+              {dateStr}{venue ? <><br />{venue}</> : ''}
+            </div>
+          )}
+        </div>
+        <Side label="AWAY" teamName={awayTeam} inn={awayInn} won={awayWon} align="right" />
+      </div>
     </div>
   )
 }
@@ -167,7 +239,6 @@ function TeamCard({ label, teamName, opponentName, batting = [], bowling = [], i
     ? inningsTotal.wickets
     : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
-  const badge = (teamName || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
   // Overs faced = overs bowled at this team, i.e. the opponent's bowling figures.
   const oversStr = ballsToOversStr(sumOversBalls(bowling))
 
@@ -176,12 +247,7 @@ function TeamCard({ label, teamName, opponentName, batting = [], bowling = [], i
       {/* Card header: badge + innings label + team name, score on the right */}
       <div className="px-5 pt-4 pb-3 pb-hairline-b bg-pb-surface2/20 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <div
-            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center font-display font-bold text-[13px] tracking-tight"
-            style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}
-          >
-            {badge}
-          </div>
+          <TeamBadge name={teamName} logoUrl={inningsTotal?.logo_url} size={36} />
           <div className="min-w-0">
             <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">
               {label}{oversStr ? ` · ${oversStr} OV` : ''}
