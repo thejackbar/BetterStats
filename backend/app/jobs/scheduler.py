@@ -194,6 +194,20 @@ async def send_trial_lifecycle_nudges():
             logger.error(f"Trial lifecycle nudge scan failed: {e}")
 
 
+async def send_member_reminders():
+    """Daily qualification-expiry and fee-owing reminder emails to members,
+    via the self-service portal. Gated per-club by
+    platform_settings.member_portal_enabled_for_org inside
+    member_reminders.send_all_reminders itself (a club with the flag off
+    gets no reminders, same as the portal being invisible/unusable there)."""
+    from app.services import member_reminders
+    try:
+        stats = await member_reminders.send_all_reminders()
+        logger.info(f"Member reminder scan done: {stats}")
+    except Exception as e:
+        logger.error(f"Member reminder scan failed: {e}")
+
+
 async def comms_daily_maintenance():
     """BetterComms daily housekeeping, run just after the AWS quota window rolls
     over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
@@ -296,6 +310,18 @@ def start_scheduler():
         hour=8,
         minute=0,
         id="daily_trial_lifecycle_nudges",
+        replace_existing=True,
+    )
+    # Member self-service portal — daily qualification-expiry + fee-owing
+    # reminder emails. Right after the trial nudge job for the same reason
+    # (adjacent, low-traffic scans); no-op for every club until a super
+    # admin switches platform_settings.member_portal_enabled on.
+    scheduler.add_job(
+        send_member_reminders,
+        trigger="cron",
+        hour=8,
+        minute=30,
+        id="daily_member_reminders",
         replace_existing=True,
     )
     # Meta Ads HQ dashboard — hourly campaign/ad snapshot (was daily 09:00

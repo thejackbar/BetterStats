@@ -14,7 +14,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+    stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -3446,6 +3447,28 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_maintenance_logs_subject ON maintenance_logs(subject_type, subject_id, performed_at DESC)"
         ))
 
+    # Migration 178: Member self-service portal, Stripe Connect fee payments,
+    # reminder automation. See services/member_portal_auth.py,
+    # services/stripe_connect_client.py, services/member_reminders.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS member_portal_override BOOLEAN"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_connect_account_id TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_connect_details_submitted BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_connect_charges_enabled BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_connect_payouts_enabled BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE member_qualifications ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_member_seasons ADD COLUMN IF NOT EXISTS last_fee_reminder_sent_at TIMESTAMPTZ"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3639,6 +3662,10 @@ app.include_router(qualifications.router)  # Qualification tracking (core capabi
 app.include_router(events.router)        # Events/Ticketing admin — registrations against the Club Calendar (core capability, not a paid module)
 app.include_router(events.public_router)  # Events/Ticketing public — unauthenticated event view + register (core, not a paid module)
 app.include_router(assets.router)        # Assets & Facilities (core capability, not a paid module)
+app.include_router(member_portal_admin.router)  # Member portal visibility check (core, no capability — see the router docstring)
+app.include_router(stripe_connect.router)       # Member portal: club-to-member Stripe Connect admin flow (core, flag-gated)
+app.include_router(public_stripe_connect.router)  # Member portal: Stripe Connect webhook (public, unauthenticated)
+app.include_router(public_member_portal.router)   # Member self-service portal (public, unauthenticated, flag-gated)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
 app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import

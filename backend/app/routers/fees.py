@@ -66,8 +66,12 @@ PAYMENT_KINDS = ("membership", "match_day")
 PAYMENT_METHODS = ("EFT", "Cash", "PlayHQ", "Comp", "Other")
 
 
-def _f(x) -> float:
-    return float(x) if x is not None else 0.0
+# _f/_financials now live in services/fees.py (extracted, not duplicated) so
+# the member-portal "my fees" view computes from the exact same functions —
+# aliased back here under their original names so every existing call site
+# below is unchanged.
+_f = fee_service._f
+_financials = fee_service._financials
 
 
 def _money(raw) -> Decimal:
@@ -362,80 +366,6 @@ async def _paid_by_member_season(db: AsyncSession, season_id) -> dict:
     for ms_id, kind, amount in rows:
         out.setdefault(ms_id, {"membership": 0.0, "match_day": 0.0})[kind] = float(amount)
     return out
-
-
-def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Optional[dict] = None,
-                waived_days: float = 0.0) -> dict:
-    """Build the canonical financials dict.
-
-    Status rules mirror the spreadsheet:
-      - no tier            → 'needs_tier'        (don't try to compute fees)
-      - complimentary tier → 'financial'          (no money owed regardless)
-      - upfront tier       → financial iff membership paid (match fee is $0)
-      - standard tier      → financial iff membership + match fees paid
-
-    `waived_days` is the days_played belonging to waived games. They are removed
-    from `match_fee_payable` (so the member reads Financial without owing them)
-    and surfaced separately as `match_fee_waived` — waived fees are forgiven, NOT
-    money received, so they never touch the paid/credit pots. `match_days` stays
-    the total (incl. waived) for display.
-
-    'No games played' is a derived UI flag, not a status — it only suppresses
-    the follow-up nudge for someone who never showed up.
-    """
-    membership_payable = _f(schedule.membership_amount) if schedule else 0.0
-    rate = _f(schedule.match_day_rate) if schedule else 0.0
-    billable_days = max(match_days - (waived_days or 0.0), 0.0)
-    match_fee_waived = round((waived_days or 0.0) * rate, 2)
-    match_fee_payable = round(billable_days * rate, 2)
-    paid = paid or {"membership": 0.0, "match_day": 0.0}
-    membership_paid = float(paid.get("membership", 0.0))
-    match_fee_paid = float(paid.get("match_day", 0.0))
-    membership_outstanding = round(max(membership_payable - membership_paid, 0.0), 2)
-    match_fee_outstanding = round(max(match_fee_payable - match_fee_paid, 0.0), 2)
-    total_outstanding = round(membership_outstanding + match_fee_outstanding, 2)
-
-    # Credit ('in the Green') — surplus on each bucket. Membership and match-fee
-    # pots are kept separate (club preference), so over-paying one never masks
-    # money still owed on the other. No tier means we can't say what's owed, so
-    # we don't claim any credit.
-    membership_credit = round(max(membership_paid - membership_payable, 0.0), 2) if schedule is not None else 0.0
-    match_fee_credit = round(max(match_fee_paid - match_fee_payable, 0.0), 2) if schedule is not None else 0.0
-    credit = round(membership_credit + match_fee_credit, 2)
-
-    if schedule is None:
-        status = "needs_tier"
-    elif schedule.payment_type == "complimentary":
-        status = "financial"
-    elif total_outstanding <= 0:
-        status = "financial"
-    else:
-        status = "non_financial"
-
-    return {
-        "tier": schedule.name if schedule else None,
-        "payment_type": schedule.payment_type if schedule else None,
-        "membership_payable": membership_payable,
-        "match_day_rate": rate,
-        "match_days": match_days,
-        "waived_days": round(waived_days or 0.0, 1),
-        "match_fee_waived": match_fee_waived,
-        "match_fee_payable": match_fee_payable,
-        "total_payable": round(membership_payable + match_fee_payable, 2),
-        "membership_paid": round(membership_paid, 2),
-        "match_fee_paid": round(match_fee_paid, 2),
-        "total_paid": round(membership_paid + match_fee_paid, 2),
-        "membership_outstanding": membership_outstanding,
-        "match_fee_outstanding": match_fee_outstanding,
-        "total_outstanding": total_outstanding,
-        "membership_credit": membership_credit,
-        "match_fee_credit": match_fee_credit,
-        "credit": credit,
-        "in_credit": credit > 0,
-        "status": status,
-        "needs_tier": schedule is None,
-        "no_games_played": (match_days == 0 and membership_payable == 0),
-    }
 
 
 # ───────────────────────────────────────────────────────────────────────────

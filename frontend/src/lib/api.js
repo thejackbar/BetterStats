@@ -456,6 +456,32 @@ export const api = {
   assetsDeleteMaintenanceLog: (id) =>
     request(`/club-admin/assets/maintenance-logs/${id}`, { method: 'DELETE' }),
 
+  // Member self-service portal — admin-side visibility check (migration 178).
+  // No capability required; the real gates sit on the endpoints below.
+  memberPortalStatus: () => request('/club-admin/member-portal/status'),
+
+  // Stripe Connect — club-to-member fee payments (migration 178). Gated by
+  // MANAGE_FEES + platform_settings.member_portal_enabled_for_org server-side.
+  stripeConnectStatus: () => request('/club-admin/stripe-connect/status'),
+  stripeConnectConnect: () => request('/club-admin/stripe-connect/connect', { method: 'POST' }),
+  stripeConnectRefresh: () => request('/club-admin/stripe-connect/refresh', { method: 'POST' }),
+  stripeConnectDashboardLink: () => request('/club-admin/stripe-connect/dashboard-link', { method: 'POST' }),
+  stripeConnectDisconnect: () => request('/club-admin/stripe-connect/disconnect', { method: 'POST' }),
+
+  // Public member self-service portal (unauthenticated — magic-link email
+  // sign-in, no shared link/PIN). See services/member_portal_auth.py.
+  portalStatus: (slug) => request(`/public/member-portal/${slug}/status`),
+  portalRequestLink: (slug, email) =>
+    request(`/public/member-portal/${slug}/request-link`, { method: 'POST', body: JSON.stringify({ email }) }),
+  portalVerify: (slug, token) =>
+    request(`/public/member-portal/${slug}/verify?token=${encodeURIComponent(token)}`),
+  portalMe: (slug) => request(`/public/member-portal/${slug}/me`),
+  portalUpdateMe: (slug, data) =>
+    request(`/public/member-portal/${slug}/me`, { method: 'PATCH', body: JSON.stringify(data) }),
+  portalLogout: (slug) => request(`/public/member-portal/${slug}/logout`, { method: 'POST' }),
+  portalPay: (slug, kind) =>
+    request(`/public/member-portal/${slug}/pay`, { method: 'POST', body: JSON.stringify({ kind }) }),
+
   // Club admin — Membership Types (migration 175) — the cross-season
   // catalogue a member's membership_type_id points at.
   feeListMembershipTypes: (includeInactive) =>

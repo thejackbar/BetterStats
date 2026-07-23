@@ -94,6 +94,7 @@ export default function SuperClubs() {
     name: '', slug: '', short_name: '', contact_email: '',
     subscription_status: 'active', renewal_date: '', billing_cycle: '',
     billing_checkout_override: '',
+    member_portal_override: '',
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
   })
   const [moduleBusy, setModuleBusy] = useState('')
@@ -112,7 +113,7 @@ export default function SuperClubs() {
   const [settingsForm, setSettingsForm] = useState({
     default_trial_days: 14, direct_enquiry_hot_days: 30,
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
-    trial_nudges_enabled: false, billing_checkout_enabled: false,
+    trial_nudges_enabled: false, billing_checkout_enabled: false, member_portal_enabled: false,
     bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
     backup_hour: 3, backup_minute: 0, backup_retention_days: 30,
   })
@@ -186,6 +187,7 @@ export default function SuperClubs() {
         onboarding_wizard_enabled: !!s?.onboarding_wizard_enabled,
         trial_nudges_enabled: !!s?.trial_nudges_enabled,
         billing_checkout_enabled: !!s?.billing_checkout_enabled,
+        member_portal_enabled: !!s?.member_portal_enabled,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
         backup_hour: s?.backup_schedule?.hour ?? 3,
         backup_minute: s?.backup_schedule?.minute ?? 0,
@@ -207,6 +209,7 @@ export default function SuperClubs() {
         onboarding_wizard_enabled: !!settingsForm.onboarding_wizard_enabled,
         trial_nudges_enabled: !!settingsForm.trial_nudges_enabled,
         billing_checkout_enabled: !!settingsForm.billing_checkout_enabled,
+        member_portal_enabled: !!settingsForm.member_portal_enabled,
         bundle_discount_schedule: Object.fromEntries(
           BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
         ),
@@ -326,6 +329,10 @@ export default function SuperClubs() {
       billing_checkout_override:
         club.billing_checkout_override === true ? 'true'
         : club.billing_checkout_override === false ? 'false'
+        : '',
+      member_portal_override:
+        club.member_portal_override === true ? 'true'
+        : club.member_portal_override === false ? 'false'
         : '',
       comms_tier: club.comms_tier || 'sandbox',
       comms_sandbox_cap: club.comms_sandbox_cap ?? '',
@@ -477,6 +484,10 @@ export default function SuperClubs() {
         billing_checkout_override:
           editForm.billing_checkout_override === 'true' ? true
           : editForm.billing_checkout_override === 'false' ? false
+          : null,
+        member_portal_override:
+          editForm.member_portal_override === 'true' ? true
+          : editForm.member_portal_override === 'false' ? false
           : null,
         comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
         comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
@@ -741,6 +752,23 @@ export default function SuperClubs() {
                   <input type="checkbox" checked={!!settingsForm.billing_checkout_enabled}
                     onChange={e => setSettingsForm(f => ({ ...f, billing_checkout_enabled: e.target.checked }))} />
                   Online billing checkout enabled
+                </label>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Member portal (in testing)
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Off keeps the member self-service portal (fees, qualifications, online payment
+                  via Stripe Connect, reminder emails) completely invisible to every club admin and
+                  unusable by any real member — a club can be switched on individually first via its
+                  own "Member Portal" override below, before flipping this on for everyone.
+                </p>
+                <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
+                  <input type="checkbox" checked={!!settingsForm.member_portal_enabled}
+                    onChange={e => setSettingsForm(f => ({ ...f, member_portal_enabled: e.target.checked }))} />
+                  Member self-service portal enabled
                 </label>
               </div>
 
@@ -1417,6 +1445,20 @@ export default function SuperClubs() {
                       <p className="font-mono text-[10px] text-pb-faintest mt-1">
                         Overrides General Settings → Billing for this one club — lets you test the
                         real Stripe flow on a single club before switching it on for everyone.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Member portal (this club)</label>
+                      <select value={editForm.member_portal_override}
+                        onChange={e => setEditForm(f => ({ ...f, member_portal_override: e.target.value }))}
+                        className={INPUT_CLS}>
+                        <option value="">Platform default</option>
+                        <option value="true">Force ON — let this club through (testing)</option>
+                        <option value="false">Force OFF — block even if the platform default is on</option>
+                      </select>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                        Overrides General Settings → Member portal for this one club — test the member
+                        self-service portal + Stripe Connect fee payments on a single club first.
                       </p>
                     </div>
                     <div>

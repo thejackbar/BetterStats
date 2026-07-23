@@ -16,13 +16,14 @@ import re
 import uuid
 from decimal import Decimal
 from difflib import SequenceMatcher
+from typing import Optional
 
 from sqlalchemy import select
 
 from app.models.db import (
     async_session_maker,
     Season, Grade, Game, Player, GameAppearance,
-    FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay,
+    FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay, FeePayment,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,167 @@ async def latest_season_id(session, organisation_id):
         .limit(1)
     )
     return row.scalar_one_or_none()
+
+
+def _f(x) -> float:
+    return float(x) if x is not None else 0.0
+
+
+def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Optional[dict] = None,
+                waived_days: float = 0.0) -> dict:
+    """Build the canonical financials dict.
+
+    Status rules mirror the spreadsheet:
+      - no tier            → 'needs_tier'        (don't try to compute fees)
+      - complimentary tier → 'financial'          (no money owed regardless)
+      - upfront tier       → financial iff membership paid (match fee is $0)
+      - standard tier      → financial iff membership + match fees paid
+
+    `waived_days` is the days_played belonging to waived games. They are removed
+    from `match_fee_payable` (so the member reads Financial without owing them)
+    and surfaced separately as `match_fee_waived` — waived fees are forgiven, NOT
+    money received, so they never touch the paid/credit pots. `match_days` stays
+    the total (incl. waived) for display.
+
+    'No games played' is a derived UI flag, not a status — it only suppresses
+    the follow-up nudge for someone who never showed up.
+
+    Moved here from routers/fees.py (extracted, not duplicated) so both the
+    admin member-detail endpoint and the member-portal "my fees" view compute
+    from the exact same function — see member_financial_snapshot below.
+    """
+    membership_payable = _f(schedule.membership_amount) if schedule else 0.0
+    rate = _f(schedule.match_day_rate) if schedule else 0.0
+    billable_days = max(match_days - (waived_days or 0.0), 0.0)
+    match_fee_waived = round((waived_days or 0.0) * rate, 2)
+    match_fee_payable = round(billable_days * rate, 2)
+    paid = paid or {"membership": 0.0, "match_day": 0.0}
+    membership_paid = float(paid.get("membership", 0.0))
+    match_fee_paid = float(paid.get("match_day", 0.0))
+    membership_outstanding = round(max(membership_payable - membership_paid, 0.0), 2)
+    match_fee_outstanding = round(max(match_fee_payable - match_fee_paid, 0.0), 2)
+    total_outstanding = round(membership_outstanding + match_fee_outstanding, 2)
+
+    # Credit ('in the Green') — surplus on each bucket. Membership and match-fee
+    # pots are kept separate (club preference), so over-paying one never masks
+    # money still owed on the other. No tier means we can't say what's owed, so
+    # we don't claim any credit.
+    membership_credit = round(max(membership_paid - membership_payable, 0.0), 2) if schedule is not None else 0.0
+    match_fee_credit = round(max(match_fee_paid - match_fee_payable, 0.0), 2) if schedule is not None else 0.0
+    credit = round(membership_credit + match_fee_credit, 2)
+
+    if schedule is None:
+        status = "needs_tier"
+    elif schedule.payment_type == "complimentary":
+        status = "financial"
+    elif total_outstanding <= 0:
+        status = "financial"
+    else:
+        status = "non_financial"
+
+    return {
+        "tier": schedule.name if schedule else None,
+        "payment_type": schedule.payment_type if schedule else None,
+        "membership_payable": membership_payable,
+        "match_day_rate": rate,
+        "match_days": match_days,
+        "waived_days": round(waived_days or 0.0, 1),
+        "match_fee_waived": match_fee_waived,
+        "match_fee_payable": match_fee_payable,
+        "total_payable": round(membership_payable + match_fee_payable, 2),
+        "membership_paid": round(membership_paid, 2),
+        "match_fee_paid": round(match_fee_paid, 2),
+        "total_paid": round(membership_paid + match_fee_paid, 2),
+        "membership_outstanding": membership_outstanding,
+        "match_fee_outstanding": match_fee_outstanding,
+        "total_outstanding": total_outstanding,
+        "membership_credit": membership_credit,
+        "match_fee_credit": match_fee_credit,
+        "credit": credit,
+        "in_credit": credit > 0,
+        "status": status,
+        "needs_tier": schedule is None,
+        "no_games_played": (match_days == 0 and membership_payable == 0),
+    }
+
+
+async def member_financial_snapshot(session, organisation_id, member_id, season_id=None) -> Optional[dict]:
+    """Read-only fee snapshot for one member — the member-portal "my fees"
+    view. Deliberately separate from routers/fees.py::get_member's own inline
+    query (which stays untouched to avoid any regression risk to the existing
+    admin endpoint); this shares only the pure financial math (_financials,
+    allocate_match_days) so both give the identical numbers.
+
+    Returns None if the member doesn't belong to this org, or has no
+    fee_member_season for the resolved season (a fresh/never-tiered member —
+    the portal shows "not set up yet" in that case)."""
+    member = await session.get(FeeMember, member_id)
+    if member is None or member.organisation_id != organisation_id:
+        return None
+    season_id = season_id or await latest_season_id(session, organisation_id)
+    if season_id is None:
+        return None
+    ms = (await session.execute(
+        select(FeeMemberSeason).where(
+            FeeMemberSeason.member_id == member.id, FeeMemberSeason.season_id == season_id,
+        )
+    )).scalar_one_or_none()
+    if ms is None:
+        return None
+
+    schedule = await session.get(FeeSchedule, ms.fee_schedule_id) if ms.fee_schedule_id else None
+
+    pay_rows = (await session.execute(
+        select(FeePayment).where(FeePayment.member_season_id == ms.id)
+        .order_by(FeePayment.paid_at.desc().nullslast(), FeePayment.created_at.desc())
+    )).scalars().all()
+    paid_totals = {"membership": 0.0, "match_day": 0.0}
+    for p in pay_rows:
+        paid_totals[p.kind] = paid_totals.get(p.kind, 0.0) + _f(p.amount)
+
+    rows = (await session.execute(
+        select(FeeMatchDay, Game, Grade)
+        .outerjoin(Game, FeeMatchDay.game_id == Game.id)
+        .outerjoin(Grade, Game.grade_id == Grade.id)
+        .where(FeeMatchDay.member_season_id == ms.id)
+        .order_by(FeeMatchDay.played_at.nullslast(), FeeMatchDay.id)
+    )).all()
+    rate = Decimal(str(_f(schedule.match_day_rate))) if schedule else Decimal("0")
+    charges = [
+        (Decimal(str(_f(e.days_played))) * rate) if e.days_played is not None else Decimal("0")
+        for e, _game, _grade in rows
+    ]
+    waived_flags = [e.waived_at is not None for e, _game, _grade in rows]
+    alloc, _credit = allocate_match_days(charges, paid_totals.get("match_day", 0.0), waived_flags)
+
+    total_days = 0.0
+    waived_days = 0.0
+    match_days_out = []
+    for (e, game, grade), charge, (st, covered) in zip(rows, charges, alloc):
+        total_days += _f(e.days_played)
+        if e.waived_at is not None:
+            waived_days += _f(e.days_played)
+        match_days_out.append({
+            "played_at": e.played_at.isoformat() if e.played_at else None,
+            "charge": round(float(charge), 2),
+            "status": st,
+            "amount_covered": round(float(covered), 2),
+            "waived": e.waived_at is not None,
+            "grade": grade.display_name if grade else None,
+            "match": f"{game.home_team} v {game.away_team}" if game else None,
+        })
+
+    fin = _financials(schedule, total_days, paid_totals, waived_days)
+    return {
+        "member": {
+            "id": str(member.id), "full_name": member.full_name,
+            "email": member.email, "mobile": member.mobile,
+            "is_life_member": member.is_life_member, "is_honorary": member.is_honorary,
+        },
+        "season_id": str(season_id),
+        "financials": fin,
+        "match_days": match_days_out,
+    }
 
 
 async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None) -> dict:

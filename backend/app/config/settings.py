@@ -320,6 +320,14 @@ class Settings(BaseSettings):
     # rejects every event (fails closed — never trust an unverified event).
     stripe_webhook_secret: str = ""
     stripe_currency: str = "aud"
+    # ─── Stripe Connect — club-to-member fee payments (migration 178) ─────────
+    # A SEPARATE integration from the platform-billing keys above: same Stripe
+    # account/keys (Connect calls just pass stripe_account=<connected acct id>
+    # per call, see services/stripe_connect_client.py), but Connect webhook
+    # events are signed with their OWN endpoint secret in the Stripe dashboard
+    # (Connect → Webhooks), not stripe_webhook_secret. Blank = the Connect
+    # webhook route rejects every event (fails closed).
+    stripe_connect_webhook_secret: str = ""
 
     @property
     def stripe_configured(self) -> bool:
@@ -334,6 +342,14 @@ class Settings(BaseSettings):
     @property
     def stripe_checkout_cancel_url(self) -> str:
         return f"{self.public_base_url}/admin/account?checkout=cancelled"
+
+    @property
+    def stripe_connect_return_url(self) -> str:
+        return f"{self.public_base_url}/admin/member-portal?connect=return"
+
+    @property
+    def stripe_connect_refresh_url(self) -> str:
+        return f"{self.public_base_url}/admin/member-portal?connect=refresh"
 
     @property
     def xero_oauth_redirect(self) -> str:

@@ -285,6 +285,22 @@ class Organisation(Base):
     # it either way for this club regardless of the platform default. See
     # services/platform_settings.billing_checkout_enabled_for_org.
     billing_checkout_override = Column(Boolean, nullable=True)
+    # Per-club override of platform_settings.member_portal_enabled (migration 178)
+    # — same NULL/True/False shape as billing_checkout_override above, so a
+    # super admin can switch the member self-service portal on for one test
+    # club while it stays invisible to every other club admin. See
+    # services/platform_settings.member_portal_enabled_for_org.
+    member_portal_override = Column(Boolean, nullable=True)
+    # ─── Stripe Connect — club-to-member fee payments (migration 178) ─────────
+    # A SEPARATE Stripe integration from stripe_customer_id/stripe_subscription_id
+    # above (which is BetterCricket's OWN platform billing, one Stripe account
+    # for the whole platform). Here each club gets its OWN Stripe Express
+    # connected account so a member's fee payment lands directly in the club's
+    # bank account, not BetterCricket's — see services/stripe_connect_client.py.
+    stripe_connect_account_id = Column(Text, nullable=True)
+    stripe_connect_details_submitted = Column(Boolean, nullable=False, server_default="false", default=False)
+    stripe_connect_charges_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    stripe_connect_payouts_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     # Club address (migration 158) — resolved at self-serve registration
     # (routers/self_serve_trial.py) so a Stripe Customer can be created with
     # a real address from the first checkout attempt (automatic tax needs
@@ -2185,6 +2201,10 @@ class FeeMemberSeason(Base):
     status = Column(Text, nullable=False, server_default="active", default="active")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    # Fee-owing reminder throttle (migration 178) — same purpose as
+    # MemberQualification.last_reminder_sent_at, kept separate since the two
+    # reminder kinds fire independently.
+    last_fee_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     member = relationship("FeeMember", back_populates="seasons")
     schedule = relationship("FeeSchedule")
@@ -2516,6 +2536,10 @@ class MemberQualification(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    # Reminder-automation throttle (migration 178) — NULL until the first
+    # expiry reminder email fires; a fresh send is skipped while this is
+    # recent, so the daily job can run every day without spamming.
+    last_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
 # ─── AGM elections/voting/motions, Committee Meeting Assistant,
