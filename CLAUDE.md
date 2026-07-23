@@ -1380,6 +1380,76 @@ Follow-up to the fill-in scorecard fix above (v8.60.x), extending it two ways.
   present — broke (linked to `undefined`) the moment a fill-in could have a
   name with no id, which this feature introduces; now checks the id first.
 
+## Scorecard endpoint rewritten to trust Grassroots, not our own DB, for both teams (v8.78.0, Jul 2026)
+
+Reported: a scorecard's header total didn't match its own batting card (e.g.
+"30/1" in the header while the card below it showed seven dismissals — the
+real score was 135/7), and a bowler occasionally appeared twice with
+identical figures, once linked correctly and once as a bogus "FILL-IN" row
+with a CLAIM button.
+
+**Root cause of the wrong total**: `get_scorecard`'s live GR-merge (see the
+fill-in notes above) decided whether a participant was "ours" by checking
+`pid in known_ids` — is this GUID a `players` row *anywhere* in our org —
+before ever checking which team's roster they were actually listed under for
+*this match*. A player registered with the club who guested for the
+opposition that day (confirmed against the raw GR payload: he's listed only
+on the opposing team's roster) got swept onto our own card by that check,
+which made the innings-total logic think it already had complete data for
+that innings and stopped it from ever falling back to GR's own authoritative
+total, wickets included.
+
+**Root cause of the duplicate bowler**: GR can report a different
+`participantId` for the same real bowler than the one already stored (the
+same MyCricket/PlayHQ dual-GUID class of issue documented elsewhere in this
+file), and only the batting side of `get_scorecard`'s merge had a name-based
+fallback for that case (`_unresolved_roster_pids` → `_nk_to_player`). The
+bowling loop and the first-pass batting DNB-detection loop had no such
+fallback, so an unrecognised GUID on our own team's roster fell straight
+through to the "unregistered fill-in" branch and rendered as a second,
+duplicate row instead of resolving to the existing player.
+
+**Fix — inverted the whole function's precedence.** `get_scorecard` no
+longer treats our stored `batting_innings`/`bowling_spells` rows as primary
+and reaches for Grassroots only to patch gaps. When the live GR fetch
+succeeds (true for essentially every non-manual game — the same `/scores/*`
+endpoint reaches back to the 1970s), **both** teams' batting, bowling and
+innings totals are built entirely from that response. Team membership is
+decided purely by GR's own team roster listing for that match
+(`our_team_roster_pids`/`opp_roster_pids`, matched on the org's name against
+the GR team name — unchanged from before) — never by whether a GUID happens
+to match a `players` row. Our own player table is now consulted for exactly
+one purpose: `_resolve_linked_id(pid_str, name)` tries the literal id, then a
+new `grassroots_id` lookup, then a name-key match, purely to attach a
+`player_id` for a profile hyperlink on rows already classified as ours — it
+can never move a row to the other side or change its numbers. Innings
+totals now uniformly prefer GR's own `numberOfWicketsFallen`/`totalExtras`
+for both sides (previously only the opposition innings got this treatment);
+bat-only `runs` is still summed from individual rows, never substituted with
+GR's full-team `runsScored`, which would double-count extras once the
+frontend adds them.
+
+The DB-sourced batting/bowling/totals built earlier in the function are only
+swapped in after the entire GR-sourced rebuild completes without error — a
+GR outage or any exception leaves the page showing the last-synced copy
+instead of erroring, same resilience as before.
+
+**Consequence for the fill-in feature above**: a DNB roster member who
+resolves via the new name fallback (like the O'Kane/Singh case) now renders
+as a normal linked row instead of a fill-in with a CLAIM button — CLAIM is
+reserved for participants who genuinely have no `players` row.
+
+**Verified against the reported game** by replaying the fix's exact logic
+offline against the real Grassroots payload (`/scores/matches/{id}` fetched
+directly, bypassing the app): the misattributed player's innings now lands
+on the opposition card as intended, the header total reads 115+20 extras =
+135 runs for 7 wickets (matching GR's own authoritative figures, and
+consistent with the winning team's actual chase target), and the duplicated
+bowler's figures appear exactly once, correctly linked. Not done this round:
+`fielding_stats` stays DB-only in this endpoint (no live GR fielding merge)
+— a known pre-existing gap, unrelated to this fix, flagged as a possible
+follow-up.
+
 ## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
 
 Yearbook generation was previously **100% manual** — two separate admin
