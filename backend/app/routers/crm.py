@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, MarketingClub, CrmPerson, CrmStage, CrmPipeline, get_db
+from app.models.db import Organisation, MarketingClub, CrmStage, CrmPipeline, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
@@ -105,7 +105,7 @@ class DealContactBody(BaseModel):
 
 
 class ConvertToDealBody(BaseModel):
-    stage_key: str = "qualified"
+    stage_key: str = "engaged"
     module_keys: List[str] = []
     value_cents: Optional[int] = None
     title: Optional[str] = None
@@ -150,7 +150,8 @@ async def _deal_or_404(db: AsyncSession, scope: str, organisation_id, deal_id: s
 async def _serialize_deal(db: AsyncSession, deal) -> dict:
     pipeline = await crm_service.get_deal_pipeline(db, deal)
     stage = next((s for s in (pipeline.stages if pipeline else []) if s.id == deal.stage_id), None)
-    return crm_service._deal_dict(deal, stage)
+    club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    return crm_service._deal_dict(deal, stage, club)
 
 
 async def _deal_stage_or_404(db: AsyncSession, deal, stage_id: str):
@@ -165,7 +166,9 @@ async def _list_deals_response(db: AsyncSession, pipeline: CrmPipeline,
                                status: Optional[str], include_archived: bool) -> dict:
     stage_by_id = {s.id: s for s in pipeline.stages}
     deals = await crm_service.list_deals(db, pipeline.id, status=status, include_archived=include_archived)
-    return {"deals": [crm_service._deal_dict(d, stage_by_id.get(d.stage_id)) for d in deals]}
+    club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals))
+    return {"deals": [crm_service._deal_dict(d, stage_by_id.get(d.stage_id), club_by_id.get(d.marketing_club_id))
+                      for d in deals]}
 
 
 async def _create_deal_in_pipeline(db: AsyncSession, pipeline: CrmPipeline, scope: str,
@@ -192,7 +195,7 @@ async def _create_deal_in_pipeline(db: AsyncSession, pipeline: CrmPipeline, scop
 async def _resolve_contact_person(db: AsyncSession, body: DealContactBody, *,
                                   organisation_id=None, marketing_club_id=None):
     if body.person_id:
-        person = await db.get(CrmPerson, _uuid_or_404(body.person_id))
+        person = await crm_service.get_person(db, _uuid_or_404(body.person_id))
         if person is None:
             raise HTTPException(status_code=404, detail="Person not found")
         return person
@@ -421,6 +424,16 @@ async def club_unlink_contact(deal_id: str, person_id: str, club: Organisation =
     return {"unlinked": ok}
 
 
+@router.post("/deals/{deal_id}/point-of-contact", dependencies=[_require])
+async def club_set_point_of_contact(deal_id: str, body: DealContactBody, club: Organisation = Depends(get_current_club),
+                                    db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
+    person = await _resolve_contact_person(db, body, organisation_id=club.id)
+    await crm_service.set_point_of_contact(db, deal.id, person.id)
+    await db.commit()
+    return {"contacts": await crm_service.list_deal_contacts(db, deal.id)}
+
+
 @router.get("/people", dependencies=[_require])
 async def club_list_people(q: Optional[str] = None, club: Organisation = Depends(get_current_club),
                            db: AsyncSession = Depends(get_db)):
@@ -442,7 +455,7 @@ async def club_create_person(body: PersonCreate, club: Organisation = Depends(ge
 @router.patch("/people/{person_id}", dependencies=[_require])
 async def club_update_person(person_id: str, body: PersonUpdate, club: Organisation = Depends(get_current_club),
                              db: AsyncSession = Depends(get_db)):
-    person = await db.get(CrmPerson, _uuid_or_404(person_id))
+    person = await crm_service.get_person(db, _uuid_or_404(person_id))
     if person is None or str(person.organisation_id) != str(club.id):
         raise HTTPException(status_code=404, detail="Person not found")
     for field in ("full_name", "email", "phone", "notes"):
@@ -456,7 +469,7 @@ async def club_update_person(person_id: str, body: PersonUpdate, club: Organisat
 @router.post("/people/{person_id}/roles", dependencies=[_require])
 async def club_add_person_role(person_id: str, body: RoleCreate, club: Organisation = Depends(get_current_club),
                                db: AsyncSession = Depends(get_db)):
-    person = await db.get(CrmPerson, _uuid_or_404(person_id))
+    person = await crm_service.get_person(db, _uuid_or_404(person_id))
     if person is None or str(person.organisation_id) != str(club.id):
         raise HTTPException(status_code=404, detail="Person not found")
     await crm_service.add_person_role(
@@ -475,7 +488,8 @@ async def club_add_person_role(person_id: str, body: RoleCreate, club: Organisat
 async def super_pipeline(db: AsyncSession = Depends(get_db)):
     pipeline = await crm_service.ensure_platform_pipeline(db)
     deals = await crm_service.list_deals(db, pipeline.id)
-    return crm_service.pipeline_board(pipeline, deals)
+    club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals))
+    return crm_service.pipeline_board(pipeline, deals, club_by_id)
 
 
 @super_router.get("/stages", dependencies=[_super])
@@ -580,6 +594,20 @@ async def super_unlink_contact(deal_id: str, person_id: str, db: AsyncSession = 
     return {"unlinked": ok}
 
 
+@super_router.post("/deals/{deal_id}/point-of-contact", dependencies=[_super])
+async def super_set_point_of_contact(deal_id: str, body: DealContactBody, db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
+    person = await _resolve_contact_person(db, body, marketing_club_id=deal.marketing_club_id)
+    await crm_service.set_point_of_contact(db, deal.id, person.id)
+    await db.commit()
+    return {"contacts": await crm_service.list_deal_contacts(db, deal.id)}
+
+
+@super_router.get("/owners", dependencies=[_super])
+async def super_list_owners(db: AsyncSession = Depends(get_db)):
+    return {"owners": await crm_service.list_platform_owners(db)}
+
+
 @super_router.get("/people", dependencies=[_super])
 async def super_list_people(q: Optional[str] = None, marketing_club_id: Optional[str] = None,
                             db: AsyncSession = Depends(get_db)):
@@ -603,7 +631,7 @@ async def super_create_person(body: PersonCreate, marketing_club_id: Optional[st
 
 @super_router.patch("/people/{person_id}", dependencies=[_super])
 async def super_update_person(person_id: str, body: PersonUpdate, db: AsyncSession = Depends(get_db)):
-    person = await db.get(CrmPerson, _uuid_or_404(person_id))
+    person = await crm_service.get_person(db, _uuid_or_404(person_id))
     if person is None:
         raise HTTPException(status_code=404, detail="Person not found")
     for field in ("full_name", "email", "phone", "notes"):

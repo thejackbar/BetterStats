@@ -34,13 +34,13 @@ import logging
 import re
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.db import (
     CrmPerson, CrmPersonRole, CrmPipeline, CrmStage, CrmDeal, CrmDealContact, CrmActivity,
-    MarketingClub,
+    MarketingClub, User, ClubMembership,
 )
 from app.services.billing_pricing import price_for
 
@@ -59,17 +59,33 @@ PERSON_ROLES = (
 ACTIVITY_TYPES = ("call", "email", "meeting", "note", "system")
 DEAL_STATUSES = ("open", "won", "lost")
 
-# (key, name, default_probability, is_won, is_lost)
+# (key, name, default_probability, is_won, is_lost) — mirrors Twenty's own
+# Opportunity pipeline exactly (bootstrap_twenty.PIPELINE), so a deal's stage
+# means the same thing whichever system is looked at during/after cutover.
 PLATFORM_DEFAULT_STAGES = [
-    ("new_lead", "New Lead", 10, False, False),
+    ("target", "Target", 10, False, False),
     ("contacted", "Contacted", 20, False, False),
-    ("qualified", "Qualified", 35, False, False),
-    ("trial", "Trial", 55, False, False),
+    ("engaged", "Engaged", 35, False, False),
+    ("trial", "Trial", 50, False, False),
+    ("self_serve_trial", "Self-Serve Trial", 50, False, False),
     ("proposal", "Proposal", 70, False, False),
-    ("negotiation", "Negotiation", 85, False, False),
     ("won", "Won", 100, True, False),
-    ("lost", "Lost", 0, False, True),
+    ("lost_dormant", "Lost / Dormant", 0, False, True),
 ]
+
+# Renames from the ORIGINAL platform stage set (pre-Twenty-parity) onto the
+# one above — applied in place by _reconcile_platform_stages so a pipeline
+# created before this list changed doesn't fork from it forever.
+_PLATFORM_STAGE_RENAMES = {
+    "new_lead": "target",
+    "qualified": "engaged",
+    "lost": "lost_dormant",
+}
+# Twenty has no equivalent of the old "negotiation" stage — any deal sitting
+# there folds into "proposal" (the stage immediately before Won).
+_PLATFORM_STAGE_MERGES = {
+    "negotiation": "proposal",
+}
 
 # ─── Club-scope tracker catalogue ────────────────────────────────────────────
 # Per direct instruction: a club shouldn't be presumed to run formal
@@ -136,6 +152,68 @@ CUSTOM_TERMS = {"won": "Won", "lost": "Lost", "itemSingular": "record", "itemPlu
 
 # ─── Pipelines / stages ──────────────────────────────────────────────────────
 
+async def _reconcile_platform_stages(session: AsyncSession, pipeline: CrmPipeline) -> bool:
+    """Bring an already-existing platform pipeline's stages in line with the
+    current PLATFORM_DEFAULT_STAGES — renames/merges the old set onto the new
+    one (see _PLATFORM_STAGE_RENAMES/_PLATFORM_STAGE_MERGES), creates any
+    still-missing stage (e.g. a brand new "self_serve_trial"), and fixes
+    ordering. No deal is ever dropped: a merge/rename moves deals off the old
+    stage's id before it's deleted. Returns True if anything changed, so the
+    caller knows whether a commit + refresh is needed — a no-op once already
+    reconciled. MUST run before any CrmDeal is loaded into this session (the
+    bulk stage_id reassignment below bypasses the ORM identity map)."""
+    by_key = {s.key: s for s in pipeline.stages}
+    changed = False
+
+    for old_key, new_key in _PLATFORM_STAGE_RENAMES.items():
+        old_stage = by_key.pop(old_key, None)
+        if old_stage is None:
+            continue
+        existing_new = by_key.get(new_key)
+        if existing_new is not None:
+            # Both keys exist (shouldn't normally happen) — move any deals off
+            # the old stage before dropping it (CrmDeal.stage_id is ON DELETE
+            # RESTRICT).
+            await session.execute(
+                sa_update(CrmDeal).where(CrmDeal.stage_id == old_stage.id)
+                .values(stage_id=existing_new.id))
+            await session.delete(old_stage)
+        else:
+            new_name = next(n for k, n, *_r in PLATFORM_DEFAULT_STAGES if k == new_key)
+            old_stage.key = new_key
+            old_stage.name = new_name
+            by_key[new_key] = old_stage
+        changed = True
+
+    for old_key, new_key in _PLATFORM_STAGE_MERGES.items():
+        old_stage = by_key.pop(old_key, None)
+        if old_stage is None:
+            continue
+        target = by_key.get(new_key)
+        if target is not None:
+            await session.execute(
+                sa_update(CrmDeal).where(CrmDeal.stage_id == old_stage.id)
+                .values(stage_id=target.id))
+        await session.delete(old_stage)
+        changed = True
+
+    for position, (key, name, prob, is_won, is_lost) in enumerate(PLATFORM_DEFAULT_STAGES):
+        stage = by_key.get(key)
+        if stage is None:
+            stage = CrmStage(pipeline_id=pipeline.id, key=key, name=name, position=position,
+                             default_probability=prob, is_won=is_won, is_lost=is_lost)
+            session.add(stage)
+            by_key[key] = stage
+            changed = True
+        elif stage.position != position:
+            stage.position = position
+            changed = True
+
+    if changed:
+        await session.flush()
+    return changed
+
+
 async def ensure_platform_pipeline(session: AsyncSession) -> CrmPipeline:
     """Get-or-create BetterCricket's own sales pipeline. Exactly one always
     exists — unlike the club scope, this one is NOT optional."""
@@ -144,6 +222,9 @@ async def ensure_platform_pipeline(session: AsyncSession) -> CrmPipeline:
         CrmPipeline.is_default.is_(True))
     pipeline = (await session.execute(stmt)).scalars().first()
     if pipeline is not None:
+        if await _reconcile_platform_stages(session, pipeline):
+            await session.commit()
+            await session.refresh(pipeline, attribute_names=["stages"])
         return pipeline
     pipeline = CrmPipeline(scope=SCOPE_PLATFORM, organisation_id=None, name="BetterCricket Sales", is_default=True)
     session.add(pipeline)
@@ -317,13 +398,23 @@ def _effective_probability(deal: CrmDeal, stage: Optional[CrmStage]) -> Optional
     return stage.default_probability if stage else None
 
 
-def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None) -> dict:
+def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
+               club: Optional[MarketingClub] = None) -> dict:
     eff = _effective_probability(deal, stage)
     return {
         "id": str(deal.id),
         "scope": deal.scope,
         "organisation_id": str(deal.organisation_id) if deal.organisation_id else None,
         "marketing_club_id": str(deal.marketing_club_id) if deal.marketing_club_id else None,
+        # Engagement score/tier are never computed here — they're Twenty's own
+        # mirrored number, sourced straight from marketing_clubs.engagement_score
+        # (twenty_sync._engagement()), the same one Twenty's Lead/Opportunity
+        # both mirror from the Company. `club` is only ever set for a platform
+        # deal linked to a prospect; a club-scope deal has no marketing_club_id
+        # so this is always None there.
+        "engagement_score": club.engagement_score if club else None,
+        "engagement_tier": club.engagement_tier if club else None,
+        "marketing_club_name": club.name if club else None,
         "pipeline_id": str(deal.pipeline_id),
         "stage_id": str(deal.stage_id),
         "stage_key": stage.key if stage else None,
@@ -380,10 +471,15 @@ def _activity_dict(activity: CrmActivity) -> dict:
     }
 
 
-def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal]) -> dict:
+def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal],
+                   club_by_id: Optional[dict] = None) -> dict:
     """Stages with their open deals + weighted value per stage and overall —
     the Kanban board's shape, computed from an already-loaded pipeline
-    (stages) and its (non-archived) deals. Pure/sync: callers fetch both."""
+    (stages) and its (non-archived) deals. Pure/sync: callers fetch both.
+    ``club_by_id`` (marketing_club_id -> MarketingClub) lets platform-scope
+    cards carry the linked prospect's engagement score without this function
+    making its own query — see clubs_by_ids()."""
+    club_by_id = club_by_id or {}
     by_stage: dict = {}
     for d in deals:
         by_stage.setdefault(d.stage_id, []).append(d)
@@ -398,7 +494,7 @@ def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal]) -> dict:
         stage_weighted = 0
         deals_out = []
         for d in stage_deals:
-            deals_out.append(_deal_dict(d, stage))
+            deals_out.append(_deal_dict(d, stage, club_by_id.get(d.marketing_club_id)))
             if d.status == "open":
                 eff = _effective_probability(d, stage) or 0
                 stage_value += d.value_cents
@@ -474,10 +570,21 @@ async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_i
     return deal
 
 
+_DEAL_CLEARABLE_FIELDS = ("probability", "expected_close_date", "owner_user_id")
+
+
 async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal:
     for key in ("title", "value_cents", "currency", "probability", "module_keys",
                 "expected_close_date", "owner_user_id"):
-        if key in fields and fields[key] is not None:
+        if key not in fields:
+            continue
+        # Most fields never take an explicit null (title/value_cents/module_keys
+        # shouldn't ever be wiped by omission-vs-null ambiguity), but these three
+        # are legitimately clearable (e.g. "unassign the owner") — the request
+        # body sending an explicit None for them means "clear it", not "no
+        # change" (an unsent field is simply absent from `fields` at all, since
+        # the router calls model_dump(exclude_unset=True)).
+        if fields[key] is not None or key in _DEAL_CLEARABLE_FIELDS:
             setattr(deal, key, fields[key])
     deal.updated_at = func.now()
     return deal
@@ -527,7 +634,7 @@ async def resolve_person(session: AsyncSession, *, full_name: str, organisation_
     deduped by email first, else an exact case-insensitive name match. Fills
     gaps on an existing match; never overwrites a value already on file."""
     email_l = (email or "").strip().lower() or None
-    stmt = select(CrmPerson)
+    stmt = select(CrmPerson).options(selectinload(CrmPerson.roles))
     if organisation_id is not None:
         stmt = stmt.where(CrmPerson.organisation_id == organisation_id)
     elif marketing_club_id is not None:
@@ -601,9 +708,66 @@ async def link_deal_contact(session: AsyncSession, deal_id, person_id,
     return link
 
 
+# Convention, not a column: at most one CrmDealContact per deal carries this
+# role at a time (enforced by set_point_of_contact clearing any other holder)
+# — mirrors Twenty's single "Point of Contact" field on an Opportunity, on
+# top of our own model's richer many-contacts-per-deal shape.
+POINT_OF_CONTACT_ROLE = "point_of_contact"
+
+
+async def set_point_of_contact(session: AsyncSession, deal_id, person_id) -> CrmDealContact:
+    """Designate ``person_id`` as the deal's ONE point of contact, demoting
+    whoever held that role before (their link stays, just loses the role) —
+    without this, re-designating would leave two contacts both flagged as
+    the point of contact."""
+    await session.execute(
+        sa_update(CrmDealContact).where(
+            CrmDealContact.deal_id == deal_id, CrmDealContact.role_on_deal == POINT_OF_CONTACT_ROLE,
+            CrmDealContact.person_id != person_id,
+        ).values(role_on_deal=None))
+    return await link_deal_contact(session, deal_id, person_id, role_on_deal=POINT_OF_CONTACT_ROLE)
+
+
+async def clubs_by_ids(session: AsyncSession, club_ids) -> dict:
+    """marketing_club_id -> MarketingClub, for the set of ids actually
+    referenced by a batch of deals — avoids an N+1 query per deal when
+    serialising a board/list."""
+    ids = {c for c in club_ids if c is not None}
+    if not ids:
+        return {}
+    rows = (await session.execute(select(MarketingClub).where(MarketingClub.id.in_(ids)))).scalars().all()
+    return {c.id: c for c in rows}
+
+
+async def list_platform_owners(session: AsyncSession) -> list[dict]:
+    """Every super admin — the internal BetterCricket staff pool a platform
+    deal's owner_user_id is picked from (not a club's own users)."""
+    rows = (await session.execute(
+        select(User).join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(ClubMembership.role == "super_admin")
+        .distinct().order_by(User.display_name, User.username)
+    )).scalars().all()
+    return [{"id": str(u.id), "name": u.display_name or u.username, "email": u.email} for u in rows]
+
+
+async def get_person(session: AsyncSession, person_id) -> Optional[CrmPerson]:
+    """A single Person with ``roles`` eager-loaded — the safe way to fetch one
+    for ``_person_dict()``. Plain ``session.get(CrmPerson, id)``/an unadorned
+    ``select(CrmPerson)`` leaves ``roles`` unloaded; touching it from
+    ``_person_dict`` in an async session then raises (MissingGreenlet), which
+    FastAPI's default handler turns into a bare "Internal Server Error" with
+    no JSON body — surfaced by the CRM's every deal/person read that reaches
+    a person this way (list_deal_contacts below, and every router call site
+    that used to load a person with a plain ``db.get``)."""
+    return (await session.execute(
+        select(CrmPerson).options(selectinload(CrmPerson.roles)).where(CrmPerson.id == person_id)
+    )).scalars().first()
+
+
 async def list_deal_contacts(session: AsyncSession, deal_id) -> list[dict]:
     rows = (await session.execute(
-        select(CrmDealContact, CrmPerson).join(CrmPerson, CrmPerson.id == CrmDealContact.person_id)
+        select(CrmDealContact, CrmPerson).options(selectinload(CrmPerson.roles))
+        .join(CrmPerson, CrmPerson.id == CrmDealContact.person_id)
         .where(CrmDealContact.deal_id == deal_id)
     )).all()
     out = []
@@ -727,7 +891,7 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                 full_name=contact_name or (contact.full_name if contact else "") or club_name,
                 email=email, phone=phone)
             deal = await sync_platform_deal_for_club(
-                session, club, stage_key="new_lead", source="auto_enquiry", person_id=person.id)
+                session, club, stage_key="target", source="auto_enquiry", person_id=person.id)
             await session.commit()
             return {"deal_id": str(deal.id)}
     except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
