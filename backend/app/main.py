@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -3248,6 +3248,204 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_member_qualifications_expiry ON member_qualifications(organisation_id, expires_at)"
         ))
 
+    # Migration 177: AGM meetings/elections/motions, Events/Ticketing,
+    # Assets & Facilities. See services/committee.py (meetings/AGM),
+    # services/events.py, services/assets.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS agenda_templates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                items JSONB NOT NULL DEFAULT '[]',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_agenda_templates_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_meetings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                meeting_type TEXT NOT NULL DEFAULT 'committee',
+                scheduled_at TIMESTAMPTZ NOT NULL,
+                location TEXT,
+                status TEXT NOT NULL DEFAULT 'scheduled',
+                minutes TEXT,
+                agenda_template_id UUID REFERENCES agenda_templates(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_meetings_org ON committee_meetings(organisation_id, scheduled_at)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS meeting_attendance (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                meeting_id UUID NOT NULL REFERENCES committee_meetings(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                status TEXT NOT NULL DEFAULT 'present',
+                CONSTRAINT uq_meeting_attendance UNIQUE (meeting_id, member_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS meeting_agenda_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                meeting_id UUID NOT NULL REFERENCES committee_meetings(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                description TEXT,
+                proposed_by_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'proposed',
+                outcome_notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_meeting_agenda_items_meeting ON meeting_agenda_items(meeting_id, position)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS meeting_motions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                meeting_id UUID NOT NULL REFERENCES committee_meetings(id) ON DELETE CASCADE,
+                agenda_item_id UUID REFERENCES meeting_agenda_items(id) ON DELETE SET NULL,
+                motion_type TEXT NOT NULL DEFAULT 'motion',
+                description TEXT NOT NULL,
+                proposed_by_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                seconded_by_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                votes_for INTEGER,
+                votes_against INTEGER,
+                votes_abstain INTEGER,
+                outcome TEXT NOT NULL DEFAULT 'pending',
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_meeting_motions_meeting ON meeting_motions(meeting_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS agm_nominations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                meeting_id UUID NOT NULL REFERENCES committee_meetings(id) ON DELETE CASCADE,
+                position_id UUID NOT NULL REFERENCES committee_positions(id) ON DELETE CASCADE,
+                candidate_member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                nominated_by_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                seconded_by_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                votes_for INTEGER,
+                status TEXT NOT NULL DEFAULT 'nominated',
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_agm_nominations_meeting ON agm_nominations(meeting_id, position_id)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_events ADD COLUMN IF NOT EXISTS is_ticketed BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_events ADD COLUMN IF NOT EXISTS ticket_price_cents INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text("ALTER TABLE club_events ADD COLUMN IF NOT EXISTS capacity INTEGER"))
+        await conn.execute(text(
+            "ALTER TABLE club_events ADD COLUMN IF NOT EXISTS registration_deadline TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS event_registrations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                event_id UUID NOT NULL REFERENCES club_events(id) ON DELETE CASCADE,
+                full_name TEXT NOT NULL,
+                email TEXT,
+                phone TEXT,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                amount_cents INTEGER NOT NULL DEFAULT 0,
+                payment_status TEXT NOT NULL DEFAULT 'free',
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_event_registrations_event ON event_registrations(event_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS facilities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                facility_type TEXT NOT NULL DEFAULT 'other',
+                description TEXT,
+                key_location TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_facilities_org ON facilities(organisation_id, is_active)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS facility_bookings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                facility_id UUID NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                starts_at TIMESTAMPTZ NOT NULL,
+                ends_at TIMESTAMPTZ,
+                booked_by_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_facility_bookings_facility ON facility_bookings(facility_id, starts_at)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_assets (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'other',
+                asset_tag TEXT,
+                purchase_cost NUMERIC(10,2),
+                purchase_date DATE,
+                condition TEXT NOT NULL DEFAULT 'good',
+                status TEXT NOT NULL DEFAULT 'in_service',
+                service_due_date DATE,
+                replace_due_date DATE,
+                facility_id UUID REFERENCES facilities(id) ON DELETE SET NULL,
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_assets_org ON club_assets(organisation_id, is_active)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS maintenance_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                subject_type TEXT NOT NULL,
+                subject_id UUID NOT NULL,
+                performed_at DATE NOT NULL DEFAULT CURRENT_DATE,
+                description TEXT NOT NULL,
+                cost NUMERIC(10,2),
+                performed_by TEXT,
+                next_due_date DATE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_maintenance_logs_subject ON maintenance_logs(subject_type, subject_id, performed_at DESC)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3438,6 +3636,9 @@ app.include_router(families.router)
 app.include_router(committee.router)     # Committee Administration (core capability, not a paid module)
 app.include_router(volunteers.router)    # Volunteer Management (core capability, not a paid module)
 app.include_router(qualifications.router)  # Qualification tracking (core capability, not a paid module)
+app.include_router(events.router)        # Events/Ticketing admin — registrations against the Club Calendar (core capability, not a paid module)
+app.include_router(events.public_router)  # Events/Ticketing public — unauthenticated event view + register (core, not a paid module)
+app.include_router(assets.router)        # Assets & Facilities (core capability, not a paid module)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
 app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import

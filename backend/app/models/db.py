@@ -2445,6 +2445,11 @@ class ClubEvent(Base):
     ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
     location = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
+    is_ticketed = Column(Boolean, nullable=False, server_default="false", default=False)
+    ticket_price_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    capacity = Column(Integer, nullable=True)
+    registration_deadline = Column(TIMESTAMP(timezone=True), nullable=True)
+    registration_open = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -2511,6 +2516,218 @@ class MemberQualification(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── AGM elections/voting/motions, Committee Meeting Assistant,
+# Events/Ticketing, Assets & Facilities (migration 177) ──────────────────────
+# committee_meetings generalises to serve both the AGM and ordinary committee
+# meetings — agm_nominations reuses committee_positions/committee_terms so an
+# elected result and the Positions tab's succession history are one record,
+# not two (an "elected" nomination calls the existing committee.start_term()).
+# Assets/Facilities is a NEW, separate concern from BetterMerch's
+# merch_assets (a paid-module retail/kit table) — general club property
+# (mower, clubhouse, nets) isn't retrofitted there. See the migration
+# docstring for the Square-scopes reasoning behind Events/Ticketing shipping
+# without online payment collection.
+
+MEETING_TYPES = ("committee", "agm", "special_general", "sub_committee", "other")
+MEETING_STATUSES = ("scheduled", "in_progress", "completed", "cancelled")
+AGENDA_ITEM_STATUSES = ("proposed", "discussed", "carried", "deferred", "withdrawn")
+MOTION_TYPES = ("motion", "amendment", "procedural")
+MOTION_OUTCOMES = ("pending", "carried", "lost", "withdrawn")
+AGM_NOMINATION_STATUSES = ("nominated", "elected", "withdrawn", "not_elected")
+FACILITY_TYPES = ("ground", "clubhouse", "nets", "scoreboard", "canteen", "storage", "other")
+ASSET_CATEGORIES = ("equipment", "technology", "furniture", "ground_maintenance", "safety", "other")
+ASSET_CONDITIONS = ("excellent", "good", "fair", "poor", "unserviceable")
+ASSET_STATUSES = ("in_service", "in_repair", "retired", "disposed")
+
+
+class AgendaTemplate(Base):
+    """A reusable agenda shape (e.g. "Standard committee meeting") — ``items``
+    is a plain JSON list of {title, description} the Committee Meeting
+    Assistant copies onto a new meeting's agenda in one click."""
+    __tablename__ = "agenda_templates"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_agenda_templates_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    items = Column(JSONB, nullable=False, server_default="[]", default=list)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeMeeting(Base):
+    """A regular committee meeting OR the AGM/a special general meeting —
+    ``meeting_type`` distinguishes them; agenda items, motions and (for an
+    AGM) nominations all hang off the one meeting record."""
+    __tablename__ = "committee_meetings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    meeting_type = Column(Text, nullable=False, server_default="committee", default="committee")
+    scheduled_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    location = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="scheduled", default="scheduled")
+    minutes = Column(Text, nullable=True)
+    agenda_template_id = Column(UUID(as_uuid=True), ForeignKey("agenda_templates.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MeetingAttendance(Base):
+    __tablename__ = "meeting_attendance"
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "member_id", name="uq_meeting_attendance"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False, server_default="present", default="present")
+
+
+class MeetingAgendaItem(Base):
+    __tablename__ = "meeting_agenda_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    proposed_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    status = Column(Text, nullable=False, server_default="proposed", default="proposed")
+    outcome_notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MeetingMotion(Base):
+    __tablename__ = "meeting_motions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    agenda_item_id = Column(UUID(as_uuid=True), ForeignKey("meeting_agenda_items.id", ondelete="SET NULL"), nullable=True)
+    motion_type = Column(Text, nullable=False, server_default="motion", default="motion")
+    description = Column(Text, nullable=False)
+    proposed_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    seconded_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    votes_for = Column(Integer, nullable=True)
+    votes_against = Column(Integer, nullable=True)
+    votes_abstain = Column(Integer, nullable=True)
+    outcome = Column(Text, nullable=False, server_default="pending", default="pending")
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgmNomination(Base):
+    """A candidate nominated for a committee position at an AGM. Marking one
+    ``elected`` calls committee.start_term() so it writes a real
+    committee_terms row (auto-closing whoever held the position before) —
+    the election result and the Positions tab's history are the same data."""
+    __tablename__ = "agm_nominations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="CASCADE"), nullable=False)
+    candidate_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    nominated_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    seconded_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    votes_for = Column(Integer, nullable=True)
+    status = Column(Text, nullable=False, server_default="nominated", default="nominated")
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EventRegistration(Base):
+    """A ticket/RSVP against a ClubEvent. ``payment_status`` 'free' (no
+    charge) | 'awaiting_payment' (a priced event, reconciled by hand — see
+    the migration docstring on why there's no online payment collection
+    yet) | 'paid' (an admin has marked it reconciled) | 'cancelled'."""
+    __tablename__ = "event_registrations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("club_events.id", ondelete="CASCADE"), nullable=False)
+    full_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    quantity = Column(Integer, nullable=False, server_default="1", default=1)
+    amount_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    payment_status = Column(Text, nullable=False, server_default="free", default="free")
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Facility(Base):
+    __tablename__ = "facilities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    facility_type = Column(Text, nullable=False, server_default="other", default="other")
+    description = Column(Text, nullable=True)
+    key_location = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FacilityBooking(Base):
+    __tablename__ = "facility_bookings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    booked_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubAsset(Base):
+    """General club property — mower, scoreboard, nets, tables — distinct
+    from BetterMerch's merch_assets (paid-module retail/kit stock)."""
+    __tablename__ = "club_assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    category = Column(Text, nullable=False, server_default="other", default="other")
+    asset_tag = Column(Text, nullable=True)
+    purchase_cost = Column(Numeric(10, 2), nullable=True)
+    purchase_date = Column(Date, nullable=True)
+    condition = Column(Text, nullable=False, server_default="good", default="good")
+    status = Column(Text, nullable=False, server_default="in_service", default="in_service")
+    service_due_date = Column(Date, nullable=True)
+    replace_due_date = Column(Date, nullable=True)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MaintenanceLog(Base):
+    """Shared between a ClubAsset and a Facility — ``subject_type`` is
+    'asset' | 'facility', ``subject_id`` the relevant row's id (no FK, since
+    it targets one of two tables — mirrors the pattern used elsewhere in
+    this codebase for a polymorphic subject, e.g. sync's opponent tags)."""
+    __tablename__ = "maintenance_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    subject_type = Column(Text, nullable=False)
+    subject_id = Column(UUID(as_uuid=True), nullable=False)
+    performed_at = Column(Date, nullable=False, server_default=func.current_date())
+    description = Column(Text, nullable=False)
+    cost = Column(Numeric(10, 2), nullable=True)
+    performed_by = Column(Text, nullable=True)
+    next_due_date = Column(Date, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────

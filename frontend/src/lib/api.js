@@ -352,6 +352,110 @@ export const api = {
   qualExpiringReport: (withinDays) =>
     request(`/club-admin/qualifications/expiring${withinDays ? `?within_days=${withinDays}` : ''}`),
 
+  // Committee Meeting Assistant + AGM elections/voting/motions (core capability,
+  // not a paid module — same MANAGE_COMMITTEE cap as the rest of committee.py)
+  committeeListAgendaTemplates: () => request('/club-admin/committee/agenda-templates'),
+  committeeCreateAgendaTemplate: (data) =>
+    request('/club-admin/committee/agenda-templates', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateAgendaTemplate: (id, data) =>
+    request(`/club-admin/committee/agenda-templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteAgendaTemplate: (id) =>
+    request(`/club-admin/committee/agenda-templates/${id}`, { method: 'DELETE' }),
+
+  committeeListMeetings: (meetingType) =>
+    request(`/club-admin/committee/meetings${meetingType ? `?meeting_type=${meetingType}` : ''}`),
+  committeeCreateMeeting: (data) =>
+    request('/club-admin/committee/meetings', { method: 'POST', body: JSON.stringify(data) }),
+  committeeGetMeeting: (id) => request(`/club-admin/committee/meetings/${id}`),
+  committeeUpdateMeeting: (id, data) =>
+    request(`/club-admin/committee/meetings/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteMeeting: (id) =>
+    request(`/club-admin/committee/meetings/${id}`, { method: 'DELETE' }),
+  committeeSetAttendance: (meetingId, entries) =>
+    request(`/club-admin/committee/meetings/${meetingId}/attendance`, { method: 'PUT', body: JSON.stringify({ entries }) }),
+
+  committeeCreateAgendaItem: (meetingId, data) =>
+    request(`/club-admin/committee/meetings/${meetingId}/agenda-items`, { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateAgendaItem: (meetingId, itemId, data) =>
+    request(`/club-admin/committee/meetings/${meetingId}/agenda-items/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteAgendaItem: (meetingId, itemId) =>
+    request(`/club-admin/committee/meetings/${meetingId}/agenda-items/${itemId}`, { method: 'DELETE' }),
+
+  committeeCreateMotion: (meetingId, data) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions`, { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateMotion: (meetingId, motionId, data) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/${motionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteMotion: (meetingId, motionId) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/${motionId}`, { method: 'DELETE' }),
+
+  committeeCreateNomination: (meetingId, data) =>
+    request(`/club-admin/committee/meetings/${meetingId}/nominations`, { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateNomination: (meetingId, nominationId, data) =>
+    request(`/club-admin/committee/meetings/${meetingId}/nominations/${nominationId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteNomination: (meetingId, nominationId) =>
+    request(`/club-admin/committee/meetings/${meetingId}/nominations/${nominationId}`, { method: 'DELETE' }),
+
+  // Events/Ticketing (core capability, not a paid module) — ClubEvent CRUD
+  // itself is committeeListEvents/CreateEvent/UpdateEvent/DeleteEvent above;
+  // these are the registration/capacity endpoints on top.
+  eventListRegistrations: (eventId) => request(`/club-admin/events/${eventId}/registrations`),
+  eventCreateRegistration: (eventId, data) =>
+    request(`/club-admin/events/${eventId}/registrations`, { method: 'POST', body: JSON.stringify(data) }),
+  eventUpdateRegistration: (eventId, regId, data) =>
+    request(`/club-admin/events/${eventId}/registrations/${regId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  eventDeleteRegistration: (eventId, regId) =>
+    request(`/club-admin/events/${eventId}/registrations/${regId}`, { method: 'DELETE' }),
+  // Public — unauthenticated event view + register (event_id-keyed link)
+  publicEventGet: (eventId) => request(`/public/events/${eventId}`),
+  publicEventRegister: (eventId, data) =>
+    request(`/public/events/${eventId}/register`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // Assets & Facilities (core capability, not a paid module)
+  assetsListFacilities: (includeInactive) =>
+    request(`/club-admin/assets/facilities${includeInactive ? '?include_inactive=true' : ''}`),
+  assetsCreateFacility: (data) =>
+    request('/club-admin/assets/facilities', { method: 'POST', body: JSON.stringify(data) }),
+  assetsUpdateFacility: (id, data) =>
+    request(`/club-admin/assets/facilities/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  assetsDeleteFacility: (id) =>
+    request(`/club-admin/assets/facilities/${id}`, { method: 'DELETE' }),
+
+  assetsListBookings: ({ facilityId, upcomingOnly } = {}) => {
+    const qs = new URLSearchParams()
+    if (facilityId) qs.set('facility_id', facilityId)
+    if (upcomingOnly) qs.set('upcoming_only', 'true')
+    const q = qs.toString()
+    return request(`/club-admin/assets/bookings${q ? `?${q}` : ''}`)
+  },
+  assetsCreateBooking: (data) =>
+    request('/club-admin/assets/bookings', { method: 'POST', body: JSON.stringify(data) }),
+  assetsUpdateBooking: (id, data) =>
+    request(`/club-admin/assets/bookings/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  assetsDeleteBooking: (id) =>
+    request(`/club-admin/assets/bookings/${id}`, { method: 'DELETE' }),
+
+  assetsListItems: ({ includeInactive, category, status } = {}) => {
+    const qs = new URLSearchParams()
+    if (includeInactive) qs.set('include_inactive', 'true')
+    if (category) qs.set('category', category)
+    if (status) qs.set('status', status)
+    const q = qs.toString()
+    return request(`/club-admin/assets/items${q ? `?${q}` : ''}`)
+  },
+  assetsCreateItem: (data) =>
+    request('/club-admin/assets/items', { method: 'POST', body: JSON.stringify(data) }),
+  assetsUpdateItem: (id, data) =>
+    request(`/club-admin/assets/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  assetsDeleteItem: (id) =>
+    request(`/club-admin/assets/items/${id}`, { method: 'DELETE' }),
+
+  assetsListMaintenanceLogs: (subjectType, subjectId) =>
+    request(`/club-admin/assets/maintenance-logs?subject_type=${subjectType}&subject_id=${subjectId}`),
+  assetsCreateMaintenanceLog: (data) =>
+    request('/club-admin/assets/maintenance-logs', { method: 'POST', body: JSON.stringify(data) }),
+  assetsDeleteMaintenanceLog: (id) =>
+    request(`/club-admin/assets/maintenance-logs/${id}`, { method: 'DELETE' }),
+
   // Club admin — Membership Types (migration 175) — the cross-season
   // catalogue a member's membership_type_id points at.
   feeListMembershipTypes: (includeInactive) =>

@@ -24,7 +24,7 @@ function ConditionalNavbar() {
   const isMarketing = isMarketingPath(pathname)
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -101,6 +101,8 @@ const AdminMembershipTypes = lazy(() => import('./pages/admin/AdminMembershipTyp
 const AdminCommittee = lazy(() => import('./pages/admin/AdminCommittee'))
 const AdminVolunteers = lazy(() => import('./pages/admin/AdminVolunteers'))
 const AdminQualifications = lazy(() => import('./pages/admin/AdminQualifications'))
+const AdminEvents = lazy(() => import('./pages/admin/AdminEvents'))
+const AdminAssets = lazy(() => import('./pages/admin/AdminAssets'))
 const BetterMerchHome = lazy(() => import('./pages/admin/bettermerch/BetterMerchHome'))
 const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
 const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
@@ -204,6 +206,8 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
 const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
+// Public, login-free event registration (Events/Ticketing — event-id link)
+const PublicEventRegister = lazy(() => import('./pages/PublicEventRegister'))
 
 const PageLoader = () => (
   <div className="flex justify-center py-24">
@@ -258,6 +262,8 @@ export default function App() {
           <Route path="/avail/:token" element={<PublicAvailability />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />
+          {/* Public event registration (no login — event-id link) */}
+          <Route path="/events/:eventId" element={<PublicEventRegister />} />
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -274,6 +280,8 @@ export default function App() {
           <Route path="/admin/committee" element={<ProtectedRoute><AdminCommittee /></ProtectedRoute>} />
           <Route path="/admin/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
           <Route path="/admin/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
+          <Route path="/admin/events" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
+          <Route path="/admin/assets" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />

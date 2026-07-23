@@ -14,7 +14,11 @@ from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import CommitteePosition, CommitteeTerm, CommitteeTask, CommitteeDocument, ClubEvent
+from app.models.db import (
+    CommitteePosition, CommitteeTerm, CommitteeTask, CommitteeDocument, ClubEvent,
+    AgendaTemplate, CommitteeMeeting, MeetingAttendance, MeetingAgendaItem, MeetingMotion,
+    AgmNomination, FeeMember,
+)
 
 # (name, responsibilities)
 STARTER_POSITIONS = [
@@ -78,6 +82,57 @@ def _event_dict(e: ClubEvent) -> dict:
         "starts_at": e.starts_at.isoformat() if e.starts_at else None,
         "ends_at": e.ends_at.isoformat() if e.ends_at else None,
         "location": e.location, "description": e.description,
+        "is_ticketed": e.is_ticketed, "ticket_price_cents": e.ticket_price_cents,
+        "capacity": e.capacity,
+        "registration_deadline": e.registration_deadline.isoformat() if e.registration_deadline else None,
+        "registration_open": e.registration_open,
+    }
+
+
+def _agenda_template_dict(t: AgendaTemplate) -> dict:
+    return {"id": str(t.id), "name": t.name, "items": t.items or []}
+
+
+def _meeting_dict(m: CommitteeMeeting) -> dict:
+    return {
+        "id": str(m.id), "title": m.title, "meeting_type": m.meeting_type,
+        "scheduled_at": m.scheduled_at.isoformat() if m.scheduled_at else None,
+        "location": m.location, "status": m.status, "minutes": m.minutes,
+        "agenda_template_id": str(m.agenda_template_id) if m.agenda_template_id else None,
+    }
+
+
+def _attendance_dict(a: MeetingAttendance) -> dict:
+    return {"id": str(a.id), "meeting_id": str(a.meeting_id), "member_id": str(a.member_id), "status": a.status}
+
+
+def _agenda_item_dict(i: MeetingAgendaItem) -> dict:
+    return {
+        "id": str(i.id), "meeting_id": str(i.meeting_id), "title": i.title, "description": i.description,
+        "proposed_by_member_id": str(i.proposed_by_member_id) if i.proposed_by_member_id else None,
+        "position": i.position, "status": i.status, "outcome_notes": i.outcome_notes,
+    }
+
+
+def _motion_dict(m: MeetingMotion) -> dict:
+    return {
+        "id": str(m.id), "meeting_id": str(m.meeting_id),
+        "agenda_item_id": str(m.agenda_item_id) if m.agenda_item_id else None,
+        "motion_type": m.motion_type, "description": m.description,
+        "proposed_by_member_id": str(m.proposed_by_member_id) if m.proposed_by_member_id else None,
+        "seconded_by_member_id": str(m.seconded_by_member_id) if m.seconded_by_member_id else None,
+        "votes_for": m.votes_for, "votes_against": m.votes_against, "votes_abstain": m.votes_abstain,
+        "outcome": m.outcome, "notes": m.notes,
+    }
+
+
+def _nomination_dict(n: AgmNomination) -> dict:
+    return {
+        "id": str(n.id), "meeting_id": str(n.meeting_id), "position_id": str(n.position_id),
+        "candidate_member_id": str(n.candidate_member_id),
+        "nominated_by_member_id": str(n.nominated_by_member_id) if n.nominated_by_member_id else None,
+        "seconded_by_member_id": str(n.seconded_by_member_id) if n.seconded_by_member_id else None,
+        "votes_for": n.votes_for, "status": n.status, "notes": n.notes,
     }
 
 
@@ -288,16 +343,24 @@ async def create_event(session: AsyncSession, org_id, **fields) -> ClubEvent:
     title = (fields.get("title") or "").strip()
     if not title or not fields.get("starts_at"):
         raise ValueError("Title and start time are required")
-    e = ClubEvent(organisation_id=org_id, title=title[:300], event_type=fields.get("event_type") or "other",
-                 starts_at=fields["starts_at"], ends_at=fields.get("ends_at"),
-                 location=fields.get("location"), description=fields.get("description"))
+    e = ClubEvent(
+        organisation_id=org_id, title=title[:300], event_type=fields.get("event_type") or "other",
+        starts_at=fields["starts_at"], ends_at=fields.get("ends_at"),
+        location=fields.get("location"), description=fields.get("description"),
+        is_ticketed=fields.get("is_ticketed") or False,
+        ticket_price_cents=fields.get("ticket_price_cents") or 0,
+        capacity=fields.get("capacity"),
+        registration_deadline=fields.get("registration_deadline"),
+        registration_open=fields.get("registration_open", True),
+    )
     session.add(e)
     await session.flush()
     return e
 
 
 async def update_event(session: AsyncSession, e: ClubEvent, **fields) -> ClubEvent:
-    for f in ("title", "event_type", "starts_at", "ends_at", "location", "description"):
+    for f in ("title", "event_type", "starts_at", "ends_at", "location", "description",
+              "is_ticketed", "ticket_price_cents", "capacity", "registration_deadline", "registration_open"):
         if f in fields and fields[f] is not None:
             setattr(e, f, fields[f])
     return e
@@ -305,3 +368,234 @@ async def update_event(session: AsyncSession, e: ClubEvent, **fields) -> ClubEve
 
 async def delete_event(session: AsyncSession, e: ClubEvent) -> None:
     await session.delete(e)
+
+
+# ─── Agenda templates ─────────────────────────────────────────────────────────
+
+async def list_agenda_templates(session: AsyncSession, org_id) -> list[AgendaTemplate]:
+    stmt = select(AgendaTemplate).where(AgendaTemplate.organisation_id == org_id).order_by(func.lower(AgendaTemplate.name))
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def create_agenda_template(session: AsyncSession, org_id, *, name: str, items: Optional[list] = None) -> AgendaTemplate:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Name is required")
+    existing = (await session.execute(
+        select(AgendaTemplate).where(AgendaTemplate.organisation_id == org_id, func.lower(AgendaTemplate.name) == name.lower())
+    )).scalars().first()
+    if existing is not None:
+        raise ValueError(f'A template called "{name}" already exists')
+    t = AgendaTemplate(organisation_id=org_id, name=name[:200], items=items or [])
+    session.add(t)
+    await session.flush()
+    return t
+
+
+async def update_agenda_template(session: AsyncSession, t: AgendaTemplate, **fields) -> AgendaTemplate:
+    for f in ("name", "items"):
+        if f in fields and fields[f] is not None:
+            setattr(t, f, fields[f])
+    return t
+
+
+async def delete_agenda_template(session: AsyncSession, t: AgendaTemplate) -> None:
+    await session.delete(t)
+
+
+# ─── Committee Meeting Assistant: meetings, attendance, agenda, motions ──────
+
+async def list_meetings(session: AsyncSession, org_id, *, meeting_type: Optional[str] = None) -> list[CommitteeMeeting]:
+    stmt = select(CommitteeMeeting).where(CommitteeMeeting.organisation_id == org_id)
+    if meeting_type:
+        stmt = stmt.where(CommitteeMeeting.meeting_type == meeting_type)
+    stmt = stmt.order_by(CommitteeMeeting.scheduled_at.desc())
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def _apply_agenda_template(session: AsyncSession, meeting: CommitteeMeeting, template: AgendaTemplate) -> None:
+    for pos, item in enumerate(template.items or []):
+        if not isinstance(item, dict) or not (item.get("title") or "").strip():
+            continue
+        session.add(MeetingAgendaItem(
+            meeting_id=meeting.id, title=str(item["title"])[:300],
+            description=item.get("description"), position=pos,
+        ))
+
+
+async def create_meeting(session: AsyncSession, org_id, **fields) -> CommitteeMeeting:
+    title = (fields.get("title") or "").strip()
+    if not title or not fields.get("scheduled_at"):
+        raise ValueError("Title and scheduled time are required")
+    m = CommitteeMeeting(
+        organisation_id=org_id, title=title[:300], meeting_type=fields.get("meeting_type") or "committee",
+        scheduled_at=fields["scheduled_at"], location=fields.get("location"),
+        agenda_template_id=fields.get("agenda_template_id"),
+    )
+    session.add(m)
+    await session.flush()
+    if fields.get("agenda_template_id"):
+        template = await session.get(AgendaTemplate, fields["agenda_template_id"])
+        if template is not None and template.organisation_id == org_id:
+            await _apply_agenda_template(session, m, template)
+            await session.flush()
+    return m
+
+
+async def update_meeting(session: AsyncSession, m: CommitteeMeeting, **fields) -> CommitteeMeeting:
+    for f in ("title", "meeting_type", "scheduled_at", "location", "status", "minutes", "agenda_template_id"):
+        if f in fields and fields[f] is not None:
+            setattr(m, f, fields[f])
+    m.updated_at = func.now()
+    return m
+
+
+async def delete_meeting(session: AsyncSession, m: CommitteeMeeting) -> None:
+    await session.delete(m)
+
+
+async def meeting_detail(session: AsyncSession, org_id, meeting_id) -> dict:
+    """Everything the Committee Meeting Assistant needs for one meeting:
+    agenda, motions, attendance and (for an AGM) nominations — one fetch."""
+    agenda = (await session.execute(
+        select(MeetingAgendaItem).where(MeetingAgendaItem.meeting_id == meeting_id).order_by(MeetingAgendaItem.position)
+    )).scalars().all()
+    motions = (await session.execute(
+        select(MeetingMotion).where(MeetingMotion.meeting_id == meeting_id).order_by(MeetingMotion.created_at)
+    )).scalars().all()
+    attendance = (await session.execute(
+        select(MeetingAttendance, FeeMember.full_name)
+        .join(FeeMember, FeeMember.id == MeetingAttendance.member_id)
+        .where(MeetingAttendance.meeting_id == meeting_id)
+    )).all()
+    nominations = (await session.execute(
+        select(AgmNomination).where(AgmNomination.meeting_id == meeting_id).order_by(AgmNomination.created_at)
+    )).scalars().all()
+    return {
+        "agenda_items": [_agenda_item_dict(i) for i in agenda],
+        "motions": [_motion_dict(mo) for mo in motions],
+        "attendance": [{**_attendance_dict(a), "full_name": name} for a, name in attendance],
+        "nominations": [_nomination_dict(n) for n in nominations],
+    }
+
+
+# ─── Attendance ───────────────────────────────────────────────────────────────
+
+async def set_attendance(session: AsyncSession, meeting_id, entries: list[dict]) -> list[MeetingAttendance]:
+    """Bulk upsert — ``entries`` is [{member_id, status}]. Replaces the whole
+    attendance list for the meeting each call (the UI always sends the full set)."""
+    existing = (await session.execute(
+        select(MeetingAttendance).where(MeetingAttendance.meeting_id == meeting_id)
+    )).scalars().all()
+    by_member = {a.member_id: a for a in existing}
+    out = []
+    seen = set()
+    for entry in entries:
+        member_id = entry["member_id"]
+        seen.add(member_id)
+        row = by_member.get(member_id)
+        if row is None:
+            row = MeetingAttendance(meeting_id=meeting_id, member_id=member_id, status=entry.get("status") or "present")
+            session.add(row)
+        else:
+            row.status = entry.get("status") or "present"
+        out.append(row)
+    for member_id, row in by_member.items():
+        if member_id not in seen:
+            await session.delete(row)
+    await session.flush()
+    return out
+
+
+# ─── Agenda items ─────────────────────────────────────────────────────────────
+
+async def create_agenda_item(session: AsyncSession, meeting_id, **fields) -> MeetingAgendaItem:
+    title = (fields.get("title") or "").strip()
+    if not title:
+        raise ValueError("Title is required")
+    i = MeetingAgendaItem(
+        meeting_id=meeting_id, title=title[:300], description=fields.get("description"),
+        proposed_by_member_id=fields.get("proposed_by_member_id"), position=fields.get("position") or 0,
+    )
+    session.add(i)
+    await session.flush()
+    return i
+
+
+async def update_agenda_item(session: AsyncSession, i: MeetingAgendaItem, **fields) -> MeetingAgendaItem:
+    for f in ("title", "description", "proposed_by_member_id", "position", "status", "outcome_notes"):
+        if f in fields and fields[f] is not None:
+            setattr(i, f, fields[f])
+    return i
+
+
+async def delete_agenda_item(session: AsyncSession, i: MeetingAgendaItem) -> None:
+    await session.delete(i)
+
+
+# ─── Motions ──────────────────────────────────────────────────────────────────
+
+async def create_motion(session: AsyncSession, meeting_id, **fields) -> MeetingMotion:
+    description = (fields.get("description") or "").strip()
+    if not description:
+        raise ValueError("Description is required")
+    m = MeetingMotion(
+        meeting_id=meeting_id, agenda_item_id=fields.get("agenda_item_id"),
+        motion_type=fields.get("motion_type") or "motion", description=description[:2000],
+        proposed_by_member_id=fields.get("proposed_by_member_id"),
+        seconded_by_member_id=fields.get("seconded_by_member_id"),
+    )
+    session.add(m)
+    await session.flush()
+    return m
+
+
+async def update_motion(session: AsyncSession, m: MeetingMotion, **fields) -> MeetingMotion:
+    for f in ("agenda_item_id", "motion_type", "description", "proposed_by_member_id", "seconded_by_member_id",
+              "votes_for", "votes_against", "votes_abstain", "outcome", "notes"):
+        if f in fields and fields[f] is not None:
+            setattr(m, f, fields[f])
+    return m
+
+
+async def delete_motion(session: AsyncSession, m: MeetingMotion) -> None:
+    await session.delete(m)
+
+
+# ─── AGM nominations ──────────────────────────────────────────────────────────
+
+async def create_nomination(session: AsyncSession, org_id, meeting_id, **fields) -> AgmNomination:
+    if not fields.get("position_id") or not fields.get("candidate_member_id"):
+        raise ValueError("Position and candidate are required")
+    n = AgmNomination(
+        organisation_id=org_id, meeting_id=meeting_id, position_id=fields["position_id"],
+        candidate_member_id=fields["candidate_member_id"],
+        nominated_by_member_id=fields.get("nominated_by_member_id"),
+        seconded_by_member_id=fields.get("seconded_by_member_id"),
+        notes=fields.get("notes"),
+    )
+    session.add(n)
+    await session.flush()
+    return n
+
+
+async def update_nomination(session: AsyncSession, org_id, n: AgmNomination, *, meeting: Optional[CommitteeMeeting] = None,
+                            **fields) -> AgmNomination:
+    """Marking a nomination ``elected`` writes a real committee_terms row via
+    start_term() — auto-closing whoever held the position — so the AGM result
+    and the Positions tab's succession history are the same data, not two."""
+    prior_status = n.status
+    for f in ("nominated_by_member_id", "seconded_by_member_id", "votes_for", "status", "notes"):
+        if f in fields and fields[f] is not None:
+            setattr(n, f, fields[f])
+    if n.status == "elected" and prior_status != "elected":
+        candidate = await session.get(FeeMember, n.candidate_member_id)
+        holder_name = candidate.full_name if candidate is not None else "Unknown"
+        started = meeting.scheduled_at.date() if meeting is not None and meeting.scheduled_at else None
+        await start_term(session, org_id, n.position_id, member_id=n.candidate_member_id,
+                         holder_name=holder_name, started_at=started)
+    return n
+
+
+async def delete_nomination(session: AsyncSession, n: AgmNomination) -> None:
+    await session.delete(n)

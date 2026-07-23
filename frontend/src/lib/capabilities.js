@@ -27,6 +27,7 @@ export const CAP = {
   MANAGE_COMMITTEE: 'manage_committee',
   MANAGE_VOLUNTEERS: 'manage_volunteers',
   MANAGE_QUALIFICATIONS: 'manage_qualifications',
+  MANAGE_ASSETS: 'manage_assets',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -57,4 +58,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_COMMITTEE, label: 'Manage committee', hint: 'Positions, terms, task register, documents, club calendar' },
   { key: CAP.MANAGE_VOLUNTEERS, label: 'Manage volunteers', hint: 'Volunteer profiles and hours ledger' },
   { key: CAP.MANAGE_QUALIFICATIONS, label: 'Manage qualifications', hint: 'Accreditations, WWCC, First Aid — with expiry tracking' },
+  { key: CAP.MANAGE_ASSETS, label: 'Manage assets & facilities', hint: 'Club property, grounds/clubhouse bookings, maintenance logs' },
 ]

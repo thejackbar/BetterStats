@@ -10,10 +10,16 @@ const STATUSES = ['todo', 'in_progress', 'done', 'blocked']
 const STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', done: 'Done', blocked: 'Blocked' }
 const DOC_CATEGORIES = ['governance', 'policies', 'constitution', 'insurance', 'grants', 'ground_leases', 'coach_accreditation', 'wwcc', 'risk_assessments', 'other']
 const EVENT_TYPES = ['committee_meeting', 'working_bee', 'registration_day', 'agm', 'awards_night', 'sponsor_function', 'fundraising', 'other']
+const MEETING_TYPES = ['committee', 'agm', 'special_general', 'sub_committee', 'other']
+const MEETING_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled']
+const AGENDA_ITEM_STATUSES = ['proposed', 'discussed', 'carried', 'deferred', 'withdrawn']
+const MOTION_OUTCOMES = ['pending', 'carried', 'lost', 'withdrawn']
+const NOMINATION_STATUSES = ['nominated', 'elected', 'withdrawn', 'not_elected']
+const ATTENDANCE_STATUSES = ['present', 'apology', 'absent']
 const label = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
 
 function TabBar({ tab, setTab }) {
-  const tabs = [['positions', 'Positions'], ['tasks', 'Tasks'], ['documents', 'Documents'], ['calendar', 'Calendar']]
+  const tabs = [['positions', 'Positions'], ['tasks', 'Tasks'], ['documents', 'Documents'], ['calendar', 'Calendar'], ['meetings', 'Meetings & AGM']]
   return (
     <div className="flex gap-1 mb-5">
       {tabs.map(([k, l]) => (
@@ -376,6 +382,405 @@ function CalendarTab() {
   )
 }
 
+// ── Meetings & AGM tab (Committee Meeting Assistant) ────────────────────────
+function AgendaTemplatesPanel({ templates, onChanged }) {
+  const toast = useToast()
+  const [form, setForm] = useState({ name: '', items: [] })
+  const [itemDraft, setItemDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  function addItem() {
+    if (!itemDraft.trim()) return
+    setForm(f => ({ ...f, items: [...f.items, { title: itemDraft.trim() }] }))
+    setItemDraft('')
+  }
+  async function submit() {
+    if (!form.name.trim() || form.items.length === 0) return
+    setBusy(true)
+    try {
+      await api.committeeCreateAgendaTemplate(form)
+      setForm({ name: '', items: [] })
+      onChanged()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function remove(t) {
+    if (!confirm(`Delete template "${t.name}"?`)) return
+    try { await api.committeeDeleteAgendaTemplate(t.id); onChanged() } catch (e) { toast.error(e.message) }
+  }
+
+  return (
+    <div className="pb-card p-4 mb-4">
+      <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">AGENDA TEMPLATES</div>
+      <p className="font-mono text-[10px] text-pb-faintest mb-2 leading-relaxed">
+        A saved agenda shape — pick one when creating a meeting to copy its items straight onto the new meeting's agenda.
+      </p>
+      {templates.length > 0 && (
+        <div className="space-y-1.5 mb-3">
+          {templates.map(t => (
+            <div key={t.id} className="flex items-center justify-between gap-2 bg-pb-surface2/40 border pb-hairline rounded px-3 py-2">
+              <div>
+                <span className="text-pb-text text-sm">{t.name}</span>
+                <span className="font-mono text-[10px] text-pb-faint ml-2">{t.items.length} item{t.items.length === 1 ? '' : 's'}</span>
+              </div>
+              <button onClick={() => remove(t)} className="font-mono text-[10px] text-pb-faint hover:text-pb-red shrink-0">Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <input className={`${inp} mb-2`} placeholder="New template name (e.g. Standard committee meeting)" value={form.name}
+        onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+      <div className="flex flex-wrap gap-1 mb-2">
+        {form.items.map((it, idx) => (
+          <span key={idx} className="font-mono text-[10px] border pb-hairline rounded px-1.5 py-0.5 text-pb-dim flex items-center gap-1">
+            {it.title}
+            <button onClick={() => setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))} className="text-pb-faintest hover:text-pb-red">✕</button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input className={`${inp} flex-1`} placeholder="Agenda item title, press Enter" value={itemDraft} onChange={e => setItemDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }} />
+        <button onClick={addItem} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Add item</button>
+        <button onClick={submit} disabled={busy || !form.name.trim() || form.items.length === 0}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'SAVING…' : '+ TEMPLATE'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function NewMeetingForm({ templates, onCreated }) {
+  const toast = useToast()
+  const [form, setForm] = useState({ title: '', meeting_type: 'committee', scheduled_at: '', location: '', agenda_template_id: '' })
+  const [busy, setBusy] = useState(false)
+  async function submit() {
+    if (!form.title.trim() || !form.scheduled_at) return
+    setBusy(true)
+    try {
+      await api.committeeCreateMeeting({
+        ...form, scheduled_at: new Date(form.scheduled_at).toISOString(),
+        agenda_template_id: form.agenda_template_id || null,
+      })
+      setForm({ title: '', meeting_type: 'committee', scheduled_at: '', location: '', agenda_template_id: '' })
+      onCreated()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="pb-card p-4 mb-4">
+      <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">NEW MEETING</div>
+      <div className="flex flex-wrap gap-2">
+        <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Title (e.g. July committee meeting)" value={form.title}
+          onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+        <select className={`${inp} w-44`} value={form.meeting_type} onChange={e => setForm(f => ({ ...f, meeting_type: e.target.value }))}>
+          {MEETING_TYPES.map(t => <option key={t} value={t}>{label(t)}</option>)}
+        </select>
+        <input type="datetime-local" className={`${inp} w-56`} value={form.scheduled_at} onChange={e => setForm(f => ({ ...f, scheduled_at: e.target.value }))} />
+        <input className={`${inp} w-40`} placeholder="Location" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
+        <select className={`${inp} w-56`} value={form.agenda_template_id} onChange={e => setForm(f => ({ ...f, agenda_template_id: e.target.value }))}>
+          <option value="">No agenda template</option>
+          {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <button onClick={submit} disabled={busy || !form.title.trim() || !form.scheduled_at}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'CREATING…' : '+ MEETING'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MeetingDetail({ meeting, members, positions, onChanged }) {
+  const toast = useToast()
+  const [detail, setDetail] = useState(null)
+  const [minutes, setMinutes] = useState('')
+  const [status, setStatus] = useState(meeting.status)
+  const [savingMeta, setSavingMeta] = useState(false)
+  const [newItem, setNewItem] = useState({ title: '', description: '' })
+  const [newMotion, setNewMotion] = useState({ description: '', motion_type: 'motion' })
+  const [newNom, setNewNom] = useState({ position_id: '', candidate_member_id: '' })
+  const [attendance, setAttendance] = useState({})
+
+  const load = useCallback(() => {
+    api.committeeGetMeeting(meeting.id).then(d => {
+      setDetail(d)
+      setMinutes(d.minutes || '')
+      setStatus(d.status)
+      const att = {}
+      for (const a of d.attendance || []) att[a.member_id] = a.status
+      setAttendance(att)
+    }).catch(e => toast.error(e.message))
+  }, [meeting.id, toast])
+  useEffect(() => { load() }, [load])
+
+  async function saveMeta() {
+    setSavingMeta(true)
+    try {
+      await api.committeeUpdateMeeting(meeting.id, { minutes, status })
+      toast.success('Saved'); onChanged()
+    } catch (e) { toast.error(e.message) } finally { setSavingMeta(false) }
+  }
+
+  async function saveAttendance() {
+    const entries = Object.entries(attendance).map(([member_id, st]) => ({ member_id, status: st }))
+    try { await api.committeeSetAttendance(meeting.id, entries); toast.success('Attendance saved') } catch (e) { toast.error(e.message) }
+  }
+
+  async function addAgendaItem() {
+    if (!newItem.title.trim()) return
+    try {
+      await api.committeeCreateAgendaItem(meeting.id, { ...newItem, position: (detail?.agenda_items?.length || 0) })
+      setNewItem({ title: '', description: '' }); load()
+    } catch (e) { toast.error(e.message) }
+  }
+  async function setItemStatus(item, itemStatus) {
+    try { await api.committeeUpdateAgendaItem(meeting.id, item.id, { status: itemStatus }); load() } catch (e) { toast.error(e.message) }
+  }
+  async function removeItem(item) {
+    if (!confirm(`Remove agenda item "${item.title}"?`)) return
+    try { await api.committeeDeleteAgendaItem(meeting.id, item.id); load() } catch (e) { toast.error(e.message) }
+  }
+
+  async function addMotion() {
+    if (!newMotion.description.trim()) return
+    try {
+      await api.committeeCreateMotion(meeting.id, newMotion)
+      setNewMotion({ description: '', motion_type: 'motion' }); load()
+    } catch (e) { toast.error(e.message) }
+  }
+  async function setMotionOutcome(motion, outcome) {
+    try { await api.committeeUpdateMotion(meeting.id, motion.id, { outcome }); load() } catch (e) { toast.error(e.message) }
+  }
+  async function removeMotion(motion) {
+    if (!confirm('Remove this motion?')) return
+    try { await api.committeeDeleteMotion(meeting.id, motion.id); load() } catch (e) { toast.error(e.message) }
+  }
+
+  async function addNomination() {
+    if (!newNom.position_id || !newNom.candidate_member_id) return
+    try {
+      await api.committeeCreateNomination(meeting.id, newNom)
+      setNewNom({ position_id: '', candidate_member_id: '' }); load()
+    } catch (e) { toast.error(e.message) }
+  }
+  async function setNominationStatus(nom, nomStatus) {
+    if (nomStatus === 'elected' && !confirm('Mark elected? This starts a new committee term for this position, ending whoever currently holds it.')) return
+    try { await api.committeeUpdateNomination(meeting.id, nom.id, { status: nomStatus }); toast.success(nomStatus === 'elected' ? 'Elected — term started' : 'Updated'); load() } catch (e) { toast.error(e.message) }
+  }
+  async function removeNomination(nom) {
+    if (!confirm('Remove this nomination?')) return
+    try { await api.committeeDeleteNomination(meeting.id, nom.id); load() } catch (e) { toast.error(e.message) }
+  }
+
+  const memberName = (id) => members.find(m => m.member_id === id)?.full_name || '—'
+  const positionName = (id) => positions.find(p => p.id === id)?.name || '—'
+
+  if (detail === null) return <PbSpinner message="Loading meeting…" />
+  return (
+    <div className="border-t pb-hairline-t px-4 py-3 space-y-4">
+      <style>{'@media print { body * { visibility: hidden; } #meeting-print-area, #meeting-print-area * { visibility: visible; } #meeting-print-area { position: absolute; left: 0; top: 0; width: 100%; } .no-print { display: none !important; } }'}</style>
+      <div className="flex flex-wrap items-center gap-2 no-print">
+        <select className={`${inp} w-44`} value={status} onChange={e => setStatus(e.target.value)}>
+          {MEETING_STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}
+        </select>
+        <button onClick={saveMeta} disabled={savingMeta}
+          className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+          {savingMeta ? 'SAVING…' : 'SAVE'}
+        </button>
+        <button onClick={() => window.print()} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-dim hover:text-pb-text ml-auto">
+          Print minutes / agenda
+        </button>
+      </div>
+
+      <div id="meeting-print-area">
+        <div className="mb-2">
+          <div className="font-display font-bold text-lg text-pb-text">{meeting.title}</div>
+          <div className="font-mono text-[10px] text-pb-faint">{new Date(meeting.scheduled_at).toLocaleString()} · {label(meeting.meeting_type)}{meeting.location ? ` · ${meeting.location}` : ''}</div>
+        </div>
+
+        <div className="no-print">
+          <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">MINUTES</div>
+          <textarea className={`${inp} h-28 mb-3`} placeholder="Minutes…" value={minutes} onChange={e => setMinutes(e.target.value)} />
+        </div>
+        {status === 'completed' && minutes && (
+          <div className="hidden print:block mb-3 text-sm text-pb-text whitespace-pre-wrap">{minutes}</div>
+        )}
+
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">ATTENDANCE</div>
+        <div className="flex flex-wrap gap-2 mb-1.5 no-print">
+          {members.map(m => (
+            <label key={m.member_id} className="flex items-center gap-1 font-mono text-[10px] text-pb-dim border pb-hairline rounded px-1.5 py-1">
+              {m.full_name}
+              <select className="bg-pb-surface2 text-pb-text text-[9px] border-none focus:outline-none"
+                value={attendance[m.member_id] || ''} onChange={e => setAttendance(a => ({ ...a, [m.member_id]: e.target.value }))}>
+                <option value="">—</option>
+                {ATTENDANCE_STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}
+              </select>
+            </label>
+          ))}
+        </div>
+        <button onClick={saveAttendance} className="font-mono text-[10px] text-pb-faint hover:text-pb-text mb-3 no-print">Save attendance</button>
+        <div className="hidden print:block text-[12px] text-pb-text mb-3">
+          {(detail.attendance || []).length === 0 ? 'No attendance recorded.' :
+            detail.attendance.map(a => `${a.full_name} (${label(a.status)})`).join(', ')}
+        </div>
+
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5 mt-3">AGENDA</div>
+        <div className="space-y-1.5 mb-2">
+          {(detail.agenda_items || []).length === 0 && <div className="font-mono text-[10px] text-pb-faintest">No agenda items yet.</div>}
+          {(detail.agenda_items || []).map(item => (
+            <div key={item.id} className="pb-card px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-pb-text text-[13px]">{item.title}</div>
+                <span className={`font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border pb-hairline ${item.status === 'carried' ? 'text-pb-accent' : 'text-pb-faint'}`}>{label(item.status)}</span>
+              </div>
+              {item.description && <div className="text-pb-faint text-[11px] mt-0.5">{item.description}</div>}
+              <div className="flex gap-1 mt-1 no-print">
+                {AGENDA_ITEM_STATUSES.filter(s => s !== item.status).map(s => (
+                  <button key={s} onClick={() => setItemStatus(item, s)} className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">{label(s)}</button>
+                ))}
+                <button onClick={() => removeItem(item)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 mb-3 no-print">
+          <input className={`${inp} flex-1`} placeholder="New agenda item" value={newItem.title} onChange={e => setNewItem(f => ({ ...f, title: e.target.value }))} />
+          <button onClick={addAgendaItem} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ Item</button>
+        </div>
+
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5 mt-3">MOTIONS</div>
+        <div className="space-y-1.5 mb-2">
+          {(detail.motions || []).length === 0 && <div className="font-mono text-[10px] text-pb-faintest">No motions recorded.</div>}
+          {(detail.motions || []).map(m => (
+            <div key={m.id} className="pb-card px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-pb-text text-[13px]">{m.description}</div>
+                <span className={`font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border ${m.outcome === 'carried' ? 'text-pb-accent border-pb-accent/40' : m.outcome === 'lost' ? 'text-pb-red border-pb-red/40' : 'text-pb-faint pb-hairline'}`}>{label(m.outcome)}</span>
+              </div>
+              <div className="flex gap-1 mt-1 no-print">
+                {MOTION_OUTCOMES.filter(o => o !== m.outcome).map(o => (
+                  <button key={o} onClick={() => setMotionOutcome(m, o)} className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">{label(o)}</button>
+                ))}
+                <button onClick={() => removeMotion(m)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 mb-3 no-print">
+          <input className={`${inp} flex-1`} placeholder="New motion wording" value={newMotion.description} onChange={e => setNewMotion(f => ({ ...f, description: e.target.value }))} />
+          <button onClick={addMotion} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ Motion</button>
+        </div>
+
+        {meeting.meeting_type === 'agm' && (
+          <>
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5 mt-3">AGM NOMINATIONS</div>
+            <div className="space-y-1.5 mb-2">
+              {(detail.nominations || []).length === 0 && <div className="font-mono text-[10px] text-pb-faintest">No nominations recorded.</div>}
+              {(detail.nominations || []).map(n => (
+                <div key={n.id} className="pb-card px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-pb-text text-[13px]">{memberName(n.candidate_member_id)} — {positionName(n.position_id)}</div>
+                    <span className={`font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border ${n.status === 'elected' ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint pb-hairline'}`}>{label(n.status)}</span>
+                  </div>
+                  <div className="flex gap-1 mt-1 no-print">
+                    {NOMINATION_STATUSES.filter(s => s !== n.status).map(s => (
+                      <button key={s} onClick={() => setNominationStatus(n, s)} className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">{label(s)}</button>
+                    ))}
+                    <button onClick={() => removeNomination(n)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 no-print">
+              <select className={`${inp} flex-1 min-w-[140px]`} value={newNom.position_id} onChange={e => setNewNom(f => ({ ...f, position_id: e.target.value }))}>
+                <option value="">Position…</option>
+                {positions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <select className={`${inp} flex-1 min-w-[140px]`} value={newNom.candidate_member_id} onChange={e => setNewNom(f => ({ ...f, candidate_member_id: e.target.value }))}>
+                <option value="">Candidate…</option>
+                {members.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+              </select>
+              <button onClick={addNomination} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ Nominate</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MeetingRow({ meeting, members, positions, onChanged }) {
+  const toast = useToast()
+  const [expanded, setExpanded] = useState(false)
+  async function remove() {
+    if (!confirm(`Delete meeting "${meeting.title}"?`)) return
+    try { await api.committeeDeleteMeeting(meeting.id); onChanged() } catch (e) { toast.error(e.message) }
+  }
+  return (
+    <div className="pb-card">
+      <button onClick={() => setExpanded(x => !x)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-pb-surface2 transition text-left">
+        <div>
+          <div className="text-pb-text font-semibold text-sm">{meeting.title}</div>
+          <div className="font-mono text-[10px] text-pb-faint mt-0.5">
+            {new Date(meeting.scheduled_at).toLocaleString()} · {label(meeting.meeting_type)}{meeting.location ? ` · ${meeting.location}` : ''}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-1.5 py-0.5 text-pb-faint">{label(meeting.status)}</span>
+          <span onClick={(e) => { e.stopPropagation(); remove() }} className="font-mono text-[10px] text-pb-faintest hover:text-pb-red">✕</span>
+          <span className="font-mono text-[9px] text-pb-faintest">{expanded ? '▾' : '▸'}</span>
+        </div>
+      </button>
+      {expanded && <MeetingDetail meeting={meeting} members={members} positions={positions} onChanged={onChanged} />}
+    </div>
+  )
+}
+
+function MeetingsTab() {
+  const toast = useToast()
+  const [meetings, setMeetings] = useState(null)
+  const [templates, setTemplates] = useState([])
+  const [members, setMembers] = useState([])
+  const [positions, setPositions] = useState([])
+
+  const load = useCallback(() => {
+    api.committeeListMeetings().then(d => setMeetings(d.meetings || [])).catch(e => toast.error(e.message))
+  }, [toast])
+  const loadTemplates = useCallback(() => {
+    api.committeeListAgendaTemplates().then(d => setTemplates(d.templates || [])).catch(e => toast.error(e.message))
+  }, [toast])
+
+  useEffect(() => {
+    load()
+    loadTemplates()
+    api.committeeListPositions().then(d => setPositions(d.positions || [])).catch(() => {})
+    api.adminListSeasons().then(seas => {
+      const sorted = (seas || []).filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0))
+      if (sorted[0]) api.feeListMembers(sorted[0].id).then(d => setMembers(d.members || [])).catch(() => {})
+    }).catch(() => {})
+  }, [load, loadTemplates])
+
+  if (meetings === null) return <PbSpinner message="Loading meetings…" />
+  return (
+    <div>
+      <p className="font-mono text-[10px] text-pb-faintest mb-3 leading-relaxed">
+        Regular committee meetings and the AGM share the same tool — an AGM meeting also gets a Nominations section where
+        marking a candidate "elected" starts a real committee term for that position.
+      </p>
+      <AgendaTemplatesPanel templates={templates} onChanged={loadTemplates} />
+      <NewMeetingForm templates={templates} onCreated={load} />
+      {meetings.length === 0 ? (
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No meetings yet — create one above.</div>
+      ) : (
+        <div className="space-y-2">
+          {meetings.map(m => <MeetingRow key={m.id} meeting={m} members={members} positions={positions} onChanged={load} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AdminCommittee() {
   const [tab, setTab] = useState('positions')
   return (
@@ -383,13 +788,14 @@ export default function AdminCommittee() {
       <div className="max-w-4xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Committee Administration</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Positions and succession history, the task register, a document index, and the club calendar.
+          Positions and succession history, the task register, a document index, the club calendar, and meetings/AGM.
         </p>
         <TabBar tab={tab} setTab={setTab} />
         {tab === 'positions' && <PositionsTab />}
         {tab === 'tasks' && <TasksTab />}
         {tab === 'documents' && <DocumentsTab />}
         {tab === 'calendar' && <CalendarTab />}
+        {tab === 'meetings' && <MeetingsTab />}
       </div>
     </AdminLayout>
   )

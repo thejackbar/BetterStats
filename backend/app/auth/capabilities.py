@@ -48,6 +48,7 @@ MANAGE_CRM = "manage_crm"                     # BetterCRM: deals/pipeline, conta
 MANAGE_COMMITTEE = "manage_committee"         # Committee positions/terms, task register, documents, club calendar
 MANAGE_VOLUNTEERS = "manage_volunteers"       # Volunteer profiles + hours ledger
 MANAGE_QUALIFICATIONS = "manage_qualifications"  # Qualification types + member qualifications/expiry
+MANAGE_ASSETS = "manage_assets"               # Club assets, facilities, bookings, maintenance logs
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -76,6 +77,7 @@ ALL_CAPABILITIES = (
     MANAGE_COMMITTEE,
     MANAGE_VOLUNTEERS,
     MANAGE_QUALIFICATIONS,
+    MANAGE_ASSETS,
 )
 
 
