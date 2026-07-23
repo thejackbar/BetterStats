@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.db import Organisation, FeeMemberSeason, FeePayment, MerchOrder
+from app.models.db import Organisation, FeeMemberSeason, FeePayment, MerchOrder, EventRegistration
 from app.services import merch_store
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,39 @@ async def handle_checkout_completed(db: AsyncSession, data_object, account_id: s
     purpose = metadata.get("purpose") or "fee_payment"
     if purpose == "merch_order":
         await _handle_merch_checkout_completed(db, data_object, account_id)
+    elif purpose == "event_registration":
+        await _handle_event_checkout_completed(db, data_object, account_id)
     else:
         await _handle_fee_checkout_completed(db, data_object, account_id)
+
+
+async def _handle_event_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:
+    """Marks the matching EventRegistration paid. Idempotent — a replayed
+    webhook for an already-paid registration is a no-op."""
+    metadata = data_object.get("metadata") or {}
+    registration_id = metadata.get("registration_id")
+    org_id = metadata.get("org_id")
+    payment_intent_id = data_object.get("payment_intent")
+    if not (registration_id and org_id):
+        logger.warning("stripe_connect event checkout.session.completed missing metadata: %s", metadata)
+        return
+
+    org = await _load_org_by_account(db, account_id)
+    if org is None or str(org.id) != str(org_id):
+        logger.warning("stripe_connect event checkout for account %s doesn't match org %s", account_id, org_id)
+        return
+
+    registration = await db.get(EventRegistration, uuid.UUID(registration_id))
+    if registration is None or registration.organisation_id != org.id:
+        logger.warning("stripe_connect event checkout: registration %s not found for org %s", registration_id, org_id)
+        return
+    if registration.payment_status == "paid":
+        return
+
+    registration.payment_status = "paid"
+    registration.stripe_checkout_session_id = data_object.get("id")
+    registration.stripe_payment_intent_id = payment_intent_id
+    await db.commit()
 
 
 async def _handle_merch_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:

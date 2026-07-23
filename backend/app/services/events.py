@@ -4,14 +4,15 @@ The ClubEvent calendar CRUD itself (create/update/delete an event, including
 the ticketing fields) lives in services/committee.py alongside the rest of
 the Club Calendar — this file is just the registration/capacity layer on top.
 
-Per the migration 177 docstring: the per-club Square connection (BetterMerch)
-was authorised with READ-ONLY OAuth scopes (ITEMS_READ/INVENTORY_READ/
-ORDERS_READ) — creating a Square Payment Link needs PAYMENTS_WRITE/
-ORDERS_WRITE, which would force every already-connected club to re-authorise.
-That's real follow-on work, not done here. A priced event's registration
-lands ``awaiting_payment`` and an admin marks it ``paid`` once they've
-reconciled the payment by hand — the same posture BetterFees already uses
-for bank-statement reconciliation.
+A priced registration is created here at ``awaiting_payment`` regardless —
+routers/events.py::public_register decides on top of that whether to mint a
+real Stripe Connect Checkout Session (club has connected Stripe, see
+migration 178/180) or leave it for manual reconciliation (club hasn't). Per
+the migration 177 docstring, Square is NOT wired up for this: the per-club
+Square connection (BetterMerch) was authorised with READ-ONLY OAuth scopes
+(ITEMS_READ/INVENTORY_READ/ORDERS_READ) — creating a Square Payment Link
+needs PAYMENTS_WRITE/ORDERS_WRITE, which would force every already-connected
+club to re-authorise. That's real follow-on work, not done here.
 """
 from __future__ import annotations
 

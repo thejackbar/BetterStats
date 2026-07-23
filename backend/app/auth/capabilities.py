@@ -49,6 +49,7 @@ MANAGE_COMMITTEE = "manage_committee"         # Committee positions/terms, task 
 MANAGE_VOLUNTEERS = "manage_volunteers"       # Volunteer profiles + hours ledger
 MANAGE_QUALIFICATIONS = "manage_qualifications"  # Qualification types + member qualifications/expiry
 MANAGE_ASSETS = "manage_assets"               # Club assets, facilities, bookings, maintenance logs
+MANAGE_CLUB_DIARY = "manage_club_diary"       # Annual/recurring compliance & maintenance task calendar
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -78,6 +79,7 @@ ALL_CAPABILITIES = (
     MANAGE_VOLUNTEERS,
     MANAGE_QUALIFICATIONS,
     MANAGE_ASSETS,
+    MANAGE_CLUB_DIARY,
 )
 
 

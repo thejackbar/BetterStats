@@ -8,8 +8,11 @@ by design (a prospective attendee has no login) and are keyed directly off
 the event's UUID, the same posture the rest of this codebase uses for
 unguessable-id public views (e.g. the public scorecard).
 
-See services/events.py for why a priced event has no online payment
-collection yet.
+Priced-event checkout reuses the SAME per-club Stripe Connect account the
+member portal and merch storefront use — see public_register below. A club
+that hasn't connected Stripe yet keeps the original manual-reconciliation
+behaviour (registration lands `awaiting_payment`, the club follows up by
+hand) unchanged.
 """
 from __future__ import annotations
 
@@ -20,11 +23,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import User, Organisation, ClubEvent, EventRegistration, get_db
 from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_COMMITTEE
 from app.services import committee as committee_service
 from app.services import events as events_service
+from app.services import stripe_connect_client
 
 router = APIRouter(prefix="/club-admin/events", tags=["club-admin-events"])
 public_router = APIRouter(prefix="/public/events", tags=["public-events"])
@@ -142,6 +147,14 @@ class PublicRegistrationCreate(BaseModel):
 
 @public_router.post("/{event_id}/register")
 async def public_register(event_id: str, data: PublicRegistrationCreate, db: AsyncSession = Depends(get_db)):
+    """Creates the registration, then — only when the event is priced AND
+    the club's Stripe Connect account has charges_enabled — mints a
+    Checkout Session and returns its URL instead of a plain confirmation.
+    Commits exactly once at the end: reading `r.id`/`r.amount_cents` after
+    an earlier commit would risk the async "expired attribute" trap this
+    codebase has hit before (see routers/public_merch_store.py's checkout
+    endpoint for the same fix), so everything needed is read before the
+    only commit."""
     try:
         eid = uuid.UUID(event_id)
     except ValueError:
@@ -153,8 +166,34 @@ async def public_register(event_id: str, data: PublicRegistrationCreate, db: Asy
         r = await events_service.create_registration(db, e, **data.model_dump())
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err))
+
+    if r.amount_cents <= 0:
+        await db.commit()
+        return {"id": str(r.id), "full_name": r.full_name, "quantity": r.quantity,
+                "amount_cents": r.amount_cents, "payment_status": r.payment_status}
+
+    org = await db.get(Organisation, e.organisation_id)
+    if not org or not org.stripe_connect_account_id or not org.stripe_connect_charges_enabled:
+        # Club hasn't connected Stripe — keep the original manual-reconciliation
+        # behaviour, unchanged.
+        await db.commit()
+        return {"id": str(r.id), "full_name": r.full_name, "quantity": r.quantity,
+                "amount_cents": r.amount_cents, "payment_status": r.payment_status}
+
+    registration_id, amount_cents = r.id, r.amount_cents
+    success_url = f"{settings.public_base_url}/events/{e.id}?paid=1"
+    cancel_url = f"{settings.public_base_url}/events/{e.id}?paid=0"
+    try:
+        checkout_session = await stripe_connect_client.create_event_checkout_session(
+            connected_account_id=org.stripe_connect_account_id, registration_id=str(registration_id),
+            org_id=str(org.id), description=e.title, amount_cents=amount_cents,
+            success_url=success_url, cancel_url=cancel_url,
+        )
+    except stripe_connect_client.StripeNotConfigured:
+        await db.commit()
+        return {"id": str(r.id), "full_name": r.full_name, "quantity": r.quantity,
+                "amount_cents": r.amount_cents, "payment_status": r.payment_status}
+
+    r.stripe_checkout_session_id = checkout_session.id
     await db.commit()
-    return {
-        "id": str(r.id), "full_name": r.full_name, "quantity": r.quantity,
-        "amount_cents": r.amount_cents, "payment_status": r.payment_status,
-    }
+    return {"id": str(registration_id), "checkout_url": checkout_session.url}

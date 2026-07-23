@@ -224,8 +224,8 @@ export default function AdminEvents() {
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Events & Ticketing</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
           Working bees, fundraisers, sponsor functions — with registration, capacity and a QR-shareable public sign-up
-          link. Priced events aren't charged online yet — a registration lands "awaiting payment" and the club follows
-          up to reconcile it, the same way match fees are reconciled by hand.
+          link. A priced event charges online automatically once Stripe is connected (Member Portal page) — until
+          then, a registration lands "awaiting payment" and the club follows up to reconcile it by hand.
         </p>
         <NewEventForm onCreated={load} />
         {events.length === 0 ? (

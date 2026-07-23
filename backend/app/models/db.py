@@ -2670,9 +2670,12 @@ class AgmNomination(Base):
 
 class EventRegistration(Base):
     """A ticket/RSVP against a ClubEvent. ``payment_status`` 'free' (no
-    charge) | 'awaiting_payment' (a priced event, reconciled by hand — see
-    the migration docstring on why there's no online payment collection
-    yet) | 'paid' (an admin has marked it reconciled) | 'cancelled'."""
+    charge) | 'awaiting_payment' (a priced event whose club hasn't connected
+    Stripe yet, or a manually-recorded phone/in-person RSVP — reconciled by
+    hand) | 'paid' (Stripe Connect checkout confirmed, or an admin marked it
+    reconciled) | 'cancelled'. See migration 180 + services/events.py for
+    the Stripe Connect checkout path (same per-club connected account the
+    member portal and merch storefront use)."""
     __tablename__ = "event_registrations"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2685,6 +2688,8 @@ class EventRegistration(Base):
     amount_cents = Column(Integer, nullable=False, server_default="0", default=0)
     payment_status = Column(Text, nullable=False, server_default="free", default="free")
     notes = Column(Text, nullable=True)
+    stripe_checkout_session_id = Column(Text, nullable=True)
+    stripe_payment_intent_id = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -2755,6 +2760,82 @@ class MaintenanceLog(Base):
     performed_by = Column(Text, nullable=True)
     next_due_date = Column(Date, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── Club Diary (migration 181) — annual/recurring compliance & maintenance
+# task calendar ────────────────────────────────────────────────────────────
+# A definition/occurrence split, NOT a retrofit of Committee Administration's
+# committee_tasks — that table is one mutable row per task with no per-period
+# trail, whereas the whole point here is "what did we do about this exact
+# recurring task last year, and the year before." See the migration 181
+# docstring and services/club_diary.py for the full reasoning.
+
+DIARY_TASK_FREQUENCIES = ("annual", "quarterly", "once")
+DIARY_TASK_STATUSES = ("pending", "in_progress", "done", "not_applicable")
+
+
+class DiaryCategory(Base):
+    """Club-defined grouping for diary tasks (Compliance, Tax, Ground &
+    Equipment, whatever the club calls it) — deliberately NOT the fixed
+    category list committee_tasks uses."""
+    __tablename__ = "club_diary_categories"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_club_diary_categories_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DiaryTaskDefinition(Base):
+    """The recurring task itself — title, how often, a suggested month,
+    and a default assignee (a committee POSITION, so responsibility
+    transfers automatically as terms change, or a specific member as a
+    fallback). Archived (is_active=False) rather than deleted so its
+    occurrence history is never lost."""
+    __tablename__ = "club_diary_task_definitions"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "title", name="uq_club_diary_definitions_org_title"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_categories.id", ondelete="SET NULL"), nullable=True)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    frequency = Column(Text, nullable=False, server_default="annual", default="annual")
+    default_month = Column(Integer, nullable=True)  # 1-12, a suggestion only
+    default_assignee_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    default_assignee_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DiaryTaskOccurrence(Base):
+    """One period's instance of a definition — 'period_label' is a plain
+    string ("2026" for annual/once, "2026 Q1" for quarterly) rather than
+    separate year/quarter columns, so every frequency shares one row shape.
+    Querying every occurrence for one definition, newest period first, IS
+    the task's history."""
+    __tablename__ = "club_diary_task_occurrences"
+    __table_args__ = (
+        UniqueConstraint("definition_id", "period_label", name="uq_club_diary_occurrence_period"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
+    period_label = Column(Text, nullable=False)
+    due_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    assigned_to_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────

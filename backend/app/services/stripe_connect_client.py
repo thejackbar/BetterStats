@@ -160,6 +160,34 @@ async def create_merch_checkout_session(*, connected_account_id: str, order_id: 
     )
 
 
+async def create_event_checkout_session(*, connected_account_id: str, registration_id: str, org_id: str,
+                                        description: str, amount_cents: int,
+                                        success_url: str, cancel_url: str):
+    """A one-off Checkout Session for a priced event registration — same
+    connected account fee payments and merch checkout use. ``metadata.
+    registration_id`` is how the webhook finds the pending EventRegistration
+    row to mark paid (see services/events.py)."""
+    _require_configured()
+    if amount_cents <= 0:
+        raise ValueError("amount_cents must be positive")
+    return await stripe.checkout.Session.create_async(
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": settings.stripe_currency,
+                "product_data": {"name": description[:250]},
+                "unit_amount": amount_cents,
+                "tax_behavior": "exclusive",
+            },
+            "quantity": 1,
+        }],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"purpose": "event_registration", "org_id": str(org_id), "registration_id": str(registration_id)},
+        stripe_account=connected_account_id,
+    )
+
+
 def construct_connect_webhook_event(payload: bytes, sig_header: str):
     """Verifies the Stripe-Signature header against the Connect endpoint's
     OWN signing secret (distinct from the platform-billing webhook's

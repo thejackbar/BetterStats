@@ -2,11 +2,12 @@
 //
 // Reached via a link shared by the club (/events/:eventId — the event's own
 // UUID is the "token", same unguessable-id posture the rest of this codebase
-// uses for public views keyed off a random id). No online payment collection
-// yet (see services/events.py) — a priced event's registration is recorded
-// `awaiting_payment` and the club follows up to collect payment by hand.
+// uses for public views keyed off a random id). A priced event redirects to
+// a Stripe Connect checkout when the club has connected Stripe (same
+// per-club account the member portal/merch storefront use); otherwise the
+// registration lands `awaiting_payment` for the club to follow up by hand.
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 
 function money(cents) {
@@ -15,11 +16,13 @@ function money(cents) {
 
 export default function PublicEventRegister() {
   const { eventId } = useParams()
+  const [searchParams] = useSearchParams()
   const [event, setEvent] = useState(null)
   const [error, setError] = useState('')
   const [form, setForm] = useState({ full_name: '', email: '', phone: '', quantity: 1 })
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(null)
+  const paidParam = searchParams.get('paid')
 
   const load = useCallback(() => {
     api.publicEventGet(eventId).then(setEvent).catch(e => setError(e.message || 'Event not found'))
@@ -31,6 +34,7 @@ export default function PublicEventRegister() {
     setBusy(true); setError('')
     try {
       const r = await api.publicEventRegister(eventId, form)
+      if (r.checkout_url) { window.location.assign(r.checkout_url); return }
       setDone(r)
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
@@ -66,6 +70,17 @@ export default function PublicEventRegister() {
           )}
         </div>
         {event.description && <p className="text-pb-dim text-sm text-center mb-6">{event.description}</p>}
+
+        {paidParam === '1' && (
+          <div className="rounded-lg px-3.5 py-2.5 mb-4 text-sm text-center" style={{ background: 'color-mix(in srgb, var(--pb-positive) 12%, transparent)', color: 'var(--pb-positive)', border: '1px solid color-mix(in srgb, var(--pb-positive) 35%, transparent)' }}>
+            Payment received — thanks, see you there!
+          </div>
+        )}
+        {paidParam === '0' && (
+          <div className="rounded-lg px-3.5 py-2.5 mb-4 text-sm text-center" style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', color: 'var(--pb-amber)', border: '1px solid color-mix(in srgb, var(--pb-amber) 35%, transparent)' }}>
+            Checkout cancelled — nothing was charged. You can register again below.
+          </div>
+        )}
 
         {done ? (
           <div className="pb-card p-5 text-center">

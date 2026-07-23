@@ -15,7 +15,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
-    stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store
+    stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
+    club_diary
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -3515,6 +3516,71 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_merch_order_items_order ON merch_order_items(order_id)"
         ))
 
+    # Migration 180: Event registration Stripe Connect payment fields.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS stripe_checkout_session_id TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT"
+        ))
+
+    # Migration 181: Club Diary — annual/recurring compliance & maintenance
+    # task calendar. See services/club_diary.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_diary_categories (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_diary_categories_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_diary_task_definitions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                category_id UUID REFERENCES club_diary_categories(id) ON DELETE SET NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                frequency TEXT NOT NULL DEFAULT 'annual',
+                default_month INTEGER,
+                default_assignee_position_id UUID REFERENCES committee_positions(id) ON DELETE SET NULL,
+                default_assignee_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_diary_definitions_org_title UNIQUE (organisation_id, title)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_diary_definitions_org ON club_diary_task_definitions(organisation_id, is_active)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_diary_task_occurrences (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                definition_id UUID NOT NULL REFERENCES club_diary_task_definitions(id) ON DELETE CASCADE,
+                period_label TEXT NOT NULL,
+                due_date DATE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                assigned_to_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                notes TEXT,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_diary_occurrence_period UNIQUE (definition_id, period_label)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_diary_occurrences_org ON club_diary_task_occurrences(organisation_id, status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_diary_occurrences_definition "
+            "ON club_diary_task_occurrences(definition_id, period_label DESC)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3708,6 +3774,7 @@ app.include_router(qualifications.router)  # Qualification tracking (core capabi
 app.include_router(events.router)        # Events/Ticketing admin — registrations against the Club Calendar (core capability, not a paid module)
 app.include_router(events.public_router)  # Events/Ticketing public — unauthenticated event view + register (core, not a paid module)
 app.include_router(assets.router)        # Assets & Facilities (core capability, not a paid module)
+app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
 app.include_router(member_portal_admin.router)  # Member portal visibility check (core, no capability — see the router docstring)
 app.include_router(stripe_connect.router)       # Member portal: club-to-member Stripe Connect admin flow (core, flag-gated)
 app.include_router(public_stripe_connect.router)  # Member portal: Stripe Connect webhook (public, unauthenticated)

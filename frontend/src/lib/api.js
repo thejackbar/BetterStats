@@ -495,6 +495,30 @@ export const api = {
   shopCheckout: (slug, data) =>
     request(`/public/merch-store/${slug}/checkout`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // Club Diary — annual/recurring compliance & maintenance task calendar
+  // (core capability, not a paid module).
+  diaryListCategories: () => request('/club-admin/club-diary/categories'),
+  diaryCreateCategory: (name) =>
+    request('/club-admin/club-diary/categories', { method: 'POST', body: JSON.stringify({ name }) }),
+  diaryUpdateCategory: (id, data) =>
+    request(`/club-admin/club-diary/categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  diaryDeleteCategory: (id) =>
+    request(`/club-admin/club-diary/categories/${id}`, { method: 'DELETE' }),
+  diaryListDefinitions: (includeInactive) =>
+    request(`/club-admin/club-diary/definitions${includeInactive ? '?include_inactive=true' : ''}`),
+  diaryCreateDefinition: (data) =>
+    request('/club-admin/club-diary/definitions', { method: 'POST', body: JSON.stringify(data) }),
+  diaryUpdateDefinition: (id, data) =>
+    request(`/club-admin/club-diary/definitions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  diaryArchiveDefinition: (id) =>
+    request(`/club-admin/club-diary/definitions/${id}`, { method: 'DELETE' }),
+  diarySeedStarterDefinitions: () =>
+    request('/club-admin/club-diary/definitions/seed-starter', { method: 'POST' }),
+  diaryDefinitionHistory: (id) => request(`/club-admin/club-diary/definitions/${id}/history`),
+  diaryBoard: () => request('/club-admin/club-diary/board'),
+  diaryUpdateOccurrence: (id, data) =>
+    request(`/club-admin/club-diary/occurrences/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
   // Club admin — Membership Types (migration 175) — the cross-season
   // catalogue a member's membership_type_id points at.
   feeListMembershipTypes: (includeInactive) =>

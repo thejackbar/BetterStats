@@ -61,6 +61,7 @@ const NAV_SECTIONS = [
     heading: 'Club Admin',
     items: [
       { to: '/admin/assets', label: 'Assets & Facilities', cap: CAP.MANAGE_ASSETS },
+      { to: '/admin/club-diary', label: 'Club Diary', cap: CAP.MANAGE_CLUB_DIARY },
       { to: '/admin/committee', label: 'Committee', cap: CAP.MANAGE_COMMITTEE },
       { to: '/admin/events', label: 'Events', cap: CAP.MANAGE_COMMITTEE },
       { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
