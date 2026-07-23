@@ -40,7 +40,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import (
     CrmPerson, CrmPersonRole, CrmPipeline, CrmStage, CrmDeal, CrmDealContact, CrmActivity,
-    MarketingClub, User, ClubMembership,
+    MarketingClub, MarketingClubContact, User, ClubMembership, Organisation, ClubOnboardingRequest,
 )
 from app.services.billing_pricing import price_for
 
@@ -625,6 +625,36 @@ async def archive_deal(session: AsyncSession, deal: CrmDeal) -> CrmDeal:
     return deal
 
 
+async def delete_deal(session: AsyncSession, deal: CrmDeal) -> None:
+    """A real, permanent delete — unlike archive_deal, which just hides it.
+    CrmActivity.deal_id and CrmDealContact.deal_id are both ON DELETE CASCADE,
+    so the deal's notes/activity log and contact links go with it; no
+    manual child cleanup needed."""
+    await session.delete(deal)
+
+
+async def reset_marketing_club_engagement(session: AsyncSession, club: MarketingClub) -> None:
+    """Wipe every sales-pipeline/engagement signal a super admin can have set
+    on a prospect club (see twenty_sync._engagement — this clears every
+    input that function reads besides real web/email activity and
+    club_onboarding_requests, which aren't safely scoped to one club without
+    a direct FK) — for purging TEST activity on a real club's directory row,
+    so a later genuine self-serve signup or enquiry scores itself fresh
+    rather than inheriting stale test state. Does NOT delete the
+    MarketingClub row itself — it's the club's real directory entry, not
+    test data."""
+    from app.services import club_directory
+    await club_directory.set_sales_state(
+        session, str(club.id), trial_modules=[], requested_trial_modules=[],
+        demo_status=None, not_interested=False)
+    club.emailed_at = None
+    club.emailed_via = None
+    club.emailed_note = None
+    club.engagement_score = None
+    club.engagement_tier = None
+    club.engagement_scored_at = None
+
+
 # ─── People / contacts ───────────────────────────────────────────────────────
 
 async def resolve_person(session: AsyncSession, *, full_name: str, organisation_id=None,
@@ -737,6 +767,78 @@ async def clubs_by_ids(session: AsyncSession, club_ids) -> dict:
         return {}
     rows = (await session.execute(select(MarketingClub).where(MarketingClub.id.in_(ids)))).scalars().all()
     return {c.id: c for c in rows}
+
+
+async def poc_names_by_deal(session: AsyncSession, deal_ids) -> dict:
+    """deal_id -> its designated point of contact's full name, batched for
+    the platform deal list's search/filter bar (poc_name)."""
+    ids = list(deal_ids)
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(CrmDealContact.deal_id, CrmPerson.full_name)
+        .join(CrmPerson, CrmPerson.id == CrmDealContact.person_id)
+        .where(CrmDealContact.deal_id.in_(ids), CrmDealContact.role_on_deal == POINT_OF_CONTACT_ROLE)
+    )).all()
+    return {deal_id: name for deal_id, name in rows}
+
+
+async def acquisition_channels_by_club(session: AsyncSession, club_by_id: dict) -> dict:
+    """marketing_club_id -> a best-guess acquisition channel label, for the
+    Super Admin CRM's "Source" filter — batched (no N+1 per deal). Priority,
+    most-specific first:
+      1. The linked Organisation's real signup attribution
+         (signup_attribution.utm_source, e.g. "google"/"facebook" — only set
+         for a self-serve ad-driven registration; else signup_source itself,
+         "self_serve_ad"/"self_serve_organic").
+      2. The most recent club_onboarding_requests row matching one of the
+         club's own contact emails ("contact_form" = the full Contact page,
+         "cta_quick_form" = the quick "Get your club on BetterCricket" modal).
+    Returns None for a club with neither signal — the caller falls back to
+    the deal's own `source` (manual/auto_enquiry/auto_trial/twenty_import)."""
+    out: dict = {}
+    org_ids = {c.existing_org_id for c in club_by_id.values() if c.existing_org_id}
+    orgs: dict = {}
+    if org_ids:
+        rows = (await session.execute(
+            select(Organisation.id, Organisation.signup_source, Organisation.signup_attribution)
+            .where(Organisation.id.in_(org_ids))
+        )).all()
+        orgs = {r[0]: (r[1], r[2]) for r in rows}
+
+    club_ids = list(club_by_id.keys())
+    club_by_email: dict = {}
+    if club_ids:
+        contact_rows = (await session.execute(
+            select(MarketingClubContact.marketing_club_id, MarketingClubContact.email)
+            .where(MarketingClubContact.marketing_club_id.in_(club_ids),
+                  MarketingClubContact.email.isnot(None), MarketingClubContact.email != "")
+        )).all()
+        for cid, email in contact_rows:
+            club_by_email.setdefault(email.strip().lower(), cid)
+
+    onboarding_source_by_club: dict = {}
+    if club_by_email:
+        rows = (await session.execute(
+            select(ClubOnboardingRequest.email, ClubOnboardingRequest.source)
+            .where(func.lower(ClubOnboardingRequest.email).in_(club_by_email.keys()))
+            .order_by(ClubOnboardingRequest.created_at.desc())
+        )).all()
+        for email, source in rows:
+            cid = club_by_email.get((email or "").strip().lower())
+            if cid is not None and cid not in onboarding_source_by_club:
+                onboarding_source_by_club[cid] = source
+
+    for cid, club in club_by_id.items():
+        channel = None
+        if club.existing_org_id and club.existing_org_id in orgs:
+            signup_source, attribution = orgs[club.existing_org_id]
+            utm_source = (attribution or {}).get("utm_source") if isinstance(attribution, dict) else None
+            channel = utm_source or signup_source
+        if not channel:
+            channel = onboarding_source_by_club.get(cid)
+        out[cid] = channel
+    return out
 
 
 async def list_platform_owners(session: AsyncSession) -> list[dict]:

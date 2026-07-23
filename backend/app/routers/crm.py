@@ -229,6 +229,16 @@ async def _club_stage_or_404(db: AsyncSession, organisation_id, stage_id: str) -
     return stage
 
 
+async def _platform_stage_or_404(db: AsyncSession, stage_id: str) -> CrmStage:
+    stage = await db.get(CrmStage, _uuid_or_404(stage_id))
+    if stage is None:
+        raise HTTPException(status_code=404, detail="Stage not found")
+    pipeline = await db.get(CrmPipeline, stage.pipeline_id)
+    if pipeline is None or pipeline.scope != crm_service.SCOPE_PLATFORM:
+        raise HTTPException(status_code=404, detail="Stage not found")
+    return stage
+
+
 @router.get("/trackers", dependencies=[_require])
 async def club_tracker_catalogue(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     return await crm_service.tracker_catalogue(db, club.id)
@@ -379,6 +389,15 @@ async def club_archive_deal(deal_id: str, club: Organisation = Depends(get_curre
     return {"archived": True}
 
 
+@router.delete("/deals/{deal_id}/permanent", dependencies=[_require])
+async def club_delete_deal_permanent(deal_id: str, club: Organisation = Depends(get_current_club),
+                                     db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
+    await crm_service.delete_deal(db, deal)
+    await db.commit()
+    return {"deleted": True}
+
+
 @router.get("/deals/{deal_id}/activities", dependencies=[_require])
 async def club_list_activities(deal_id: str, club: Organisation = Depends(get_current_club),
                                db: AsyncSession = Depends(get_db)):
@@ -498,11 +517,61 @@ async def super_stages(db: AsyncSession = Depends(get_db)):
     return {"stages": crm_service.stage_dicts(pipeline)}
 
 
+@super_router.post("/stages", dependencies=[_super])
+async def super_add_stage(body: StageCreate, db: AsyncSession = Depends(get_db)):
+    pipeline = await crm_service.ensure_platform_pipeline(db)
+    await crm_service.add_stage(db, pipeline, name=body.name, default_probability=body.default_probability,
+                                is_won=body.is_won, is_lost=body.is_lost)
+    await db.commit()
+    pipeline = await crm_service.ensure_platform_pipeline(db)
+    return {"stages": crm_service.stage_dicts(pipeline)}
+
+
+@super_router.patch("/stages/{stage_id}", dependencies=[_super])
+async def super_update_stage(stage_id: str, body: StageUpdate, db: AsyncSession = Depends(get_db)):
+    stage = await _platform_stage_or_404(db, stage_id)
+    await crm_service.update_stage(db, stage, **body.model_dump(exclude_unset=True))
+    await db.commit()
+    return {"id": str(stage.id), "key": stage.key, "name": stage.name, "position": stage.position,
+            "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost}
+
+
+@super_router.delete("/stages/{stage_id}", dependencies=[_super])
+async def super_delete_stage(stage_id: str, db: AsyncSession = Depends(get_db)):
+    stage = await _platform_stage_or_404(db, stage_id)
+    try:
+        await crm_service.delete_stage(db, stage)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await db.commit()
+    return {"deleted": True}
+
+
 @super_router.get("/deals", dependencies=[_super])
 async def super_list_deals(status: Optional[str] = None, include_archived: bool = False,
                            db: AsyncSession = Depends(get_db)):
+    """Every field the CRM's search/filter bar needs, in one call — the
+    filtering itself happens client-side (the platform pipeline is small
+    enough that a per-keystroke round trip isn't worth the complexity a
+    fully server-side filter would add). `point_of_contact_name`,
+    `marketing_club_state`/`_association`, and `acquisition_channel` are
+    batch-computed (no N+1) alongside the existing engagement fields."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
-    return await _list_deals_response(db, pipeline, status, include_archived)
+    stage_by_id = {s.id: s for s in pipeline.stages}
+    deals = await crm_service.list_deals(db, pipeline.id, status=status, include_archived=include_archived)
+    club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals))
+    poc_by_deal = await crm_service.poc_names_by_deal(db, (d.id for d in deals))
+    channel_by_club = await crm_service.acquisition_channels_by_club(db, club_by_id)
+    out = []
+    for d in deals:
+        club = club_by_id.get(d.marketing_club_id)
+        row = crm_service._deal_dict(d, stage_by_id.get(d.stage_id), club)
+        row["point_of_contact_name"] = poc_by_deal.get(d.id)
+        row["marketing_club_state"] = club.state if club else None
+        row["marketing_club_association"] = club.association_name if club else None
+        row["acquisition_channel"] = (channel_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or d.source
+        out.append(row)
+    return {"deals": out}
 
 
 @super_router.post("/deals", dependencies=[_super])
@@ -552,6 +621,25 @@ async def super_archive_deal(deal_id: str, db: AsyncSession = Depends(get_db)):
     await crm_service.archive_deal(db, deal)
     await db.commit()
     return {"archived": True}
+
+
+@super_router.delete("/deals/{deal_id}/permanent", dependencies=[_super])
+async def super_delete_deal_permanent(deal_id: str, reset_club: bool = False,
+                                      db: AsyncSession = Depends(get_db)):
+    """Permanently removes a platform deal — for purging test Leads/
+    Opportunities, not routine cleanup (that's Archive). `reset_club=true`
+    also wipes the linked prospect's sales-pipeline/engagement state (see
+    reset_marketing_club_engagement) so a later genuine self-serve signup or
+    enquiry from the SAME real club starts completely fresh, rather than
+    inheriting whatever test trial/demo flags were set on it — the club's
+    own directory row is never deleted, only its CRM-set state."""
+    deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
+    club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    if reset_club and club is not None:
+        await crm_service.reset_marketing_club_engagement(db, club)
+    await crm_service.delete_deal(db, deal)
+    await db.commit()
+    return {"deleted": True, "club_reset": bool(reset_club and club is not None)}
 
 
 @super_router.get("/deals/{deal_id}/activities", dependencies=[_super])
