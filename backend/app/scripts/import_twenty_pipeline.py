@@ -142,42 +142,46 @@ def _clean_label(value) -> "str | None":
 
 
 def _assignee_id_from(record: dict) -> "str | None":
-    """Twenty's Opportunity/Lead "Assignee" (a WorkspaceMember relation — the
-    same field family as Task.assigneeId, already used elsewhere in this
-    codebase to raise a Task for a specific rep) — checked under every
-    plausible key since this integration has never previously needed to READ
-    this field (only ever written it, on Task). Unverified against the live
-    workspace; if none of these match, _resolve_owner just returns None and
-    the deal is left unassigned rather than guessing."""
+    """Twenty's Opportunity owner (a genuine `owner` RELATION -> workspaceMember
+    — the reverse side of workspaceMember.ownedOpportunities — confirmed against
+    the live workspace via app/scripts/twenty_schema_dump.py on 2026-07-24; the
+    earlier "assignee" guess matched nothing because that field doesn't exist
+    here). Handles both possible REST read shapes: a nested `owner: {id: ...}`
+    object, or the plain `ownerId` scalar the client's own docstring documents
+    as the write-time convention for a many-to-one relation. Lead has NO
+    owner/assignee field at all in this workspace, so this always returns None
+    for a Lead record — that's the confirmed schema, not a missed guess."""
     if not isinstance(record, dict):
         return None
-    return (record.get("assigneeId") or (record.get("assignee") or {}).get("id")
-            or record.get("assignedToId"))
+    owner = record.get("owner")
+    if isinstance(owner, dict) and owner.get("id"):
+        return owner["id"]
+    return record.get("ownerId")
 
 
-async def _resolve_owner(http: httpx.AsyncClient, assignee_id: "str | None",
+async def _resolve_owner(http: httpx.AsyncClient, owner_id: "str | None",
                          users_by_email: dict, cache: dict) -> "object | None":
     """Twenty WorkspaceMember id -> our own users.id, matched by email.
     Cached per run (a handful of reps assigned across hundreds of deals).
     Returns None (not an error) on anything unexpected — an owner Twenty
     shows correctly is a nice-to-have backfill, not something worth failing
     the whole deal import over."""
-    if not assignee_id:
+    if not owner_id:
         return None
-    if assignee_id in cache:
-        return cache[assignee_id]
-    owner_id = None
+    if owner_id in cache:
+        return cache[owner_id]
+    resolved = None
     try:
-        member = await client.get_by_id(http, "workspaceMembers", assignee_id)
+        member = await client.get_by_id(http, "workspaceMembers", owner_id)
         if member:
             email = (member.get("userEmail") or member.get("email")
                      or (member.get("user") or {}).get("email") or "").strip().lower()
             if email:
-                owner_id = users_by_email.get(email)
+                resolved = users_by_email.get(email)
     except Exception:  # noqa: BLE001 - best-effort only
-        logger.exception("twenty: failed to resolve assignee %s", assignee_id)
-    cache[assignee_id] = owner_id
-    return owner_id
+        logger.exception("twenty: failed to resolve owner %s", owner_id)
+    cache[owner_id] = resolved
+    return resolved
 
 
 _notes_warned = False
@@ -185,23 +189,26 @@ _notes_warned = False
 
 async def _fetch_opportunity_notes(http: httpx.AsyncClient, opp_id: str) -> list:
     """Every Note attached to this Opportunity via Twenty's noteTargets join
-    object — mirrors the taskTargets shape (taskId + companyId) already used
-    elsewhere in this codebase for Task attachment, but for Notes this is a
-    READ, never previously exercised here. Returns [] (not an error) if the
-    filter/shape doesn't match live Twenty — unverified beyond the
-    taskTargets pattern match. Confirmed WRONG against the live workspace
-    (2026-07-24): noteTarget has no opportunityId field at all — logs ONCE,
-    not per-opportunity, until the real field name is confirmed and this is
-    fixed (see app/scripts/twenty_schema_dump.py)."""
+    object. noteTarget doesn't have a plain `opportunity`/`opportunityId`
+    field — like taskTarget, it's a MORPH_RELATION set named `target<Type>`
+    (targetOpportunity/targetLead/targetCompany/targetPerson/…), confirmed
+    against the live workspace via app/scripts/twenty_schema_dump.py on
+    2026-07-24 (the earlier plain-`opportunityId` guess 400'd). Filters on
+    `targetOpportunityId`, the write-time scalar form of that relation field
+    per twenty_client's own documented `<fieldName>Id` convention. Still
+    wrapped defensively — returns [] rather than raising if this ever stops
+    matching live Twenty (e.g. a future workspace schema change), logging
+    once per run rather than once per opportunity."""
     global _notes_warned
     try:
-        payload = await client.list_page(http, "noteTargets", limit=60, filter=f"opportunityId[eq]:{opp_id}")
+        payload = await client.list_page(http, "noteTargets", limit=60,
+                                         filter=f"targetOpportunityId[eq]:{opp_id}")
     except Exception as e:  # noqa: BLE001
         if not _notes_warned:
             _notes_warned = True
-            logger.warning("twenty: noteTargets filter rejected (%s) — Notes import is disabled for the "
-                           "rest of this run; run app/scripts/twenty_schema_dump.py to find the real field "
-                           "name, fix _fetch_opportunity_notes, then re-run", e)
+            logger.warning("twenty: noteTargets filter on targetOpportunityId rejected (%s) — Notes import "
+                           "is disabled for the rest of this run; re-check app/scripts/twenty_schema_dump.py "
+                           "output against this error, fix _fetch_opportunity_notes, then re-run", e)
         return []
     data = payload.get("data") if isinstance(payload, dict) else None
     targets = data.get("noteTargets") if isinstance(data, dict) else None
@@ -454,10 +461,9 @@ async def main() -> None:
         print("Skipped deals need a manual look — check the log above for the reason "
               "(unrecognised stage/status, or a Twenty record that's since been deleted).")
     if stats["owners_unmatched"]:
-        print(f"{stats['owners_unmatched']} deal(s) had a Twenty assignee that couldn't be matched to a "
-              "BetterCricket user by email — check the log above for the assignee lookup, and that the "
-              "workspaceMembers/assigneeId field names actually match this workspace's live Twenty schema "
-              "(this integration never previously needed to READ that field, so it's unverified).")
+        print(f"{stats['owners_unmatched']} deal(s) had a Twenty owner whose workspaceMember email didn't "
+              "match any BetterCricket user's email — check the log above for the lookup, and confirm the "
+              "rep's Twenty login email matches their BetterCricket admin account email.")
 
 
 if __name__ == "__main__":
