@@ -12,12 +12,20 @@ only lives in Twenty is where a human sales rep has manually dragged a deal
 card to (stage, dollar amount, lost reason) — that's what this script reads
 back.
 
-Source: ``twenty_links`` (entity_type IN ('opportunity', 'lead')), which is
-the same membership ledger every other Twenty integration point already
-relies on for id mapping — no separate full paginated scan of Twenty's
-Opportunity/Lead lists is needed. Per club, the Opportunity (if one exists)
-wins over the Lead: it's the more progressed state, and reaching Opportunity
-already implies the Lead was converted.
+Source: a FULL paginated scan of Twenty's Opportunity and Lead lists —
+NOT just ``twenty_links`` (entity_type IN ('opportunity', 'lead')). That
+table only ever gets an 'opportunity'/'lead' row when the record was
+created THROUGH our own cascade (services/twenty_opportunity.py) or export
+flow; one created directly in Twenty's UI has no such row and was
+previously invisible to this backfill entirely (confirmed live 2026-07-24
+as the cause of a real "not all Opportunities are migrated" report — see
+``_discover_pipeline_records``). Each scanned record is matched to a club
+via its own ``bcOpportunityKey``/``bcLeadKey`` external key first, else its
+Company -> ``twenty_links(entity_type='club')`` -> club (the same
+reverse-lookup ``twenty_opportunity._club_by_company_id`` already relies on).
+Per club, the Opportunity (if one exists) wins over the Lead: it's the more
+progressed state, and reaching Opportunity already implies the Lead was
+converted.
 
 This is a ONE-TIME backfill, not an ongoing sync — going forward,
 ``crm.sync_platform_deal_for_club`` already keeps the local pipeline moving
@@ -205,25 +213,47 @@ async def _fetch_opportunity_notes(http: httpx.AsyncClient, opp_id: str) -> list
     against the live workspace via app/scripts/twenty_schema_dump.py on
     2026-07-24 (the earlier plain-`opportunityId` guess 400'd). Filters on
     `targetOpportunityId`, the write-time scalar form of that relation field
-    per twenty_client's own documented `<fieldName>Id` convention. Still
-    wrapped defensively — returns [] rather than raising if this ever stops
-    matching live Twenty (e.g. a future workspace schema change), logging
-    once per run rather than once per opportunity."""
+    per twenty_client's own documented `<fieldName>Id` convention.
+
+    Fully paginated (mirrors twenty_sync._index_people_pass) — the original
+    version only ever read the first 60 noteTargets, so any Opportunity with
+    more than 60 notes silently lost the rest. Still wrapped defensively —
+    returns [] rather than raising if the filter ever stops matching live
+    Twenty (e.g. a future workspace schema change), logging once per run
+    rather than once per opportunity."""
     global _notes_warned
-    try:
-        payload = await client.list_page(http, "noteTargets", limit=60,
-                                         filter=f"targetOpportunityId[eq]:{opp_id}")
-    except Exception as e:  # noqa: BLE001
-        if not _notes_warned:
-            _notes_warned = True
-            logger.warning("twenty: noteTargets filter on targetOpportunityId rejected (%s) — Notes import "
-                           "is disabled for the rest of this run; re-check app/scripts/twenty_schema_dump.py "
-                           "output against this error, fix _fetch_opportunity_notes, then re-run", e)
-        return []
-    data = payload.get("data") if isinstance(payload, dict) else None
-    targets = data.get("noteTargets") if isinstance(data, dict) else None
+    targets: list = []
+    cursor = None
+    for _ in range(50):  # cap 50 pages * 60 = 3000 notes on one opportunity — generous headroom
+        try:
+            payload = await client.list_page(http, "noteTargets", limit=60, starting_after=cursor,
+                                             filter=f"targetOpportunityId[eq]:{opp_id}")
+        except Exception as e:  # noqa: BLE001
+            if not _notes_warned:
+                _notes_warned = True
+                logger.warning("twenty: noteTargets filter on targetOpportunityId rejected (%s) — Notes "
+                               "import is disabled for the rest of this run; re-check "
+                               "app/scripts/twenty_schema_dump.py output against this error, fix "
+                               "_fetch_opportunity_notes, then re-run", e)
+            return []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        page_targets = data.get("noteTargets") if isinstance(data, dict) else None
+        if not page_targets:
+            break
+        targets.extend(page_targets)
+        page = (payload.get("pageInfo") or {}) if isinstance(payload, dict) else {}
+        cursor = page.get("endCursor")
+        if page.get("hasNextPage") is False:
+            break
+        if not cursor:
+            if len(page_targets) < 60:
+                break
+            cursor = page_targets[-1].get("id")
+            if not cursor:
+                break
+
     notes = []
-    for t in (targets or []):
+    for t in targets:
         note_id = t.get("noteId") or (t.get("note") or {}).get("id")
         if not note_id:
             continue
@@ -273,18 +303,91 @@ def _should_move(current_stage_key: "str | None", target_stage_key: str) -> bool
     return tgt > cur
 
 
-async def _linked_clubs() -> dict:
-    """Every club with a Twenty Opportunity and/or Lead, keyed on
-    marketing_clubs.grassroots_guid -> {"opportunity": twenty_id, "lead": twenty_id}."""
+async def _scan_all(http: httpx.AsyncClient, plural: str) -> list:
+    """Every record of a Twenty object, fully paginated (mirrors
+    twenty_sync._index_people_pass's proven cursor-walk) — not filtered, not
+    limited to what twenty_links already tracks. Twenty's list endpoint
+    returns the identical field set as a single GET (the `ownerId`/
+    `companyId` scalars this script and twenty_opportunity.py already read
+    come back the same way on both), so no extra per-record GET is needed
+    once a record's been scanned here."""
+    out: list = []
+    cursor = None
+    for _ in range(400):  # cap 400 pages * 60 = 24k records — generous headroom
+        payload = await client.list_page(http, plural, limit=60, starting_after=cursor)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        records = data.get(plural) if isinstance(data, dict) else None
+        if not records:
+            break
+        out.extend(records)
+        page = (payload.get("pageInfo") or {}) if isinstance(payload, dict) else {}
+        cursor = page.get("endCursor")
+        if page.get("hasNextPage") is False:
+            break
+        if not cursor:
+            if len(records) < 60:
+                break
+            cursor = records[-1].get("id")
+            if not cursor:
+                break
+    return out
+
+
+async def _company_guid_map() -> dict:
+    """Twenty company id -> club grassroots_guid, via
+    twenty_links(entity_type='club') — the same reverse-lookup
+    twenty_opportunity._club_by_company_id already relies on."""
     async with async_session_maker() as session:
         rows = (await session.execute(text(
-            "SELECT entity_type, bc_id, twenty_id FROM twenty_links "
-            "WHERE entity_type IN ('opportunity', 'lead')"
+            "SELECT twenty_id, bc_id FROM twenty_links WHERE entity_type = 'club'"
         ))).all()
-    out: dict = {}
-    for entity_type, bc_id, twenty_id in rows:
-        out.setdefault(bc_id, {})[entity_type] = twenty_id
-    return out
+    return {twenty_id: bc_id for twenty_id, bc_id in rows}
+
+
+def _record_company_id(record: dict) -> "str | None":
+    company = record.get("company")
+    if isinstance(company, dict) and company.get("id"):
+        return company["id"]
+    return record.get("companyId")
+
+
+async def _discover_pipeline_records(http: httpx.AsyncClient) -> tuple:
+    """Every club's CURRENT Opportunity and/or Lead, keyed on
+    marketing_clubs.grassroots_guid -> {"opportunity": full_dict, "lead": full_dict}.
+
+    A FULL scan of Twenty's Opportunity/Lead lists — NOT just what
+    twenty_links already tracks. twenty_links only ever gets an
+    'opportunity'/'lead' row when the record was created THROUGH our own
+    cascade (services/twenty_opportunity.py) or export flow; one created
+    directly in Twenty's UI has no such row and was previously invisible to
+    this backfill entirely — confirmed live (2026-07-24) as the cause of a
+    real "not all Opportunities are migrated" report.
+
+    Matched via bcOpportunityKey/bcLeadKey (our own external key) first,
+    else the record's Company -> twenty_links(entity_type='club') -> club.
+    Returns (by_club, opp_unmatched, lead_unmatched) — the unmatched counts
+    are records that exist in Twenty but couldn't be tied to any known
+    BetterCricket club (no bcKey and either no Company or a Company this
+    workspace's twenty_links doesn't know about)."""
+    company_guid = await _company_guid_map()
+    by_club: dict = {}
+    opp_unmatched = lead_unmatched = 0
+
+    for opp in await _scan_all(http, "opportunities"):
+        guid = opp.get("bcOpportunityKey") or company_guid.get(_record_company_id(opp) or "")
+        if not guid:
+            opp_unmatched += 1
+            continue
+        by_club.setdefault(guid, {})["opportunity"] = opp
+
+    for lead in await _scan_all(http, "leads"):
+        guid = lead.get("bcLeadKey") or company_guid.get(_record_company_id(lead) or "")
+        if not guid:
+            lead_unmatched += 1
+            continue
+        by_club.setdefault(guid, {}).setdefault("lead", lead)
+
+    return by_club, opp_unmatched, lead_unmatched
 
 
 async def _primary_contact(session, marketing_club_id):
@@ -312,14 +415,12 @@ async def _existing_platform_deal(session, pipeline_id, marketing_club_id):
 
 
 async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: dict,
-                      club: MarketingClub, links: dict, users_by_email: dict, owner_cache: dict) -> dict:
-    opp_id = links.get("opportunity")
-    lead_id = links.get("lead")
+                      club: MarketingClub, records: dict, users_by_email: dict, owner_cache: dict) -> dict:
+    opp = records.get("opportunity")
+    lead = records.get("lead")
 
-    if opp_id:
-        opp = await client.get_by_id(http, "opportunities", opp_id)
-        if opp is None:
-            return {"club": club.name, "skipped": "linked opportunity no longer exists in Twenty"}
+    if opp:
+        opp_id = opp.get("id")
         stage_key = _OPPORTUNITY_STAGE_MAP.get(_normalize_option(opp.get("stage")))
         if stage_key is None:
             return {"club": club.name, "skipped": f"unrecognised opportunity stage {opp.get('stage')!r}"}
@@ -328,10 +429,8 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
         lost_reason = _clean_label(opp.get("lostReason")) if stage_key == "lost_dormant" else None
         assignee_raw = _assignee_id_from(opp)
         twenty_kind, twenty_id, raw_stage = "opportunity", opp_id, opp.get("stage")
-    elif lead_id:
-        lead = await client.get_by_id(http, "leads", lead_id)
-        if lead is None:
-            return {"club": club.name, "skipped": "linked lead no longer exists in Twenty"}
+    elif lead:
+        lead_id = lead.get("id")
         stage_key = _LEAD_STATUS_MAP.get(_normalize_option(lead.get("leadStatus")))
         if stage_key is None:
             return {"club": club.name, "skipped": f"unrecognised lead status {lead.get('leadStatus')!r}"}
@@ -395,8 +494,8 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
     )
 
     notes_imported = 0
-    if opp_id:
-        for tw_note in await _fetch_opportunity_notes(http, opp_id):
+    if opp:
+        for tw_note in await _fetch_opportunity_notes(http, opp["id"]):
             note_id = tw_note.get("id")
             if not note_id or await _note_already_imported(session, deal.id, note_id):
                 continue
@@ -418,9 +517,6 @@ async def main() -> None:
         print("Twenty is not configured (TWENTY_API_URL / TWENTY_API_KEY) — nothing to do.")
         return
 
-    linked = await _linked_clubs()
-    print(f"=== {len(linked)} club(s) have a Twenty Opportunity and/or Lead linked ===")
-
     stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "no_local_club": 0,
              "owners_matched": 0, "owners_unmatched": 0, "notes_imported": 0}
     owner_cache: dict = {}
@@ -433,36 +529,45 @@ async def main() -> None:
         users_by_email = {email.strip().lower(): uid for uid, email in users_rows if email}
 
         async with httpx.AsyncClient() as http:
-            for idx, (guid, links) in enumerate(sorted(linked.items()), start=1):
+            by_club, opp_unmatched, lead_unmatched = await _discover_pipeline_records(http)
+            print(f"=== {len(by_club)} club(s) have a Twenty Opportunity and/or Lead "
+                  f"(full scan of Twenty, not just twenty_links) ===")
+            if opp_unmatched or lead_unmatched:
+                print(f"WARNING: {opp_unmatched} opportunity(s) and {lead_unmatched} lead(s) exist in Twenty "
+                      "but couldn't be matched to any BetterCricket club (no bcOpportunityKey/bcLeadKey and no "
+                      "recognised Company) — these were NOT imported. They're likely records created directly "
+                      "in Twenty's UI for a club whose Company was itself never exported from BetterCricket.")
+
+            for idx, (guid, records) in enumerate(sorted(by_club.items()), start=1):
                 club = (await session.execute(
                     select(MarketingClub).where(MarketingClub.grassroots_guid == guid)
                 )).scalar_one_or_none()
                 if club is None:
                     stats["no_local_club"] += 1
-                    logger.warning("  [%d/%d] %s -> no matching marketing_clubs row", idx, len(linked), guid)
+                    logger.warning("  [%d/%d] %s -> no matching marketing_clubs row", idx, len(by_club), guid)
                     await asyncio.sleep(_PACE_SECONDS)
                     continue
                 try:
-                    result = await _import_one(http, session, pipeline, stage_by_key, club, links,
+                    result = await _import_one(http, session, pipeline, stage_by_key, club, records,
                                                users_by_email, owner_cache)
                     await session.commit()
                 except Exception:  # noqa: BLE001 - one bad club can't stop the rest
                     await session.rollback()
                     stats["errors"] += 1
-                    logger.exception("  [%d/%d] %s -> import failed", idx, len(linked), club.name)
+                    logger.exception("  [%d/%d] %s -> import failed", idx, len(by_club), club.name)
                     await asyncio.sleep(_PACE_SECONDS)
                     continue
 
                 if "skipped" in result:
                     stats["skipped"] += 1
-                    logger.info("  [%d/%d] %s -> skipped: %s", idx, len(linked), club.name, result["skipped"])
+                    logger.info("  [%d/%d] %s -> skipped: %s", idx, len(by_club), club.name, result["skipped"])
                 else:
                     stats[result["action"]] += 1
                     stats["notes_imported"] += result.get("notes_imported", 0)
                     if result.get("owner_seen"):
                         stats["owners_matched" if result.get("owner_matched") else "owners_unmatched"] += 1
                     logger.info("  [%d/%d] %s -> %s (stage=%s, value_cents=%s, notes=%d)",
-                               idx, len(linked), club.name, result["action"],
+                               idx, len(by_club), club.name, result["action"],
                                result["stage"], result["value_cents"], result.get("notes_imported", 0))
                 await asyncio.sleep(_PACE_SECONDS)
 
