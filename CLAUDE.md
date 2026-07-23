@@ -1662,6 +1662,64 @@ before, which is how the header nearly ended up matching it instead
   needed since both already receive it (`MatchHeader` via `game`, `TeamCard`
   via a new `winner` prop threaded from the main component).
 
+### Cross-club player leak in scorecard team classification (v8.79.3, Jul 2026)
+
+Reported on a DIFFERENT match (Applecross 1st XI vs Pentagon-NBCCC 1st XI):
+both teams' crests showed as the same club's logo, and most of Pentagon's
+batters rendered as "FILL-IN" with a CLAIM button — except two of them, who
+showed as fully linked Applecross players.
+
+**Root cause**: `_our_tid` (get_scorecard's "which GR team is ours" decision,
+see the rewrite above) tries the DB-overlap signal (does either team's roster
+overlap names we already have a stored row for on this exact game) before
+org-name matching. Two of Pentagon-NBCCC's players — real people who had at
+some point also played for Applecross — had old `batting_innings` rows
+already stored under Applecross for this exact game (their own separate
+data-integrity issue, not fixed here — see below), so DB-overlap scored
+Pentagon-NBCCC 2 and Applecross 0, and `max()` picked Pentagon-NBCCC as
+"ours". Every one of their actual teammates then correctly failed to
+resolve against Applecross's roster and rendered as a fill-in, while the two
+contaminated names resolved to their (real, but wrong-context) Applecross
+`players` rows — and the crest swap followed directly from the same
+misclassification.
+
+**Fix**: swapped the precedence — org-name matching is now the PRIMARY
+signal (it can't be fooled by a few contaminated rows the way a raw overlap
+count can), with DB-overlap only as the fallback for when org itself can't
+be resolved at all (the original `org.name`-crash scenario two sections up).
+Verified offline against the real payload for this match: org_word alone
+correctly picks Applecross even with the 2-vs-0 contaminated overlap still
+in play.
+
+**A deeper, separate bug found while investigating**: `get_game_fall_of_wickets`
+and `get_game_partnerships` (`services/aggregations.py`) joined `players` on
+`player_id` with **no organisation scoping at all** — a fall-of-wicket or
+partnership row whose stored `player_id` happens to belong to another club's
+roster (the same "shared GUID"/prior-registration class of issue as above)
+rendered as if it were one of ours. For fall of wickets specifically this
+also produced literal duplicate rows per wicket — one correct unlinked row
+(GR short name, no `player_id`) and one wrongly cross-club-linked row for
+the same wicket, both stored, both returned. Fixed both functions to accept
+an `org_id` and scope the `players` join to it (`AND (:org_id IS NULL OR
+p.organisation_id = :org_id)`, so a caller with no org context is
+unaffected); `get_game_fall_of_wickets` also now deduplicates by
+`(innings_number, wicket_number)` after the org-scoped query, keeping
+whichever of the two stored rows has a usable name. A row that loses its
+link this way and has no stored free-text fallback name renders as
+"Unknown" on the frontend (already-existing behaviour) — a real gap, but
+never the wrong person's name.
+
+**Not fixed, flagged for follow-up**: `records.py`'s partnership leaderboard
+query (`top_partnerships`) requires BOTH batters' `organisation_id` to match
+the viewing club — which sounds safe, but isn't, for exactly this case: the
+two contaminated players' `players` rows ARE genuinely org-scoped to
+Applecross, so a stand like theirs from a match they didn't actually play
+for Applecross in can still surface on Applecross's own records page as a
+phantom top partnership. This wasn't chased further today — scope is
+"how many historical games/players are affected platform-wide", which needs
+a proper audit (and likely a sync-side fix, not just a read-side one) beyond
+what one reported match justifies investigating alone.
+
 Yearbook generation was previously **100% manual** — two separate admin
 buttons (Generate stubs, Generate narrative) plus a Publish button, with the
 only automatic step being an at-startup stub-only sweep (`generate_all_stubs`,

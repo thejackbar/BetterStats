@@ -589,8 +589,8 @@ async def get_scorecard(
     # Fall of wickets + partnerships read through the v_effective_* views, so an
     # uploaded manual card (manual_fall_of_wickets / manual_partnerships) shows them
     # too. Manual opposition batting/bowling still comes from extracted_payload below.
-    fow = await get_game_fall_of_wickets(db, game.id)
-    partnerships = await get_game_partnerships(db, game.id)
+    fow = await get_game_fall_of_wickets(db, game.id, str(org.id) if org else None)
+    partnerships = await get_game_partnerships(db, game.id, str(org.id) if org else None)
     # batterN_name already falls back to the raw fill-in/redacted GR name (see
     # get_game_partnerships) whenever batterN_id is NULL — strip it back out
     # if the club has the toggle off, else classify it the same way a
@@ -699,22 +699,26 @@ async def get_scorecard(
                     return nk_to_pid.get(_name_key(name))
                 return None
 
-            # Org name first word — a fallback signal for which GR team is
-            # ours, used only when the DB-overlap signal below has nothing to
-            # go on (see it for why that one comes first).
+            # Org name first word — the PRIMARY signal for which GR team is
+            # ours: it's authoritative for "which real-world club is this",
+            # unaffected by any stray data quality issue in stored rows.
             org_word = (org.name or "").lower().split()[0] if org and org.name else ""
 
             # Names we ALREADY have a stored batting/bowling row for on this
             # exact game (batting_rows/bowling_rows were queried further up,
-            # independent of org/season resolution). By construction sync only
-            # ever writes rows for our own team, so whichever GR team's roster
-            # overlaps these names is ours — a signal that doesn't depend on
-            # `org` resolving at all, and is trusted over org-name matching
-            # when it has anything to go on. Without this, a game whose
-            # grade/season chain fails to resolve an org (happens — see the
-            # `org` guards above) silently lost this whole rebuild the moment
-            # any `org.` field was touched; that bug is fixed by not
-            # depending on `org` for this signal in the first place.
+            # independent of org/season resolution) — the FALLBACK signal,
+            # used only when org_word can't be computed at all (org
+            # unresolvable — happens, see the `org` guards above) or doesn't
+            # match either team's GR name. It's a courser signal than
+            # org_word and can be actively wrong: a player who once turned
+            # out for this club but is on the OPPOSITION roster for this
+            # specific match still has old per-game rows stored under us
+            # (reported case: two of Pentagon-NBCCC's 11 players had prior
+            # Applecross rows, which was enough for `any()`/`max()` to flip
+            # the whole match onto their side — wrong team, wrong crest,
+            # every one of their actual opposition teammates rendered as a
+            # bogus "FILL-IN"). org_word doesn't have that failure mode, so
+            # it must win whenever it's available and unambiguous.
             _existing_game_names: set = set()
             for _bi, _p in batting_rows:
                 if _p and _p.display_name and not _looks_redacted(_p.display_name):
@@ -771,16 +775,15 @@ async def get_scorecard(
             if org:
                 _our_logo = org.logo_url or (f"/images/organisations/{org.id}/logo" if org.logo_data else None)
 
-            # Pass 2: decide which team id is ours, DB-overlap first.
-            if any(_team_overlap.values()):
-                _our_tid = max(_team_overlap, key=_team_overlap.get)
-            elif org_word:
+            # Pass 2: decide which team id is ours, org name first.
+            _our_tid = None
+            if org_word:
                 _our_tid = next(
                     (tid for tid, nm in gr_team_name_by_id.items() if org_word in nm.lower()),
                     None,
                 )
-            else:
-                _our_tid = None
+            if _our_tid is None and any(_team_overlap.values()):
+                _our_tid = max(_team_overlap, key=_team_overlap.get)
 
             # Pass 3: populate the roster sets now that "ours" is settled.
             pid_to_name: dict[str, str] = {}

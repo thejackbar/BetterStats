@@ -1381,7 +1381,14 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
     return [dict(r) for r in result.mappings()]
 
 
-async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[dict]:
+async def get_game_fall_of_wickets(session: AsyncSession, game_id: str, org_id: str | None = None) -> list[dict]:
+    # p.organisation_id scoping (when org_id is known) stops a player_id that
+    # belongs to ANOTHER club's roster from rendering as if the fall of
+    # wicket were ours — e.g. an opposition batter who, under a shared
+    # participant GUID, also has (or once had) a `players` row in our own
+    # org: a real reported case had 8 of an opponent's 10 wickets rendering
+    # under the names of our own past/unrelated players. `:org_id IS NULL`
+    # keeps the join unscoped for a caller with no org context.
     result = await session.execute(
         text("""
             SELECT
@@ -1390,15 +1397,34 @@ async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[
                 fow.score_at_fall,
                 fow.overs_at_fall,
                 COALESCE(p.display_name_override, p.name, fow.batter_name) AS player_name,
-                fow.player_id::text
+                p.id::text AS player_id,
+                fow.batter_name
             FROM v_effective_fall_of_wickets fow
             LEFT JOIN players p ON p.id = fow.player_id
+                AND (CAST(:org_id AS uuid) IS NULL OR p.organisation_id = CAST(:org_id AS uuid))
             WHERE fow.game_id = :gid
             ORDER BY fow.innings_number, fow.wicket_number
         """),
-        {"gid": game_id},
+        {"gid": game_id, "org_id": org_id},
     )
-    return [dict(r) for r in result.mappings()]
+    rows = [dict(r) for r in result.mappings()]
+
+    # A game shared between two both-synced clubs can carry two physical rows
+    # for the same wicket in the base table — one from each club's own sync.
+    # Org-scoping the join above stops a cross-club row from being MISLINKED
+    # to one of our players, but the duplicate itself still needs collapsing
+    # to one row per wicket; keep whichever has the most useful info.
+    best: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["innings_number"], r["wicket_number"])
+        score = (2 if r["player_id"] else 0) + (1 if (r["player_name"] or r["batter_name"]) else 0)
+        if key not in best or score > best[key][1]:
+            best[key] = (r, score)
+    out = [r for r, _ in best.values()]
+    for r in out:
+        r.pop("batter_name", None)
+    out.sort(key=lambda r: (r["innings_number"], r["wicket_number"]))
+    return out
 
 
 async def get_upcoming_milestones_for_org(
@@ -2988,12 +3014,19 @@ async def get_club_summary(
     return base
 
 
-async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dict]:
+async def get_game_partnerships(session: AsyncSession, game_id: str, org_id: str | None = None) -> list[dict]:
     # batterN_name falls through display-override → real name → the raw GR
     # name stored for a fill-in/redacted participant (pt.batterN_name, added
     # migration 147) — same COALESCE chain get_game_fall_of_wickets already
     # uses. The caller (games.py) decides whether to keep or strip that
     # fallback name based on the club's include_fill_ins_in_stats setting.
+    # p.organisation_id scoping (same reasoning as get_game_fall_of_wickets,
+    # see its own comment) stops an opposition batter from being misattributed
+    # to one of our own players who happens to share a participant GUID with
+    # them. A row that loses its link this way and has no stored fallback
+    # name (an old row that predates the fallback column) shows as "Unknown"
+    # on the frontend — a real gap, but a truthful one, unlike showing the
+    # wrong person's name.
     result = await session.execute(
         text("""
             SELECT
@@ -3003,17 +3036,19 @@ async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dic
                 pt.balls,
                 pt.batter1_runs,
                 pt.batter2_runs,
-                pt.batter1_id::text,
-                pt.batter2_id::text,
+                p1.id::text AS batter1_id,
+                p2.id::text AS batter2_id,
                 COALESCE(p1.display_name_override, p1.name, pt.batter1_name) AS batter1_name,
                 COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name
             FROM v_effective_partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
+                AND (CAST(:org_id AS uuid) IS NULL OR p1.organisation_id = CAST(:org_id AS uuid))
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
+                AND (CAST(:org_id AS uuid) IS NULL OR p2.organisation_id = CAST(:org_id AS uuid))
             WHERE pt.game_id = :gid
             ORDER BY pt.innings_number, pt.wicket_number
         """),
-        {"gid": game_id},
+        {"gid": game_id, "org_id": org_id},
     )
     return [dict(r) for r in result.mappings()]
 
