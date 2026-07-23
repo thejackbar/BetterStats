@@ -352,7 +352,8 @@ def _slug(text: str) -> str:
 
 
 async def add_stage(session: AsyncSession, pipeline: CrmPipeline, *, name: str,
-                    default_probability: int = 0, is_won: bool = False, is_lost: bool = False) -> CrmStage:
+                    default_probability: int = 0, is_won: bool = False, is_lost: bool = False,
+                    hidden_from_board: bool = False) -> CrmStage:
     base = _slug(name)
     existing_keys = {s.key for s in pipeline.stages}
     key, n = base, 2
@@ -362,6 +363,7 @@ async def add_stage(session: AsyncSession, pipeline: CrmPipeline, *, name: str,
     stage = CrmStage(
         pipeline_id=pipeline.id, key=key, name=(name or "New stage")[:80], position=len(pipeline.stages),
         default_probability=max(0, min(100, int(default_probability or 0))), is_won=is_won, is_lost=is_lost,
+        hidden_from_board=hidden_from_board,
     )
     session.add(stage)
     await session.flush()
@@ -369,7 +371,7 @@ async def add_stage(session: AsyncSession, pipeline: CrmPipeline, *, name: str,
 
 
 async def update_stage(session: AsyncSession, stage: CrmStage, **fields) -> CrmStage:
-    for f in ("name", "default_probability", "is_won", "is_lost", "position"):
+    for f in ("name", "default_probability", "is_won", "is_lost", "position", "hidden_from_board"):
         if f in fields and fields[f] is not None:
             setattr(stage, f, fields[f])
     return stage
@@ -387,7 +389,8 @@ async def delete_stage(session: AsyncSession, stage: CrmStage) -> None:
 def stage_dicts(pipeline: CrmPipeline) -> list[dict]:
     return [
         {"id": str(s.id), "key": s.key, "name": s.name, "position": s.position,
-         "default_probability": s.default_probability, "is_won": s.is_won, "is_lost": s.is_lost}
+         "default_probability": s.default_probability, "is_won": s.is_won, "is_lost": s.is_lost,
+         "hidden_from_board": s.hidden_from_board}
         for s in pipeline.stages
     ]
 
@@ -505,7 +508,7 @@ def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal],
         stages_out.append({
             "id": str(stage.id), "key": stage.key, "name": stage.name,
             "position": stage.position, "default_probability": stage.default_probability,
-            "is_won": stage.is_won, "is_lost": stage.is_lost,
+            "is_won": stage.is_won, "is_lost": stage.is_lost, "hidden_from_board": stage.hidden_from_board,
             "deal_count": len(stage_deals),
             "value_cents": stage_value,
             "weighted_value_cents": stage_weighted,

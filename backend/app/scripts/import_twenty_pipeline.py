@@ -45,7 +45,7 @@ import re
 import httpx
 from sqlalchemy import select, text
 
-from app.models.db import MarketingClub, MarketingClubContact, async_session_maker
+from app.models.db import MarketingClub, MarketingClubContact, User, async_session_maker
 from app.services import crm
 from app.services.billing_pricing import price_for
 from app.services.twenty_client import client
@@ -141,6 +141,95 @@ def _clean_label(value) -> "str | None":
     return s or None
 
 
+def _assignee_id_from(record: dict) -> "str | None":
+    """Twenty's Opportunity/Lead "Assignee" (a WorkspaceMember relation — the
+    same field family as Task.assigneeId, already used elsewhere in this
+    codebase to raise a Task for a specific rep) — checked under every
+    plausible key since this integration has never previously needed to READ
+    this field (only ever written it, on Task). Unverified against the live
+    workspace; if none of these match, _resolve_owner just returns None and
+    the deal is left unassigned rather than guessing."""
+    if not isinstance(record, dict):
+        return None
+    return (record.get("assigneeId") or (record.get("assignee") or {}).get("id")
+            or record.get("assignedToId"))
+
+
+async def _resolve_owner(http: httpx.AsyncClient, assignee_id: "str | None",
+                         users_by_email: dict, cache: dict) -> "object | None":
+    """Twenty WorkspaceMember id -> our own users.id, matched by email.
+    Cached per run (a handful of reps assigned across hundreds of deals).
+    Returns None (not an error) on anything unexpected — an owner Twenty
+    shows correctly is a nice-to-have backfill, not something worth failing
+    the whole deal import over."""
+    if not assignee_id:
+        return None
+    if assignee_id in cache:
+        return cache[assignee_id]
+    owner_id = None
+    try:
+        member = await client.get_by_id(http, "workspaceMembers", assignee_id)
+        if member:
+            email = (member.get("userEmail") or member.get("email")
+                     or (member.get("user") or {}).get("email") or "").strip().lower()
+            if email:
+                owner_id = users_by_email.get(email)
+    except Exception:  # noqa: BLE001 - best-effort only
+        logger.exception("twenty: failed to resolve assignee %s", assignee_id)
+    cache[assignee_id] = owner_id
+    return owner_id
+
+
+async def _fetch_opportunity_notes(http: httpx.AsyncClient, opp_id: str) -> list:
+    """Every Note attached to this Opportunity via Twenty's noteTargets join
+    object — mirrors the taskTargets shape (taskId + companyId) already used
+    elsewhere in this codebase for Task attachment, but for Notes this is a
+    READ, never previously exercised here. Returns [] (not an error) if the
+    filter/shape doesn't match live Twenty — unverified beyond the
+    taskTargets pattern match."""
+    try:
+        payload = await client.list_page(http, "noteTargets", limit=60, filter=f"opportunityId[eq]:{opp_id}")
+    except Exception:  # noqa: BLE001
+        logger.exception("twenty: failed to list noteTargets for opportunity %s", opp_id)
+        return []
+    data = payload.get("data") if isinstance(payload, dict) else None
+    targets = data.get("noteTargets") if isinstance(data, dict) else None
+    notes = []
+    for t in (targets or []):
+        note_id = t.get("noteId") or (t.get("note") or {}).get("id")
+        if not note_id:
+            continue
+        try:
+            note = await client.get_by_id(http, "notes", note_id)
+        except Exception:  # noqa: BLE001
+            note = None
+        if note:
+            notes.append(note)
+    return notes
+
+
+def _note_text(note: dict) -> str:
+    """Twenty's Note body may be a plain string (older workspaces) or a
+    structured bodyV2 (blocknote/markdown, newer ones) — try both, fall back
+    to the title so a note with no body text still leaves a trace."""
+    body = note.get("body")
+    if isinstance(body, str) and body.strip():
+        return body.strip()
+    body_v2 = note.get("bodyV2")
+    if isinstance(body_v2, dict):
+        md = body_v2.get("markdown")
+        if isinstance(md, str) and md.strip():
+            return md.strip()
+    return (note.get("title") or "").strip()
+
+
+async def _note_already_imported(session, deal_id, note_id: str) -> bool:
+    row = (await session.execute(text(
+        "SELECT 1 FROM crm_activities WHERE deal_id = :d AND meta->>'twenty_note_id' = :n LIMIT 1"),
+        {"d": str(deal_id), "n": note_id})).first()
+    return row is not None
+
+
 def _should_move(current_stage_key: "str | None", target_stage_key: str) -> bool:
     """Never drag a deal BACKWARD relative to what's already recorded
     locally — a deal that progressed further after this script's first run
@@ -195,7 +284,7 @@ async def _existing_platform_deal(session, pipeline_id, marketing_club_id):
 
 
 async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: dict,
-                      club: MarketingClub, links: dict) -> dict:
+                      club: MarketingClub, links: dict, users_by_email: dict, owner_cache: dict) -> dict:
     opp_id = links.get("opportunity")
     lead_id = links.get("lead")
 
@@ -209,6 +298,7 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
         modules = _modules_from_twenty(opp.get("modulesInScope"))
         value_cents = _amount_to_cents(opp.get("amount"))
         lost_reason = _clean_label(opp.get("lostReason")) if stage_key == "lost_dormant" else None
+        assignee_raw = _assignee_id_from(opp)
         twenty_kind, twenty_id, raw_stage = "opportunity", opp_id, opp.get("stage")
     elif lead_id:
         lead = await client.get_by_id(http, "leads", lead_id)
@@ -220,6 +310,7 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
         modules = _modules_from_twenty(lead.get("modulesToPursue") or lead.get("modulesOfInterest"))
         value_cents = None
         lost_reason = None
+        assignee_raw = _assignee_id_from(lead)
         twenty_kind, twenty_id, raw_stage = "lead", lead_id, lead.get("leadStatus")
     else:
         return {"club": club.name, "skipped": "no linked opportunity or lead"}
@@ -230,13 +321,14 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
 
     if value_cents is None and modules:
         value_cents = int(round(price_for(modules)["total"] * 100))
+    owner_user_id = await _resolve_owner(http, assignee_raw, users_by_email, owner_cache)
 
     existing = await _existing_platform_deal(session, pipeline.id, club.id)
     if existing is None:
         deal = await crm.create_deal(
             session, scope=crm.SCOPE_PLATFORM, pipeline_id=pipeline.id, stage_id=stage.id,
             title=club.name, marketing_club_id=club.id, value_cents=value_cents or 0,
-            module_keys=modules, source="twenty_import",
+            module_keys=modules, source="twenty_import", owner_user_id=owner_user_id,
         )
         if stage.is_won or stage.is_lost:
             await crm.move_stage(session, deal, stage)
@@ -250,6 +342,10 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
         deal.module_keys = sorted(set(deal.module_keys or []) | set(modules))
         if value_cents and value_cents > (deal.value_cents or 0):
             deal.value_cents = value_cents
+        # Never overwrite an owner already set locally (a super admin may
+        # have reassigned it directly in BetterCRM since the last run).
+        if owner_user_id and not deal.owner_user_id:
+            deal.owner_user_id = owner_user_id
         action = "updated"
     if lost_reason:
         deal.lost_reason = lost_reason
@@ -269,7 +365,24 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
         session, deal_id=deal.id, type="system", body=note,
         meta={"twenty_kind": twenty_kind, "twenty_id": twenty_id, "twenty_raw_stage": raw_stage},
     )
-    return {"club": club.name, "action": action, "stage": stage.key, "value_cents": deal.value_cents}
+
+    notes_imported = 0
+    if opp_id:
+        for tw_note in await _fetch_opportunity_notes(http, opp_id):
+            note_id = tw_note.get("id")
+            if not note_id or await _note_already_imported(session, deal.id, note_id):
+                continue
+            body_text = _note_text(tw_note)
+            if not body_text:
+                continue
+            await crm.log_activity(
+                session, deal_id=deal.id, type="note", body=body_text,
+                meta={"twenty_note_id": note_id, "twenty_note_created_at": tw_note.get("createdAt")},
+            )
+            notes_imported += 1
+
+    return {"club": club.name, "action": action, "stage": stage.key, "value_cents": deal.value_cents,
+            "owner_matched": bool(owner_user_id), "owner_seen": bool(assignee_raw), "notes_imported": notes_imported}
 
 
 async def main() -> None:
@@ -280,11 +393,16 @@ async def main() -> None:
     linked = await _linked_clubs()
     print(f"=== {len(linked)} club(s) have a Twenty Opportunity and/or Lead linked ===")
 
-    stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "no_local_club": 0}
+    stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "no_local_club": 0,
+             "owners_matched": 0, "owners_unmatched": 0, "notes_imported": 0}
+    owner_cache: dict = {}
     async with async_session_maker() as session:
         pipeline = await crm.ensure_platform_pipeline(session)
         await session.commit()
         stage_by_key = {s.key: s for s in pipeline.stages}
+
+        users_rows = (await session.execute(select(User.id, User.email))).all()
+        users_by_email = {email.strip().lower(): uid for uid, email in users_rows if email}
 
         async with httpx.AsyncClient() as http:
             for idx, (guid, links) in enumerate(sorted(linked.items()), start=1):
@@ -297,7 +415,8 @@ async def main() -> None:
                     await asyncio.sleep(_PACE_SECONDS)
                     continue
                 try:
-                    result = await _import_one(http, session, pipeline, stage_by_key, club, links)
+                    result = await _import_one(http, session, pipeline, stage_by_key, club, links,
+                                               users_by_email, owner_cache)
                     await session.commit()
                 except Exception:  # noqa: BLE001 - one bad club can't stop the rest
                     await session.rollback()
@@ -311,15 +430,23 @@ async def main() -> None:
                     logger.info("  [%d/%d] %s -> skipped: %s", idx, len(linked), club.name, result["skipped"])
                 else:
                     stats[result["action"]] += 1
-                    logger.info("  [%d/%d] %s -> %s (stage=%s, value_cents=%s)",
+                    stats["notes_imported"] += result.get("notes_imported", 0)
+                    if result.get("owner_seen"):
+                        stats["owners_matched" if result.get("owner_matched") else "owners_unmatched"] += 1
+                    logger.info("  [%d/%d] %s -> %s (stage=%s, value_cents=%s, notes=%d)",
                                idx, len(linked), club.name, result["action"],
-                               result["stage"], result["value_cents"])
+                               result["stage"], result["value_cents"], result.get("notes_imported", 0))
                 await asyncio.sleep(_PACE_SECONDS)
 
     print(f"\nDone. {stats}")
     if stats["skipped"]:
         print("Skipped deals need a manual look — check the log above for the reason "
               "(unrecognised stage/status, or a Twenty record that's since been deleted).")
+    if stats["owners_unmatched"]:
+        print(f"{stats['owners_unmatched']} deal(s) had a Twenty assignee that couldn't be matched to a "
+              "BetterCricket user by email — check the log above for the assignee lookup, and that the "
+              "workspaceMembers/assigneeId field names actually match this workspace's live Twenty schema "
+              "(this integration never previously needed to READ that field, so it's unverified).")
 
 
 if __name__ == "__main__":

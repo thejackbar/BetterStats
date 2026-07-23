@@ -77,6 +77,7 @@ function buildBoard(stages, deals) {
     return {
       id: stage.id, key: stage.key, name: stage.name, position: stage.position,
       default_probability: stage.default_probability, is_won: stage.is_won, is_lost: stage.is_lost,
+      hidden_from_board: stage.hidden_from_board,
       deal_count: stageDeals.length, value_cents: stageValue, weighted_value_cents: stageWeighted,
       deals: stageDeals,
     }
@@ -208,6 +209,8 @@ export default function SuperCrm() {
   const [showStages, setShowStages] = useState(false)
   const [owners, setOwners] = useState([])
   const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [sortBy, setSortBy] = useState('')
+  const [sortDir, setSortDir] = useState('asc')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -251,7 +254,23 @@ export default function SuperCrm() {
     })
   }, [deals, filters])
 
-  const board = useMemo(() => buildBoard(stages, filteredDeals), [stages, filteredDeals])
+  // Sorts WITHIN each stage — buildBoard groups by stage in whatever order
+  // it's handed, so sorting the flat list first sorts each resulting column.
+  const sortedDeals = useMemo(() => {
+    if (!sortBy) return filteredDeals
+    const dir = sortDir === 'desc' ? -1 : 1
+    const key = sortBy === 'club' ? (d => (d.marketing_club_name || d.title || '').toLowerCase())
+      : sortBy === 'value' ? (d => d.value_cents || 0)
+      : (d => d.engagement_score ?? -1)
+    return [...filteredDeals].sort((a, b) => {
+      const av = key(a), bv = key(b)
+      if (av < bv) return -1 * dir
+      if (av > bv) return 1 * dir
+      return 0
+    })
+  }, [filteredDeals, sortBy, sortDir])
+
+  const board = useMemo(() => buildBoard(stages, sortedDeals), [stages, sortedDeals])
   const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
 
   return (
@@ -272,6 +291,22 @@ export default function SuperCrm() {
         <>
           <FilterBar filters={filters} setFilters={setFilters} owners={owners} stateOptions={stateOptions}
             associationOptions={associationOptions} channelOptions={channelOptions} resultCount={filteredDeals.length} />
+
+          <div className="flex items-center gap-2 mb-4 -mt-2">
+            <span className="text-[11px] text-pb-faint">Sort {view === 'board' ? 'within stage' : ''} by</span>
+            <Select value={sortBy} onChange={e => setSortBy(e.target.value)} className="w-40">
+              <option value="">Default (recent)</option>
+              <option value="club">Club name</option>
+              <option value="value">Dollar value</option>
+              <option value="engagement">Engagement score</option>
+            </Select>
+            {sortBy && (
+              <button onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                className="px-2.5 py-1 rounded-full text-[11.5px] border border-pb-hairline2 text-pb-faint hover:text-pb-text">
+                {sortDir === 'asc' ? '↑ Ascending' : '↓ Descending'}
+              </button>
+            )}
+          </div>
 
           {view === 'board' && (
             <PipelineBoard board={board} onOpenDeal={setOpenDealId} onMoved={load} client={superClient} />
@@ -302,12 +337,12 @@ export default function SuperCrm() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredDeals.length === 0 && (
+                    {sortedDeals.length === 0 && (
                       <tr><td colSpan={8} className="px-3 py-6 text-center text-pb-faintest">
                         {deals.length === 0 ? 'No deals yet.' : 'No deals match these filters.'}
                       </td></tr>
                     )}
-                    {filteredDeals.map(d => (
+                    {sortedDeals.map(d => (
                       <tr key={d.id} onClick={() => setOpenDealId(d.id)} className="border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer">
                         <td className="px-3 py-2.5">{d.title}</td>
                         <td className="px-3 py-2.5 text-pb-faint">{d.point_of_contact_name || '—'}</td>

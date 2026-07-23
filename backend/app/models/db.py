@@ -3583,6 +3583,10 @@ class CrmStage(Base):
     default_probability = Column(Integer, nullable=False, server_default="0", default=0)
     is_won = Column(Boolean, nullable=False, server_default="false", default=False)
     is_lost = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Migration 183: drops the column from the Kanban board without deleting
+    # the stage — a deal can still be filed into/out of it via the Stage
+    # dropdown, which always lists every stage regardless of this flag.
+    hidden_from_board = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
