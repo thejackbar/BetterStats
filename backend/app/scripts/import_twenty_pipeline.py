@@ -180,17 +180,28 @@ async def _resolve_owner(http: httpx.AsyncClient, assignee_id: "str | None",
     return owner_id
 
 
+_notes_warned = False
+
+
 async def _fetch_opportunity_notes(http: httpx.AsyncClient, opp_id: str) -> list:
     """Every Note attached to this Opportunity via Twenty's noteTargets join
     object — mirrors the taskTargets shape (taskId + companyId) already used
     elsewhere in this codebase for Task attachment, but for Notes this is a
     READ, never previously exercised here. Returns [] (not an error) if the
     filter/shape doesn't match live Twenty — unverified beyond the
-    taskTargets pattern match."""
+    taskTargets pattern match. Confirmed WRONG against the live workspace
+    (2026-07-24): noteTarget has no opportunityId field at all — logs ONCE,
+    not per-opportunity, until the real field name is confirmed and this is
+    fixed (see app/scripts/twenty_schema_dump.py)."""
+    global _notes_warned
     try:
         payload = await client.list_page(http, "noteTargets", limit=60, filter=f"opportunityId[eq]:{opp_id}")
-    except Exception:  # noqa: BLE001
-        logger.exception("twenty: failed to list noteTargets for opportunity %s", opp_id)
+    except Exception as e:  # noqa: BLE001
+        if not _notes_warned:
+            _notes_warned = True
+            logger.warning("twenty: noteTargets filter rejected (%s) — Notes import is disabled for the "
+                           "rest of this run; run app/scripts/twenty_schema_dump.py to find the real field "
+                           "name, fix _fetch_opportunity_notes, then re-run", e)
         return []
     data = payload.get("data") if isinstance(payload, dict) else None
     targets = data.get("noteTargets") if isinstance(data, dict) else None
