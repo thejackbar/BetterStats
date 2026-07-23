@@ -636,7 +636,7 @@ async def get_scorecard(
             raise RuntimeError("skip-gr-fetch-for-manual-game")
         from app.services.grassroots_scores_client import get_match_scorecard
         gr_data = await get_match_scorecard(str(game.id))
-        if gr_data and org:
+        if gr_data:
             _DNB = {"absent", "did not bat", "dnb"}
 
             # Match on (surname, first_initial) — handles "Baker, Daniel" (DB
@@ -657,11 +657,17 @@ async def get_scorecard(
                     return ("", "")
                 return (words[-1].lower(), words[0][0].lower() if words[0] else "")
 
-            player_res = await db.execute(
-                select(Player.id, Player.grassroots_id, Player.display_name)
-                .where(Player.organisation_id == org.id)
-            )
-            player_rows = player_res.all()
+            # `org` can legitimately be unresolvable (see `include_fillins_stats`
+            # above) — that only means no `players` row can ever be linked for
+            # a hyperlink; it must never block rebuilding the card itself from
+            # Grassroots, which needs no org lookup at all to be correct.
+            player_rows = []
+            if org:
+                player_res = await db.execute(
+                    select(Player.id, Player.grassroots_id, Player.display_name)
+                    .where(Player.organisation_id == org.id)
+                )
+                player_rows = player_res.all()
             known_ids: set = {r[0] for r in player_rows}
             guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
             id_to_display: dict[uuid.UUID, str] = {r[0]: r[2] for r in player_rows}
@@ -687,10 +693,29 @@ async def get_scorecard(
                     return nk_to_pid.get(_name_key(name))
                 return None
 
-            # Org name first word — the ONLY thing that decides which side of
-            # the card a participant lands on. Never whether their GUID
-            # matches a `players` row — see the note above this block.
-            org_word = (org.name or "").lower().split()[0] if org.name else ""
+            # Org name first word — a fallback signal for which GR team is
+            # ours, used only when the DB-overlap signal below has nothing to
+            # go on (see it for why that one comes first).
+            org_word = (org.name or "").lower().split()[0] if org and org.name else ""
+
+            # Names we ALREADY have a stored batting/bowling row for on this
+            # exact game (batting_rows/bowling_rows were queried further up,
+            # independent of org/season resolution). By construction sync only
+            # ever writes rows for our own team, so whichever GR team's roster
+            # overlaps these names is ours — a signal that doesn't depend on
+            # `org` resolving at all, and is trusted over org-name matching
+            # when it has anything to go on. Without this, a game whose
+            # grade/season chain fails to resolve an org (happens — see the
+            # `org` guards above) silently lost this whole rebuild the moment
+            # any `org.` field was touched; that bug is fixed by not
+            # depending on `org` for this signal in the first place.
+            _existing_game_names: set = set()
+            for _bi, _p in batting_rows:
+                if _p and _p.display_name and not _looks_redacted(_p.display_name):
+                    _existing_game_names.add(_name_key(_p.display_name))
+            for _bs, _p in bowling_rows:
+                if _p and _p.display_name and not _looks_redacted(_p.display_name):
+                    _existing_game_names.add(_name_key(_p.display_name))
 
             # GR confirmed fields (via /scorecard/gr-debug):
             #   teams[]: players[], nonPlayingMembers[], id, displayName, name, owningOrganisation
@@ -698,18 +723,43 @@ async def get_scorecard(
             #                 ballsFaced, foursScored, sixesScored, runsScored, battingMinutes,
             #                 strikeRate, dismissalTypeId, dismissalType, dismissalText,
             #                 isOnStrike, isOnNonStrike, highlight
+            _teams_raw = gr_data.get("teams") or []
+
+            # Pass 1: team id -> (display name, members, DB-overlap count).
+            gr_team_name_by_id: dict[str, str] = {}
+            _team_members: dict[str, list] = {}
+            _team_overlap: dict[str, int] = {}
+            for _team in _teams_raw:
+                _tid = (_team.get("id") or "").lower()
+                if not _tid:
+                    continue
+                _members = (_team.get("players") or []) + (_team.get("nonPlayingMembers") or [])
+                gr_team_name_by_id[_tid] = _team.get("displayName") or _team.get("name") or ""
+                _team_members[_tid] = _members
+                _team_overlap[_tid] = sum(
+                    1 for _pl in _members
+                    if _name_key(_pl.get("playerShortName") or _pl.get("displayName") or
+                                 _pl.get("name") or "") in _existing_game_names
+                )
+
+            # Pass 2: decide which team id is ours, DB-overlap first.
+            if any(_team_overlap.values()):
+                _our_tid = max(_team_overlap, key=_team_overlap.get)
+            elif org_word:
+                _our_tid = next(
+                    (tid for tid, nm in gr_team_name_by_id.items() if org_word in nm.lower()),
+                    None,
+                )
+            else:
+                _our_tid = None
+
+            # Pass 3: populate the roster sets now that "ours" is settled.
             pid_to_name: dict[str, str] = {}
             opp_roster_pids: set[str] = set()
             our_team_roster_pids: set[str] = set()
-            gr_team_name_by_id: dict[str, str] = {}
-            for _team in (gr_data.get("teams") or []):
-                _team_name = (_team.get("displayName") or _team.get("name") or "").lower()
-                _is_our_team = bool(org_word and org_word in _team_name)
-                _tid = (_team.get("id") or "").lower()
-                if _tid:
-                    gr_team_name_by_id[_tid] = _team.get("displayName") or _team.get("name") or ""
-                _all_members = (_team.get("players") or []) + (_team.get("nonPlayingMembers") or [])
-                for _pl in _all_members:
+            for _tid, _members in _team_members.items():
+                _is_our_team = _tid == _our_tid
+                for _pl in _members:
                     _pid = _pl.get("participantId") or _pl.get("id")
                     _name = (_pl.get("playerShortName") or _pl.get("displayName") or
                              _pl.get("name") or "")
@@ -747,7 +797,7 @@ async def get_scorecard(
                     "wickets": inn.get("numberOfWicketsFallen"),
                     "extras": inn.get("totalExtras"),
                 }
-                _bt_is_ours = bool(org_word) and org_word in (gr_team_name_by_id.get(bt_id) or "").lower()
+                _bt_is_ours = _our_tid is not None and bt_id == _our_tid
                 (our_inn_nums if _bt_is_ours else opp_inn_nums).append(inn_num)
                 new_innings_totals[inn_num] = {
                     "runs": 0,

@@ -1477,6 +1477,58 @@ cache. This bug predates the rewrite above and would have been silently
 capping the OLD merge logic's live-GR data too, on whichever match happened
 to be fetched during an in-progress correction.
 
+**Second follow-up (same day) — the cache fix above wasn't the actual cause
+of the "16/0" symptom; the real bug was a crash.** After the cache fix
+deployed, the page still showed the same wrong total. Repeated, interleaved
+checks against Grassroots directly and against our own `/scorecard` and
+`/scorecard/gr-debug` endpoints proved the upstream data was correct and
+stable on every single check, while `/scorecard` was stable and WRONG on
+every single check — impossible if the two endpoints (which share the exact
+same `get_match_scorecard` call) were both reading live data normally. The
+timing gave it away: `/scorecard` took a full ~1-1.5s per request (a genuine
+live fetch, not a cache hit), yet still returned the pre-rewrite DB-only
+shape (dismissal text truncated to the DB's own short form, the opposition
+side entirely absent, extras undercounted at 16 — exactly the sum of our own
+bowlers' wides+no-balls, with no byes/leg-byes, which is what the *old*
+pre-rewrite code computed from stored rows alone).
+
+Root cause: `org_word = (org.name or "").lower().split()[0] if org.name else
+""` dereferenced `org.name` without checking `org` was truthy first. `org`
+being `None` is an anticipated, already-handled state two lines above it
+(`include_fillins_stats = ... if org else True`) — grade/season resolve
+fine but the season's `organisation_id` doesn't always resolve to a live
+`Organisation` row. The `AttributeError` this threw was inside the same
+`try` the whole rebuild lives in, so it was swallowed by the generic
+`except Exception` and silently fell back to the DB-only pre-rewrite
+rendering — reproducing the *original* bug this whole fix was meant to
+solve, indistinguishable from the outside from "the fix didn't deploy".
+
+Fixed two ways, not just one: (1) the `if gr_data and org:` guard became
+`if gr_data:` and the null-unsafe `org.name`/`org.id` reads are now properly
+guarded, so the rebuild no longer requires `org` to resolve at all — losing
+the org lookup should only mean losing the ability to hyperlink a name to a
+profile, never losing the rebuild itself. (2) Team classification (which GR
+team is "ours") no longer leans on `org.name` substring-matching as the
+*primary* signal at all: it now checks first whether either team's roster
+overlaps with names we already have a stored batting/bowling row for on this
+exact game (`batting_rows`/`bowling_rows`, queried earlier in the function
+regardless of org resolution) — a signal that's true by construction (sync
+only ever writes rows for our own team) and doesn't depend on the
+grade→season→org chain resolving at all. `org_word` matching is now only the
+fallback for a game with zero prior synced rows to compare against (i.e. the
+very first time it's ever viewed). Verified offline against the real
+payload with `org_word` forced empty (simulating the exact failure): the
+DB-overlap signal alone correctly picks Mulgrave as "ours" (11/12 roster
+names match) with no org lookup involved at all.
+
+**The pattern worth remembering**: a broad `except Exception` around a large
+rebuild is good for resilience against a flaky upstream, but it also hides a
+genuine bug in the rebuild itself behind the SAME "fall back to the old
+data" behavior — from the outside, "GR is down" and "our own code just
+crashed" look identical. Anything added inside a block like this needs the
+same null-safety discipline as the rest of the function, since a silent
+`except` won't surface a shortcut taken in a hurry.
+
 ## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
 
 Yearbook generation was previously **100% manual** — two separate admin
