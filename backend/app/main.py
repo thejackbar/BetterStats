@@ -3014,6 +3014,18 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_person ON crm_activities(person_id, occurred_at DESC)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_org ON crm_activities(organisation_id, occurred_at DESC)"))
 
+    # Migration 174: BetterCRM optional trackers — a club adds pipelines from
+    # a preset catalogue (or a fully custom one) rather than getting one
+    # auto-seeded. See services/crm.py's PIPELINE_TEMPLATES.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE crm_pipelines ADD COLUMN IF NOT EXISTS template_key TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE crm_pipelines ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_pipelines_template ON crm_pipelines(organisation_id, template_key)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

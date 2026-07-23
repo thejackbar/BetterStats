@@ -3,10 +3,15 @@
 One engine, two scopes:
   - **platform**: BetterCricket's own sales pipeline (organisation_id NULL,
     deals usually linked to a ``marketing_clubs`` prospect row) — the
-    replacement for Twenty's Opportunity board.
-  - **club**: the BetterAdmin CRM module (organisation_id set) — a club's own
-    pipeline for sponsorship renewals, grant applications, alumni asks, or
-    anything else worth tracking stage-by-stage with a dollar value attached.
+    replacement for Twenty's Opportunity board. Exactly one pipeline always
+    exists (``ensure_platform_pipeline``), auto-seeded on first touch.
+  - **club**: the BetterAdmin CRM module (organisation_id set) — a club adds
+    zero or more opt-in "trackers" (pipelines) from a small preset catalogue
+    (Sponsors / Grants / Alumni & Fundraising) or builds a fully custom one.
+    Nothing is auto-seeded here: formal sponsorship pursuit, grant
+    applications and alumni fundraising are not universal to every club, so
+    unlike the platform pipeline a club starts with NO trackers until it adds
+    one (see PIPELINE_TEMPLATES / tracker_catalogue / add_tracker below).
 
 A Deal always belongs to exactly one Pipeline, which is stage-ordered
 (``CrmStage.position``); a stage's ``key`` is a stable slug the auto-creation
@@ -26,6 +31,7 @@ uuid5-on-collision scheme is untouched by this module.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from sqlalchemy import select, func
@@ -64,46 +70,85 @@ PLATFORM_DEFAULT_STAGES = [
     ("won", "Won", 100, True, False),
     ("lost", "Lost", 0, False, True),
 ]
-# Club scope launches scoped to Sponsors — the one relationship-tracking need
-# with the clearest demand and the one thing TidyHQ conspicuously doesn't do
-# (its own sponsorship handling is a static public listing page, not a
-# tracked pipeline). Stage names are sponsorship-flavoured, not generic sales
-# stages, on purpose — see the "Pipeline/Deals" terminology discussion this
-# module's naming came out of. "Renewal Due" sits after Signed: a club moves a
-# signed sponsor back into it when it's time to renew, re-opening the record.
-CLUB_DEFAULT_STAGES = [
+
+# ─── Club-scope tracker catalogue ────────────────────────────────────────────
+# Per direct instruction: a club shouldn't be presumed to run formal
+# sponsorship, grants or alumni-fundraising activity — these are opt-in
+# "trackers" a club adds (or never adds) from this small catalogue, same
+# posture as a template email a club may or may not use. Each template
+# carries its own stage names AND its own vocabulary (`terms`, consumed by
+# the frontend's shared Kanban/detail components) so "Won"/"Lost"/"deal"
+# never leaks through as generic sales language.
+PIPELINE_TEMPLATES = {
+    "sponsors": {
+        "label": "Sponsors",
+        "blurb": "Sponsorship prospects through to a signed agreement and renewal.",
+        "stages": [
+            ("prospect", "Prospect", 10, False, False),
+            ("contacted", "Contacted", 25, False, False),
+            ("proposal_sent", "Proposal Sent", 50, False, False),
+            ("signed", "Signed", 100, True, False),
+            ("renewal_due", "Renewal Due", 60, False, False),
+            ("not_proceeding", "Not Proceeding", 0, False, True),
+        ],
+        "terms": {"won": "Signed", "lost": "Not Proceeding",
+                  "itemSingular": "sponsor", "itemPlural": "sponsors", "titleLabel": "Sponsor name"},
+    },
+    "grants": {
+        "label": "Grants",
+        "blurb": "Grant opportunities from research through to the outcome.",
+        "stages": [
+            ("researching", "Researching", 10, False, False),
+            ("drafting", "Drafting", 30, False, False),
+            ("submitted", "Submitted", 50, False, False),
+            ("awarded", "Awarded", 100, True, False),
+            ("declined", "Declined", 0, False, True),
+        ],
+        "terms": {"won": "Awarded", "lost": "Declined",
+                  "itemSingular": "grant", "itemPlural": "grants", "titleLabel": "Grant name"},
+    },
+    "alumni": {
+        "label": "Alumni & Fundraising",
+        "blurb": "Former players, life members and fundraising asks.",
+        "stages": [
+            ("identified", "Identified", 10, False, False),
+            ("contacted", "Contacted", 25, False, False),
+            ("asked", "Asked", 50, False, False),
+            ("given", "Given", 100, True, False),
+            ("declined", "Declined", 0, False, True),
+        ],
+        "terms": {"won": "Given", "lost": "Declined",
+                  "itemSingular": "supporter", "itemPlural": "supporters", "titleLabel": "Supporter name"},
+    },
+}
+
+# Seeded for a fully custom, club-authored tracker — deliberately generic
+# (renamed/added/removed freely via the stage CRUD functions below).
+CUSTOM_DEFAULT_STAGES = [
     ("prospect", "Prospect", 10, False, False),
     ("contacted", "Contacted", 25, False, False),
-    ("proposal_sent", "Proposal Sent", 50, False, False),
-    ("signed", "Signed", 100, True, False),
-    ("renewal_due", "Renewal Due", 60, False, False),
-    ("not_proceeding", "Not Proceeding", 0, False, True),
+    ("proposal", "Proposal", 50, False, False),
+    ("won", "Won", 100, True, False),
+    ("lost", "Lost", 0, False, True),
 ]
+CUSTOM_TERMS = {"won": "Won", "lost": "Lost", "itemSingular": "record", "itemPlural": "records", "titleLabel": "Title"}
 
 
 # ─── Pipelines / stages ──────────────────────────────────────────────────────
 
-async def ensure_pipeline(session: AsyncSession, scope: str, organisation_id=None) -> CrmPipeline:
-    """Get-or-create the one default pipeline for a scope (+org). Lazy and
-    idempotent — same "seed on first touch" posture as BetterMerch's category
-    defaults — so the first read/write into a fresh club or the platform
-    pipeline just works with no separate setup step."""
+async def ensure_platform_pipeline(session: AsyncSession) -> CrmPipeline:
+    """Get-or-create BetterCricket's own sales pipeline. Exactly one always
+    exists — unlike the club scope, this one is NOT optional."""
     stmt = select(CrmPipeline).options(selectinload(CrmPipeline.stages)).where(
-        CrmPipeline.scope == scope, CrmPipeline.is_default.is_(True))
-    stmt = (stmt.where(CrmPipeline.organisation_id == organisation_id) if organisation_id
-            else stmt.where(CrmPipeline.organisation_id.is_(None)))
+        CrmPipeline.scope == SCOPE_PLATFORM, CrmPipeline.organisation_id.is_(None),
+        CrmPipeline.is_default.is_(True))
     pipeline = (await session.execute(stmt)).scalars().first()
     if pipeline is not None:
         return pipeline
-    pipeline = CrmPipeline(
-        scope=scope, organisation_id=organisation_id,
-        name="BetterCricket Sales" if scope == SCOPE_PLATFORM else "Sponsors",
-        is_default=True,
-    )
+    pipeline = CrmPipeline(scope=SCOPE_PLATFORM, organisation_id=None, name="BetterCricket Sales", is_default=True)
     session.add(pipeline)
     await session.flush()
-    stages_def = PLATFORM_DEFAULT_STAGES if scope == SCOPE_PLATFORM else CLUB_DEFAULT_STAGES
-    for position, (key, name, prob, is_won, is_lost) in enumerate(stages_def):
+    for position, (key, name, prob, is_won, is_lost) in enumerate(PLATFORM_DEFAULT_STAGES):
         session.add(CrmStage(
             pipeline_id=pipeline.id, key=key, name=name, position=position,
             default_probability=prob, is_won=is_won, is_lost=is_lost,
@@ -111,6 +156,159 @@ async def ensure_pipeline(session: AsyncSession, scope: str, organisation_id=Non
     await session.flush()
     await session.refresh(pipeline, attribute_names=["stages"])
     return pipeline
+
+
+async def get_pipeline_for_org(session: AsyncSession, pipeline_id, organisation_id) -> Optional[CrmPipeline]:
+    """A club-scope pipeline owned by this org, with its stages loaded — the
+    ownership check every club-scope tracker/board/deal endpoint gates on."""
+    stmt = select(CrmPipeline).options(selectinload(CrmPipeline.stages)).where(CrmPipeline.id == pipeline_id)
+    pipeline = (await session.execute(stmt)).scalars().first()
+    if pipeline is None or pipeline.scope != SCOPE_CLUB or str(pipeline.organisation_id) != str(organisation_id):
+        return None
+    return pipeline
+
+
+def terms_for_pipeline(pipeline: CrmPipeline) -> dict:
+    if pipeline.template_key and pipeline.template_key in PIPELINE_TEMPLATES:
+        return PIPELINE_TEMPLATES[pipeline.template_key]["terms"]
+    return CUSTOM_TERMS
+
+
+async def tracker_catalogue(session: AsyncSession, organisation_id) -> dict:
+    """The "Add a tracker" screen's data: every preset template (with whether
+    this club already has it active, and its pipeline id if so) plus this
+    club's own custom trackers, active or not."""
+    existing = (await session.execute(
+        select(CrmPipeline).where(CrmPipeline.scope == SCOPE_CLUB, CrmPipeline.organisation_id == organisation_id)
+    )).scalars().all()
+    by_template = {p.template_key: p for p in existing if p.template_key}
+    presets = []
+    for key, tpl in PIPELINE_TEMPLATES.items():
+        existing_p = by_template.get(key)
+        presets.append({
+            "key": key, "label": tpl["label"], "blurb": tpl["blurb"],
+            "active": bool(existing_p and existing_p.is_active),
+            "pipeline_id": str(existing_p.id) if existing_p else None,
+        })
+    customs = [
+        {"id": str(p.id), "name": p.name, "active": p.is_active}
+        for p in existing if not p.template_key
+    ]
+    return {"presets": presets, "custom": customs}
+
+
+async def active_trackers(session: AsyncSession, organisation_id) -> list[dict]:
+    """Every tracker this club currently has switched on — what the module's
+    nav is built from. Each carries its own vocabulary (`terms`)."""
+    rows = (await session.execute(
+        select(CrmPipeline).where(
+            CrmPipeline.scope == SCOPE_CLUB, CrmPipeline.organisation_id == organisation_id,
+            CrmPipeline.is_active.is_(True))
+        .order_by(CrmPipeline.created_at)
+    )).scalars().all()
+    return [
+        {"id": str(p.id), "name": p.name, "template_key": p.template_key, "terms": terms_for_pipeline(p)}
+        for p in rows
+    ]
+
+
+async def add_tracker(session: AsyncSession, organisation_id, *,
+                      template_key: Optional[str] = None, name: Optional[str] = None) -> CrmPipeline:
+    """Turn a preset template on (minting it the first time, reactivating it
+    if the club had switched it off before — so history survives a re-add),
+    or create a brand new custom tracker."""
+    if template_key:
+        tpl = PIPELINE_TEMPLATES.get(template_key)
+        if tpl is None:
+            raise ValueError(f"Unknown tracker template: {template_key}")
+        existing = (await session.execute(
+            select(CrmPipeline).options(selectinload(CrmPipeline.stages)).where(
+                CrmPipeline.scope == SCOPE_CLUB, CrmPipeline.organisation_id == organisation_id,
+                CrmPipeline.template_key == template_key)
+        )).scalars().first()
+        if existing is not None:
+            existing.is_active = True
+            return existing
+        pipeline = CrmPipeline(scope=SCOPE_CLUB, organisation_id=organisation_id,
+                              name=tpl["label"], template_key=template_key, is_active=True)
+        stages_def = tpl["stages"]
+    else:
+        if not name or not name.strip():
+            raise ValueError("A custom tracker needs a name")
+        pipeline = CrmPipeline(scope=SCOPE_CLUB, organisation_id=organisation_id,
+                              name=name.strip()[:120], template_key=None, is_active=True)
+        stages_def = CUSTOM_DEFAULT_STAGES
+    session.add(pipeline)
+    await session.flush()
+    for position, (key, sname, prob, is_won, is_lost) in enumerate(stages_def):
+        session.add(CrmStage(pipeline_id=pipeline.id, key=key, name=sname, position=position,
+                             default_probability=prob, is_won=is_won, is_lost=is_lost))
+    await session.flush()
+    await session.refresh(pipeline, attribute_names=["stages"])
+    return pipeline
+
+
+async def deactivate_tracker(session: AsyncSession, pipeline: CrmPipeline) -> None:
+    """"Removing" a tracker just hides it — its deals stay, and re-adding the
+    same preset later reactivates this same pipeline rather than duplicating."""
+    pipeline.is_active = False
+
+
+async def reactivate_tracker(session: AsyncSession, pipeline: CrmPipeline) -> None:
+    """Turn a previously-removed tracker back on. A preset is more commonly
+    reactivated via ``add_tracker`` (which finds it by template_key), but a
+    custom tracker has no template_key to re-find it by, so it's reactivated
+    directly by id instead."""
+    pipeline.is_active = True
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(text: str) -> str:
+    s = _SLUG_RE.sub("_", text.strip().lower()).strip("_")
+    return s or "stage"
+
+
+async def add_stage(session: AsyncSession, pipeline: CrmPipeline, *, name: str,
+                    default_probability: int = 0, is_won: bool = False, is_lost: bool = False) -> CrmStage:
+    base = _slug(name)
+    existing_keys = {s.key for s in pipeline.stages}
+    key, n = base, 2
+    while key in existing_keys:
+        key = f"{base}_{n}"
+        n += 1
+    stage = CrmStage(
+        pipeline_id=pipeline.id, key=key, name=(name or "New stage")[:80], position=len(pipeline.stages),
+        default_probability=max(0, min(100, int(default_probability or 0))), is_won=is_won, is_lost=is_lost,
+    )
+    session.add(stage)
+    await session.flush()
+    return stage
+
+
+async def update_stage(session: AsyncSession, stage: CrmStage, **fields) -> CrmStage:
+    for f in ("name", "default_probability", "is_won", "is_lost", "position"):
+        if f in fields and fields[f] is not None:
+            setattr(stage, f, fields[f])
+    return stage
+
+
+async def delete_stage(session: AsyncSession, stage: CrmStage) -> None:
+    in_use = (await session.execute(
+        select(func.count()).select_from(CrmDeal).where(CrmDeal.stage_id == stage.id)
+    )).scalar_one()
+    if in_use:
+        raise ValueError("This stage still has records in it — move or archive them first")
+    await session.delete(stage)
+
+
+def stage_dicts(pipeline: CrmPipeline) -> list[dict]:
+    return [
+        {"id": str(s.id), "key": s.key, "name": s.name, "position": s.position,
+         "default_probability": s.default_probability, "is_won": s.is_won, "is_lost": s.is_lost}
+        for s in pipeline.stages
+    ]
 
 
 def _effective_probability(deal: CrmDeal, stage: Optional[CrmStage]) -> Optional[int]:
@@ -182,14 +380,10 @@ def _activity_dict(activity: CrmActivity) -> dict:
     }
 
 
-async def pipeline_board(session: AsyncSession, scope: str, organisation_id=None) -> dict:
+def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal]) -> dict:
     """Stages with their open deals + weighted value per stage and overall —
-    the Kanban board's one data fetch."""
-    pipeline = await ensure_pipeline(session, scope, organisation_id)
-    deals = (await session.execute(
-        select(CrmDeal).where(CrmDeal.pipeline_id == pipeline.id, CrmDeal.archived_at.is_(None))
-        .order_by(CrmDeal.updated_at.desc())
-    )).scalars().all()
+    the Kanban board's shape, computed from an already-loaded pipeline
+    (stages) and its (non-archived) deals. Pure/sync: callers fetch both."""
     by_stage: dict = {}
     for d in deals:
         by_stage.setdefault(d.stage_id, []).append(d)
@@ -222,7 +416,8 @@ async def pipeline_board(session: AsyncSession, scope: str, organisation_id=None
             "deals": deals_out,
         })
     return {
-        "pipeline": {"id": str(pipeline.id), "name": pipeline.name, "scope": pipeline.scope},
+        "pipeline": {"id": str(pipeline.id), "name": pipeline.name, "scope": pipeline.scope,
+                    "terms": terms_for_pipeline(pipeline)},
         "stages": stages_out,
         "totals": {
             "open_value_cents": total_open_value,
@@ -232,21 +427,11 @@ async def pipeline_board(session: AsyncSession, scope: str, organisation_id=None
     }
 
 
-async def list_stages(session: AsyncSession, scope: str, organisation_id=None) -> list[dict]:
-    pipeline = await ensure_pipeline(session, scope, organisation_id)
-    return [
-        {"id": str(s.id), "key": s.key, "name": s.name, "position": s.position,
-         "default_probability": s.default_probability, "is_won": s.is_won, "is_lost": s.is_lost}
-        for s in pipeline.stages
-    ]
-
-
 # ─── Deals ────────────────────────────────────────────────────────────────────
 
-async def list_deals(session: AsyncSession, scope: str, organisation_id=None, *,
+async def list_deals(session: AsyncSession, pipeline_id, *,
                      status: Optional[str] = None, include_archived: bool = False) -> list[CrmDeal]:
-    pipeline = await ensure_pipeline(session, scope, organisation_id)
-    stmt = select(CrmDeal).where(CrmDeal.pipeline_id == pipeline.id)
+    stmt = select(CrmDeal).where(CrmDeal.pipeline_id == pipeline_id)
     if not include_archived:
         stmt = stmt.where(CrmDeal.archived_at.is_(None))
     if status:
@@ -262,6 +447,13 @@ async def get_deal(session: AsyncSession, deal_id, scope: str, organisation_id=N
     if scope == SCOPE_CLUB and str(deal.organisation_id) != str(organisation_id):
         return None
     return deal
+
+
+async def get_deal_pipeline(session: AsyncSession, deal: CrmDeal) -> Optional[CrmPipeline]:
+    """The (stages-loaded) pipeline a deal belongs to — for serialising a
+    single deal without the caller needing to already know which pipeline."""
+    stmt = select(CrmPipeline).options(selectinload(CrmPipeline.stages)).where(CrmPipeline.id == deal.pipeline_id)
+    return (await session.execute(stmt)).scalars().first()
 
 
 async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_id,
@@ -473,7 +665,7 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
     already in Proposal. Value is priced from ``module_keys`` via the same
     ``billing_pricing.price_for()`` the Account page / Stripe Checkout use, so
     the pipeline's dollar figure is never a second, drifting estimate."""
-    pipeline = await ensure_pipeline(session, SCOPE_PLATFORM)
+    pipeline = await ensure_platform_pipeline(session)
     stage_by_key = {s.key: s for s in pipeline.stages}
     target_stage = stage_by_key.get(stage_key)
     if target_stage is None:

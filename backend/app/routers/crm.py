@@ -3,11 +3,14 @@
 Two routers sharing one service layer (``services/crm.py``):
   - ``router`` (``/club-admin/crm``) — the club-facing CRM module, gated by
     MANAGE_CRM (the whole router is also module-gated by require_module
-    ("crm") at include time — see main.py).
+    ("crm") at include time — see main.py). Club-scope pipelines are opt-in
+    "trackers" (a club adds zero or more from a preset catalogue, or builds a
+    fully custom one) rather than one auto-seeded default — see
+    services/crm.py's PIPELINE_TEMPLATES for why.
   - ``super_router`` (``/club-admin/super/crm``) — BetterCricket's own
     internal sales pipeline, cross-club platform tooling gated by
     require_super_admin (same posture as marketing.py), NOT a per-club
-    capability.
+    capability. Exactly one pipeline always exists here (not optional).
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, MarketingClub, get_db
+from app.models.db import Organisation, MarketingClub, CrmPerson, CrmStage, CrmPipeline, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
@@ -108,21 +111,33 @@ class ConvertToDealBody(BaseModel):
     title: Optional[str] = None
 
 
-# ─── Shared helpers (parameterised by scope/org) ─────────────────────────────
+class AddTrackerBody(BaseModel):
+    template_key: Optional[str] = None
+    name: Optional[str] = None  # required when template_key is omitted (a custom tracker)
+
+
+class StageCreate(BaseModel):
+    name: str
+    default_probability: int = 0
+    is_won: bool = False
+    is_lost: bool = False
+
+
+class StageUpdate(BaseModel):
+    name: Optional[str] = None
+    default_probability: Optional[int] = None
+    is_won: Optional[bool] = None
+    is_lost: Optional[bool] = None
+    position: Optional[int] = None
+
+
+# ─── Shared helpers ───────────────────────────────────────────────────────────
 
 def _uuid_or_404(raw: str):
     try:
         return uuid.UUID(str(raw))
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=422, detail="Invalid id")
-
-
-async def _stage_or_404(db: AsyncSession, scope: str, organisation_id, stage_id: str):
-    pipeline = await crm_service.ensure_pipeline(db, scope, organisation_id)
-    stage = next((s for s in pipeline.stages if str(s.id) == str(stage_id)), None)
-    if stage is None:
-        raise HTTPException(status_code=404, detail="Stage not found")
-    return pipeline, stage
 
 
 async def _deal_or_404(db: AsyncSession, scope: str, organisation_id, deal_id: str):
@@ -132,31 +147,36 @@ async def _deal_or_404(db: AsyncSession, scope: str, organisation_id, deal_id: s
     return deal
 
 
-async def _serialize_deal(db: AsyncSession, deal, scope: str, organisation_id) -> dict:
-    pipeline = await crm_service.ensure_pipeline(db, scope, organisation_id)
-    stage = next((s for s in pipeline.stages if s.id == deal.stage_id), None)
+async def _serialize_deal(db: AsyncSession, deal) -> dict:
+    pipeline = await crm_service.get_deal_pipeline(db, deal)
+    stage = next((s for s in (pipeline.stages if pipeline else []) if s.id == deal.stage_id), None)
     return crm_service._deal_dict(deal, stage)
 
 
-async def _list_deals_response(db: AsyncSession, scope: str, organisation_id,
+async def _deal_stage_or_404(db: AsyncSession, deal, stage_id: str):
+    pipeline = await crm_service.get_deal_pipeline(db, deal)
+    stage = next((s for s in (pipeline.stages if pipeline else []) if str(s.id) == str(stage_id)), None)
+    if pipeline is None or stage is None:
+        raise HTTPException(status_code=404, detail="Stage not found")
+    return pipeline, stage
+
+
+async def _list_deals_response(db: AsyncSession, pipeline: CrmPipeline,
                                status: Optional[str], include_archived: bool) -> dict:
-    pipeline = await crm_service.ensure_pipeline(db, scope, organisation_id)
     stage_by_id = {s.id: s for s in pipeline.stages}
-    deals = await crm_service.list_deals(db, scope, organisation_id, status=status,
-                                        include_archived=include_archived)
+    deals = await crm_service.list_deals(db, pipeline.id, status=status, include_archived=include_archived)
     return {"deals": [crm_service._deal_dict(d, stage_by_id.get(d.stage_id)) for d in deals]}
 
 
-async def _create_deal(db: AsyncSession, scope: str, organisation_id, body: DealCreate,
-                       marketing_club_id=None) -> dict:
-    pipeline = await crm_service.ensure_pipeline(db, scope, organisation_id)
+async def _create_deal_in_pipeline(db: AsyncSession, pipeline: CrmPipeline, scope: str,
+                                   organisation_id, marketing_club_id, body: DealCreate) -> dict:
     stage = None
     if body.stage_id:
         stage = next((s for s in pipeline.stages if str(s.id) == body.stage_id), None)
     elif body.stage_key:
         stage = next((s for s in pipeline.stages if s.key == body.stage_key), None)
     if stage is None:
-        stage = pipeline.stages[0]  # default: first stage
+        stage = pipeline.stages[0]
     deal = await crm_service.create_deal(
         db, scope=scope, pipeline_id=pipeline.id, stage_id=stage.id, title=body.title,
         organisation_id=organisation_id, marketing_club_id=marketing_club_id,
@@ -166,13 +186,12 @@ async def _create_deal(db: AsyncSession, scope: str, organisation_id, body: Deal
         source="manual",
     )
     await db.commit()
-    return await _serialize_deal(db, deal, scope, organisation_id)
+    return await _serialize_deal(db, deal)
 
 
 async def _resolve_contact_person(db: AsyncSession, body: DealContactBody, *,
                                   organisation_id=None, marketing_club_id=None):
     if body.person_id:
-        from app.models.db import CrmPerson
         person = await db.get(CrmPerson, _uuid_or_404(body.person_id))
         if person is None:
             raise HTTPException(status_code=404, detail="Person not found")
@@ -186,36 +205,135 @@ async def _resolve_contact_person(db: AsyncSession, body: DealContactBody, *,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Club-scope router (BetterAdmin CRM module)
+# Club-scope router (BetterAdmin CRM module) — opt-in trackers
 # ═══════════════════════════════════════════════════════════════════════════
 
-@router.get("/pipeline", dependencies=[_require])
-async def club_pipeline(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return await crm_service.pipeline_board(db, crm_service.SCOPE_CLUB, club.id)
+async def _pipeline_or_404(db: AsyncSession, organisation_id, pipeline_id: str) -> CrmPipeline:
+    pipeline = await crm_service.get_pipeline_for_org(db, _uuid_or_404(pipeline_id), organisation_id)
+    if pipeline is None:
+        raise HTTPException(status_code=404, detail="Tracker not found")
+    return pipeline
 
 
-@router.get("/stages", dependencies=[_require])
-async def club_stages(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"stages": await crm_service.list_stages(db, crm_service.SCOPE_CLUB, club.id)}
+async def _club_stage_or_404(db: AsyncSession, organisation_id, stage_id: str) -> CrmStage:
+    stage = await db.get(CrmStage, _uuid_or_404(stage_id))
+    if stage is None:
+        raise HTTPException(status_code=404, detail="Stage not found")
+    pipeline = await db.get(CrmPipeline, stage.pipeline_id)
+    if (pipeline is None or pipeline.scope != crm_service.SCOPE_CLUB
+            or str(pipeline.organisation_id) != str(organisation_id)):
+        raise HTTPException(status_code=404, detail="Stage not found")
+    return stage
 
 
-@router.get("/deals", dependencies=[_require])
-async def club_list_deals(status: Optional[str] = None, include_archived: bool = False,
-                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return await _list_deals_response(db, crm_service.SCOPE_CLUB, club.id, status, include_archived)
+@router.get("/trackers", dependencies=[_require])
+async def club_tracker_catalogue(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return await crm_service.tracker_catalogue(db, club.id)
 
 
-@router.post("/deals", dependencies=[_require])
-async def club_create_deal(body: DealCreate, club: Organisation = Depends(get_current_club),
+@router.get("/trackers/active", dependencies=[_require])
+async def club_active_trackers(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"trackers": await crm_service.active_trackers(db, club.id)}
+
+
+@router.post("/trackers", dependencies=[_require])
+async def club_add_tracker(body: AddTrackerBody, club: Organisation = Depends(get_current_club),
                            db: AsyncSession = Depends(get_db)):
-    return await _create_deal(db, crm_service.SCOPE_CLUB, club.id, body)
+    try:
+        pipeline = await crm_service.add_tracker(db, club.id, template_key=body.template_key, name=body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"id": str(pipeline.id), "name": pipeline.name, "template_key": pipeline.template_key,
+            "terms": crm_service.terms_for_pipeline(pipeline)}
+
+
+@router.delete("/trackers/{pipeline_id}", dependencies=[_require])
+async def club_remove_tracker(pipeline_id: str, club: Organisation = Depends(get_current_club),
+                              db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    await crm_service.deactivate_tracker(db, pipeline)
+    await db.commit()
+    return {"deactivated": True}
+
+
+@router.post("/trackers/{pipeline_id}/reactivate", dependencies=[_require])
+async def club_reactivate_tracker(pipeline_id: str, club: Organisation = Depends(get_current_club),
+                                  db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    await crm_service.reactivate_tracker(db, pipeline)
+    await db.commit()
+    return {"id": str(pipeline.id), "name": pipeline.name, "template_key": pipeline.template_key,
+            "terms": crm_service.terms_for_pipeline(pipeline)}
+
+
+@router.get("/pipelines/{pipeline_id}/board", dependencies=[_require])
+async def club_pipeline_board(pipeline_id: str, club: Organisation = Depends(get_current_club),
+                              db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    deals = await crm_service.list_deals(db, pipeline.id)
+    return crm_service.pipeline_board(pipeline, deals)
+
+
+@router.get("/pipelines/{pipeline_id}/stages", dependencies=[_require])
+async def club_stages(pipeline_id: str, club: Organisation = Depends(get_current_club),
+                      db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    return {"stages": crm_service.stage_dicts(pipeline)}
+
+
+@router.post("/pipelines/{pipeline_id}/stages", dependencies=[_require])
+async def club_add_stage(pipeline_id: str, body: StageCreate, club: Organisation = Depends(get_current_club),
+                         db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    await crm_service.add_stage(db, pipeline, name=body.name, default_probability=body.default_probability,
+                                is_won=body.is_won, is_lost=body.is_lost)
+    await db.commit()
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    return {"stages": crm_service.stage_dicts(pipeline)}
+
+
+@router.patch("/stages/{stage_id}", dependencies=[_require])
+async def club_update_stage(stage_id: str, body: StageUpdate, club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    stage = await _club_stage_or_404(db, club.id, stage_id)
+    await crm_service.update_stage(db, stage, **body.model_dump(exclude_unset=True))
+    await db.commit()
+    return {"id": str(stage.id), "key": stage.key, "name": stage.name, "position": stage.position,
+            "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost}
+
+
+@router.delete("/stages/{stage_id}", dependencies=[_require])
+async def club_delete_stage(stage_id: str, club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    stage = await _club_stage_or_404(db, club.id, stage_id)
+    try:
+        await crm_service.delete_stage(db, stage)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await db.commit()
+    return {"deleted": True}
+
+
+@router.get("/pipelines/{pipeline_id}/deals", dependencies=[_require])
+async def club_list_deals(pipeline_id: str, status: Optional[str] = None, include_archived: bool = False,
+                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    return await _list_deals_response(db, pipeline, status, include_archived)
+
+
+@router.post("/pipelines/{pipeline_id}/deals", dependencies=[_require])
+async def club_create_deal(pipeline_id: str, body: DealCreate, club: Organisation = Depends(get_current_club),
+                           db: AsyncSession = Depends(get_db)):
+    pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
+    return await _create_deal_in_pipeline(db, pipeline, crm_service.SCOPE_CLUB, club.id, None, body)
 
 
 @router.get("/deals/{deal_id}", dependencies=[_require])
 async def club_get_deal(deal_id: str, club: Organisation = Depends(get_current_club),
                         db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
-    return await _serialize_deal(db, deal, crm_service.SCOPE_CLUB, club.id)
+    return await _serialize_deal(db, deal)
 
 
 @router.patch("/deals/{deal_id}", dependencies=[_require])
@@ -224,17 +342,17 @@ async def club_update_deal(deal_id: str, body: DealUpdate, club: Organisation = 
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
     await crm_service.update_deal(db, deal, **body.model_dump(exclude_unset=True))
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_CLUB, club.id)
+    return await _serialize_deal(db, deal)
 
 
 @router.post("/deals/{deal_id}/stage", dependencies=[_require])
 async def club_move_stage(deal_id: str, body: StageMoveBody, club: Organisation = Depends(get_current_club),
                           db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
-    _, stage = await _stage_or_404(db, crm_service.SCOPE_CLUB, club.id, body.stage_id)
+    _, stage = await _deal_stage_or_404(db, deal, body.stage_id)
     await crm_service.move_stage(db, deal, stage, probability=body.probability)
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_CLUB, club.id)
+    return await _serialize_deal(db, deal)
 
 
 @router.post("/deals/{deal_id}/close", dependencies=[_require])
@@ -243,10 +361,10 @@ async def club_close_deal(deal_id: str, body: CloseBody, club: Organisation = De
     if body.status not in ("won", "lost"):
         raise HTTPException(status_code=422, detail="status must be 'won' or 'lost'")
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
-    pipeline = await crm_service.ensure_pipeline(db, crm_service.SCOPE_CLUB, club.id)
+    pipeline = await crm_service.get_deal_pipeline(db, deal)
     await crm_service.close_deal(db, deal, pipeline, status=body.status, lost_reason=body.lost_reason)
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_CLUB, club.id)
+    return await _serialize_deal(db, deal)
 
 
 @router.delete("/deals/{deal_id}", dependencies=[_require])
@@ -324,7 +442,6 @@ async def club_create_person(body: PersonCreate, club: Organisation = Depends(ge
 @router.patch("/people/{person_id}", dependencies=[_require])
 async def club_update_person(person_id: str, body: PersonUpdate, club: Organisation = Depends(get_current_club),
                              db: AsyncSession = Depends(get_db)):
-    from app.models.db import CrmPerson
     person = await db.get(CrmPerson, _uuid_or_404(person_id))
     if person is None or str(person.organisation_id) != str(club.id):
         raise HTTPException(status_code=404, detail="Person not found")
@@ -339,7 +456,6 @@ async def club_update_person(person_id: str, body: PersonUpdate, club: Organisat
 @router.post("/people/{person_id}/roles", dependencies=[_require])
 async def club_add_person_role(person_id: str, body: RoleCreate, club: Organisation = Depends(get_current_club),
                                db: AsyncSession = Depends(get_db)):
-    from app.models.db import CrmPerson
     person = await db.get(CrmPerson, _uuid_or_404(person_id))
     if person is None or str(person.organisation_id) != str(club.id):
         raise HTTPException(status_code=404, detail="Person not found")
@@ -357,30 +473,35 @@ async def club_add_person_role(person_id: str, body: RoleCreate, club: Organisat
 
 @super_router.get("/pipeline", dependencies=[_super])
 async def super_pipeline(db: AsyncSession = Depends(get_db)):
-    return await crm_service.pipeline_board(db, crm_service.SCOPE_PLATFORM)
+    pipeline = await crm_service.ensure_platform_pipeline(db)
+    deals = await crm_service.list_deals(db, pipeline.id)
+    return crm_service.pipeline_board(pipeline, deals)
 
 
 @super_router.get("/stages", dependencies=[_super])
 async def super_stages(db: AsyncSession = Depends(get_db)):
-    return {"stages": await crm_service.list_stages(db, crm_service.SCOPE_PLATFORM)}
+    pipeline = await crm_service.ensure_platform_pipeline(db)
+    return {"stages": crm_service.stage_dicts(pipeline)}
 
 
 @super_router.get("/deals", dependencies=[_super])
 async def super_list_deals(status: Optional[str] = None, include_archived: bool = False,
                            db: AsyncSession = Depends(get_db)):
-    return await _list_deals_response(db, crm_service.SCOPE_PLATFORM, None, status, include_archived)
+    pipeline = await crm_service.ensure_platform_pipeline(db)
+    return await _list_deals_response(db, pipeline, status, include_archived)
 
 
 @super_router.post("/deals", dependencies=[_super])
 async def super_create_deal(body: DealCreate, db: AsyncSession = Depends(get_db)):
+    pipeline = await crm_service.ensure_platform_pipeline(db)
     marketing_club_id = _uuid_or_404(body.marketing_club_id) if body.marketing_club_id else None
-    return await _create_deal(db, crm_service.SCOPE_PLATFORM, None, body, marketing_club_id=marketing_club_id)
+    return await _create_deal_in_pipeline(db, pipeline, crm_service.SCOPE_PLATFORM, None, marketing_club_id, body)
 
 
 @super_router.get("/deals/{deal_id}", dependencies=[_super])
 async def super_get_deal(deal_id: str, db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
-    return await _serialize_deal(db, deal, crm_service.SCOPE_PLATFORM, None)
+    return await _serialize_deal(db, deal)
 
 
 @super_router.patch("/deals/{deal_id}", dependencies=[_super])
@@ -388,16 +509,16 @@ async def super_update_deal(deal_id: str, body: DealUpdate, db: AsyncSession = D
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     await crm_service.update_deal(db, deal, **body.model_dump(exclude_unset=True))
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_PLATFORM, None)
+    return await _serialize_deal(db, deal)
 
 
 @super_router.post("/deals/{deal_id}/stage", dependencies=[_super])
 async def super_move_stage(deal_id: str, body: StageMoveBody, db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
-    _, stage = await _stage_or_404(db, crm_service.SCOPE_PLATFORM, None, body.stage_id)
+    _, stage = await _deal_stage_or_404(db, deal, body.stage_id)
     await crm_service.move_stage(db, deal, stage, probability=body.probability)
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_PLATFORM, None)
+    return await _serialize_deal(db, deal)
 
 
 @super_router.post("/deals/{deal_id}/close", dependencies=[_super])
@@ -405,10 +526,10 @@ async def super_close_deal(deal_id: str, body: CloseBody, db: AsyncSession = Dep
     if body.status not in ("won", "lost"):
         raise HTTPException(status_code=422, detail="status must be 'won' or 'lost'")
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
-    pipeline = await crm_service.ensure_pipeline(db, crm_service.SCOPE_PLATFORM)
+    pipeline = await crm_service.get_deal_pipeline(db, deal)
     await crm_service.close_deal(db, deal, pipeline, status=body.status, lost_reason=body.lost_reason)
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_PLATFORM, None)
+    return await _serialize_deal(db, deal)
 
 
 @super_router.delete("/deals/{deal_id}", dependencies=[_super])
@@ -482,7 +603,6 @@ async def super_create_person(body: PersonCreate, marketing_club_id: Optional[st
 
 @super_router.patch("/people/{person_id}", dependencies=[_super])
 async def super_update_person(person_id: str, body: PersonUpdate, db: AsyncSession = Depends(get_db)):
-    from app.models.db import CrmPerson
     person = await db.get(CrmPerson, _uuid_or_404(person_id))
     if person is None:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -511,4 +631,4 @@ async def super_convert_club_to_deal(marketing_club_id: str, body: ConvertToDeal
     if body.title:
         deal.title = body.title
     await db.commit()
-    return await _serialize_deal(db, deal, crm_service.SCOPE_PLATFORM, None)
+    return await _serialize_deal(db, deal)

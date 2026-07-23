@@ -104,7 +104,7 @@ const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity
 const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
 const MerchSquare = lazy(() => import('./pages/admin/bettermerch/MerchSquare'))
 const BetterCrmHome = lazy(() => import('./pages/admin/bettercrm/BetterCrmHome'))
-const BetterCrmDeals = lazy(() => import('./pages/admin/bettercrm/BetterCrmDeals'))
+const BetterCrmTracker = lazy(() => import('./pages/admin/bettercrm/BetterCrmTracker'))
 const BetterCrmPeople = lazy(() => import('./pages/admin/bettercrm/BetterCrmPeople'))
 const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
@@ -294,8 +294,8 @@ export default function App() {
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
           <Route path="/admin/crm" element={<ProtectedRoute requireModule="crm"><BetterCrmHome /></ProtectedRoute>} />
-          <Route path="/admin/crm/list" element={<ProtectedRoute requireModule="crm"><BetterCrmDeals /></ProtectedRoute>} />
           <Route path="/admin/crm/people" element={<ProtectedRoute requireModule="crm"><BetterCrmPeople /></ProtectedRoute>} />
+          <Route path="/admin/crm/:pipelineId" element={<ProtectedRoute requireModule="crm"><BetterCrmTracker /></ProtectedRoute>} />
           <Route path="/admin/super/crm" element={<ProtectedRoute requireRole="super_admin"><SuperCrm /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />

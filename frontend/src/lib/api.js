@@ -445,16 +445,27 @@ export const api = {
   merchSquareSync: () => request('/club-admin/merch/square/sync', { method: 'POST' }),
   merchSquareDisconnect: () => request('/club-admin/merch/square/disconnect', { method: 'POST' }),
   // ─── BetterCRM — club-scope (BetterAdmin module) ─────────────────────────────
-  crmPipeline: () => request('/club-admin/crm/pipeline'),
-  crmStages: () => request('/club-admin/crm/stages'),
-  crmListDeals: ({ status, includeArchived } = {}) => {
+  // Pipelines are opt-in "trackers" a club adds from a preset catalogue
+  // (Sponsors/Grants/Alumni & Fundraising) or builds fully custom — see
+  // services/crm.py's PIPELINE_TEMPLATES. Nothing is auto-seeded.
+  crmTrackerCatalogue: () => request('/club-admin/crm/trackers'),
+  crmActiveTrackers: () => request('/club-admin/crm/trackers/active'),
+  crmAddTracker: (data) => request('/club-admin/crm/trackers', { method: 'POST', body: JSON.stringify(data) }),
+  crmRemoveTracker: (pipelineId) => request(`/club-admin/crm/trackers/${pipelineId}`, { method: 'DELETE' }),
+  crmReactivateTracker: (pipelineId) => request(`/club-admin/crm/trackers/${pipelineId}/reactivate`, { method: 'POST' }),
+  crmPipelineBoard: (pipelineId) => request(`/club-admin/crm/pipelines/${pipelineId}/board`),
+  crmStages: (pipelineId) => request(`/club-admin/crm/pipelines/${pipelineId}/stages`),
+  crmAddStage: (pipelineId, data) => request(`/club-admin/crm/pipelines/${pipelineId}/stages`, { method: 'POST', body: JSON.stringify(data) }),
+  crmUpdateStage: (stageId, data) => request(`/club-admin/crm/stages/${stageId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  crmDeleteStage: (stageId) => request(`/club-admin/crm/stages/${stageId}`, { method: 'DELETE' }),
+  crmListDeals: (pipelineId, { status, includeArchived } = {}) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
     if (includeArchived) p.set('include_archived', 'true')
     const qs = p.toString()
-    return request(`/club-admin/crm/deals${qs ? `?${qs}` : ''}`)
+    return request(`/club-admin/crm/pipelines/${pipelineId}/deals${qs ? `?${qs}` : ''}`)
   },
-  crmCreateDeal: (data) => request('/club-admin/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
+  crmCreateDeal: (pipelineId, data) => request(`/club-admin/crm/pipelines/${pipelineId}/deals`, { method: 'POST', body: JSON.stringify(data) }),
   crmGetDeal: (id) => request(`/club-admin/crm/deals/${id}`),
   crmUpdateDeal: (id, data) => request(`/club-admin/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   crmMoveDealStage: (id, data) => request(`/club-admin/crm/deals/${id}/stage`, { method: 'POST', body: JSON.stringify(data) }),

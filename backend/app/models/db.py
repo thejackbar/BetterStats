@@ -2933,6 +2933,12 @@ class CrmPipeline(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
     name = Column(Text, nullable=False)
     is_default = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Club-scope "trackers" (migration 174): which preset catalogue entry this
+    # was added from (NULL = a custom, club-authored tracker), and whether the
+    # club currently has it turned on — "removing" a tracker deactivates it
+    # rather than deleting, so its historical deals survive re-adding it later.
+    template_key = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     stages = relationship("CrmStage", cascade="all, delete-orphan", passive_deletes=True,
