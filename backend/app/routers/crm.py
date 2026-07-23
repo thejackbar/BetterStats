@@ -153,6 +153,17 @@ async def _deal_or_404(db: AsyncSession, scope: str, organisation_id, deal_id: s
 
 
 async def _serialize_deal(db: AsyncSession, deal) -> dict:
+    # move_stage/update_deal/close_deal all set deal.updated_at = func.now() —
+    # assigning a raw SQL expression to a mapped column always marks it
+    # expired after flush (SQLAlchemy has no Python-side value for it), not
+    # just on commit. Every caller here runs this right after `await
+    # db.commit()`, so without an explicit async refresh the plain attribute
+    # access below (deal.updated_at, deal.marketing_club_id, …) would try to
+    # lazy-load outside an awaited context and raise MissingGreenlet — the
+    # write itself already succeeded, only this response serialization step
+    # was failing (confirmed via a live "moved but 500'd" report + traceback,
+    # 2026-07-24).
+    await db.refresh(deal)
     pipeline = await crm_service.get_deal_pipeline(db, deal)
     stage = next((s for s in (pipeline.stages if pipeline else []) if s.id == deal.stage_id), None)
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
