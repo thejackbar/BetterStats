@@ -5,17 +5,20 @@ import { Modal, TextInput, NumberInput, Btn, Pill } from './ui'
 
 const CLUB_CLIENT = { addStage: api.crmAddStage, updateStage: api.crmUpdateStage, deleteStage: api.crmDeleteStage }
 
-// Add/rename/reorder/delete a pipeline's own stages — works for any club
-// tracker (preset or custom) AND, since `client` can be swapped for the
+// Add/rename/reorder/hide/delete a pipeline's own stages — works for any
+// club tracker (preset or custom) AND, since `client` can be swapped for the
 // platform equivalents, BetterCricket's own sales pipeline. `pipelineId` is
 // only meaningful for the club client (add_stage there is scoped by
 // pipeline id in the URL); the platform client resolves its one pipeline
-// server-side, so it's ignored there.
+// server-side, so it's ignored there. Reordering supports both the ▲▼
+// buttons (a single swap) and dragging a row to any position (a full
+// re-sequence) — same underlying position PATCH either way.
 export default function ManageStagesModal({ open, onClose, pipelineId, stages, onChanged, client }) {
   const toast = useToast()
   const c = client || CLUB_CLIENT
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [draggingId, setDraggingId] = useState(null)
 
   if (!open) return null
   const sorted = [...(stages || [])].sort((a, b) => a.position - b.position)
@@ -61,6 +64,20 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
     } catch (e) { toast.error(e.message || 'Could not reorder') }
   }
 
+  const reorderTo = async (draggedId, targetIndex) => {
+    const fromIndex = sorted.findIndex(s => s.id === draggedId)
+    if (fromIndex === -1 || fromIndex === targetIndex) return
+    const next = [...sorted]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(targetIndex, 0, moved)
+    const changed = next.map((s, i) => ({ s, i })).filter(({ s, i }) => s.position !== i)
+    if (!changed.length) return
+    try {
+      await Promise.all(changed.map(({ s, i }) => c.updateStage(s.id, { position: i })))
+      onChanged()
+    } catch (e) { toast.error(e.message || 'Could not reorder') }
+  }
+
   const remove = async (stage) => {
     if (!window.confirm(`Delete the "${stage.name}" stage?`)) return
     try { await c.deleteStage(stage.id); onChanged() }
@@ -71,7 +88,13 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
     <Modal open={open} onClose={onClose} title="Manage stages" wide>
       <div className="space-y-2 mb-4">
         {sorted.map((s, i) => (
-          <div key={s.id} className="pb-card px-3 py-2.5 flex items-center gap-2">
+          <div key={s.id} draggable
+            onDragStart={() => setDraggingId(s.id)}
+            onDragEnd={() => setDraggingId(null)}
+            onDragOver={e => { if (draggingId) e.preventDefault() }}
+            onDrop={e => { e.preventDefault(); if (draggingId) reorderTo(draggingId, i) }}
+            className={`pb-card px-3 py-2.5 flex items-center gap-2 cursor-grab ${draggingId === s.id ? 'opacity-40' : ''}`}>
+            <span className="text-pb-faintest text-[13px] shrink-0" title="Drag to reorder">⠿</span>
             <div className="flex flex-col gap-0.5 shrink-0">
               <button disabled={i === 0} onClick={() => move(s, -1)}
                 className="text-pb-faint hover:text-pb-text disabled:opacity-20 text-[10px] leading-none">▲</button>
@@ -89,6 +112,10 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
             </button>
             <button onClick={() => toggleFlag(s, 'is_lost')} className="shrink-0">
               <Pill tone={s.is_lost ? 'red' : 'faint'}>Lost</Pill>
+            </button>
+            <button onClick={() => toggleFlag(s, 'hidden_from_board')} className="shrink-0"
+              title="Hide this column from the Kanban board — a deal can still be filed into it via the Stage dropdown">
+              <Pill tone={s.hidden_from_board ? 'amber' : 'faint'}>{s.hidden_from_board ? 'Hidden' : 'On board'}</Pill>
             </button>
             <button onClick={() => remove(s)} className="text-pb-faintest hover:text-pb-red text-[11px] shrink-0">Delete</button>
           </div>

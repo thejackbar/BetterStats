@@ -16,6 +16,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
   const [overStageId, setOverStageId] = useState(null)
   if (!board) return null
   const { stages, totals } = board
+  const visibleStages = stages.filter(s => !s.hidden_from_board)
   const t = { ...DEFAULT_CRM_TERMS, ...terms }
 
   const drop = async (stageId) => {
@@ -48,9 +49,15 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
           <div className="font-display font-bold text-xl">{totals.open_count}</div>
         </div>
       </div>
+      {visibleStages.length < stages.length && (
+        <p className="text-[11px] text-pb-faintest -mt-2">
+          {stages.length - visibleStages.length} stage{stages.length - visibleStages.length === 1 ? '' : 's'} hidden from
+          the board (totals above still include them) — unhide from Manage stages.
+        </p>
+      )}
 
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {stages.map(stage => (
+        {visibleStages.map(stage => (
           <div key={stage.id} className="w-64 shrink-0"
             onDragOver={e => { if (draggingId) { e.preventDefault(); setOverStageId(stage.id) } }}
             onDragLeave={() => setOverStageId(id => (id === stage.id ? null : id))}
@@ -75,6 +82,9 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   className={`pb-card w-full text-left px-3 py-2.5 hover:border-pb-accent/40 transition cursor-pointer ${
                     deal.status !== 'open' ? 'opacity-60' : ''} ${draggingId === deal.id ? 'opacity-40' : ''}`}>
                   <div className="font-medium text-[13px] truncate mb-1">{deal.title}</div>
+                  {deal.point_of_contact_name && (
+                    <div className="text-[11px] text-pb-faint truncate mb-1">{deal.point_of_contact_name}</div>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[12px] text-pb-faint">{money(deal.value_cents)}</span>
                     {deal.effective_probability != null && (

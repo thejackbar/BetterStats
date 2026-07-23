@@ -3594,6 +3594,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ"
         ))
 
+    # Migration 183: hide a Kanban stage/column from the board without deleting it.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE crm_stages ADD COLUMN IF NOT EXISTS hidden_from_board BOOLEAN NOT NULL DEFAULT false"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

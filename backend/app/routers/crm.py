@@ -14,6 +14,7 @@ Two routers sharing one service layer (``services/crm.py``):
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date
 from typing import List, Optional
@@ -26,6 +27,8 @@ from app.models.db import Organisation, MarketingClub, CrmStage, CrmPipeline, ge
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/club-admin/crm", tags=["crm"])
 super_router = APIRouter(prefix="/club-admin/super/crm", tags=["crm-platform"])
@@ -121,6 +124,7 @@ class StageCreate(BaseModel):
     default_probability: int = 0
     is_won: bool = False
     is_lost: bool = False
+    hidden_from_board: bool = False
 
 
 class StageUpdate(BaseModel):
@@ -129,6 +133,7 @@ class StageUpdate(BaseModel):
     is_won: Optional[bool] = None
     is_lost: Optional[bool] = None
     position: Optional[int] = None
+    hidden_from_board: Optional[bool] = None
 
 
 # ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -300,7 +305,7 @@ async def club_add_stage(pipeline_id: str, body: StageCreate, club: Organisation
                          db: AsyncSession = Depends(get_db)):
     pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
     await crm_service.add_stage(db, pipeline, name=body.name, default_probability=body.default_probability,
-                                is_won=body.is_won, is_lost=body.is_lost)
+                                is_won=body.is_won, is_lost=body.is_lost, hidden_from_board=body.hidden_from_board)
     await db.commit()
     pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
     return {"stages": crm_service.stage_dicts(pipeline)}
@@ -313,7 +318,8 @@ async def club_update_stage(stage_id: str, body: StageUpdate, club: Organisation
     await crm_service.update_stage(db, stage, **body.model_dump(exclude_unset=True))
     await db.commit()
     return {"id": str(stage.id), "key": stage.key, "name": stage.name, "position": stage.position,
-            "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost}
+            "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost,
+            "hidden_from_board": stage.hidden_from_board}
 
 
 @router.delete("/stages/{stage_id}", dependencies=[_require])
@@ -521,7 +527,7 @@ async def super_stages(db: AsyncSession = Depends(get_db)):
 async def super_add_stage(body: StageCreate, db: AsyncSession = Depends(get_db)):
     pipeline = await crm_service.ensure_platform_pipeline(db)
     await crm_service.add_stage(db, pipeline, name=body.name, default_probability=body.default_probability,
-                                is_won=body.is_won, is_lost=body.is_lost)
+                                is_won=body.is_won, is_lost=body.is_lost, hidden_from_board=body.hidden_from_board)
     await db.commit()
     pipeline = await crm_service.ensure_platform_pipeline(db)
     return {"stages": crm_service.stage_dicts(pipeline)}
@@ -533,7 +539,8 @@ async def super_update_stage(stage_id: str, body: StageUpdate, db: AsyncSession 
     await crm_service.update_stage(db, stage, **body.model_dump(exclude_unset=True))
     await db.commit()
     return {"id": str(stage.id), "key": stage.key, "name": stage.name, "position": stage.position,
-            "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost}
+            "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost,
+            "hidden_from_board": stage.hidden_from_board}
 
 
 @super_router.delete("/stages/{stage_id}", dependencies=[_super])
@@ -560,8 +567,23 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     stage_by_id = {s.id: s for s in pipeline.stages}
     deals = await crm_service.list_deals(db, pipeline.id, status=status, include_archived=include_archived)
     club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals))
-    poc_by_deal = await crm_service.poc_names_by_deal(db, (d.id for d in deals))
-    channel_by_club = await crm_service.acquisition_channels_by_club(db, club_by_id)
+
+    # Each enrichment pass is optional relative to the base deal list — one
+    # failing (a large club_by_email IN-list, a since-deleted org, whatever)
+    # must never 500 the whole board/list; it just degrades to a blank
+    # column for that one field, same posture as iq_team._safe elsewhere in
+    # this codebase.
+    try:
+        poc_by_deal = await crm_service.poc_names_by_deal(db, (d.id for d in deals))
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: poc_names_by_deal failed")
+        poc_by_deal = {}
+    try:
+        channel_by_club = await crm_service.acquisition_channels_by_club(db, club_by_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: acquisition_channels_by_club failed")
+        channel_by_club = {}
+
     out = []
     for d in deals:
         club = club_by_id.get(d.marketing_club_id)
