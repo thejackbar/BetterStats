@@ -748,6 +748,7 @@ export const api = {
   crmMoveDealStage: (id, data) => request(`/club-admin/crm/deals/${id}/stage`, { method: 'POST', body: JSON.stringify(data) }),
   crmCloseDeal: (id, data) => request(`/club-admin/crm/deals/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
   crmArchiveDeal: (id) => request(`/club-admin/crm/deals/${id}`, { method: 'DELETE' }),
+  crmDeleteDealPermanent: (id) => request(`/club-admin/crm/deals/${id}/permanent`, { method: 'DELETE' }),
   crmListActivities: (dealId) => request(`/club-admin/crm/deals/${dealId}/activities`),
   crmAddActivity: (dealId, data) => request(`/club-admin/crm/deals/${dealId}/activities`, { method: 'POST', body: JSON.stringify(data) }),
   crmListDealContacts: (dealId) => request(`/club-admin/crm/deals/${dealId}/contacts`),
@@ -761,6 +762,9 @@ export const api = {
   // ─── BetterCRM — platform scope (BetterCricket's own sales pipeline) ────────
   superCrmPipeline: () => request('/club-admin/super/crm/pipeline'),
   superCrmStages: () => request('/club-admin/super/crm/stages'),
+  superCrmAddStage: (_pipelineId, data) => request('/club-admin/super/crm/stages', { method: 'POST', body: JSON.stringify(data) }),
+  superCrmUpdateStage: (stageId, data) => request(`/club-admin/super/crm/stages/${stageId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superCrmDeleteStage: (stageId) => request(`/club-admin/super/crm/stages/${stageId}`, { method: 'DELETE' }),
   superCrmListDeals: ({ status, includeArchived } = {}) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
@@ -774,6 +778,8 @@ export const api = {
   superCrmMoveDealStage: (id, data) => request(`/club-admin/super/crm/deals/${id}/stage`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmCloseDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmArchiveDeal: (id) => request(`/club-admin/super/crm/deals/${id}`, { method: 'DELETE' }),
+  superCrmDeleteDealPermanent: (id, resetClub) =>
+    request(`/club-admin/super/crm/deals/${id}/permanent${resetClub ? '?reset_club=true' : ''}`, { method: 'DELETE' }),
   superCrmListActivities: (dealId) => request(`/club-admin/super/crm/deals/${dealId}/activities`),
   superCrmAddActivity: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/activities`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmListDealContacts: (dealId) => request(`/club-admin/super/crm/deals/${dealId}/contacts`),

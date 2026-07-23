@@ -3,11 +3,17 @@ import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import { Modal, TextInput, NumberInput, Btn, Pill } from './ui'
 
-// Add/rename/reorder/delete a tracker's own stages — works for any club
-// tracker (preset or custom); the platform sales pipeline doesn't expose
-// this (its stages are BetterCricket's own, not club-editable).
-export default function ManageStagesModal({ open, onClose, pipelineId, stages, onChanged }) {
+const CLUB_CLIENT = { addStage: api.crmAddStage, updateStage: api.crmUpdateStage, deleteStage: api.crmDeleteStage }
+
+// Add/rename/reorder/delete a pipeline's own stages — works for any club
+// tracker (preset or custom) AND, since `client` can be swapped for the
+// platform equivalents, BetterCricket's own sales pipeline. `pipelineId` is
+// only meaningful for the club client (add_stage there is scoped by
+// pipeline id in the URL); the platform client resolves its one pipeline
+// server-side, so it's ignored there.
+export default function ManageStagesModal({ open, onClose, pipelineId, stages, onChanged, client }) {
   const toast = useToast()
+  const c = client || CLUB_CLIENT
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -19,7 +25,7 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
     if (!newName.trim()) return
     setSaving(true)
     try {
-      await api.crmAddStage(pipelineId, { name: newName.trim() })
+      await c.addStage(pipelineId, { name: newName.trim() })
       setNewName('')
       onChanged()
     } catch (e2) { toast.error(e2.message || 'Could not add stage') } finally { setSaving(false) }
@@ -27,17 +33,17 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
 
   const rename = async (stage, name) => {
     if (!name.trim() || name === stage.name) return
-    try { await api.crmUpdateStage(stage.id, { name: name.trim() }); onChanged() }
+    try { await c.updateStage(stage.id, { name: name.trim() }); onChanged() }
     catch (e) { toast.error(e.message || 'Could not rename stage') }
   }
 
   const setProbability = async (stage, value) => {
-    try { await api.crmUpdateStage(stage.id, { default_probability: value }); onChanged() }
+    try { await c.updateStage(stage.id, { default_probability: value }); onChanged() }
     catch (e) { toast.error(e.message || 'Could not update probability') }
   }
 
   const toggleFlag = async (stage, flag) => {
-    try { await api.crmUpdateStage(stage.id, { [flag]: !stage[flag] }); onChanged() }
+    try { await c.updateStage(stage.id, { [flag]: !stage[flag] }); onChanged() }
     catch (e) { toast.error(e.message || 'Could not update stage') }
   }
 
@@ -48,8 +54,8 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
     const other = sorted[swapIdx]
     try {
       await Promise.all([
-        api.crmUpdateStage(stage.id, { position: other.position }),
-        api.crmUpdateStage(other.id, { position: stage.position }),
+        c.updateStage(stage.id, { position: other.position }),
+        c.updateStage(other.id, { position: stage.position }),
       ])
       onChanged()
     } catch (e) { toast.error(e.message || 'Could not reorder') }
@@ -57,7 +63,7 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
 
   const remove = async (stage) => {
     if (!window.confirm(`Delete the "${stage.name}" stage?`)) return
-    try { await api.crmDeleteStage(stage.id); onChanged() }
+    try { await c.deleteStage(stage.id); onChanged() }
     catch (e) { toast.error(e.message || 'Could not delete stage — move its records out first') }
   }
 

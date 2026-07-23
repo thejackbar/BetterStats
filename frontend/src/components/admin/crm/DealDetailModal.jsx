@@ -25,6 +25,8 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const [showLostBox, setShowLostBox] = useState(false)
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
+  const [showPurgeBox, setShowPurgeBox] = useState(false)
+  const [resetClub, setResetClub] = useState(false)
 
   const load = useCallback(() => {
     if (!dealId) return
@@ -79,6 +81,14 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     } catch (e) { toast.error(e.message || 'Could not archive') }
   }
 
+  const deletePermanently = async () => {
+    try {
+      await client.deletePermanent(dealId, resetClub)
+      onChanged?.()
+      onClose()
+    } catch (e) { toast.error(e.message || `Could not delete this ${t.itemSingular}`) }
+  }
+
   const addActivity = async (e) => {
     e.preventDefault()
     if (!note.trim()) return
@@ -128,17 +138,44 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
   return (
     <Modal open={open} onClose={onClose} wide title={titleNode}
-      footer={deal && deal.status === 'open' ? (
+      footer={deal ? (
         <>
-          <Btn variant="danger" onClick={archive}>Archive</Btn>
-          <Btn variant="danger" onClick={() => closeDeal('lost')}>Mark {t.lost}</Btn>
-          <Btn variant="primary" onClick={() => closeDeal('won')}>Mark {t.won}</Btn>
+          <Btn variant="ghost" onClick={() => setShowPurgeBox(v => !v)}>Delete permanently…</Btn>
+          {deal.status === 'open' ? (
+            <>
+              <Btn variant="danger" onClick={archive}>Archive</Btn>
+              <Btn variant="danger" onClick={() => closeDeal('lost')}>Mark {t.lost}</Btn>
+              <Btn variant="primary" onClick={() => closeDeal('won')}>Mark {t.won}</Btn>
+            </>
+          ) : (
+            <Btn variant="ghost" onClick={archive}>Archive</Btn>
+          )}
         </>
-      ) : deal ? <Btn variant="ghost" onClick={archive}>Archive</Btn> : null}>
+      ) : null}>
       {loading || !deal ? <p className="text-pb-faint text-sm">Loading…</p> : (
         <div className="space-y-5">
           {deal.status !== 'open' && (
             <Pill tone={deal.status === 'won' ? 'green' : 'red'}>{(deal.status === 'won' ? t.won : t.lost).toUpperCase()}</Pill>
+          )}
+
+          {showPurgeBox && (
+            <div className="pb-card px-3 py-3 border-pb-red/40 space-y-2">
+              <p className="text-[12.5px] text-pb-text">
+                Permanently deletes this {t.itemSingular} — its notes, activity and contact links
+                go with it. This can't be undone. Archive instead if you might want it back.
+              </p>
+              {deal.marketing_club_id && (
+                <label className="flex items-start gap-2 text-[12px] text-pb-faint">
+                  <input type="checkbox" checked={resetClub} onChange={e => setResetClub(e.target.checked)} className="mt-0.5" />
+                  <span>Also reset this club's engagement score and trial/demo flags — use this only
+                    if this was test activity, so a real future enquiry starts fresh.</span>
+                </label>
+              )}
+              <div className="flex justify-end gap-2">
+                <Btn variant="ghost" sm onClick={() => setShowPurgeBox(false)}>Cancel</Btn>
+                <Btn variant="danger" sm onClick={deletePermanently}>Confirm delete</Btn>
+              </div>
+            </div>
           )}
           <div className="flex flex-wrap gap-3">
             <Field label={t.titleLabel} half>
