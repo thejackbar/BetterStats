@@ -13,7 +13,7 @@ import csv
 import io
 import re
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
@@ -28,14 +28,15 @@ from app.models.db import (
     User, Organisation, Season, Grade, Game, Player,
     FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay, FeePayment,
     FeeSquareImportLog, MerchSquareConnection,
-    FeeXeroConnection, FeeXeroImportLog,
-    FEE_PAYMENT_TYPES, FEE_FORMATS, get_db,
+    FeeXeroConnection, FeeXeroImportLog, MembershipType,
+    FEE_PAYMENT_TYPES, FEE_FORMATS, MEMBERSHIP_STATUSES, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_FEES
 from app.services import fees as fee_service
 from app.services import fees_square as fee_square_service
 from app.services import fees_xero as fee_xero_service
+from app.services import membership_types as membership_types_service
 from app.services import square_client, square_sync
 from app.services import xero_client
 
@@ -437,6 +438,108 @@ def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Option
     }
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Membership types (migration 175) — the cross-season catalogue a member's
+# membership_type_id points at. Distinct from FeeSchedule (the per-season $
+# tier) — see services/membership_types.py.
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.get("/membership-types")
+async def list_membership_types(
+    include_inactive: bool = False,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    return {"types": await membership_types_service.list_types(db, club.id, include_inactive=include_inactive)}
+
+
+class MembershipTypeCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    default_annual_fee: Optional[float] = None
+    is_playing: bool = False
+    requires_voting_rights: bool = False
+    requires_insurance: bool = False
+    requires_wwcc: bool = False
+    requires_playhq_registration: bool = False
+    comms_group: Optional[str] = None
+    sort_order: int = 0
+
+
+@router.post("/membership-types")
+async def create_membership_type(
+    data: MembershipTypeCreate,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        t = await membership_types_service.create_type(db, club.id, **data.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return membership_types_service._dict(t)
+
+
+class MembershipTypePatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    default_annual_fee: Optional[float] = None
+    is_playing: Optional[bool] = None
+    requires_voting_rights: Optional[bool] = None
+    requires_insurance: Optional[bool] = None
+    requires_wwcc: Optional[bool] = None
+    requires_playhq_registration: Optional[bool] = None
+    comms_group: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+@router.patch("/membership-types/{type_id}")
+async def update_membership_type(
+    type_id: str,
+    data: MembershipTypePatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    t = await db.get(MembershipType, uuid.UUID(type_id))
+    if not t or t.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Membership type not found")
+    fields = data.model_dump(exclude_unset=True)
+    if "name" in fields and fields["name"]:
+        t.name = fields.pop("name").strip()[:120]
+    await membership_types_service.update_type(db, t, **fields)
+    await db.commit()
+    return membership_types_service._dict(t)
+
+
+@router.delete("/membership-types/{type_id}")
+async def archive_membership_type(
+    type_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    t = await db.get(MembershipType, uuid.UUID(type_id))
+    if not t or t.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Membership type not found")
+    await membership_types_service.archive_type(db, t)
+    await db.commit()
+    return {"archived": True}
+
+
+@router.post("/membership-types/seed-starter")
+async def seed_starter_membership_types(
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    seeded = await membership_types_service.seed_starter_types(db, club.id)
+    await db.commit()
+    return {"seeded": seeded}
+
+
 @router.get("/members")
 async def list_members(
     season_id: str,
@@ -478,6 +581,10 @@ async def list_members(
             "mobile": member.mobile,
             "fee_schedule_id": str(ms.fee_schedule_id) if ms.fee_schedule_id else None,
             "is_new_registration": ms.is_new_registration,
+            "membership_type_id": str(member.membership_type_id) if member.membership_type_id else None,
+            "is_life_member": member.is_life_member,
+            "is_honorary": member.is_honorary,
+            "season_status": ms.status,
             **fin,
         })
         summary["total_members"] += 1
@@ -501,6 +608,7 @@ class MemberCreate(BaseModel):
     email: Optional[str] = None
     mobile: Optional[str] = None
     fee_schedule_id: Optional[str] = None
+    membership_type_id: Optional[str] = None
 
 
 @router.post("/members")
@@ -510,19 +618,25 @@ async def create_member(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually add a non-playing member (life member, sponsor, ICL). Players
-    who appear in a game are added automatically by the sync recompute."""
+    """Manually add a non-playing member (life member, sponsor, ICL, parent).
+    Players who appear in a game are added automatically by the sync recompute."""
     season = await _season_or_404(db, club, data.season_id)
     full_name = (data.full_name or "").strip()
     if not full_name:
         raise HTTPException(status_code=422, detail="Name is required")
 
     schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
+    membership_type_id = None
+    if data.membership_type_id:
+        mt = await db.get(MembershipType, uuid.UUID(data.membership_type_id))
+        if not mt or mt.organisation_id != club.id:
+            raise HTTPException(status_code=422, detail="Membership type not found")
+        membership_type_id = mt.id
 
     member = FeeMember(
         id=uuid.uuid4(), organisation_id=club.id, player_id=None, full_name=full_name,
         email=(data.email or "").strip() or None, mobile=(data.mobile or "").strip() or None,
-        current_tier=schedule.name if schedule else None,
+        current_tier=schedule.name if schedule else None, membership_type_id=membership_type_id,
     )
     db.add(member)
     await db.flush()
@@ -642,6 +756,10 @@ async def get_member(
             "mobile": member.mobile,
             "current_tier": member.current_tier,
             "notes": member.notes,
+            "membership_type_id": str(member.membership_type_id) if member.membership_type_id else None,
+            "is_life_member": member.is_life_member,
+            "is_honorary": member.is_honorary,
+            "honorary_expires_at": member.honorary_expires_at.isoformat() if member.honorary_expires_at else None,
         },
         "season": {"id": str(season.id), "name": season.name},
         "member_season": None if ms is None else {
@@ -650,6 +768,7 @@ async def get_member(
             "is_new_registration": ms.is_new_registration,
             "membership_payment_method": ms.membership_payment_method,
             "notes": ms.notes,
+            "status": ms.status,
         },
         "financials": fin,
         "match_days": entries,
@@ -662,6 +781,10 @@ class MemberPatch(BaseModel):
     email: Optional[str] = None
     mobile: Optional[str] = None
     notes: Optional[str] = None
+    membership_type_id: Optional[str] = None  # "" clears it
+    is_life_member: Optional[bool] = None
+    is_honorary: Optional[bool] = None
+    honorary_expires_at: Optional[str] = None  # "" clears it (perpetual honorary)
 
 
 @router.patch("/members/{member_id}")
@@ -683,6 +806,26 @@ async def patch_member(
         member.mobile = data.mobile.strip() or None
     if data.notes is not None:
         member.notes = data.notes.strip() or None
+    if data.membership_type_id is not None:
+        if data.membership_type_id == "":
+            member.membership_type_id = None
+        else:
+            mt = await db.get(MembershipType, uuid.UUID(data.membership_type_id))
+            if not mt or mt.organisation_id != club.id:
+                raise HTTPException(status_code=422, detail="Membership type not found")
+            member.membership_type_id = mt.id
+    if data.is_life_member is not None:
+        member.is_life_member = data.is_life_member
+    if data.is_honorary is not None:
+        member.is_honorary = data.is_honorary
+    if data.honorary_expires_at is not None:
+        if data.honorary_expires_at == "":
+            member.honorary_expires_at = None
+        else:
+            try:
+                member.honorary_expires_at = date.fromisoformat(data.honorary_expires_at)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid honorary_expires_at date")
     await db.commit()
     return {"ok": True}
 
@@ -693,6 +836,7 @@ class MemberSeasonPatch(BaseModel):
     is_new_registration: Optional[bool] = None
     membership_payment_method: Optional[str] = None
     notes: Optional[str] = None
+    status: Optional[str] = None
 
 
 @router.patch("/members/{member_id}/season")
@@ -730,6 +874,10 @@ async def patch_member_season(
         ms.membership_payment_method = data.membership_payment_method.strip() or None
     if data.notes is not None:
         ms.notes = data.notes.strip() or None
+    if data.status is not None:
+        if data.status not in MEMBERSHIP_STATUSES:
+            raise HTTPException(status_code=422, detail=f"Invalid status — must be one of {MEMBERSHIP_STATUSES}")
+        ms.status = data.status
     await db.commit()
     return {"ok": True}
 

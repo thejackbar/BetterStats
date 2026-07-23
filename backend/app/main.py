@@ -3026,6 +3026,65 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_crm_pipelines_template ON crm_pipelines(organisation_id, template_key)"
         ))
 
+    # Migration 175: Membership Management + Family/Household. See
+    # services/membership_types.py + routers/families.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS membership_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                default_annual_fee NUMERIC(10,2),
+                is_playing BOOLEAN NOT NULL DEFAULT false,
+                requires_voting_rights BOOLEAN NOT NULL DEFAULT false,
+                requires_insurance BOOLEAN NOT NULL DEFAULT false,
+                requires_wwcc BOOLEAN NOT NULL DEFAULT false,
+                requires_playhq_registration BOOLEAN NOT NULL DEFAULT false,
+                comms_group TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_membership_types_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_membership_types_org ON membership_types(organisation_id, is_active)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS membership_type_id UUID "
+            "REFERENCES membership_types(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS is_life_member BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS is_honorary BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS honorary_expires_at DATE"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fee_members_type ON fee_members(membership_type_id)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_member_seasons ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'"
+        ))
+        await conn.execute(text("ALTER TABLE family_members ALTER COLUMN player_id DROP NOT NULL"))
+        await conn.execute(text(
+            "ALTER TABLE family_members ADD COLUMN IF NOT EXISTS fee_member_id UUID "
+            "REFERENCES fee_members(id) ON DELETE CASCADE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE family_members ADD COLUMN IF NOT EXISTS is_guardian BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE family_members ADD COLUMN IF NOT EXISTS receives_family_comms BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_family_member_fee_member
+            ON family_members(family_id, fee_member_id) WHERE fee_member_id IS NOT NULL
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

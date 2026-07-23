@@ -97,6 +97,7 @@ const AdminFeeBulkPayment = lazy(() => import('./pages/admin/AdminFeeBulkPayment
 const AdminFeeReports = lazy(() => import('./pages/admin/AdminFeeReports'))
 const AdminFeesSquare = lazy(() => import('./pages/admin/AdminFeesSquare'))
 const AdminFeesXero = lazy(() => import('./pages/admin/AdminFeesXero'))
+const AdminMembershipTypes = lazy(() => import('./pages/admin/AdminMembershipTypes'))
 const BetterMerchHome = lazy(() => import('./pages/admin/bettermerch/BetterMerchHome'))
 const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
 const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
@@ -286,6 +287,7 @@ export default function App() {
           <Route path="/admin/fees/reports" element={<ProtectedRoute requireModule="fees"><AdminFeeReports /></ProtectedRoute>} />
           <Route path="/admin/fees/square" element={<ProtectedRoute requireModule="fees"><AdminFeesSquare /></ProtectedRoute>} />
           <Route path="/admin/fees/xero" element={<ProtectedRoute requireModule="fees"><AdminFeesXero /></ProtectedRoute>} />
+          <Route path="/admin/fees/membership-types" element={<ProtectedRoute requireModule="fees"><AdminMembershipTypes /></ProtectedRoute>} />
           <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute requireModule="fees"><AdminFeeMemberDetail /></ProtectedRoute>} />
           <Route path="/admin/merch" element={<ProtectedRoute requireModule="merch"><BetterMerchHome /></ProtectedRoute>} />
           <Route path="/admin/merch/stock" element={<ProtectedRoute requireModule="merch"><MerchStock /></ProtectedRoute>} />

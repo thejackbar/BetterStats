@@ -2020,12 +2020,26 @@ class FamilyMember(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     family_id = Column(UUID(as_uuid=True), ForeignKey("families.id", ondelete="CASCADE"), nullable=False)
-    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    # Nullable (migration 175): a non-playing family member (a parent who
+    # isn't a registered player) has no player_id at all — see fee_member_id
+    # below. An existing row always has exactly one of the two set; new code
+    # should treat "which one is set" as the row's kind (player vs fee member).
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    # A non-playing family member — parents/guardians and anyone else who's a
+    # fee_members row (see FeeMember: "manual members ... have player_id
+    # NULL") but not themselves a Player (migration 175).
+    fee_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=True)
+    # This member is a responsible adult for the family's minors (migration 175).
+    is_guardian = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Lets a separated parent opt out of "email the whole family" while
+    # staying part of the family's structure (migration 175).
+    receives_family_comms = Column(Boolean, nullable=False, server_default="true", default=True)
     relationship_label = Column("relationship", Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     family = relationship("Family", back_populates="members")
     player = relationship("Player")
+    fee_member = relationship("FeeMember")
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -2048,6 +2062,42 @@ class FamilyMember(Base):
 FEE_PAYMENT_TYPES = ("standard", "upfront", "complimentary", "left_club")
 # fee_match_days.fee_format / Grade.fee_format values.
 FEE_FORMATS = ("two_day", "one_day", "t20", "women", "exclude")
+# fee_member_seasons.status values (migration 175) — the per-season
+# membership lifecycle.
+MEMBERSHIP_STATUSES = (
+    "prospect", "invited", "application_started", "awaiting_documents",
+    "awaiting_payment", "active", "suspended", "expired", "archived",
+)
+
+
+class MembershipType(Base):
+    """A club-adopted membership category (Senior Player, Parent, Life
+    Member, Coach, Committee Member, …) — migration 175. Cross-season,
+    unlike FeeSchedule ($ tiers, re-created per season): a type's descriptive
+    attributes (voting rights, WWCC required, …) don't change season to
+    season. Nothing is seeded automatically — a club adopts a starter set (or
+    none at all) via services/membership_types.py, same "may or may not
+    apply" posture as the CRM tracker templates."""
+    __tablename__ = "membership_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_membership_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    default_annual_fee = Column(Numeric(10, 2), nullable=True)
+    is_playing = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_voting_rights = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_insurance = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_wwcc = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_playhq_registration = Column(Boolean, nullable=False, server_default="false", default=False)
+    comms_group = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 class FeeSchedule(Base):
@@ -2096,10 +2146,19 @@ class FeeMember(Base):
     # default). Not a FK — schedules are per-season, this is a cross-season hint.
     current_tier = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Membership Management (migration 175): the catalogue entry this member
+    # holds (Senior Player, Parent, Coach, …) — cross-season, distinct from the
+    # per-season fee_schedule $ tier. Life/honorary status is cross-season too
+    # (it doesn't reset each season the way a fee_schedule tier does).
+    membership_type_id = Column(UUID(as_uuid=True), ForeignKey("membership_types.id", ondelete="SET NULL"), nullable=True)
+    is_life_member = Column(Boolean, nullable=False, server_default="false", default=False)
+    is_honorary = Column(Boolean, nullable=False, server_default="false", default=False)
+    honorary_expires_at = Column(Date, nullable=True)  # NULL + is_honorary = perpetual
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     player = relationship("Player")
+    membership_type = relationship("MembershipType")
     seasons = relationship("FeeMemberSeason", back_populates="member", cascade="all, delete-orphan")
 
 
@@ -2119,6 +2178,11 @@ class FeeMemberSeason(Base):
     is_new_registration = Column(Boolean, nullable=False, server_default="false")
     membership_payment_method = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Per-season membership lifecycle (migration 175): prospect | invited |
+    # application_started | awaiting_documents | awaiting_payment | active |
+    # suspended | expired | archived. Defaults to 'active' so every row that
+    # existed before this migration reads exactly as it did before.
+    status = Column(Text, nullable=False, server_default="active", default="active")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

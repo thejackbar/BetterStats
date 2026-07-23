@@ -6,6 +6,7 @@ import BetterCrmLayout from '../../../components/admin/BetterCrmLayout'
 import { PbSpinner } from '../../../lib/presskit'
 import PipelineBoard from '../../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../../components/admin/crm/DealDetailModal'
+import ManageStagesModal from '../../../components/admin/crm/ManageStagesModal'
 import { Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money } from '../../../components/admin/crm/ui'
 
 const clubClient = {
@@ -75,6 +76,7 @@ export default function BetterCrmTracker() {
   const [loading, setLoading] = useState(true)
   const [openDealId, setOpenDealId] = useState(null)
   const [showNew, setShowNew] = useState(false)
+  const [showStages, setShowStages] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -95,7 +97,12 @@ export default function BetterCrmTracker() {
 
   return (
     <BetterCrmLayout title={board?.pipeline?.name || 'Tracker'}
-      actions={<Btn variant="primary" sm onClick={() => setShowNew(true)}>New {terms.itemSingular}</Btn>}>
+      actions={(
+        <>
+          <Btn variant="ghost" sm onClick={() => setShowStages(true)}>Manage stages</Btn>
+          <Btn variant="primary" sm onClick={() => setShowNew(true)}>New {terms.itemSingular}</Btn>
+        </>
+      )}>
       {loading && !board ? <PbSpinner message="Loading…" /> : !board ? null : (
         <>
           <div className="flex items-center gap-2 mb-4">
@@ -154,6 +161,7 @@ export default function BetterCrmTracker() {
       )}
 
       <NewRecordModal open={showNew} onClose={() => setShowNew(false)} pipelineId={pipelineId} stages={stages} terms={terms} onCreated={load} />
+      <ManageStagesModal open={showStages} onClose={() => setShowStages(false)} pipelineId={pipelineId} stages={stages} onChanged={load} />
       <DealDetailModal
         dealId={openDealId} open={!!openDealId} onClose={() => setOpenDealId(null)}
         stages={stages} client={clubClient} onChanged={load} terms={terms}

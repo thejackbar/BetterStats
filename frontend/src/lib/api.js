@@ -231,6 +231,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ org_id: orgId, surname_key: surnameKey }),
     }),
+  // Family/Household — non-playing members (parents/guardians)
+  addFamilyFeeMember: (familyId, orgId, feeMemberId, relationship, isGuardian) =>
+    request(`/families/${familyId}/members/fee-member`, {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, fee_member_id: feeMemberId, relationship: relationship || null, is_guardian: !!isGuardian }),
+    }),
+  updateFamilyFeeMember: (familyId, feeMemberId, orgId, patch) =>
+    request(`/families/${familyId}/members/fee-member/${feeMemberId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ org_id: orgId, ...patch }),
+    }),
+  removeFamilyFeeMember: (familyId, feeMemberId, orgId) =>
+    request(`/families/${familyId}/members/fee-member/${feeMemberId}?org_id=${encodeURIComponent(orgId)}`, {
+      method: 'DELETE',
+    }),
+  getFamilyFinancials: (familyId, orgId, seasonId) =>
+    request(`/families/${familyId}/financials?org_id=${encodeURIComponent(orgId)}&season_id=${encodeURIComponent(seasonId)}`),
 
   // Grade merge tools
   listGradesWithStats: (orgId) => request(`/admin/grades-with-stats?org_id=${orgId}`),
@@ -254,6 +271,19 @@ export const api = {
     }),
   applyGradeSuggestions: () =>
     request('/admin/grades/apply-suggestions', { method: 'POST' }),
+
+  // Club admin — Membership Types (migration 175) — the cross-season
+  // catalogue a member's membership_type_id points at.
+  feeListMembershipTypes: (includeInactive) =>
+    request(`/club-admin/fees/membership-types${includeInactive ? '?include_inactive=true' : ''}`),
+  feeCreateMembershipType: (data) =>
+    request('/club-admin/fees/membership-types', { method: 'POST', body: JSON.stringify(data) }),
+  feeUpdateMembershipType: (id, data) =>
+    request(`/club-admin/fees/membership-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feeArchiveMembershipType: (id) =>
+    request(`/club-admin/fees/membership-types/${id}`, { method: 'DELETE' }),
+  feeSeedStarterMembershipTypes: () =>
+    request('/club-admin/fees/membership-types/seed-starter', { method: 'POST' }),
 
   // Club admin — fees (Phase 1)
   feeListSchedule: (seasonId) => request(`/club-admin/fees/schedule?season_id=${seasonId}`),

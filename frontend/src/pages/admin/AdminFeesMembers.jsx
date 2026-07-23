@@ -30,9 +30,9 @@ function Kpi({ label, value, accent, warn }) {
   )
 }
 
-function AddMemberModal({ seasonId, tiers, onClose, onCreated }) {
+function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }) {
   const toast = useToast()
-  const [form, setForm] = useState({ full_name: '', email: '', mobile: '', fee_schedule_id: '' })
+  const [form, setForm] = useState({ full_name: '', email: '', mobile: '', fee_schedule_id: '', membership_type_id: '' })
   const [busy, setBusy] = useState(false)
   const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
@@ -44,6 +44,7 @@ function AddMemberModal({ seasonId, tiers, onClose, onCreated }) {
         season_id: seasonId, full_name: form.full_name.trim(),
         email: form.email.trim() || null, mobile: form.mobile.trim() || null,
         fee_schedule_id: form.fee_schedule_id || null,
+        membership_type_id: form.membership_type_id || null,
       })
       toast.success('Member added'); onCreated()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
@@ -80,6 +81,13 @@ function AddMemberModal({ seasonId, tiers, onClose, onCreated }) {
             <select className={inp} value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
               <option value="">— Needs tier —</option>
               {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MEMBERSHIP TYPE</label>
+            <select className={inp} value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
+              <option value="">— None —</option>
+              {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
         </div>
@@ -189,6 +197,7 @@ export default function AdminFeesMembers() {
   const [seasonId, setSeasonId] = useState('')
   const [data, setData] = useState(null)
   const [tiers, setTiers] = useState([])
+  const [membershipTypes, setMembershipTypes] = useState([])
   const [q, setQ] = useState('')
   const [needsTierOnly, setNeedsTierOnly] = useState(false)
   const [owesOnly, setOwesOnly] = useState(false)
@@ -202,6 +211,7 @@ export default function AdminFeesMembers() {
     api.adminListSeasons()
       .then(s => { const sorted = sortSeasons(s); setSeasons(sorted); if (sorted[0]) setSeasonId(sorted[0].id) })
       .catch(e => toast.error(e.message))
+    api.feeListMembershipTypes().then(d => setMembershipTypes(d.types || [])).catch(() => {})
   }, [])
 
   const load = useCallback(() => {
@@ -346,6 +356,7 @@ export default function AdminFeesMembers() {
                             className="cursor-pointer align-middle" />
                         </th>
                         <th className="font-medium py-2.5 pr-3">NAME</th>
+                        <th className="font-medium py-2.5 pr-3">TYPE</th>
                         <th className="font-medium py-2.5 pr-3">TIER</th>
                         <th className="font-medium py-2.5 pr-3 w-16 text-right">DAYS</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAYABLE</th>
@@ -375,6 +386,13 @@ export default function AdminFeesMembers() {
                                 {m.full_name}
                                 {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
                               </Link>
+                            </td>
+                            <td className="py-2.5 pr-3">
+                              <span className="text-pb-dim text-[12px]">
+                                {membershipTypes.find(t => t.id === m.membership_type_id)?.name || '—'}
+                              </span>
+                              {m.is_life_member && <span className="ml-1.5 font-mono text-[8px] tracking-wide2 text-pb-accent border border-pb-accent/40 rounded px-1 py-px">LIFE</span>}
+                              {m.is_honorary && <span className="ml-1.5 font-mono text-[8px] tracking-wide2 text-pb-faint border pb-hairline rounded px-1 py-px">HON.</span>}
                             </td>
                             <td className="py-2.5 pr-3">
                               {m.needs_tier
@@ -424,7 +442,7 @@ export default function AdminFeesMembers() {
       )}
 
       {showAdd && (
-        <AddMemberModal seasonId={seasonId} tiers={tiers}
+        <AddMemberModal seasonId={seasonId} tiers={tiers} membershipTypes={membershipTypes}
           onClose={() => setShowAdd(false)}
           onCreated={() => { setShowAdd(false); load() }} />
       )}
