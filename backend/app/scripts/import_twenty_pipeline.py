@@ -173,11 +173,21 @@ async def _resolve_owner(http: httpx.AsyncClient, owner_id: "str | None",
     resolved = None
     try:
         member = await client.get_by_id(http, "workspaceMembers", owner_id)
-        if member:
+        if member is None:
+            logger.warning("twenty: owner workspaceMember %s not found (404) — record may have been "
+                           "deleted or the id shape is unexpected", owner_id)
+        else:
             email = (member.get("userEmail") or member.get("email")
                      or (member.get("user") or {}).get("email") or "").strip().lower()
-            if email:
+            if not email:
+                logger.warning("twenty: owner workspaceMember %s has no readable email field — raw keys: %s",
+                               owner_id, sorted(member.keys()))
+            else:
                 resolved = users_by_email.get(email)
+                if resolved is None:
+                    logger.warning("twenty: owner workspaceMember %s (email=%s) doesn't match any "
+                                   "BetterCricket user's email — known users: %s",
+                                   owner_id, email, sorted(users_by_email.keys()))
     except Exception:  # noqa: BLE001 - best-effort only
         logger.exception("twenty: failed to resolve owner %s", owner_id)
     cache[owner_id] = resolved
