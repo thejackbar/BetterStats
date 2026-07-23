@@ -1450,6 +1450,33 @@ bowler's figures appear exactly once, correctly linked. Not done this round:
 — a known pre-existing gap, unrelated to this fix, flagged as a possible
 follow-up.
 
+**Follow-up (same day) — the scorecard cache had no expiry.** After the fix
+above deployed, the reported game still showed a wrong, DIFFERENT wrong
+total ("16/0" this time, with one side's whole batting card missing).
+Re-fetching Grassroots directly (repeatedly, with the app's own request
+shape) confirmed the live upstream data is correct and has been stable —
+135/7, 20 extras, full batting rows both sides — so the corrupted output
+wasn't coming from Grassroots or from the rewritten merge logic. It was
+`grassroots_scores_client._scorecard_cache`: an in-process, no-TTL,
+never-invalidated cache keyed by match id. Once a match's scorecard is
+fetched, that exact response is served forever for the life of the backend
+process. A club scorer correcting this match on Grassroots' side got caught
+mid-save at some point (an innings with its totals present but its batting
+rows momentarily empty is the signature — exactly what's visible in the
+symptom), and that half-saved snapshot got pinned permanently the moment
+anything first requested this match. `get_match_scorecard` now takes a
+`_SCORECARD_TTL` of 15 minutes (`get_grade_ladder` already had this pattern
+for the same reason — "ladders move ~weekly, an hour keeps the proxy happy"
+— the scorecard cache just never got the equivalent treatment), plus a
+`_scorecard_looks_incomplete` guard: a response with an innings that reports
+real totals but zero batting rows is never cached at all, so a mid-edit
+snapshot can't get pinned even briefly — the very next request retries
+instead. `force=True` was also added, matching `get_grade_matches`'s
+existing param, for any future caller that needs to explicitly bypass the
+cache. This bug predates the rewrite above and would have been silently
+capping the OLD merge logic's live-GR data too, on whichever match happened
+to be fetched during an in-progress correction.
+
 ## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
 
 Yearbook generation was previously **100% manual** — two separate admin

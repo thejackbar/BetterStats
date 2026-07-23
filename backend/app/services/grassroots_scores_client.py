@@ -36,9 +36,17 @@ _HEADERS = {
 
 _grade_matches_cache: dict[str, list] = {}  # grade_id -> matches
 _matches_cache: dict[str, list] = {}  # team_id -> matches
-_scorecard_cache: dict[str, Optional[dict]] = {}  # match_id -> scorecard or None
+_scorecard_cache: dict[str, tuple] = {}  # match_id -> (fetched_at, scorecard | None)
 _ladder_cache: dict[str, tuple] = {}  # grade_id -> (fetched_at, data | None)
 _LADDER_TTL = 3600  # ladders move ~weekly; an hour keeps the proxy happy
+# A scorecard can be corrected by a club scorer after the fact (observed live:
+# a match caught mid-edit returned an innings with totals but an empty batting
+# array, and that incomplete snapshot then sat cached indefinitely — this
+# endpoint is now the primary source for the live match page, so an unbounded
+# cache pins a bad snapshot until the process restarts). 15 minutes keeps the
+# proxy happy for the common case (an old, settled match) while letting a
+# recently-edited scorecard catch up within one reload.
+_SCORECARD_TTL = 900
 
 
 async def _get(url: str, params: dict | None = None) -> httpx.Response:
@@ -171,30 +179,60 @@ async def get_match_balls(match_id: str) -> Optional[dict]:
         return None
 
 
-async def get_match_scorecard(match_id: str) -> Optional[dict]:
+async def get_match_scorecard(match_id: str, *, force: bool = False) -> Optional[dict]:
     """Return full scorecard for a match, or None if not in Grassroots (204).
 
     The 204 case isn't an error — it means this match is a post-migration
     PlayHQ-only game that Grassroots doesn't know about. The caller should
     skip it and let the PlayHQ sync path handle it.
+
+    Cached for `_SCORECARD_TTL` (see its comment for why this isn't
+    unbounded). `force=True` bypasses the cache entirely.
     """
-    if match_id in _scorecard_cache:
-        return _scorecard_cache[match_id]
+    now = time.time()
+    hit = _scorecard_cache.get(match_id)
+    if not force and hit and now - hit[0] < _SCORECARD_TTL:
+        return hit[1]
     try:
         r = await _get(f"{BASE_URL}/scores/matches/{match_id}", params={"responseModifier": "includeScorecard"})
         if r.status_code == 204:
-            _scorecard_cache[match_id] = None
+            _scorecard_cache[match_id] = (now, None)
             return None
         if r.status_code != 200:
             logger.warning(f"GR scores: /matches/{match_id} → {r.status_code}: {r.text[:200]}")
-            _scorecard_cache[match_id] = None
+            # Transient failure — don't cache it, so the next request actually
+            # retries instead of being stuck on a `None` for the full TTL
+            # (same reasoning as get_grade_matches's non-200 handling above).
+            if hit:
+                return hit[1]
             return None
         data = r.json()
-        _scorecard_cache[match_id] = data
+        if _scorecard_looks_incomplete(data):
+            # Caught mid-edit — a scorer correcting the match on Grassroots'
+            # side can momentarily save an innings with its totals intact but
+            # its per-row batting wiped. Don't pin that snapshot; return it
+            # for this one call (or the last good one, if we have it) but let
+            # the next request try again instead of caching a broken card for
+            # the full TTL.
+            logger.warning(f"GR scores: /matches/{match_id} looks incomplete (innings totals present, batting rows missing) — not caching")
+            return hit[1] if hit else data
+        _scorecard_cache[match_id] = (now, data)
         return data
     except Exception as e:
         logger.warning(f"GR scores: /matches/{match_id} failed: {e}")
+        if hit:
+            return hit[1]
         return None
+
+
+def _scorecard_looks_incomplete(data: dict) -> bool:
+    """True when an innings reports real totals but has no batting rows to
+    back them up — the signature of catching Grassroots mid-correction."""
+    for inn in (data.get("innings") or []):
+        has_totals = bool(inn.get("numberOfWicketsFallen") or inn.get("runsScored"))
+        if has_totals and not (inn.get("batting") or []):
+            return True
+    return False
 
 
 # ── Upcoming fixtures ────────────────────────────────────────────────────────
