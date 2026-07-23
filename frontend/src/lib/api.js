@@ -482,6 +482,19 @@ export const api = {
   portalPay: (slug, kind) =>
     request(`/public/member-portal/${slug}/pay`, { method: 'POST', body: JSON.stringify({ kind }) }),
 
+  // Merch storefront — admin (migration 179). Gated by MANAGE_MERCH + merch
+  // module + platform_settings.merch_storefront_enabled_for_org.
+  merchStorefrontStatus: () => request('/club-admin/merch/storefront-status'),
+  merchListOrders: (status) => request(`/club-admin/merch/orders${status ? `?status=${status}` : ''}`),
+  merchUpdateOrder: (id, status) =>
+    request(`/club-admin/merch/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+
+  // Merch storefront — public (unauthenticated). See routers/public_merch_store.py.
+  shopStatus: (slug) => request(`/public/merch-store/${slug}/status`),
+  shopCatalogue: (slug) => request(`/public/merch-store/${slug}/catalogue`),
+  shopCheckout: (slug, data) =>
+    request(`/public/merch-store/${slug}/checkout`, { method: 'POST', body: JSON.stringify(data) }),
+
   // Club admin — Membership Types (migration 175) — the cross-season
   // catalogue a member's membership_type_id points at.
   feeListMembershipTypes: (includeInactive) =>

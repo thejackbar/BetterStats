@@ -24,7 +24,7 @@ function ConditionalNavbar() {
   const isMarketing = isMarketingPath(pathname)
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -110,6 +110,7 @@ const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
 const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity'))
 const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
 const MerchSquare = lazy(() => import('./pages/admin/bettermerch/MerchSquare'))
+const MerchOrders = lazy(() => import('./pages/admin/bettermerch/MerchOrders'))
 const BetterCrmHome = lazy(() => import('./pages/admin/bettercrm/BetterCrmHome'))
 const BetterCrmTracker = lazy(() => import('./pages/admin/bettercrm/BetterCrmTracker'))
 const BetterCrmPeople = lazy(() => import('./pages/admin/bettercrm/BetterCrmPeople'))
@@ -211,6 +212,8 @@ const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
 const PublicEventRegister = lazy(() => import('./pages/PublicEventRegister'))
 // Public, login-free member self-service portal (emailed magic link)
 const PublicMemberPortal = lazy(() => import('./pages/PublicMemberPortal'))
+// Public, login-free merch storefront
+const PublicMerchStore = lazy(() => import('./pages/PublicMerchStore'))
 
 const PageLoader = () => (
   <div className="flex justify-center py-24">
@@ -269,6 +272,8 @@ export default function App() {
           <Route path="/events/:eventId" element={<PublicEventRegister />} />
           {/* Public member self-service portal (no login — emailed magic link) */}
           <Route path="/portal/:slug" element={<PublicMemberPortal />} />
+          {/* Public merch storefront (no login) */}
+          <Route path="/shop/:slug" element={<PublicMerchStore />} />
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -315,6 +320,7 @@ export default function App() {
           <Route path="/admin/merch/activity" element={<ProtectedRoute requireModule="merch"><MerchActivity /></ProtectedRoute>} />
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
+          <Route path="/admin/merch/orders" element={<ProtectedRoute requireModule="merch"><MerchOrders /></ProtectedRoute>} />
           <Route path="/admin/crm" element={<ProtectedRoute requireModule="crm"><BetterCrmHome /></ProtectedRoute>} />
           <Route path="/admin/crm/people" element={<ProtectedRoute requireModule="crm"><BetterCrmPeople /></ProtectedRoute>} />
           <Route path="/admin/crm/:pipelineId" element={<ProtectedRoute requireModule="crm"><BetterCrmTracker /></ProtectedRoute>} />

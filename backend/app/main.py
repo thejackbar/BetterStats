@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
-    stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal
+    stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -3469,6 +3469,52 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE fee_member_seasons ADD COLUMN IF NOT EXISTS last_fee_reminder_sent_at TIMESTAMPTZ"
         ))
 
+    # Migration 179: Merch storefront — public online ordering against the
+    # existing BetterMerch catalogue. See services/merch_store.py.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS show_in_storefront BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS merch_storefront_override BOOLEAN"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_orders (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                customer_name TEXT NOT NULL,
+                email TEXT,
+                phone TEXT,
+                member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'pending_payment',
+                total_cents INTEGER NOT NULL DEFAULT 0,
+                stripe_checkout_session_id TEXT,
+                stripe_payment_intent_id TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_orders_org ON merch_orders(organisation_id, status)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_merch_orders_checkout_session "
+            "ON merch_orders(stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_order_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                order_id UUID NOT NULL REFERENCES merch_orders(id) ON DELETE CASCADE,
+                variant_id UUID REFERENCES merch_variants(id) ON DELETE SET NULL,
+                product_name TEXT NOT NULL,
+                variant_label TEXT,
+                unit_price_cents INTEGER NOT NULL DEFAULT 0,
+                quantity INTEGER NOT NULL DEFAULT 1
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_order_items_order ON merch_order_items(order_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3688,6 +3734,7 @@ app.include_router(backup_admin.router)  # Backup/restore task history + DB size
 app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees (BetterAdmin)
 app.include_router(comms.router, dependencies=[Depends(require_module("comms"))])         # BetterComms (BetterAdmin)
 app.include_router(merch.router, dependencies=[Depends(require_module("merch"))])         # BetterMerch (BetterAdmin)
+app.include_router(public_merch_store.router)  # Merch storefront (public, unauthenticated) — checks module + flag itself per-org
 app.include_router(crm.router, dependencies=[Depends(require_module("crm"))])             # BetterCRM (BetterAdmin)
 app.include_router(fixtures.router, dependencies=[Depends(require_module("select"))])     # BetterSelect
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect

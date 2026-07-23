@@ -30,6 +30,7 @@ from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player,
     MerchProduct, MerchVariant, MerchMovement, MerchAsset, MerchSquareConnection, MerchCategory,
+    MerchOrder, MERCH_ORDER_STATUSES,
     MERCH_CATEGORIES, MERCH_MOVEMENT_KINDS, MERCH_ASSET_CONDITIONS, MERCH_ASSET_STATUSES,
     MERCH_MAX_CATEGORY_DEPTH,
     get_db,
@@ -37,6 +38,7 @@ from app.models.db import (
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERCH
 from app.services import merch as merch_service
+from app.services import merch_store as merch_store_service
 from app.services import square_client, square_sync
 
 # Signed state for the Square OAuth handshake — ties the callback back to the
@@ -157,6 +159,8 @@ def _product_out(p: MerchProduct, variants: list[MerchVariant] | None = None) ->
         "supplier": p.supplier,
         "notes": p.notes,
         "is_active": p.is_active,
+        "show_in_storefront": p.show_in_storefront,
+        "source": p.source,
     }
     if variants is not None:
         active = [v for v in variants if v.is_active]
@@ -433,6 +437,7 @@ class ProductIn(BaseModel):
     low_stock_threshold: Optional[int] = None
     supplier: Optional[str] = None
     notes: Optional[str] = None
+    show_in_storefront: bool = True
     variants: Optional[List[VariantIn]] = None  # optional initial variants
 
 
@@ -448,6 +453,7 @@ class ProductPatch(BaseModel):
     supplier: Optional[str] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    show_in_storefront: Optional[bool] = None
 
 
 class VariantPatch(BaseModel):
@@ -533,6 +539,7 @@ async def create_product(
         low_stock_threshold=body.low_stock_threshold,
         supplier=body.supplier,
         notes=body.notes,
+        show_in_storefront=body.show_in_storefront,
     )
     db.add(p)
     await db.flush()
@@ -587,7 +594,8 @@ async def update_product(
     data = body.model_dump(exclude_unset=True)
     if "category" in data and data["category"] not in MERCH_CATEGORIES:
         raise HTTPException(status_code=422, detail=f"Unknown category: {data['category']}")
-    for field in ("category", "name", "description", "for_resale", "low_stock_threshold", "supplier", "notes", "is_active"):
+    for field in ("category", "name", "description", "for_resale", "low_stock_threshold", "supplier", "notes",
+                  "is_active", "show_in_storefront"):
         if field in data:
             setattr(p, field, data[field])
     if "category_id" in data:
@@ -1385,3 +1393,53 @@ async def square_disconnect(
         await db.delete(conn)
         await db.commit()
     return {"ok": True}
+
+
+# ─── Online store orders (merch storefront, migration 179) ──────────────────
+# The catalogue/checkout side is public (routers/public_merch_store.py) and
+# flag-gated (platform_settings.merch_storefront_enabled_for_org); this is
+# just the admin's fulfilment queue — always reachable once a club holds the
+# merch module, same as every other tab on this router.
+
+@router.get("/storefront-status", dependencies=[_require])
+async def storefront_status(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Whether the public merch storefront is switched on for this club —
+    every MANAGE_MERCH holder already reaches this router, so no separate
+    uncapped nav-visibility endpoint is needed (unlike the member portal,
+    whose nav item sits in the general admin nav where a user might not
+    hold MANAGE_FEES at all)."""
+    from app.services import platform_settings as ps
+    return {"enabled": await ps.merch_storefront_enabled_for_org(db, club)}
+
+
+@router.get("/orders", dependencies=[_require])
+async def list_orders(
+    status: Optional[str] = None,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if status is not None and status not in MERCH_ORDER_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Unknown status: {status}")
+    orders = await merch_store_service.list_orders(db, club.id, status=status)
+    return {"orders": [merch_store_service._order_dict(o) for o in orders]}
+
+
+class OrderStatusPatch(BaseModel):
+    status: str
+
+
+@router.patch("/orders/{order_id}", dependencies=[_require])
+async def update_order(
+    order_id: str,
+    body: OrderStatusPatch,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.status not in MERCH_ORDER_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Unknown status: {body.status}")
+    order = await db.get(MerchOrder, uuid.UUID(order_id))
+    if not order or order.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await merch_store_service.update_order_status(db, order, body.status)
+    await db.commit()
+    return {"id": str(order.id), "status": order.status}

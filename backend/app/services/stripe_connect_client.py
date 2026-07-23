@@ -122,7 +122,40 @@ async def create_fee_payment_checkout_session(*, connected_account_id: str, amou
         }],
         success_url=success_url,
         cancel_url=cancel_url,
-        metadata={"org_id": str(org_id), "member_id": str(member_id), "season_id": str(season_id), "kind": kind},
+        metadata={
+            "purpose": "fee_payment", "org_id": str(org_id), "member_id": str(member_id),
+            "season_id": str(season_id), "kind": kind,
+        },
+        stripe_account=connected_account_id,
+    )
+
+
+async def create_merch_checkout_session(*, connected_account_id: str, order_id: str, org_id: str,
+                                        line_items: list[dict], success_url: str, cancel_url: str):
+    """A one-off Checkout Session for a merch storefront order — one line
+    item per cart line, all on the SAME connected account fee payments use
+    (one club, one Stripe account, for fees and merch alike). ``line_items``
+    is [{name, unit_amount_cents, quantity}]; ``metadata.order_id`` is how
+    the webhook finds the pending MerchOrder row to mark paid (see
+    services/merch_store.py::mark_order_paid) — the full cart isn't encoded
+    in metadata (Stripe's per-value size limit), only the order id."""
+    _require_configured()
+    if not line_items:
+        raise ValueError("line_items must not be empty")
+    return await stripe.checkout.Session.create_async(
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": settings.stripe_currency,
+                "product_data": {"name": li["name"][:250]},
+                "unit_amount": li["unit_amount_cents"],
+                "tax_behavior": "exclusive",
+            },
+            "quantity": li["quantity"],
+        } for li in line_items],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"purpose": "merch_order", "org_id": str(org_id), "order_id": str(order_id)},
         stripe_account=connected_account_id,
     )
 

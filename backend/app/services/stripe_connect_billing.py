@@ -15,8 +15,10 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models.db import Organisation, FeeMemberSeason, FeePayment
+from app.models.db import Organisation, FeeMemberSeason, FeePayment, MerchOrder
+from app.services import merch_store
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,50 @@ async def handle_account_updated(db: AsyncSession, data_object, account_id: str)
 
 
 async def handle_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:
+    """Dispatches by metadata.purpose — the SAME Connect Checkout Session
+    shape (fees vs merch) both land on checkout.session.completed, so this
+    is the one place that tells them apart. Older sessions created before
+    the purpose tag existed have none — treated as a fee payment (the only
+    kind that existed before merch storefront shipped)."""
+    metadata = data_object.get("metadata") or {}
+    purpose = metadata.get("purpose") or "fee_payment"
+    if purpose == "merch_order":
+        await _handle_merch_checkout_completed(db, data_object, account_id)
+    else:
+        await _handle_fee_checkout_completed(db, data_object, account_id)
+
+
+async def _handle_merch_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:
+    """Marks the matching pending MerchOrder paid and turns its line items
+    into ordinary 'sold' stock movements — see
+    services/merch_store.py::mark_order_paid, which is itself idempotent
+    (a no-op if the order isn't still pending_payment)."""
+    metadata = data_object.get("metadata") or {}
+    order_id = metadata.get("order_id")
+    org_id = metadata.get("org_id")
+    payment_intent_id = data_object.get("payment_intent")
+    if not (order_id and org_id):
+        logger.warning("stripe_connect merch checkout.session.completed missing metadata: %s", metadata)
+        return
+
+    org = await _load_org_by_account(db, account_id)
+    if org is None or str(org.id) != str(org_id):
+        logger.warning("stripe_connect merch checkout for account %s doesn't match org %s", account_id, org_id)
+        return
+
+    order = (await db.execute(
+        select(MerchOrder).where(MerchOrder.id == uuid.UUID(order_id)).options(selectinload(MerchOrder.items))
+    )).scalar_one_or_none()
+    if order is None or order.organisation_id != org.id:
+        logger.warning("stripe_connect merch checkout: order %s not found for org %s", order_id, org_id)
+        return
+
+    order.stripe_checkout_session_id = data_object.get("id")
+    await merch_store.mark_order_paid(db, order, payment_intent_id=payment_intent_id)
+    await db.commit()
+
+
+async def _handle_fee_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:
     """Records a member's completed online fee payment as an ordinary
     fee_payments row (source='stripe_connect') so it flows straight into the
     SAME allocate_match_days()/_financials() math every other payment already

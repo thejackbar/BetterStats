@@ -291,6 +291,9 @@ class Organisation(Base):
     # club while it stays invisible to every other club admin. See
     # services/platform_settings.member_portal_enabled_for_org.
     member_portal_override = Column(Boolean, nullable=True)
+    # Per-club override of platform_settings.merch_storefront_enabled
+    # (migration 179) — same shape as member_portal_override above.
+    merch_storefront_override = Column(Boolean, nullable=True)
     # ─── Stripe Connect — club-to-member fee payments (migration 178) ─────────
     # A SEPARATE Stripe integration from stripe_customer_id/stripe_subscription_id
     # above (which is BetterCricket's OWN platform billing, one Stripe account
@@ -2811,6 +2814,12 @@ class MerchProduct(Base):
     source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
     square_object_id = Column(Text, nullable=True)                    # Square catalog ITEM id
     is_active = Column(Boolean, nullable=False, server_default="true")
+    # Merch storefront (migration 179): whether this product shows on the
+    # public online store. Default true so an existing club's whole resale
+    # catalogue is visible the moment the storefront is switched on — a
+    # Square-synced product (source='square') is excluded from the
+    # storefront regardless of this flag (see routers/public_merch_store.py).
+    show_in_storefront = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -2875,6 +2884,54 @@ class MerchMovement(Base):
 
     variant = relationship("MerchVariant", back_populates="movements")
     player = relationship("Player")
+
+
+# ─── Merch storefront (migration 179) ────────────────────────────────────────
+# Public online ordering against the SAME catalogue above — a NEW pair of
+# tables (not a repurposing of merch_movements), since an order needs its own
+# customer/contact details, payment status and Stripe correlation. A paid
+# order's line items become ordinary MerchMovement rows (kind='sold',
+# source='online_store') via the existing record_movement() once payment is
+# confirmed — stock accounting stays in the one place it's always lived.
+
+MERCH_ORDER_STATUSES = ("pending_payment", "paid", "fulfilled", "cancelled")
+
+
+class MerchOrder(Base):
+    __tablename__ = "merch_orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    customer_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    status = Column(Text, nullable=False, server_default="pending_payment", default="pending_payment")
+    total_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    stripe_checkout_session_id = Column(Text, nullable=True)
+    stripe_payment_intent_id = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    items = relationship("MerchOrderItem", back_populates="order", cascade="all, delete-orphan")
+
+
+class MerchOrderItem(Base):
+    """A line-item snapshot — product/variant NAME and price are copied at
+    order time (not re-read from the live catalogue) so a later price change
+    or product rename never rewrites a historical order."""
+    __tablename__ = "merch_order_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("merch_orders.id", ondelete="CASCADE"), nullable=False)
+    variant_id = Column(UUID(as_uuid=True), ForeignKey("merch_variants.id", ondelete="SET NULL"), nullable=True)
+    product_name = Column(Text, nullable=False)
+    variant_label = Column(Text, nullable=True)
+    unit_price_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    quantity = Column(Integer, nullable=False, server_default="1", default=1)
+
+    order = relationship("MerchOrder", back_populates="items")
 
 
 class MerchAsset(Base):

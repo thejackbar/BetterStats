@@ -1963,6 +1963,7 @@ async def get_general_settings(
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
         "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
         "member_portal_enabled": await ps.get_member_portal_enabled(db),
+        "merch_storefront_enabled": await ps.get_merch_storefront_enabled(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "backup_schedule": await ps.get_backup_schedule(db),
     }
@@ -1981,6 +1982,9 @@ class GeneralSettingsUpdate(BaseModel):
     # super admin switches it on (globally, or per-club first via
     # ClubUpdate.member_portal_override below).
     member_portal_enabled: Optional[bool] = None
+    # Merch storefront (migration 179) — same off-by-default, super-admin-only
+    # posture as member_portal_enabled above.
+    merch_storefront_enabled: Optional[bool] = None
     # module-count (str or int, JSON-friendly either way) -> whole-dollar
     # discount. See platform_settings.update_bundle_discount_schedule — this
     # REPLACES the whole table, it's not a merge.
@@ -2022,6 +2026,7 @@ async def patch_general_settings(
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
         "billing_checkout_enabled": await ps.get_billing_checkout_enabled(db),
         "member_portal_enabled": await ps.get_member_portal_enabled(db),
+        "merch_storefront_enabled": await ps.get_merch_storefront_enabled(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "backup_schedule": await ps.get_backup_schedule(db),
     }
@@ -2100,6 +2105,9 @@ class ClubUpdate(BaseModel):
     # 178) — same None/omitted-vs-explicit-null semantics as
     # billing_checkout_override above.
     member_portal_override: Optional[bool] = None
+    # Per-club override of platform_settings.merch_storefront_enabled
+    # (migration 179) — same shape as member_portal_override above.
+    merch_storefront_override: Optional[bool] = None
     # Club General Settings — the configurable default trial length (days).
     default_trial_days: Optional[int] = None
     # BetterComms sending tier + optional per-club daily-cap overrides per tier.
