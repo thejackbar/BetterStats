@@ -90,7 +90,95 @@ function RelationshipInput({ value, onChange, onBlur, autoFocus }) {
   )
 }
 
-function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
+function FeeMemberPicker({ candidates, value, onChange, placeholder = 'Search parent/guardian…' }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (q.length < 1) return []
+    return candidates.filter(m => (m.full_name || '').toLowerCase().includes(q)).slice(0, 10)
+  }, [candidates, query])
+
+  function pick(m) {
+    onChange(m)
+    setQuery('')
+    setOpen(false)
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        type="text"
+        value={value ? value.full_name : query}
+        onChange={e => { if (value) onChange(null); setQuery(e.target.value); setOpen(true) }}
+        onFocus={() => { if (!value) setOpen(true) }}
+        placeholder={placeholder}
+        className="w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
+      />
+      <Dropdown anchorRef={ref} open={open && filtered.length > 0} onClose={() => setOpen(false)} maxHeight={208}
+        className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll">
+        {filtered.map(m => (
+          <button key={m.member_id} onMouseDown={() => pick(m)} className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text">
+            {m.full_name}
+          </button>
+        ))}
+      </Dropdown>
+    </div>
+  )
+}
+
+function money(n) { return n == null ? '—' : `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` }
+
+function FamilyFinancials({ familyId, orgId, seasonId, seasons }) {
+  const toast = useToast()
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!seasonId) return
+    setLoading(true)
+    api.getFamilyFinancials(familyId, orgId, seasonId).then(setData).catch(e => toast.error(e.message)).finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyId, orgId, seasonId])
+
+  if (!seasonId) return null
+  const seasonName = seasons.find(s => s.id === seasonId)?.name || ''
+
+  return (
+    <div className="pt-3 border-t pb-hairline-t">
+      <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">FAMILY FINANCIALS — {seasonName.toUpperCase()}</div>
+      {loading && <div className="font-mono text-[10px] text-pb-faint">Loading…</div>}
+      {data && (
+        <>
+          <p className="font-mono text-[10px] text-pb-faintest mb-2 leading-relaxed">
+            One view for one payment conversation with the family — each member's own BetterFees record, summed. Billing itself
+            still happens per member.
+          </p>
+          {data.members.length === 0 ? (
+            <div className="font-mono text-[11px] text-pb-faint">No fee-tracked members in this family for this season.</div>
+          ) : (
+            <div className="space-y-1.5 mb-2">
+              {data.members.map(m => (
+                <div key={m.member_id} className="flex items-center justify-between font-mono text-[11px] text-pb-dim">
+                  <span>{m.full_name}</span>
+                  <span className={m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}>{money(m.total_outstanding)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between font-mono text-[11px] pt-1.5 border-t pb-hairline-t">
+                <span className="text-pb-text">Family total outstanding</span>
+                <span className="font-display font-bold text-base" style={{ color: 'var(--pb-accent)' }}>{money(data.totals.total_outstanding)}</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDeleted }) {
   const toast = useToast()
   const [expanded, setExpanded] = useState(false)
   const [members, setMembers] = useState(null)
@@ -98,7 +186,13 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
   const [adding, setAdding] = useState(false)
   const [pickedPlayer, setPickedPlayer] = useState(null)
   const [pickedRelationship, setPickedRelationship] = useState('')
-  const [editingRel, setEditingRel] = useState(null) // player_id
+  const [feeCandidates, setFeeCandidates] = useState([])
+  const [pickedFeeMember, setPickedFeeMember] = useState(null)
+  const [pickedFeeRelationship, setPickedFeeRelationship] = useState('')
+  const [pickedIsGuardian, setPickedIsGuardian] = useState(true)
+  const [addingFeeMember, setAddingFeeMember] = useState(false)
+  const [showFinancials, setShowFinancials] = useState(false)
+  const [editingRel, setEditingRel] = useState(null) // player_id or fee_member_id
   const [editValue, setEditValue] = useState('')
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState(family.name)
@@ -120,11 +214,25 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
     if (expanded && members === null) loadMembers()
   }, [expanded, members, loadMembers])
 
+  // Non-playing candidates (parents/guardians etc — manual, non-player
+  // fee_members rows) for the "add non-player member" picker. Needs a
+  // season to read from BetterFees' member list; harmless if none picked yet.
+  useEffect(() => {
+    if (!expanded || !seasonId) return
+    api.feeListMembers(seasonId).then(d => setFeeCandidates((d.members || []).filter(m => !m.is_linked))).catch(() => {})
+  }, [expanded, seasonId])
+
   const availablePlayers = useMemo(() => {
     if (!members) return players
-    const taken = new Set(members.map(m => m.player_id))
+    const taken = new Set(members.filter(m => m.kind === 'player').map(m => m.player_id))
     return players.filter(p => !taken.has(p.id))
   }, [players, members])
+
+  const availableFeeCandidates = useMemo(() => {
+    if (!members) return feeCandidates
+    const taken = new Set(members.filter(m => m.kind === 'fee_member').map(m => m.fee_member_id))
+    return feeCandidates.filter(m => !taken.has(m.member_id))
+  }, [feeCandidates, members])
 
   async function handleAddMember() {
     if (!pickedPlayer) return
@@ -142,6 +250,22 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
     }
   }
 
+  async function handleAddFeeMember() {
+    if (!pickedFeeMember) return
+    setAddingFeeMember(true)
+    try {
+      const res = await api.addFamilyFeeMember(family.id, orgId, pickedFeeMember.member_id, pickedFeeRelationship || null, pickedIsGuardian)
+      setMembers(res.members || [])
+      setPickedFeeMember(null)
+      setPickedFeeRelationship('')
+      onChanged?.()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setAddingFeeMember(false)
+    }
+  }
+
   async function handleRemove(playerId) {
     if (!confirm('Remove this player from the family?')) return
     try {
@@ -153,11 +277,41 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
     }
   }
 
+  async function handleRemoveFeeMember(feeMemberId) {
+    if (!confirm('Remove this member from the family?')) return
+    try {
+      await api.removeFamilyFeeMember(family.id, feeMemberId, orgId)
+      setMembers(ms => ms.filter(m => m.fee_member_id !== feeMemberId))
+      onChanged?.()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
   async function handleSaveRelationship(playerId) {
     try {
       await api.updateFamilyMember(family.id, playerId, orgId, editValue || null)
       setMembers(ms => ms.map(m => m.player_id === playerId ? { ...m, relationship: editValue || null } : m))
       setEditingRel(null)
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  async function handleSaveFeeRelationship(feeMemberId) {
+    try {
+      await api.updateFamilyFeeMember(family.id, feeMemberId, orgId, { relationship: editValue || null })
+      setMembers(ms => ms.map(m => m.fee_member_id === feeMemberId ? { ...m, relationship: editValue || null } : m))
+      setEditingRel(null)
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  async function handleToggleGuardian(m) {
+    try {
+      if (m.kind === 'fee_member') await api.updateFamilyFeeMember(family.id, m.fee_member_id, orgId, { is_guardian: !m.is_guardian })
+      setMembers(ms => ms.map(x => x.id === m.id ? { ...x, is_guardian: !x.is_guardian } : x))
     } catch (e) {
       toast.error(e.message)
     }
@@ -272,42 +426,51 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
             )}
             {members && members.length > 0 && (
               <div className="space-y-1.5">
-                {members.map(m => (
-                  <div key={m.player_id} className="flex items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-3 py-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-pb-text text-sm truncate">{m.name}</div>
-                      {editingRel === m.player_id ? (
-                        <div className="mt-1">
-                          <RelationshipInput
-                            value={editValue}
-                            onChange={setEditValue}
-                            onBlur={() => handleSaveRelationship(m.player_id)}
-                            autoFocus
-                          />
+                {members.map(m => {
+                  const key = m.kind === 'player' ? m.player_id : m.fee_member_id
+                  const isEditing = editingRel === key
+                  const saveRel = () => m.kind === 'player' ? handleSaveRelationship(m.player_id) : handleSaveFeeRelationship(m.fee_member_id)
+                  const remove = () => m.kind === 'player' ? handleRemove(m.player_id) : handleRemoveFeeMember(m.fee_member_id)
+                  return (
+                    <div key={m.id} className="flex items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-pb-text text-sm truncate flex items-center gap-1.5">
+                          {m.name}
+                          {m.kind === 'fee_member' && (
+                            <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">NON-PLAYER</span>
+                          )}
+                          {m.is_guardian && (
+                            <span className="font-mono text-[8px] tracking-wide2 text-pb-accent border border-pb-accent/40 rounded px-1 py-px">GUARDIAN</span>
+                          )}
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => { setEditingRel(m.player_id); setEditValue(m.relationship || '') }}
-                          className="text-left font-mono text-[10px] text-pb-faint hover:text-pb-text mt-0.5"
-                        >
-                          {m.relationship || 'Add relationship…'}
+                        {isEditing ? (
+                          <div className="mt-1">
+                            <RelationshipInput value={editValue} onChange={setEditValue} onBlur={saveRel} autoFocus />
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingRel(key); setEditValue(m.relationship || '') }}
+                            className="text-left font-mono text-[10px] text-pb-faint hover:text-pb-text mt-0.5">
+                            {m.relationship || 'Add relationship…'}
+                          </button>
+                        )}
+                      </div>
+                      {m.kind === 'fee_member' && (
+                        <button onClick={() => handleToggleGuardian(m)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text px-2 py-1">
+                          {m.is_guardian ? 'Unmark guardian' : 'Mark guardian'}
                         </button>
                       )}
+                      <button onClick={remove} className="font-mono text-[10px] text-pb-faint hover:text-pb-red px-2 py-1">
+                        Remove
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleRemove(m.player_id)}
-                      className="font-mono text-[10px] text-pb-faint hover:text-pb-red px-2 py-1"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
 
           <div className="pt-3 border-t pb-hairline-t">
-            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">ADD MEMBER</div>
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">ADD PLAYER</div>
             <div className="flex flex-col sm:flex-row gap-2 items-stretch">
               <div className="flex-1">
                 <PlayerPicker
@@ -329,6 +492,42 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
               </button>
             </div>
           </div>
+
+          <div className="pt-3 border-t pb-hairline-t">
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">ADD PARENT / GUARDIAN (NON-PLAYER)</div>
+            {!seasonId ? (
+              <div className="font-mono text-[10px] text-pb-faintest">Pick a season above to add a non-playing member.</div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+                <div className="flex-1">
+                  <FeeMemberPicker candidates={availableFeeCandidates} value={pickedFeeMember} onChange={setPickedFeeMember} />
+                </div>
+                <div className="sm:w-40">
+                  <RelationshipInput value={pickedFeeRelationship} onChange={setPickedFeeRelationship} placeholder="e.g. Mother, Father" />
+                </div>
+                <label className="flex items-center gap-1.5 font-mono text-[10px] text-pb-dim cursor-pointer select-none whitespace-nowrap px-1">
+                  <input type="checkbox" checked={pickedIsGuardian} onChange={e => setPickedIsGuardian(e.target.checked)} />
+                  Guardian
+                </label>
+                <button
+                  onClick={handleAddFeeMember}
+                  disabled={!pickedFeeMember || addingFeeMember}
+                  className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
+                >
+                  {addingFeeMember ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+            )}
+            <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+              Candidates come from BetterFees' non-playing members for the selected season — add the parent there first (Members → + Member) if they're not listed.
+            </p>
+          </div>
+
+          <button onClick={() => setShowFinancials(x => !x)}
+            className="font-mono text-[10px] text-pb-faint hover:text-pb-text pt-1">
+            {showFinancials ? '▾ Hide financials' : '▸ Show family financials'}
+          </button>
+          {showFinancials && <FamilyFinancials familyId={family.id} orgId={orgId} seasonId={seasonId} seasons={seasons} />}
         </div>
       )}
     </div>
@@ -533,6 +732,8 @@ export default function AdminFamilies() {
   const [families, setFamilies] = useState([])
   const [players, setPlayers] = useState([])
   const [suggestions, setSuggestions] = useState([])
+  const [seasons, setSeasons] = useState([])
+  const [seasonId, setSeasonId] = useState('')
   const [initialLoading, setInitialLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
@@ -552,12 +753,16 @@ export default function AdminFamilies() {
       api.listFamilies(orgId),
       api.adminListPlayers(),
       api.getFamilySuggestions(orgId),
+      api.adminListSeasons(),
     ])
-      .then(([fams, pls, sugg]) => {
+      .then(([fams, pls, sugg, seas]) => {
         if (cancelled) return
         setFamilies(fams || [])
         setPlayers(pls || [])
         setSuggestions(sugg || [])
+        const sorted = (seas || []).filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0))
+        setSeasons(sorted)
+        setSeasonId(prev => prev || sorted[0]?.id || '')
       })
       .catch(e => { if (!cancelled) toast.error(e.message) })
       .finally(() => { if (!cancelled) setInitialLoading(false) })
@@ -594,9 +799,18 @@ export default function AdminFamilies() {
   return (
     <AdminLayout>
       <div className="max-w-4xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Families</h1>
+        <div className="flex flex-wrap items-end justify-between gap-3 mb-1">
+          <h1 className="font-display text-2xl font-bold text-pb-text">Families</h1>
+          {seasons.length > 0 && (
+            <select value={seasonId} onChange={e => setSeasonId(e.target.value)}
+              className="bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent">
+              {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
+        </div>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Group related players. Once created, families can be used as a filter in StatLab.
+          Group related players and non-playing members — parents/guardians included. Once created, families can be used
+          as a filter in StatLab; the season picker drives the non-player picker and family financials below.
         </p>
 
         <div className="flex gap-1 mb-5">
@@ -673,6 +887,8 @@ export default function AdminFamilies() {
                 family={f}
                 players={players}
                 orgId={orgId}
+                seasonId={seasonId}
+                seasons={seasons}
                 onChanged={refresh}
                 onDeleted={refresh}
               />

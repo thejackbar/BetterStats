@@ -8,6 +8,11 @@ import { formatSeason } from '../../lib/cricketFormat'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 const PAY_METHODS = ['', 'EFT', 'Cash', 'PlayHQ', 'Comp', 'Other']
+const STATUS_OPTIONS = [
+  ['prospect', 'Prospect'], ['invited', 'Invited'], ['application_started', 'Application Started'],
+  ['awaiting_documents', 'Awaiting Documents'], ['awaiting_payment', 'Awaiting Payment'],
+  ['active', 'Active'], ['suspended', 'Suspended'], ['expired', 'Expired'], ['archived', 'Archived'],
+]
 const FORMAT_LABEL = { two_day: 'Two Day', one_day: 'One Day', t20: 'T20', women: "Women's" }
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
@@ -294,10 +299,15 @@ export default function AdminFeeMemberDetail() {
   const [seasonId, setSeasonId] = useState(params.get('season') || '')
   const [data, setData] = useState(null)
   const [tiers, setTiers] = useState([])
+  const [membershipTypes, setMembershipTypes] = useState([])
   const [contact, setContact] = useState({ full_name: '', email: '', mobile: '', notes: '' })
   const [tierForm, setTierForm] = useState({ fee_schedule_id: '', is_new_registration: false, membership_payment_method: '' })
+  const [membershipForm, setMembershipForm] = useState({
+    membership_type_id: '', is_life_member: false, is_honorary: false, honorary_expires_at: '', status: 'active',
+  })
   const [savingContact, setSavingContact] = useState(false)
   const [savingTier, setSavingTier] = useState(false)
+  const [savingMembership, setSavingMembership] = useState(false)
 
   // Resolve a season if it wasn't passed in the URL.
   useEffect(() => {
@@ -322,8 +332,16 @@ export default function AdminFeeMemberDetail() {
         is_new_registration: d.member_season?.is_new_registration || false,
         membership_payment_method: d.member_season?.membership_payment_method || '',
       })
+      setMembershipForm({
+        membership_type_id: d.member.membership_type_id || '',
+        is_life_member: d.member.is_life_member || false,
+        is_honorary: d.member.is_honorary || false,
+        honorary_expires_at: d.member.honorary_expires_at || '',
+        status: d.member_season?.status || 'active',
+      })
     }).catch(e => toast.error(e.message))
     api.feeListSchedule(seasonId).then(setTiers).catch(() => setTiers([]))
+    api.feeListMembershipTypes().then(d => setMembershipTypes(d.types || [])).catch(() => {})
   }, [memberId, seasonId])
   useEffect(() => { load() }, [load])
 
@@ -343,6 +361,19 @@ export default function AdminFeeMemberDetail() {
       })
       toast.success('Tier saved'); load()
     } catch (e) { toast.error(e.message) } finally { setSavingTier(false) }
+  }
+  async function saveMembership() {
+    setSavingMembership(true)
+    try {
+      await api.feePatchMember(memberId, {
+        membership_type_id: membershipForm.membership_type_id || '',
+        is_life_member: membershipForm.is_life_member,
+        is_honorary: membershipForm.is_honorary,
+        honorary_expires_at: membershipForm.honorary_expires_at || '',
+      })
+      await api.feePatchMemberSeason(memberId, { season_id: seasonId, status: membershipForm.status })
+      toast.success('Membership saved'); load()
+    } catch (e) { toast.error(e.message) } finally { setSavingMembership(false) }
   }
 
   if (data === null) return <BetterFeesLayout><PbSpinner message="Loading member…" /></BetterFeesLayout>
@@ -374,7 +405,44 @@ export default function AdminFeeMemberDetail() {
           <BalanceCard label="Total" payable={f.total_payable} paid={f.total_paid} owed={f.total_outstanding} credit={f.credit} waived={f.match_fee_waived} highlight />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
+          {/* Membership panel */}
+          <div className="pb-card p-5">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Membership</p>
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TYPE</label>
+            <select className={`${inp} mb-3`} value={membershipForm.membership_type_id}
+              onChange={e => setMembershipForm(f => ({ ...f, membership_type_id: e.target.value }))}>
+              <option value="">— None —</option>
+              {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">STATUS THIS SEASON</label>
+            <select className={`${inp} mb-3`} value={membershipForm.status}
+              onChange={e => setMembershipForm(f => ({ ...f, status: e.target.value }))}>
+              {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mb-2">
+              <input type="checkbox" checked={membershipForm.is_life_member}
+                onChange={e => setMembershipForm(f => ({ ...f, is_life_member: e.target.checked }))} />
+              Life member (permanent)
+            </label>
+            <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mb-2">
+              <input type="checkbox" checked={membershipForm.is_honorary}
+                onChange={e => setMembershipForm(f => ({ ...f, is_honorary: e.target.checked }))} />
+              Honorary member
+            </label>
+            {membershipForm.is_honorary && (
+              <div className="mb-3">
+                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">HONORARY UNTIL (blank = perpetual)</label>
+                <input type="date" className={inp} value={membershipForm.honorary_expires_at}
+                  onChange={e => setMembershipForm(f => ({ ...f, honorary_expires_at: e.target.value }))} />
+              </div>
+            )}
+            <button onClick={saveMembership} disabled={savingMembership}
+              className="w-full py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+              {savingMembership ? 'SAVING…' : 'SAVE MEMBERSHIP'}
+            </button>
+          </div>
+
           {/* Tier panel */}
           <div className="pb-card p-5">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Membership Tier</p>

@@ -37,7 +37,7 @@ _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
 # real club until a super admin deliberately switches it on for testing/launch.
 _BOOL_KEYS = {
     "self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled",
-    "billing_checkout_enabled",
+    "billing_checkout_enabled", "member_portal_enabled", "merch_storefront_enabled",
 }
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
@@ -278,6 +278,73 @@ async def require_billing_checkout_enabled(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Online billing isn't switched on for your club yet. Contact the BetterCricket team to subscribe.",
         )
+
+
+async def get_member_portal_enabled(db: AsyncSession) -> bool:
+    """The PLATFORM DEFAULT for whether the member self-service portal
+    (login, fee view, qualifications, online fee payment via Stripe Connect)
+    is reachable at all. Off by default — per direct instruction this whole
+    feature stays invisible to every club admin, and unusable by any real
+    member, until deliberately switched on. A club can override this
+    individually — see member_portal_enabled_for_org, which is what routes
+    and the admin nav should actually check."""
+    return await get_feature_flag(db, "member_portal_enabled")
+
+
+async def member_portal_enabled_for_org(db: AsyncSession, org: Organisation) -> bool:
+    """The EFFECTIVE member-portal switch for one club — mirrors
+    billing_checkout_enabled_for_org exactly. ``organisations.
+    member_portal_override`` wins when set (True lets a super admin switch
+    the portal on for ONE test club while the platform default stays off for
+    everyone else; False forces it off even once the platform default is
+    on), else falls back to the platform default."""
+    override = getattr(org, "member_portal_override", None)
+    if override is not None:
+        return bool(override)
+    return await get_member_portal_enabled(db)
+
+
+async def require_member_portal_enabled(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+) -> None:
+    """FastAPI dependency: 404s an authenticated club-admin route while the
+    member portal is switched off for the caller's club — a 404 (not 403)
+    since, per direct instruction, the whole feature should read as if it
+    doesn't exist yet to an ordinary club admin, the same "doesn't exist"
+    convention used by require_self_serve_registration_enabled."""
+    if not await member_portal_enabled_for_org(db, club):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+async def get_merch_storefront_enabled(db: AsyncSession) -> bool:
+    """The PLATFORM DEFAULT for whether the public merch storefront
+    (browsing + online checkout against a club's BetterMerch catalogue) is
+    reachable at all. Off by default — same "invisible until switched on"
+    posture as the member portal. See merch_storefront_enabled_for_org."""
+    return await get_feature_flag(db, "merch_storefront_enabled")
+
+
+async def merch_storefront_enabled_for_org(db: AsyncSession, org: Organisation) -> bool:
+    """The EFFECTIVE merch-storefront switch for one club — mirrors
+    member_portal_enabled_for_org exactly. ``organisations.
+    merch_storefront_override`` wins when set, else falls back to the
+    platform default."""
+    override = getattr(org, "merch_storefront_override", None)
+    if override is not None:
+        return bool(override)
+    return await get_merch_storefront_enabled(db)
+
+
+async def require_merch_storefront_enabled(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+) -> None:
+    """FastAPI dependency: 404s an authenticated club-admin route while the
+    merch storefront is switched off for the caller's club — same "doesn't
+    exist" convention as require_member_portal_enabled."""
+    if not await merch_storefront_enabled_for_org(db, club):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
 # ─── Bundle discount schedule (module-count -> whole-dollar discount) ─────────
