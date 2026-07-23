@@ -111,6 +111,20 @@ function TeamBadge({ name, logoUrl, size = 36 }) {
   )
 }
 
+// Small accent-green pill marking the winning side — echoed in both the
+// header and each team's own card, so the winner reads at a glance no
+// matter where on the page you're looking (not just the very top).
+function WinnerTag() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 font-mono text-[9px] tracking-wide2 font-bold px-1.5 py-0.5 rounded-sm"
+      style={{ color: 'var(--pb-positive)', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)' }}
+    >
+      ✓ WON
+    </span>
+  )
+}
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
@@ -130,9 +144,13 @@ function MatchHeader({ game, innings }) {
   const margin = marginText(game, inningsData[0], inningsData[1])
   const competition = [game.grade?.name, game.season?.name].filter(Boolean).join(' · ')
 
-  // Map innings to home/away using batting_team where available, same
-  // matching the team cards below use — the away side bats first as often
-  // as home does, so innings order alone can't be trusted.
+  // The header is deliberately home/away, NOT batting order — this is the
+  // one place on the page that answers "who's playing", so it stays fixed
+  // regardless of who won the toss. (The team cards further down the page
+  // are the opposite: always ordered 1st-innings-batted left, 2nd right —
+  // see their own "INNINGS 1"/"INNINGS 2" labels, unchanged by this.)
+  // Matched via battingTeam since the away side bats first as often as home
+  // does, so innings array order alone can't place them.
   const homeTeam = game.home_team || ''
   const awayTeam = game.away_team || ''
   let homeInn = inningsData[0], awayInn = inningsData[1]
@@ -145,16 +163,20 @@ function MatchHeader({ game, innings }) {
   const awayWon = !!winner && !homeWon
 
   const Side = ({ label, teamName, inn, won, align }) => (
-    <div className={`px-3 sm:px-6 py-4 flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'} gap-1`}>
+    <div
+      className={`px-3 sm:px-6 py-4 flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'} gap-1`}
+      style={won ? { background: 'rgba(34,197,94,0.06)' } : undefined}
+    >
       <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">{label}</div>
       <div className={`flex items-center gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
         <TeamBadge name={teamName} logoUrl={inn?.logoUrl} size={32} />
         <div className="font-display font-bold text-[14px] sm:text-[18px] text-pb-text tracking-tight leading-tight">
           {teamName || '—'}
         </div>
+        {won && <WinnerTag />}
       </div>
       {inn && fmtScore(inn.runs, inn.wickets) != null && (
-        <div className="font-mono font-bold text-[26px] sm:text-[38px] leading-none" style={{ color: won ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
+        <div className="font-mono font-bold text-[26px] sm:text-[38px] leading-none" style={{ color: won ? 'var(--pb-positive)' : 'var(--pb-dim)' }}>
           {fmtScore(inn.runs, inn.wickets)}
         </div>
       )}
@@ -225,7 +247,7 @@ function ClaimButton({ row, onClaim }) {
 // BetterSocials' SC3 Dashboard share-image template lays it out — the
 // bowling figures of whichever team bowled at them, labelled by that
 // opponent's name. Two of these side by side is the whole scorecard.
-function TeamCard({ label, teamName, opponentName, batting = [], bowling = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
+function TeamCard({ label, teamName, opponentName, winner, batting = [], bowling = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
   const batted = batting
     .filter(r => !r.did_not_bat)
     .sort((a, b) => (a.batting_position ?? 999) - (b.batting_position ?? 999))
@@ -239,26 +261,33 @@ function TeamCard({ label, teamName, opponentName, batting = [], bowling = [], i
     ? inningsTotal.wickets
     : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
+  const won = !!winner && teamsMatch(winner, teamName)
   // Overs faced = overs bowled at this team, i.e. the opponent's bowling figures.
   const oversStr = ballsToOversStr(sumOversBalls(bowling))
 
   return (
     <div className="pb-card overflow-hidden">
       {/* Card header: badge + innings label + team name, score on the right */}
-      <div className="px-5 pt-4 pb-3 pb-hairline-b bg-pb-surface2/20 flex items-center justify-between gap-4">
+      <div
+        className={`px-5 pt-4 pb-3 pb-hairline-b flex items-center justify-between gap-4 ${won ? '' : 'bg-pb-surface2/20'}`}
+        style={won ? { background: 'rgba(34,197,94,0.06)' } : undefined}
+      >
         <div className="flex items-center gap-3 min-w-0">
           <TeamBadge name={teamName} logoUrl={inningsTotal?.logo_url} size={36} />
           <div className="min-w-0">
             <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">
               {label}{oversStr ? ` · ${oversStr} OV` : ''}
             </div>
-            <div className="font-display font-bold text-[16px] sm:text-[18px] tracking-tight text-pb-text leading-tight truncate">
-              {teamName}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="font-display font-bold text-[16px] sm:text-[18px] tracking-tight text-pb-text leading-tight truncate">
+                {teamName}
+              </div>
+              {won && <WinnerTag />}
             </div>
           </div>
         </div>
         {score != null && (
-          <div className="font-mono font-bold text-[22px] sm:text-[26px] pb-num leading-none shrink-0" style={{ color: 'var(--pb-accent)' }}>
+          <div className="font-mono font-bold text-[22px] sm:text-[26px] pb-num leading-none shrink-0" style={{ color: won ? 'var(--pb-positive)' : 'var(--pb-accent)' }}>
             {score}
           </div>
         )}
@@ -723,6 +752,7 @@ export default function MatchScorecard() {
               label="INNINGS 1"
               teamName={inn1Team}
               opponentName={inn2Team}
+              winner={game.winning_team}
               batting={inn1.batting}
               bowling={inn1.bowling}
               inningsTotal={t1}
@@ -735,6 +765,7 @@ export default function MatchScorecard() {
                 label="INNINGS 2"
                 teamName={inn2Team}
                 opponentName={inn1Team}
+                winner={game.winning_team}
                 batting={inn2.batting}
                 bowling={inn2.bowling}
                 inningsTotal={t2}

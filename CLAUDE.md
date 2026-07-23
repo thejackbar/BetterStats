@@ -1641,7 +1641,26 @@ Two follow-ups on the SC3 redesign above, per direct request.
   reference site itself (play.cricket.com.au) shows the same score both in
   its top summary and again in the innings detail below.
 
-## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
+### Winner clarity + explicit home/away-vs-batting-order split (v8.79.2, Jul 2026)
+
+Feedback on v8.79.1: the winner wasn't obvious at a glance, and the two
+sections' ordering rules needed to be pinned down explicitly rather than
+left implicit. Per direct instruction: `MatchHeader` stays home-left/
+away-right always (unrelated to who batted first or who won); the `TeamCard`
+row below it stays ordered by batting sequence (1st innings left, 2nd
+right) — this was already how it worked, since `inn1`/`inn2` in the main
+component come from sorted `inningsNums`, but nothing said so explicitly
+before, which is how the header nearly ended up matching it instead
+(reverted mid-build after being pointed out).
+
+- **`WinnerTag`** — a small green "✓ WON" pill (reusing `--pb-positive`,
+  the same win-green `ResultPill` already uses for `WIN`), rendered next to
+  the winning team's name in both `MatchHeader`'s `Side` and `TeamCard`,
+  plus a light green tint on that side's background in both places. Winner
+  match is `teamsMatch(game.winning_team, teamName)`, computed independently
+  in each component off the same `winning_team` string — no shared state
+  needed since both already receive it (`MatchHeader` via `game`, `TeamCard`
+  via a new `winner` prop threaded from the main component).
 
 Yearbook generation was previously **100% manual** — two separate admin
 buttons (Generate stubs, Generate narrative) plus a Publish button, with the
