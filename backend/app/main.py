@@ -3581,6 +3581,19 @@ async def lifespan(app: FastAPI):
             "ON club_diary_task_occurrences(definition_id, period_label DESC)"
         ))
 
+    # Migration 182: Club Diary — optional reminder emails. See
+    # services/club_diary_reminders.py.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE club_diary_task_definitions ADD COLUMN IF NOT EXISTS reminder_enabled BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_diary_task_definitions ADD COLUMN IF NOT EXISTS reminder_days_before INTEGER NOT NULL DEFAULT 14"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

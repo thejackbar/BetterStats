@@ -2811,6 +2811,10 @@ class DiaryTaskDefinition(Base):
     default_assignee_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
     default_assignee_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Optional reminder email to whoever's assigned, ahead of the due date
+    # (migration 182) — off by default, per-task opt-in, not mandatory.
+    reminder_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    reminder_days_before = Column(Integer, nullable=False, server_default="14", default=14)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -2834,6 +2838,9 @@ class DiaryTaskOccurrence(Base):
     assigned_to_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Reminder throttle (migration 182) — mirrors MemberQualification/
+    # FeeMemberSeason's own last_*_sent_at columns.
+    last_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

@@ -107,6 +107,8 @@ class DefinitionCreate(BaseModel):
     category_id: Optional[str] = None
     default_assignee_position_id: Optional[str] = None
     default_assignee_member_id: Optional[str] = None
+    reminder_enabled: bool = False
+    reminder_days_before: int = 14
 
 
 @router.post("/definitions")
@@ -132,6 +134,8 @@ class DefinitionPatch(BaseModel):
     default_assignee_position_id: Optional[str] = None
     default_assignee_member_id: Optional[str] = None
     is_active: Optional[bool] = None
+    reminder_enabled: Optional[bool] = None
+    reminder_days_before: Optional[int] = None
 
 
 @router.patch("/definitions/{definition_id}")

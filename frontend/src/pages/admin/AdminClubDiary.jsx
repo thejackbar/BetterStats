@@ -147,9 +147,30 @@ function BoardTab({ members }) {
 }
 
 // ── Recurring Tasks tab ──────────────────────────────────────────────────────
+function ReminderFields({ form, setForm }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 mt-2">
+      <label className="flex items-center gap-1.5 font-mono text-[11px] text-pb-dim cursor-pointer select-none">
+        <input type="checkbox" checked={form.reminder_enabled} onChange={e => setForm(f => ({ ...f, reminder_enabled: e.target.checked }))} />
+        Email the assigned person before this is due
+      </label>
+      {form.reminder_enabled && (
+        <label className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faintest">
+          <input type="number" min="1" max="180" className={`${inp} w-16`} value={form.reminder_days_before}
+            onChange={e => setForm(f => ({ ...f, reminder_days_before: e.target.value }))} />
+          days before due
+        </label>
+      )}
+    </div>
+  )
+}
+
 function NewDefinitionForm({ categories, onCreated }) {
   const toast = useToast()
-  const [form, setForm] = useState({ title: '', category_id: '', frequency: 'annual', default_month: '', description: '' })
+  const [form, setForm] = useState({
+    title: '', category_id: '', frequency: 'annual', default_month: '', description: '',
+    reminder_enabled: false, reminder_days_before: 14,
+  })
   const [newCategory, setNewCategory] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -165,8 +186,9 @@ function NewDefinitionForm({ categories, onCreated }) {
       await api.diaryCreateDefinition({
         title: form.title, category_id: categoryId || null, frequency: form.frequency,
         default_month: form.default_month ? Number(form.default_month) : null, description: form.description || null,
+        reminder_enabled: form.reminder_enabled, reminder_days_before: Number(form.reminder_days_before) || 14,
       })
-      setForm({ title: '', category_id: '', frequency: 'annual', default_month: '', description: '' })
+      setForm({ title: '', category_id: '', frequency: 'annual', default_month: '', description: '', reminder_enabled: false, reminder_days_before: 14 })
       setNewCategory('')
       onCreated()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
@@ -203,26 +225,93 @@ function NewDefinitionForm({ categories, onCreated }) {
           {busy ? 'ADDING…' : '+ TASK'}
         </button>
       </div>
+      <ReminderFields form={form} setForm={setForm} />
+    </div>
+  )
+}
+
+function DefinitionEditForm({ def, categories, onSaved, onCancel }) {
+  const toast = useToast()
+  const [form, setForm] = useState({
+    title: def.title, category_id: def.category_id || '', frequency: def.frequency,
+    default_month: def.default_month || '', description: def.description || '',
+    reminder_enabled: def.reminder_enabled, reminder_days_before: def.reminder_days_before,
+  })
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    if (!form.title.trim()) return
+    setBusy(true)
+    try {
+      await api.diaryUpdateDefinition(def.id, {
+        title: form.title, category_id: form.category_id || null, frequency: form.frequency,
+        default_month: form.default_month ? Number(form.default_month) : null, description: form.description || null,
+        reminder_enabled: form.reminder_enabled, reminder_days_before: Number(form.reminder_days_before) || 14,
+      })
+      toast.success('Saved')
+      onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-4">
+      <div className="flex flex-wrap gap-2 mb-2">
+        <input className={`${inp} flex-1 min-w-[160px]`} value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+        <select className={`${inp} w-44`} value={form.category_id} onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))}>
+          <option value="">No category</option>
+          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <select className={`${inp} w-36`} value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))}>
+          {FREQUENCIES.map(f => <option key={f} value={f}>{label(f)}</option>)}
+        </select>
+        {form.frequency === 'annual' && (
+          <select className={`${inp} w-36`} value={form.default_month} onChange={e => setForm(f => ({ ...f, default_month: e.target.value }))}>
+            <option value="">Suggested month…</option>
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+        )}
+        <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Description" value={form.description}
+          onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+      </div>
+      <ReminderFields form={form} setForm={setForm} />
+      <div className="flex gap-2 mt-3">
+        <button onClick={save} disabled={busy || !form.title.trim()}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'SAVING…' : 'SAVE'}
+        </button>
+        <button onClick={onCancel} className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Cancel</button>
+      </div>
     </div>
   )
 }
 
 function DefinitionRow({ def, categories, onChanged }) {
   const toast = useToast()
+  const [editing, setEditing] = useState(false)
   async function archive() {
     if (!confirm(`Archive "${def.title}"? Its history is kept.`)) return
     try { await api.diaryArchiveDefinition(def.id); onChanged() } catch (e) { toast.error(e.message) }
   }
   const categoryName = categories.find(c => c.id === def.category_id)?.name
+
+  if (editing) {
+    return <DefinitionEditForm def={def} categories={categories} onSaved={() => { setEditing(false); onChanged() }} onCancel={() => setEditing(false)} />
+  }
   return (
     <div className="flex items-center justify-between gap-2 pb-card px-3 py-2.5">
       <div>
         <span className="text-pb-text text-sm">{def.title}</span>
         <span className="font-mono text-[10px] text-pb-faint ml-2">
           {categoryName ? `${categoryName} · ` : ''}{label(def.frequency)}{def.default_month ? ` · ${MONTHS[def.default_month - 1]}` : ''}
+          {def.reminder_enabled ? ` · reminds ${def.reminder_days_before}d before` : ''}
         </span>
       </div>
-      <button onClick={archive} className="font-mono text-[10px] text-pb-faint hover:text-pb-red shrink-0">Archive</button>
+      <div className="flex items-center gap-2 shrink-0">
+        <button onClick={() => setEditing(true)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Edit</button>
+        <button onClick={archive} className="font-mono text-[10px] text-pb-faint hover:text-pb-red">Archive</button>
+      </div>
     </div>
   )
 }

@@ -62,6 +62,8 @@ def _definition_dict(d: DiaryTaskDefinition) -> dict:
         "default_assignee_position_id": str(d.default_assignee_position_id) if d.default_assignee_position_id else None,
         "default_assignee_member_id": str(d.default_assignee_member_id) if d.default_assignee_member_id else None,
         "is_active": d.is_active,
+        "reminder_enabled": d.reminder_enabled,
+        "reminder_days_before": d.reminder_days_before,
     }
 
 
@@ -149,6 +151,8 @@ async def create_definition(session: AsyncSession, org_id, **fields) -> DiaryTas
         category_id=fields.get("category_id"),
         default_assignee_position_id=fields.get("default_assignee_position_id"),
         default_assignee_member_id=fields.get("default_assignee_member_id"),
+        reminder_enabled=fields.get("reminder_enabled") or False,
+        reminder_days_before=fields.get("reminder_days_before") or 14,
     )
     session.add(d)
     await session.flush()
@@ -157,7 +161,8 @@ async def create_definition(session: AsyncSession, org_id, **fields) -> DiaryTas
 
 async def update_definition(session: AsyncSession, d: DiaryTaskDefinition, **fields) -> DiaryTaskDefinition:
     for f in ("title", "description", "frequency", "default_month", "category_id",
-              "default_assignee_position_id", "default_assignee_member_id", "is_active"):
+              "default_assignee_position_id", "default_assignee_member_id", "is_active",
+              "reminder_enabled", "reminder_days_before"):
         if f in fields and fields[f] is not None:
             setattr(d, f, fields[f])
     return d
