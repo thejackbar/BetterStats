@@ -16,7 +16,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_FAMILIES, require_cap
-from app.models.db import Family, FamilyMember, Player, User, get_db
+from app.models.db import Family, FamilyMember, FeeMember, FeeMemberSeason, FeeSchedule, Player, Season, User, get_db
+from app.routers.fees import _days_by_member_season, _financials, _paid_by_member_season, _waived_days_by_member_season
 from app.services.audit_log import log_activity
 
 router = APIRouter(prefix="/families", tags=["families"])
@@ -49,9 +50,12 @@ def _player_dict(p: Player) -> dict:
 
 
 async def _load_family_members(db: AsyncSession, family_id: uuid.UUID) -> list[dict]:
+    """Every member of a family — players AND non-playing members (parents,
+    guardians — anyone who's a fee_members row but not themselves a Player;
+    migration 175). ``kind`` tells the two apart on the frontend."""
     rows = await db.execute(
         text("""
-            SELECT fm.id AS fm_id, fm.relationship, fm.created_at,
+            SELECT fm.id AS fm_id, fm.relationship, fm.created_at, fm.is_guardian, fm.receives_family_comms,
                    p.id AS player_id, p.name, p.display_name_override, p.playhq_id
             FROM family_members fm
             JOIN players p ON p.id = fm.player_id
@@ -60,17 +64,49 @@ async def _load_family_members(db: AsyncSession, family_id: uuid.UUID) -> list[d
         """),
         {"fid": str(family_id)},
     )
-    return [
+    out = [
         {
             "id": str(r.fm_id),
+            "kind": "player",
             "player_id": str(r.player_id),
+            "fee_member_id": None,
             "name": r.display_name_override or r.name,
             "playhq_id": r.playhq_id,
             "relationship": r.relationship,
+            "is_guardian": r.is_guardian,
+            "receives_family_comms": r.receives_family_comms,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows.mappings().all()
     ]
+    rows2 = await db.execute(
+        text("""
+            SELECT fm.id AS fm_id, fm.relationship, fm.created_at, fm.is_guardian, fm.receives_family_comms,
+                   m.id AS fee_member_id, m.full_name, m.email, m.mobile
+            FROM family_members fm
+            JOIN fee_members m ON m.id = fm.fee_member_id
+            WHERE fm.family_id = :fid
+            ORDER BY m.full_name
+        """),
+        {"fid": str(family_id)},
+    )
+    out += [
+        {
+            "id": str(r.fm_id),
+            "kind": "fee_member",
+            "player_id": None,
+            "fee_member_id": str(r.fee_member_id),
+            "name": r.full_name,
+            "email": r.email,
+            "mobile": r.mobile,
+            "relationship": r.relationship,
+            "is_guardian": r.is_guardian,
+            "receives_family_comms": r.receives_family_comms,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows2.mappings().all()
+    ]
+    return out
 
 
 @router.get("")
@@ -337,6 +373,177 @@ async def remove_member(
     )
     await db.commit()
     return {"status": "removed"}
+
+
+class FeeMemberIn(BaseModel):
+    org_id: str
+    fee_member_id: str
+    relationship: Optional[str] = Field(None, max_length=80)
+    is_guardian: bool = False
+
+
+@router.post("/{family_id}/members/fee-member")
+async def add_fee_member(
+    family_id: str,
+    body: FeeMemberIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_FAMILIES)),
+):
+    """Add a non-playing member (typically a parent/guardian) to a family —
+    the fee_member-based counterpart to add_member above (which is
+    player-only). See routers/fees.py — a "manual member" with player_id NULL
+    already covers parents; this just links their existing FeeMember row into
+    the family structure."""
+    fam = await db.get(Family, uuid.UUID(family_id))
+    if not fam or str(fam.organisation_id) != body.org_id:
+        raise HTTPException(status_code=404, detail="Family not found")
+    fmember = await db.get(FeeMember, uuid.UUID(body.fee_member_id))
+    if not fmember or str(fmember.organisation_id) != body.org_id:
+        raise HTTPException(status_code=404, detail="Member not found in this organisation")
+    dupe = await db.execute(
+        select(FamilyMember).where(
+            FamilyMember.family_id == fam.id, FamilyMember.fee_member_id == fmember.id,
+        )
+    )
+    if dupe.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="This member is already in this family")
+    rel = (body.relationship or "").strip() or None
+    fm_row = FamilyMember(family_id=fam.id, fee_member_id=fmember.id, relationship_label=rel, is_guardian=body.is_guardian)
+    db.add(fm_row)
+    await db.execute(text("UPDATE families SET updated_at = NOW() WHERE id = :fid"), {"fid": str(fam.id)})
+    await log_activity(
+        db, org_id=fam.organisation_id, user_id=current_user.id,
+        action="add_family_member", target_type="family", target_id=str(fam.id),
+        details={"family": fam.name, "member": fmember.full_name, "relationship": rel},
+    )
+    await db.commit()
+    members = await _load_family_members(db, fam.id)
+    return {"members": members}
+
+
+class FeeMemberPatchIn(BaseModel):
+    org_id: str
+    relationship: Optional[str] = Field(None, max_length=80)
+    is_guardian: Optional[bool] = None
+    receives_family_comms: Optional[bool] = None
+
+
+@router.patch("/{family_id}/members/fee-member/{fee_member_id}")
+async def update_fee_member(
+    family_id: str,
+    fee_member_id: str,
+    body: FeeMemberPatchIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_cap(MANAGE_FAMILIES)),
+):
+    fam = await db.get(Family, uuid.UUID(family_id))
+    if not fam or str(fam.organisation_id) != body.org_id:
+        raise HTTPException(status_code=404, detail="Family not found")
+    row = await db.execute(
+        select(FamilyMember).where(
+            FamilyMember.family_id == fam.id, FamilyMember.fee_member_id == uuid.UUID(fee_member_id),
+        )
+    )
+    frow = row.scalar_one_or_none()
+    if not frow:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if body.relationship is not None:
+        frow.relationship_label = body.relationship.strip() or None
+    if body.is_guardian is not None:
+        frow.is_guardian = body.is_guardian
+    if body.receives_family_comms is not None:
+        frow.receives_family_comms = body.receives_family_comms
+    await db.execute(text("UPDATE families SET updated_at = NOW() WHERE id = :fid"), {"fid": str(fam.id)})
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/{family_id}/members/fee-member/{fee_member_id}")
+async def remove_fee_member(
+    family_id: str,
+    fee_member_id: str,
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_FAMILIES)),
+):
+    fam = await db.get(Family, uuid.UUID(family_id))
+    if not fam or str(fam.organisation_id) != org_id:
+        raise HTTPException(status_code=404, detail="Family not found")
+    row = await db.execute(
+        select(FamilyMember).where(
+            FamilyMember.family_id == fam.id, FamilyMember.fee_member_id == uuid.UUID(fee_member_id),
+        )
+    )
+    frow = row.scalar_one_or_none()
+    if not frow:
+        raise HTTPException(status_code=404, detail="Member not found")
+    await db.delete(frow)
+    await db.execute(text("UPDATE families SET updated_at = NOW() WHERE id = :fid"), {"fid": str(fam.id)})
+    await log_activity(
+        db, org_id=fam.organisation_id, user_id=current_user.id,
+        action="remove_family_member", target_type="family", target_id=str(fam.id),
+        details={"family": fam.name, "fee_member_id": fee_member_id},
+    )
+    await db.commit()
+    return {"status": "removed"}
+
+
+@router.get("/{family_id}/financials")
+async def family_financials(
+    family_id: str,
+    org_id: str,
+    season_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_cap(MANAGE_FAMILIES)),
+):
+    """A read-only rollup of what this family owes for one season — sums each
+    member's own individual BetterFees record. This is "one view for one
+    payment conversation with the family", NOT a new combined-invoicing
+    engine (billing still happens per member underneath) — that's real,
+    separate follow-on work, not built here."""
+    fam = await db.get(Family, uuid.UUID(family_id))
+    if not fam or str(fam.organisation_id) != org_id:
+        raise HTTPException(status_code=404, detail="Family not found")
+    season = await db.get(Season, uuid.UUID(season_id))
+    if not season or str(season.organisation_id) != uuid.UUID(org_id):
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    fam_members = (await db.execute(
+        select(FamilyMember).where(FamilyMember.family_id == fam.id)
+    )).scalars().all()
+    member_ids: set = set()
+    for frow in fam_members:
+        if frow.fee_member_id:
+            member_ids.add(frow.fee_member_id)
+        elif frow.player_id:
+            m = (await db.execute(
+                select(FeeMember).where(FeeMember.organisation_id == uuid.UUID(org_id), FeeMember.player_id == frow.player_id)
+            )).scalars().first()
+            if m:
+                member_ids.add(m.id)
+
+    days_map = await _days_by_member_season(db, season.id)
+    paid_map = await _paid_by_member_season(db, season.id)
+    waived_map = await _waived_days_by_member_season(db, season.id)
+
+    members_out = []
+    totals = {"total_payable": 0.0, "total_paid": 0.0, "total_outstanding": 0.0}
+    for mid in member_ids:
+        m = await db.get(FeeMember, mid)
+        ms = (await db.execute(
+            select(FeeMemberSeason).where(FeeMemberSeason.member_id == mid, FeeMemberSeason.season_id == season.id)
+        )).scalars().first()
+        if ms is None or m is None:
+            continue
+        schedule = await db.get(FeeSchedule, ms.fee_schedule_id) if ms.fee_schedule_id else None
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id), waived_map.get(ms.id, 0.0))
+        members_out.append({"member_id": str(mid), "full_name": m.full_name, "status": ms.status, **fin})
+        totals["total_payable"] += fin["total_payable"]
+        totals["total_paid"] += fin["total_paid"]
+        totals["total_outstanding"] += fin["total_outstanding"]
+    totals = {k: round(v, 2) for k, v in totals.items()}
+
+    return {"family": {"id": str(fam.id), "name": fam.name}, "members": members_out, "totals": totals}
 
 
 @router.get("/suggestions/list")

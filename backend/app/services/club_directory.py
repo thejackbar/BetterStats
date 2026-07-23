@@ -1176,6 +1176,16 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
                     "engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
         except Exception:  # noqa: BLE001 - the CRM push must never block the save
             logger.exception("club_directory: failed to push trial engagement for %s", club.id)
+        # Local CRM pipeline equivalent — advance (or create) this club's
+        # platform deal to Trial, same trigger as the Twenty push above.
+        try:
+            from app.services.crm import sync_platform_deal_for_club
+            deal_modules = sorted(set(club.trial_modules or []) | set(added_modules))
+            await sync_platform_deal_for_club(
+                session, club, stage_key="trial", source="auto_trial", module_keys=deal_modules)
+            await session.commit()
+        except Exception:  # noqa: BLE001 - the CRM sync must never block the save
+            logger.exception("club_directory: failed to sync CRM deal for %s", club.id)
     return {
         "id": str(club.id),
         "trial_modules": club.trial_modules or [],

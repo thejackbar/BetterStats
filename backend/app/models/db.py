@@ -285,6 +285,25 @@ class Organisation(Base):
     # it either way for this club regardless of the platform default. See
     # services/platform_settings.billing_checkout_enabled_for_org.
     billing_checkout_override = Column(Boolean, nullable=True)
+    # Per-club override of platform_settings.member_portal_enabled (migration 178)
+    # — same NULL/True/False shape as billing_checkout_override above, so a
+    # super admin can switch the member self-service portal on for one test
+    # club while it stays invisible to every other club admin. See
+    # services/platform_settings.member_portal_enabled_for_org.
+    member_portal_override = Column(Boolean, nullable=True)
+    # Per-club override of platform_settings.merch_storefront_enabled
+    # (migration 179) — same shape as member_portal_override above.
+    merch_storefront_override = Column(Boolean, nullable=True)
+    # ─── Stripe Connect — club-to-member fee payments (migration 178) ─────────
+    # A SEPARATE Stripe integration from stripe_customer_id/stripe_subscription_id
+    # above (which is BetterCricket's OWN platform billing, one Stripe account
+    # for the whole platform). Here each club gets its OWN Stripe Express
+    # connected account so a member's fee payment lands directly in the club's
+    # bank account, not BetterCricket's — see services/stripe_connect_client.py.
+    stripe_connect_account_id = Column(Text, nullable=True)
+    stripe_connect_details_submitted = Column(Boolean, nullable=False, server_default="false", default=False)
+    stripe_connect_charges_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    stripe_connect_payouts_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     # Club address (migration 158) — resolved at self-serve registration
     # (routers/self_serve_trial.py) so a Stripe Customer can be created with
     # a real address from the first checkout attempt (automatic tax needs
@@ -2020,12 +2039,26 @@ class FamilyMember(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     family_id = Column(UUID(as_uuid=True), ForeignKey("families.id", ondelete="CASCADE"), nullable=False)
-    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    # Nullable (migration 175): a non-playing family member (a parent who
+    # isn't a registered player) has no player_id at all — see fee_member_id
+    # below. An existing row always has exactly one of the two set; new code
+    # should treat "which one is set" as the row's kind (player vs fee member).
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    # A non-playing family member — parents/guardians and anyone else who's a
+    # fee_members row (see FeeMember: "manual members ... have player_id
+    # NULL") but not themselves a Player (migration 175).
+    fee_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=True)
+    # This member is a responsible adult for the family's minors (migration 175).
+    is_guardian = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Lets a separated parent opt out of "email the whole family" while
+    # staying part of the family's structure (migration 175).
+    receives_family_comms = Column(Boolean, nullable=False, server_default="true", default=True)
     relationship_label = Column("relationship", Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     family = relationship("Family", back_populates="members")
     player = relationship("Player")
+    fee_member = relationship("FeeMember")
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -2048,6 +2081,42 @@ class FamilyMember(Base):
 FEE_PAYMENT_TYPES = ("standard", "upfront", "complimentary", "left_club")
 # fee_match_days.fee_format / Grade.fee_format values.
 FEE_FORMATS = ("two_day", "one_day", "t20", "women", "exclude")
+# fee_member_seasons.status values (migration 175) — the per-season
+# membership lifecycle.
+MEMBERSHIP_STATUSES = (
+    "prospect", "invited", "application_started", "awaiting_documents",
+    "awaiting_payment", "active", "suspended", "expired", "archived",
+)
+
+
+class MembershipType(Base):
+    """A club-adopted membership category (Senior Player, Parent, Life
+    Member, Coach, Committee Member, …) — migration 175. Cross-season,
+    unlike FeeSchedule ($ tiers, re-created per season): a type's descriptive
+    attributes (voting rights, WWCC required, …) don't change season to
+    season. Nothing is seeded automatically — a club adopts a starter set (or
+    none at all) via services/membership_types.py, same "may or may not
+    apply" posture as the CRM tracker templates."""
+    __tablename__ = "membership_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_membership_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    default_annual_fee = Column(Numeric(10, 2), nullable=True)
+    is_playing = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_voting_rights = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_insurance = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_wwcc = Column(Boolean, nullable=False, server_default="false", default=False)
+    requires_playhq_registration = Column(Boolean, nullable=False, server_default="false", default=False)
+    comms_group = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 class FeeSchedule(Base):
@@ -2096,10 +2165,19 @@ class FeeMember(Base):
     # default). Not a FK — schedules are per-season, this is a cross-season hint.
     current_tier = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Membership Management (migration 175): the catalogue entry this member
+    # holds (Senior Player, Parent, Coach, …) — cross-season, distinct from the
+    # per-season fee_schedule $ tier. Life/honorary status is cross-season too
+    # (it doesn't reset each season the way a fee_schedule tier does).
+    membership_type_id = Column(UUID(as_uuid=True), ForeignKey("membership_types.id", ondelete="SET NULL"), nullable=True)
+    is_life_member = Column(Boolean, nullable=False, server_default="false", default=False)
+    is_honorary = Column(Boolean, nullable=False, server_default="false", default=False)
+    honorary_expires_at = Column(Date, nullable=True)  # NULL + is_honorary = perpetual
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     player = relationship("Player")
+    membership_type = relationship("MembershipType")
     seasons = relationship("FeeMemberSeason", back_populates="member", cascade="all, delete-orphan")
 
 
@@ -2119,8 +2197,17 @@ class FeeMemberSeason(Base):
     is_new_registration = Column(Boolean, nullable=False, server_default="false")
     membership_payment_method = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Per-season membership lifecycle (migration 175): prospect | invited |
+    # application_started | awaiting_documents | awaiting_payment | active |
+    # suspended | expired | archived. Defaults to 'active' so every row that
+    # existed before this migration reads exactly as it did before.
+    status = Column(Text, nullable=False, server_default="active", default="active")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    # Fee-owing reminder throttle (migration 178) — same purpose as
+    # MemberQualification.last_reminder_sent_at, kept separate since the two
+    # reminder kinds fire independently.
+    last_fee_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     member = relationship("FeeMember", back_populates="seasons")
     schedule = relationship("FeeSchedule")
@@ -2280,6 +2367,484 @@ class FeeXeroImportLog(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+# ─── Committee Administration, Volunteer Management, Qualifications ─────────
+# (migration 176). All three are CORE capabilities (like Families and
+# Membership Types) — gated by capability, not a paid module, nothing
+# auto-seeded. Reuse fee_members as "the person" throughout, the same
+# unification point Membership Management and Family/Household use.
+# committee_positions/committee_terms is a SEPARATE concern from the existing
+# ClubCommitteeMember (`club_committee`, the public website's simple bio
+# list) — deliberately not retrofitted, see the migration docstring.
+
+COMMITTEE_TASK_CATEGORIES = ("operational", "maintenance", "compliance", "finance", "other")
+COMMITTEE_TASK_STATUSES = ("todo", "in_progress", "done", "blocked")
+COMMITTEE_DOCUMENT_CATEGORIES = (
+    "governance", "policies", "constitution", "insurance", "grants",
+    "ground_leases", "coach_accreditation", "wwcc", "risk_assessments", "other",
+)
+CLUB_EVENT_TYPES = (
+    "committee_meeting", "working_bee", "registration_day", "agm",
+    "awards_night", "sponsor_function", "fundraising", "other",
+)
+
+
+class CommitteePosition(Base):
+    __tablename__ = "committee_positions"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_committee_positions_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    responsibilities = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeTerm(Base):
+    """Who's held a position, when. ``ended_at IS NULL`` = the current holder;
+    a position's history is every row sharing its position_id, newest first."""
+    __tablename__ = "committee_terms"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    holder_name = Column(Text, nullable=False)  # snapshot — survives member_id going NULL
+    started_at = Column(Date, nullable=False, server_default=func.current_date())
+    ended_at = Column(Date, nullable=True)
+    handover_notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeTask(Base):
+    """The Task Register + the "Calendar of Annual Tasks" from the brief,
+    unified — same shape (assigned, due date, status, category)."""
+    __tablename__ = "committee_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(Text, nullable=False, server_default="operational", default="operational")
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    assigned_to_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    due_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="todo", default="todo")
+    is_recurring = Column(Boolean, nullable=False, server_default="false", default=False)
+    recurrence_note = Column(Text, nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeDocument(Base):
+    """A link-based document registry — governance/policy docs live wherever
+    the club already keeps them (Drive, Dropbox); this just indexes them."""
+    __tablename__ = "committee_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    category = Column(Text, nullable=False, server_default="governance", default="governance")
+    url = Column(Text, nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubEvent(Base):
+    """The Club Calendar — committee meetings, working bees, the AGM, sponsor
+    functions, fundraising — distinct from cricket fixtures."""
+    __tablename__ = "club_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    event_type = Column(Text, nullable=False, server_default="other", default="other")
+    starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    location = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    is_ticketed = Column(Boolean, nullable=False, server_default="false", default=False)
+    ticket_price_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    capacity = Column(Integer, nullable=True)
+    registration_deadline = Column(TIMESTAMP(timezone=True), nullable=True)
+    registration_open = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class VolunteerProfile(Base):
+    __tablename__ = "volunteer_profiles"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "member_id", name="uq_volunteer_profiles_org_member"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    roles_interested = Column(JSONB, nullable=False, server_default="[]", default=list)
+    available_days = Column(JSONB, nullable=False, server_default="[]", default=list)
+    lives_nearby = Column(Boolean, nullable=False, server_default="false", default=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class VolunteerHours(Base):
+    __tablename__ = "volunteer_hours"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    logged_date = Column(Date, nullable=False, server_default=func.current_date())
+    hours = Column(Numeric(6, 2), nullable=False, server_default="0")
+    activity = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class QualificationType(Base):
+    """WWCC, First Aid, coach/umpire/scorer accreditation, … ``validity_months``
+    is a default used to compute a new record's expiry at the time it's
+    logged (NULL = doesn't expire) — editable per club, not authoritative."""
+    __tablename__ = "qualification_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_qualification_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    validity_months = Column(Integer, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MemberQualification(Base):
+    __tablename__ = "member_qualifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    qualification_type_id = Column(UUID(as_uuid=True), ForeignKey("qualification_types.id", ondelete="CASCADE"), nullable=False)
+    obtained_at = Column(Date, nullable=False, server_default=func.current_date())
+    expires_at = Column(Date, nullable=True)
+    certificate_ref = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    # Reminder-automation throttle (migration 178) — NULL until the first
+    # expiry reminder email fires; a fresh send is skipped while this is
+    # recent, so the daily job can run every day without spamming.
+    last_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
+# ─── AGM elections/voting/motions, Committee Meeting Assistant,
+# Events/Ticketing, Assets & Facilities (migration 177) ──────────────────────
+# committee_meetings generalises to serve both the AGM and ordinary committee
+# meetings — agm_nominations reuses committee_positions/committee_terms so an
+# elected result and the Positions tab's succession history are one record,
+# not two (an "elected" nomination calls the existing committee.start_term()).
+# Assets/Facilities is a NEW, separate concern from BetterMerch's
+# merch_assets (a paid-module retail/kit table) — general club property
+# (mower, clubhouse, nets) isn't retrofitted there. See the migration
+# docstring for the Square-scopes reasoning behind Events/Ticketing shipping
+# without online payment collection.
+
+MEETING_TYPES = ("committee", "agm", "special_general", "sub_committee", "other")
+MEETING_STATUSES = ("scheduled", "in_progress", "completed", "cancelled")
+AGENDA_ITEM_STATUSES = ("proposed", "discussed", "carried", "deferred", "withdrawn")
+MOTION_TYPES = ("motion", "amendment", "procedural")
+MOTION_OUTCOMES = ("pending", "carried", "lost", "withdrawn")
+AGM_NOMINATION_STATUSES = ("nominated", "elected", "withdrawn", "not_elected")
+FACILITY_TYPES = ("ground", "clubhouse", "nets", "scoreboard", "canteen", "storage", "other")
+ASSET_CATEGORIES = ("equipment", "technology", "furniture", "ground_maintenance", "safety", "other")
+ASSET_CONDITIONS = ("excellent", "good", "fair", "poor", "unserviceable")
+ASSET_STATUSES = ("in_service", "in_repair", "retired", "disposed")
+
+
+class AgendaTemplate(Base):
+    """A reusable agenda shape (e.g. "Standard committee meeting") — ``items``
+    is a plain JSON list of {title, description} the Committee Meeting
+    Assistant copies onto a new meeting's agenda in one click."""
+    __tablename__ = "agenda_templates"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_agenda_templates_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    items = Column(JSONB, nullable=False, server_default="[]", default=list)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeMeeting(Base):
+    """A regular committee meeting OR the AGM/a special general meeting —
+    ``meeting_type`` distinguishes them; agenda items, motions and (for an
+    AGM) nominations all hang off the one meeting record."""
+    __tablename__ = "committee_meetings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    meeting_type = Column(Text, nullable=False, server_default="committee", default="committee")
+    scheduled_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    location = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="scheduled", default="scheduled")
+    minutes = Column(Text, nullable=True)
+    agenda_template_id = Column(UUID(as_uuid=True), ForeignKey("agenda_templates.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MeetingAttendance(Base):
+    __tablename__ = "meeting_attendance"
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "member_id", name="uq_meeting_attendance"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False, server_default="present", default="present")
+
+
+class MeetingAgendaItem(Base):
+    __tablename__ = "meeting_agenda_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    proposed_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    status = Column(Text, nullable=False, server_default="proposed", default="proposed")
+    outcome_notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MeetingMotion(Base):
+    __tablename__ = "meeting_motions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    agenda_item_id = Column(UUID(as_uuid=True), ForeignKey("meeting_agenda_items.id", ondelete="SET NULL"), nullable=True)
+    motion_type = Column(Text, nullable=False, server_default="motion", default="motion")
+    description = Column(Text, nullable=False)
+    proposed_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    seconded_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    votes_for = Column(Integer, nullable=True)
+    votes_against = Column(Integer, nullable=True)
+    votes_abstain = Column(Integer, nullable=True)
+    outcome = Column(Text, nullable=False, server_default="pending", default="pending")
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgmNomination(Base):
+    """A candidate nominated for a committee position at an AGM. Marking one
+    ``elected`` calls committee.start_term() so it writes a real
+    committee_terms row (auto-closing whoever held the position before) —
+    the election result and the Positions tab's history are the same data."""
+    __tablename__ = "agm_nominations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="CASCADE"), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="CASCADE"), nullable=False)
+    candidate_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    nominated_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    seconded_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    votes_for = Column(Integer, nullable=True)
+    status = Column(Text, nullable=False, server_default="nominated", default="nominated")
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EventRegistration(Base):
+    """A ticket/RSVP against a ClubEvent. ``payment_status`` 'free' (no
+    charge) | 'awaiting_payment' (a priced event whose club hasn't connected
+    Stripe yet, or a manually-recorded phone/in-person RSVP — reconciled by
+    hand) | 'paid' (Stripe Connect checkout confirmed, or an admin marked it
+    reconciled) | 'cancelled'. See migration 180 + services/events.py for
+    the Stripe Connect checkout path (same per-club connected account the
+    member portal and merch storefront use)."""
+    __tablename__ = "event_registrations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("club_events.id", ondelete="CASCADE"), nullable=False)
+    full_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    quantity = Column(Integer, nullable=False, server_default="1", default=1)
+    amount_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    payment_status = Column(Text, nullable=False, server_default="free", default="free")
+    notes = Column(Text, nullable=True)
+    stripe_checkout_session_id = Column(Text, nullable=True)
+    stripe_payment_intent_id = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Facility(Base):
+    __tablename__ = "facilities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    facility_type = Column(Text, nullable=False, server_default="other", default="other")
+    description = Column(Text, nullable=True)
+    key_location = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FacilityBooking(Base):
+    __tablename__ = "facility_bookings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    booked_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubAsset(Base):
+    """General club property — mower, scoreboard, nets, tables — distinct
+    from BetterMerch's merch_assets (paid-module retail/kit stock)."""
+    __tablename__ = "club_assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    category = Column(Text, nullable=False, server_default="other", default="other")
+    asset_tag = Column(Text, nullable=True)
+    purchase_cost = Column(Numeric(10, 2), nullable=True)
+    purchase_date = Column(Date, nullable=True)
+    condition = Column(Text, nullable=False, server_default="good", default="good")
+    status = Column(Text, nullable=False, server_default="in_service", default="in_service")
+    service_due_date = Column(Date, nullable=True)
+    replace_due_date = Column(Date, nullable=True)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MaintenanceLog(Base):
+    """Shared between a ClubAsset and a Facility — ``subject_type`` is
+    'asset' | 'facility', ``subject_id`` the relevant row's id (no FK, since
+    it targets one of two tables — mirrors the pattern used elsewhere in
+    this codebase for a polymorphic subject, e.g. sync's opponent tags)."""
+    __tablename__ = "maintenance_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    subject_type = Column(Text, nullable=False)
+    subject_id = Column(UUID(as_uuid=True), nullable=False)
+    performed_at = Column(Date, nullable=False, server_default=func.current_date())
+    description = Column(Text, nullable=False)
+    cost = Column(Numeric(10, 2), nullable=True)
+    performed_by = Column(Text, nullable=True)
+    next_due_date = Column(Date, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── Club Diary (migration 181) — annual/recurring compliance & maintenance
+# task calendar ────────────────────────────────────────────────────────────
+# A definition/occurrence split, NOT a retrofit of Committee Administration's
+# committee_tasks — that table is one mutable row per task with no per-period
+# trail, whereas the whole point here is "what did we do about this exact
+# recurring task last year, and the year before." See the migration 181
+# docstring and services/club_diary.py for the full reasoning.
+
+DIARY_TASK_FREQUENCIES = ("annual", "quarterly", "once")
+DIARY_TASK_STATUSES = ("pending", "in_progress", "done", "not_applicable")
+
+
+class DiaryCategory(Base):
+    """Club-defined grouping for diary tasks (Compliance, Tax, Ground &
+    Equipment, whatever the club calls it) — deliberately NOT the fixed
+    category list committee_tasks uses."""
+    __tablename__ = "club_diary_categories"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_club_diary_categories_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DiaryTaskDefinition(Base):
+    """The recurring task itself — title, how often, a suggested month,
+    and a default assignee (a committee POSITION, so responsibility
+    transfers automatically as terms change, or a specific member as a
+    fallback). Archived (is_active=False) rather than deleted so its
+    occurrence history is never lost."""
+    __tablename__ = "club_diary_task_definitions"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "title", name="uq_club_diary_definitions_org_title"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_categories.id", ondelete="SET NULL"), nullable=True)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    frequency = Column(Text, nullable=False, server_default="annual", default="annual")
+    default_month = Column(Integer, nullable=True)  # 1-12, a suggestion only
+    default_assignee_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    default_assignee_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Optional reminder email to whoever's assigned, ahead of the due date
+    # (migration 182) — off by default, per-task opt-in, not mandatory.
+    reminder_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    reminder_days_before = Column(Integer, nullable=False, server_default="14", default=14)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DiaryTaskOccurrence(Base):
+    """One period's instance of a definition — 'period_label' is a plain
+    string ("2026" for annual/once, "2026 Q1" for quarterly) rather than
+    separate year/quarter columns, so every frequency shares one row shape.
+    Querying every occurrence for one definition, newest period first, IS
+    the task's history."""
+    __tablename__ = "club_diary_task_occurrences"
+    __table_args__ = (
+        UniqueConstraint("definition_id", "period_label", name="uq_club_diary_occurrence_period"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
+    period_label = Column(Text, nullable=False)
+    due_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    assigned_to_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Reminder throttle (migration 182) — mirrors MemberQualification/
+    # FeeMemberSeason's own last_*_sent_at columns.
+    last_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────
 # One engine, three category templates: apparel (sized/coloured variants),
 # equipment (quantity OR individual assets), food_drink (canteen/bar stock with
@@ -2337,6 +2902,12 @@ class MerchProduct(Base):
     source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
     square_object_id = Column(Text, nullable=True)                    # Square catalog ITEM id
     is_active = Column(Boolean, nullable=False, server_default="true")
+    # Merch storefront (migration 179): whether this product shows on the
+    # public online store. Default true so an existing club's whole resale
+    # catalogue is visible the moment the storefront is switched on — a
+    # Square-synced product (source='square') is excluded from the
+    # storefront regardless of this flag (see routers/public_merch_store.py).
+    show_in_storefront = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -2401,6 +2972,54 @@ class MerchMovement(Base):
 
     variant = relationship("MerchVariant", back_populates="movements")
     player = relationship("Player")
+
+
+# ─── Merch storefront (migration 179) ────────────────────────────────────────
+# Public online ordering against the SAME catalogue above — a NEW pair of
+# tables (not a repurposing of merch_movements), since an order needs its own
+# customer/contact details, payment status and Stripe correlation. A paid
+# order's line items become ordinary MerchMovement rows (kind='sold',
+# source='online_store') via the existing record_movement() once payment is
+# confirmed — stock accounting stays in the one place it's always lived.
+
+MERCH_ORDER_STATUSES = ("pending_payment", "paid", "fulfilled", "cancelled")
+
+
+class MerchOrder(Base):
+    __tablename__ = "merch_orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    customer_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    status = Column(Text, nullable=False, server_default="pending_payment", default="pending_payment")
+    total_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    stripe_checkout_session_id = Column(Text, nullable=True)
+    stripe_payment_intent_id = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    items = relationship("MerchOrderItem", back_populates="order", cascade="all, delete-orphan")
+
+
+class MerchOrderItem(Base):
+    """A line-item snapshot — product/variant NAME and price are copied at
+    order time (not re-read from the live catalogue) so a later price change
+    or product rename never rewrites a historical order."""
+    __tablename__ = "merch_order_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("merch_orders.id", ondelete="CASCADE"), nullable=False)
+    variant_id = Column(UUID(as_uuid=True), ForeignKey("merch_variants.id", ondelete="SET NULL"), nullable=True)
+    product_name = Column(Text, nullable=False)
+    variant_label = Column(Text, nullable=True)
+    unit_price_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    quantity = Column(Integer, nullable=False, server_default="1", default=1)
+
+    order = relationship("MerchOrder", back_populates="items")
 
 
 class MerchAsset(Base):
@@ -2875,6 +3494,163 @@ class MarketingClubContact(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     club = relationship("MarketingClub", back_populates="contacts")
+
+
+# ─── BetterCRM — People/Contacts + the internal & club-facing Deal pipeline ──
+# (migration 173). One schema, two scopes: 'platform' (BetterCricket's own
+# sales pipeline — organisation_id NULL, usually linked to a MarketingClub
+# prospect row) and 'club' (the BetterAdmin CRM module — organisation_id set,
+# gated by the "crm" entitlement key + MANAGE_CRM). See services/crm.py.
+
+class CrmPerson(Base):
+    """A generic contact — player, parent, coach, committee member, volunteer,
+    sponsor contact, association official… — one row per real person, tagged
+    with roles via CrmPersonRole rather than a table per role. ``player_id``
+    is a nullable bridge to the existing per-club Player identity (additive
+    only; the Player table's own uuid5-on-collision scheme is untouched) so a
+    future unified profile has somewhere to anchor without a migration."""
+    __tablename__ = "crm_people"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    full_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    roles = relationship("CrmPersonRole", cascade="all, delete-orphan", passive_deletes=True)
+
+
+class CrmPersonRole(Base):
+    """One role a Person holds — a Person can have several (a parent who is
+    also a volunteer and a sponsor contact), each with its own tenure."""
+    __tablename__ = "crm_person_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    role = Column(Text, nullable=False)
+    title = Column(Text, nullable=True)
+    started_at = Column(Date, nullable=True)
+    ended_at = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CrmPipeline(Base):
+    """A stage-ordered pipeline. 'platform' scope has exactly one (Better
+    Cricket's sales pipeline); a club can in principle run more than one
+    (e.g. Sponsorship vs Grants) though only a default is seeded today."""
+    __tablename__ = "crm_pipelines"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope = Column(Text, nullable=False, server_default="club", default="club")
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    name = Column(Text, nullable=False)
+    is_default = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Club-scope "trackers" (migration 174): which preset catalogue entry this
+    # was added from (NULL = a custom, club-authored tracker), and whether the
+    # club currently has it turned on — "removing" a tracker deactivates it
+    # rather than deleting, so its historical deals survive re-adding it later.
+    template_key = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    stages = relationship("CrmStage", cascade="all, delete-orphan", passive_deletes=True,
+                          order_by="CrmStage.position")
+
+
+class CrmStage(Base):
+    """A pipeline stage. ``key`` is a stable slug the app looks up by (auto
+    stage-advance hooks, the Won/Lost buttons) — ``name`` is the display label
+    a super admin / club admin can freely rename without breaking those
+    lookups. ``default_probability`` is what a deal shows unless it carries
+    its own override."""
+    __tablename__ = "crm_stages"
+    __table_args__ = (
+        UniqueConstraint("pipeline_id", "key", name="uq_crm_stages_pipeline_key"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pipeline_id = Column(UUID(as_uuid=True), ForeignKey("crm_pipelines.id", ondelete="CASCADE"), nullable=False)
+    key = Column(Text, nullable=False)
+    name = Column(Text, nullable=False)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    default_probability = Column(Integer, nullable=False, server_default="0", default=0)
+    is_won = Column(Boolean, nullable=False, server_default="false", default=False)
+    is_lost = Column(Boolean, nullable=False, server_default="false", default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CrmDeal(Base):
+    """One Opportunity/Deal. ``value_cents``/``module_keys`` mirror the public
+    pricing vocabulary (see billing_pricing.py) for a platform deal's product
+    interest; a club deal (sponsorship renewal, grant application…) leaves
+    module_keys empty and just uses value_cents + title/notes/activities."""
+    __tablename__ = "crm_deals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope = Column(Text, nullable=False, server_default="club", default="club")
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
+    pipeline_id = Column(UUID(as_uuid=True), ForeignKey("crm_pipelines.id", ondelete="CASCADE"), nullable=False)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("crm_stages.id", ondelete="RESTRICT"), nullable=False)
+    title = Column(Text, nullable=False)
+    value_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    currency = Column(Text, nullable=False, server_default="AUD", default="AUD")
+    probability = Column(Integer, nullable=True)  # NULL = use the stage's default_probability
+    module_keys = Column(JSONB, nullable=False, server_default="[]", default=list)
+    expected_close_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="open", default="open")  # open | won | lost
+    lost_reason = Column(Text, nullable=True)
+    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial
+    archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    closed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    stage = relationship("CrmStage")
+    contacts = relationship("CrmDealContact", cascade="all, delete-orphan", passive_deletes=True)
+
+
+class CrmDealContact(Base):
+    """Links a Person to a Deal (the people involved — decision maker,
+    influencer, the officer who first enquired…)."""
+    __tablename__ = "crm_deal_contacts"
+    __table_args__ = (
+        UniqueConstraint("deal_id", "person_id", name="uq_crm_deal_contacts"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("crm_deals.id", ondelete="CASCADE"), nullable=False)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="CASCADE"), nullable=False)
+    role_on_deal = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    person = relationship("CrmPerson")
+
+
+class CrmActivity(Base):
+    """One timeline entry — a call, email, meeting or note against a Deal
+    and/or a Person. ``meta`` carries structured detail for system-logged
+    entries (e.g. the engagement score that triggered an auto stage-move)."""
+    __tablename__ = "crm_activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("crm_deals.id", ondelete="CASCADE"), nullable=True)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="CASCADE"), nullable=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=True)
+    type = Column(Text, nullable=False, server_default="note", default="note")
+    body = Column(Text, nullable=True)
+    occurred_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    meta = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── KlubPro → BetterStats migration audit + rollback (migration 072) ─────────

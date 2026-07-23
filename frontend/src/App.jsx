@@ -24,7 +24,7 @@ function ConditionalNavbar() {
   const isMarketing = isMarketingPath(pathname)
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -97,12 +97,25 @@ const AdminFeeBulkPayment = lazy(() => import('./pages/admin/AdminFeeBulkPayment
 const AdminFeeReports = lazy(() => import('./pages/admin/AdminFeeReports'))
 const AdminFeesSquare = lazy(() => import('./pages/admin/AdminFeesSquare'))
 const AdminFeesXero = lazy(() => import('./pages/admin/AdminFeesXero'))
+const AdminMembershipTypes = lazy(() => import('./pages/admin/AdminMembershipTypes'))
+const AdminCommittee = lazy(() => import('./pages/admin/AdminCommittee'))
+const AdminVolunteers = lazy(() => import('./pages/admin/AdminVolunteers'))
+const AdminQualifications = lazy(() => import('./pages/admin/AdminQualifications'))
+const AdminEvents = lazy(() => import('./pages/admin/AdminEvents'))
+const AdminAssets = lazy(() => import('./pages/admin/AdminAssets'))
+const AdminMemberPortal = lazy(() => import('./pages/admin/AdminMemberPortal'))
+const AdminClubDiary = lazy(() => import('./pages/admin/AdminClubDiary'))
 const BetterMerchHome = lazy(() => import('./pages/admin/bettermerch/BetterMerchHome'))
 const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
 const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
 const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity'))
 const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
 const MerchSquare = lazy(() => import('./pages/admin/bettermerch/MerchSquare'))
+const MerchOrders = lazy(() => import('./pages/admin/bettermerch/MerchOrders'))
+const BetterCrmHome = lazy(() => import('./pages/admin/bettercrm/BetterCrmHome'))
+const BetterCrmTracker = lazy(() => import('./pages/admin/bettercrm/BetterCrmTracker'))
+const BetterCrmPeople = lazy(() => import('./pages/admin/bettercrm/BetterCrmPeople'))
+const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
@@ -196,6 +209,12 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
 const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
+// Public, login-free event registration (Events/Ticketing — event-id link)
+const PublicEventRegister = lazy(() => import('./pages/PublicEventRegister'))
+// Public, login-free member self-service portal (emailed magic link)
+const PublicMemberPortal = lazy(() => import('./pages/PublicMemberPortal'))
+// Public, login-free merch storefront
+const PublicMerchStore = lazy(() => import('./pages/PublicMerchStore'))
 
 const PageLoader = () => (
   <div className="flex justify-center py-24">
@@ -250,6 +269,12 @@ export default function App() {
           <Route path="/avail/:token" element={<PublicAvailability />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />
+          {/* Public event registration (no login — event-id link) */}
+          <Route path="/events/:eventId" element={<PublicEventRegister />} />
+          {/* Public member self-service portal (no login — emailed magic link) */}
+          <Route path="/portal/:slug" element={<PublicMemberPortal />} />
+          {/* Public merch storefront (no login) */}
+          <Route path="/shop/:slug" element={<PublicMerchStore />} />
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -263,6 +288,13 @@ export default function App() {
           <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
           <Route path="/admin/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
+          <Route path="/admin/committee" element={<ProtectedRoute><AdminCommittee /></ProtectedRoute>} />
+          <Route path="/admin/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
+          <Route path="/admin/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
+          <Route path="/admin/events" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
+          <Route path="/admin/assets" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
+          <Route path="/admin/member-portal" element={<ProtectedRoute><AdminMemberPortal /></ProtectedRoute>} />
+          <Route path="/admin/club-diary" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
@@ -282,6 +314,7 @@ export default function App() {
           <Route path="/admin/fees/reports" element={<ProtectedRoute requireModule="fees"><AdminFeeReports /></ProtectedRoute>} />
           <Route path="/admin/fees/square" element={<ProtectedRoute requireModule="fees"><AdminFeesSquare /></ProtectedRoute>} />
           <Route path="/admin/fees/xero" element={<ProtectedRoute requireModule="fees"><AdminFeesXero /></ProtectedRoute>} />
+          <Route path="/admin/fees/membership-types" element={<ProtectedRoute requireModule="fees"><AdminMembershipTypes /></ProtectedRoute>} />
           <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute requireModule="fees"><AdminFeeMemberDetail /></ProtectedRoute>} />
           <Route path="/admin/merch" element={<ProtectedRoute requireModule="merch"><BetterMerchHome /></ProtectedRoute>} />
           <Route path="/admin/merch/stock" element={<ProtectedRoute requireModule="merch"><MerchStock /></ProtectedRoute>} />
@@ -289,6 +322,11 @@ export default function App() {
           <Route path="/admin/merch/activity" element={<ProtectedRoute requireModule="merch"><MerchActivity /></ProtectedRoute>} />
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
+          <Route path="/admin/merch/orders" element={<ProtectedRoute requireModule="merch"><MerchOrders /></ProtectedRoute>} />
+          <Route path="/admin/crm" element={<ProtectedRoute requireModule="crm"><BetterCrmHome /></ProtectedRoute>} />
+          <Route path="/admin/crm/people" element={<ProtectedRoute requireModule="crm"><BetterCrmPeople /></ProtectedRoute>} />
+          <Route path="/admin/crm/:pipelineId" element={<ProtectedRoute requireModule="crm"><BetterCrmTracker /></ProtectedRoute>} />
+          <Route path="/admin/super/crm" element={<ProtectedRoute requireRole="super_admin"><SuperCrm /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />

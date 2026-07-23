@@ -462,8 +462,10 @@ function ProductEditModal({ product, categories, onCategoriesChanged, onClose, o
   const [price, setPrice] = useState(product.unit_price != null ? String(product.unit_price) : '')
   const [threshold, setThreshold] = useState(product.low_stock_threshold != null ? String(product.low_stock_threshold) : '')
   const [supplier, setSupplier] = useState(product.supplier || '')
+  const [showInStorefront, setShowInStorefront] = useState(product.show_in_storefront !== false)
   const [busy, setBusy] = useState(false)
   const onCat = (next) => { setCat(next); setCategoryId(null) }
+  const isSquareSynced = product.source === 'square'
 
   const save = async () => {
     if (!name.trim()) { toast.error('Name is required'); return }
@@ -475,6 +477,7 @@ function ProductEditModal({ product, categories, onCategoriesChanged, onClose, o
         unit_price: (forResale && price !== '') ? Number(price) : null,
         low_stock_threshold: threshold === '' ? null : Number(threshold),
         supplier: supplier || null,
+        show_in_storefront: showInStorefront,
       })
       toast.success('Saved'); onSaved()
     } catch (e) { toast.error(e.message || 'Could not save') } finally { setBusy(false) }
@@ -519,6 +522,20 @@ function ProductEditModal({ product, categories, onCategoriesChanged, onClose, o
           <Field half label="Low-stock alert at"><NumberInput value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="e.g. 5" /></Field>
           <Field half label="Supplier"><TextInput value={supplier} onChange={(e) => setSupplier(e.target.value)} /></Field>
         </div>
+        {forResale && (
+          <Field label="Online store">
+            <label className="flex items-center gap-2 text-[12.5px] text-pb-text cursor-pointer select-none">
+              <input type="checkbox" checked={showInStorefront} disabled={isSquareSynced}
+                onChange={(e) => setShowInStorefront(e.target.checked)} />
+              Show in the public online store
+            </label>
+            {isSquareSynced && (
+              <p className="text-[10.5px] text-pb-faintest mt-1">
+                Synced from Square — Square's till owns this item's stock count, so it never appears in the online store.
+              </p>
+            )}
+          </Field>
+        )}
         <p className="text-[10.5px] text-pb-faintest">Sizes and stock lines are managed on the card. This edits the product details.</p>
       </div>
     </Modal>

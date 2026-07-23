@@ -44,6 +44,12 @@ MANAGE_IQ = "manage_iq"                       # BetterIQ: opposition analysis + 
 MANAGE_COMMS = "manage_comms"                 # BetterComms: contacts + bulk email campaigns
 MANAGE_MERCH = "manage_merch"                 # BetterMerch: stock register (apparel, equipment, food/drink)
 MANAGE_FANTASY = "manage_fantasy"             # BetterFantasyCricket: fantasy season setup, leagues, settlement
+MANAGE_CRM = "manage_crm"                     # BetterCRM: deals/pipeline, contacts, activities
+MANAGE_COMMITTEE = "manage_committee"         # Committee positions/terms, task register, documents, club calendar
+MANAGE_VOLUNTEERS = "manage_volunteers"       # Volunteer profiles + hours ledger
+MANAGE_QUALIFICATIONS = "manage_qualifications"  # Qualification types + member qualifications/expiry
+MANAGE_ASSETS = "manage_assets"               # Club assets, facilities, bookings, maintenance logs
+MANAGE_CLUB_DIARY = "manage_club_diary"       # Annual/recurring compliance & maintenance task calendar
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -68,6 +74,12 @@ ALL_CAPABILITIES = (
     MANAGE_COMMS,
     MANAGE_MERCH,
     MANAGE_FANTASY,
+    MANAGE_CRM,
+    MANAGE_COMMITTEE,
+    MANAGE_VOLUNTEERS,
+    MANAGE_QUALIFICATIONS,
+    MANAGE_ASSETS,
+    MANAGE_CLUB_DIARY,
 )
 
 

@@ -33,13 +33,15 @@ MODULE_IQ = "iq"             # BetterIQ      — AI + stats deep-dive
 MODULE_COMMS = "comms"       # BetterComms   — bulk email to the member database
 MODULE_MERCH = "merch"       # BetterMerch   — club stock register (apparel, equipment, food/drink)
 MODULE_FANTASY = "fantasy"   # BetterFantasyCricket — internal club fantasy league
+MODULE_CRM = "crm"           # BetterCRM      — People/Contacts + the club's own deal pipeline
 
-# BetterFees + BetterComms + BetterMerch are presented together on the admin
-# dashboard under the **BetterAdmin** umbrella (see frontend modules.js). They stay
-# separate ENTITLEMENT keys here (each route gates on its own key), but are sold,
-# trialed and requested as ONE billable module — BetterAdmin (see billing helpers
-# below), matching the public pricing (one $149 umbrella).
-ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS, MODULE_MERCH, MODULE_FANTASY)
+# BetterFees + BetterComms + BetterMerch + BetterCRM are presented together on
+# the admin dashboard under the **BetterAdmin** umbrella (see frontend
+# modules.js). They stay separate ENTITLEMENT keys here (each route gates on
+# its own key), but are sold, trialed and requested as ONE billable module —
+# BetterAdmin (see billing helpers below), matching the public pricing (one
+# $149 umbrella).
+ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS, MODULE_MERCH, MODULE_FANTASY, MODULE_CRM)
 
 # BetterStats (Core) — the base product every synced club gets. It's NOT in
 # ALL_MODULES (which is the add-on gating set, so the add-on entitlement logic and
@@ -57,7 +59,7 @@ MANAGED_MODULES = ALL_MODULES + (MODULE_CORE,)
 # still uses the underlying keys.
 MODULE_ADMIN = "admin"     # BetterAdmin umbrella
 MODULE_GROUPS: dict[str, tuple[str, ...]] = {
-    MODULE_ADMIN: (MODULE_FEES, MODULE_COMMS, MODULE_MERCH),
+    MODULE_ADMIN: (MODULE_FEES, MODULE_COMMS, MODULE_MERCH, MODULE_CRM),
 }
 # Core leads — it's the base everything builds on.
 BILLABLE_MODULES = (MODULE_CORE, MODULE_SELECT, MODULE_SOCIALS, MODULE_ADMIN, MODULE_IQ, MODULE_FANTASY)
@@ -95,6 +97,7 @@ MODULE_META: dict[str, dict] = {
     MODULE_COMMS: {"name": "BetterComms", "blurb": "Bulk email to your member database", "built": True},
     MODULE_MERCH: {"name": "BetterMerch", "blurb": "Track club stock — apparel, equipment and canteen", "built": True},
     MODULE_FANTASY: {"name": "BetterFantasyCricket", "blurb": "Run an internal club fantasy cricket league", "built": True},
+    MODULE_CRM: {"name": "BetterCRM", "blurb": "Contacts, sponsorship, grants and relationship pipeline", "built": True},
 }
 
 

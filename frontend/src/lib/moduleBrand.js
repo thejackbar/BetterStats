@@ -35,7 +35,7 @@ const ALIAS = {
   betterstats: 'stats', core: 'stats',
   betterselect: 'select',
   bettersocials: 'socials', socials: 'socials',
-  betteradmin: 'admin', fees: 'admin', comms: 'admin', merch: 'admin',
+  betteradmin: 'admin', fees: 'admin', comms: 'admin', merch: 'admin', crm: 'admin', bettercrm: 'admin',
   betteriq: 'iq',
   betterfantasy: 'fantasy', betterfantasycricket: 'fantasy', fantasycricket: 'fantasy',
 }

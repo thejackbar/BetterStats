@@ -16,6 +16,7 @@ export const MODULE = {
   COMMS: 'comms',
   MERCH: 'merch',
   FANTASY: 'fantasy',
+  CRM: 'crm',
 }
 
 // Module registry — the admin dashboard renders one tile per entry, in order.
@@ -67,6 +68,15 @@ export const MODULE_INFO = [
     group: 'admin',
   },
   {
+    key: MODULE.CRM,
+    name: 'BetterCRM',
+    blurb: 'Contacts, sponsorship, grants and a deal pipeline for the club.',
+    to: '/admin/crm',
+    built: true,
+    caps: [CAP.MANAGE_CRM],
+    group: 'admin',
+  },
+  {
     key: MODULE.IQ,
     name: 'BetterIQ',
     blurb: 'AI + stats deep-dive: opposition scouting, selection analysis, trends.',
@@ -103,7 +113,7 @@ export const MODULE_GROUPS = {
     key: 'admin',
     billingKey: 'admin',
     name: 'BetterAdmin',
-    blurb: 'Run the back office — fees, comms and merch in one place.',
+    blurb: 'Run the back office — fees, comms, merch and CRM in one place.',
     to: '/admin/betteradmin',
   },
 }
@@ -140,7 +150,7 @@ export const MODULE_TOGGLES = [
   { key: 'core',    label: 'BetterStats',   modules: ['core'] },
   { key: 'select',  label: 'BetterSelect',  modules: ['select'] },
   { key: 'socials', label: 'BetterSocials', modules: ['socials'] },
-  { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms', 'merch'] },
+  { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms', 'merch', 'crm'] },
   { key: 'iq',      label: 'BetterIQ',       modules: ['iq'] },
   { key: 'fantasy', label: 'BetterFantasyCricket', modules: ['fantasy'] },
 ]
@@ -157,6 +167,7 @@ export const BILLABLE_MODULE_NAME = {
   fees: 'BetterFees',
   comms: 'BetterComms',
   merch: 'BetterMerch',
+  crm: 'BetterCRM',
 }
 
 // Subscription statuses — keep in sync with backend ALL_STATUSES /

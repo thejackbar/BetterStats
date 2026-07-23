@@ -58,11 +58,23 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    heading: 'Club Admin',
+    items: [
+      { to: '/admin/assets', label: 'Assets & Facilities', cap: CAP.MANAGE_ASSETS },
+      { to: '/admin/club-diary', label: 'Club Diary', cap: CAP.MANAGE_CLUB_DIARY },
+      { to: '/admin/committee', label: 'Committee', cap: CAP.MANAGE_COMMITTEE },
+      { to: '/admin/events', label: 'Events', cap: CAP.MANAGE_COMMITTEE },
+      { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
+      { to: '/admin/member-portal', label: 'Member Portal', cap: CAP.MANAGE_FEES, flag: 'memberPortal' },
+      { to: '/admin/qualifications', label: 'Qualifications', cap: CAP.MANAGE_QUALIFICATIONS },
+      { to: '/admin/volunteers', label: 'Volunteers', cap: CAP.MANAGE_VOLUNTEERS },
+    ],
+  },
+  {
     heading: 'Tools',
     items: [
       { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
       { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
-      { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
       { to: '/admin/import', label: 'Import Stats', cap: CAP.MANAGE_MANUAL_ENTRIES },
       { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
       { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
@@ -101,6 +113,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/meta-ads', label: 'Meta Ads' },
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
+  { to: '/admin/super/crm', label: 'Sales Pipeline (CRM)' },
   { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
   { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics' },
   { to: '/admin/usage', label: 'Usage' },
@@ -143,6 +156,13 @@ export default function AdminLayout({ children }) {
   // state fetch succeeds (the endpoint 404s outright when the platform flag
   // is off, same "doesn't exist" convention as the self-serve flag).
   const [wizardAvailable, setWizardAvailable] = useState(false)
+  // Member self-service portal + Stripe Connect fee payments (migration 178)
+  // — off by default; per direct instruction invisible to every club admin
+  // until a super admin switches platform_settings.member_portal_enabled on
+  // (globally, or for this one club via its override). No capability gate
+  // alone can hide this, since MANAGE_FEES-holding admins would otherwise
+  // see it immediately — see routers/member_portal_admin.py.
+  const [memberPortalVisible, setMemberPortalVisible] = useState(false)
   // Setup steps still to do (total - done from /state, skipped included) —
   // the little count badge on the sidebar's Setup Wizard item. Replaced the
   // old every-5th-dashboard-visit toast: a steady, quiet signal beats a
@@ -154,7 +174,9 @@ export default function AdminLayout({ children }) {
   // hold every capability, so in practice they see the full set.)
   const visibleSections = NAV_SECTIONS.map(s => ({
     ...s,
-    items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
+    items: s.items.filter(i =>
+      (i.cap == null || hasCapability(i.cap)) &&
+      (i.flag !== 'memberPortal' || memberPortalVisible)),
   })).filter(s => s.items.length > 0)
 
   // Flag-gated Better HQ links (currently just self-serve registration) — hidden
@@ -281,6 +303,15 @@ export default function AdminLayout({ children }) {
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  useEffect(() => {
+    if (!user) { setMemberPortalVisible(false); return }
+    let cancelled = false
+    api.memberPortalStatus()
+      .then(s => { if (!cancelled) setMemberPortalVisible(!!s?.enabled) })
+      .catch(() => { if (!cancelled) setMemberPortalVisible(false) })
+    return () => { cancelled = true }
   }, [user])
 
   const handleLogout = async () => {
