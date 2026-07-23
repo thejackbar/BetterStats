@@ -58,126 +58,60 @@ function teamsMatch(a, b) {
   return aWords.some(w => bSet.has(w))
 }
 
+// "Won by N wickets" (chasing side won) or "won by N runs" (defending side
+// won) — derived from the two innings totals themselves, since the backend
+// doesn't store a pre-written margin string. Wickets-margin only makes sense
+// for the side that batted second; a first-innings win is always by runs.
+function marginText(game, innings1, innings2) {
+  if (!game.winning_team || !innings1 || !innings2) return null
+  const first = innings1, second = innings2
+  const secondBattingTeam = second.battingTeam
+  const wonBattingSecond = secondBattingTeam && teamsMatch(secondBattingTeam, game.winning_team)
+  if (wonBattingSecond && second.wickets != null) {
+    const left = 10 - second.wickets
+    if (left > 0) return `won by ${left} wicket${left === 1 ? '' : 's'}`
+  }
+  if (first.runs != null && second.runs != null) {
+    const diff = Math.abs(first.runs - second.runs)
+    if (diff > 0) return `won by ${diff} run${diff === 1 ? '' : 's'}`
+  }
+  return null
+}
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
-    ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()
+    ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
     : null
   const venue = game.venue || game.ground || null
 
-  // Build per-innings data with accurate totals, overs, RR
   const inningsData = innings.map(inn => {
     const t = (game.innings_totals || {})[inn.num] || {}
-    // Use backend totals if available, fall back to summing batting rows. Add extras to total.
     const batsRuns = t.runs ?? inn.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
     const runs = batsRuns != null ? batsRuns + (t.extras ?? 0) : null
     const wickets = t.runs != null ? t.wickets : inn.batting.filter(r => !r.not_out && r.dismissal_type).length
-    const balls = sumOversBalls(inn.bowling)
-    const oversStr = ballsToOversStr(balls)
-    const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
-    return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '' }
+    return { ...inn, runs, wickets, battingTeam: t.batting_team || '' }
   })
-
-  // Map innings to home/away using batting_team if available
-  const homeTeam = game.home_team || ''
-  const inn1Data = inningsData[0]
-  const inn2Data = inningsData[1]
-
-  // Determine which innings is home vs away
-  let homeInn = inn1Data, awayInn = inn2Data
-  if (inn1Data?.battingTeam && homeTeam) {
-    if (!teamsMatch(inn1Data.battingTeam, homeTeam) && inn2Data) {
-      homeInn = inn2Data
-      awayInn = inn1Data
-    }
-  }
-
-  // Win/loss background tints
-  const winner = (game.winning_team || '').toLowerCase().trim()
-  const homeWon = !!winner && !!(homeTeam) && teamsMatch(game.winning_team || '', homeTeam)
-  const awayTeam = game.away_team || ''
-  const awayWon = !!winner && !homeWon
-  const winBg = 'rgba(22,199,132,0.07)'
-  const lossBg = 'rgba(220,38,38,0.07)'
+  const margin = marginText(game, inningsData[0], inningsData[1])
+  const competition = [game.grade?.name, game.season?.name].filter(Boolean).join(' · ')
 
   return (
-    <div className="pb-card overflow-hidden mb-5">
-      {/* Teams + scores — main hero */}
-      <div className="grid grid-cols-[1fr_auto_1fr]">
-        {/* Home */}
-        <div
-          className="px-3 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
-          style={winner ? { background: homeWon ? winBg : lossBg } : undefined}
-        >
-          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">HOME</div>
-          <div className="font-display font-bold text-[14px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
-            {homeTeam || '—'}
-          </div>
-          {homeInn && fmtScore(homeInn.runs, homeInn.wickets) != null && (
-            <div className="font-mono font-bold text-[28px] sm:text-[48px] leading-none" style={{ color: homeWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
-              {fmtScore(homeInn.runs, homeInn.wickets)}
-            </div>
-          )}
-          {homeInn?.oversStr && (
-            <div className="font-mono text-[10.5px] text-pb-faint tracking-wide2">
-              {homeInn.oversStr} overs{homeInn.rr ? ` · RR ${homeInn.rr}` : ''}
-            </div>
-          )}
-        </div>
-
-        {/* Result */}
-        <div className="px-2 sm:px-8 py-5 flex flex-col items-center justify-center gap-2 pb-hairline-l pb-hairline-r min-w-[110px] sm:min-w-[160px]">
-          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">RESULT</div>
+    <div className="pb-card overflow-hidden mb-5 px-5 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+      <div>
+        {competition && (
+          <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">{competition}</div>
+        )}
+        <div className="flex items-center gap-3 flex-wrap">
           <ResultPill result={game.result || 'N/R'} />
           {game.winning_team && (
-            <div className="font-mono text-[11px] text-pb-text font-semibold text-center leading-snug max-w-[160px]">
-              {game.winning_team}
-            </div>
-          )}
-          {game.winning_team && (
-            <div className="font-mono text-[9px] tracking-wide2 text-pb-faint">WON</div>
-          )}
-          {dateStr && (
-            <div className="font-mono text-[9px] tracking-wide2 text-pb-faintest text-center mt-1">
-              {dateStr}{venue ? <><br />{venue}</> : ''}
-            </div>
-          )}
-        </div>
-
-        {/* Away */}
-        <div
-          className="px-3 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
-          style={winner ? { background: awayWon ? winBg : lossBg } : undefined}
-        >
-          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">AWAY</div>
-          <div className="font-display font-bold text-[14px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
-            {awayTeam || '—'}
-          </div>
-          {awayInn && fmtScore(awayInn.runs, awayInn.wickets) != null && (
-            <div className="font-mono font-bold text-[28px] sm:text-[48px] leading-none" style={{ color: awayWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
-              {fmtScore(awayInn.runs, awayInn.wickets)}
-            </div>
-          )}
-          {awayInn?.oversStr && (
-            <div className="font-mono text-[10.5px] text-pb-faint tracking-wide2">
-              {awayInn.oversStr} overs{awayInn.rr ? ` · RR ${awayInn.rr}` : ''}
-            </div>
+            <span className="font-display font-bold text-[16px] sm:text-[19px] text-pb-text tracking-tight">
+              {game.winning_team}{margin ? ` ${margin}` : ''}
+            </span>
           )}
         </div>
       </div>
-
-      {/* Toss / Umpires strip */}
-      {(game.toss || game.umpires) && (
-        <div className="px-5 py-2.5 pb-hairline-t bg-pb-surface2/20 flex flex-wrap gap-x-6 gap-y-1">
-          {game.toss && (
-            <span className="font-mono text-[10.5px] text-pb-dim">
-              <span className="text-pb-faint mr-2">TOSS</span>{game.toss}
-            </span>
-          )}
-          {game.umpires && (
-            <span className="font-mono text-[10.5px] text-pb-dim">
-              <span className="text-pb-faint mr-2">UMPIRES</span>{game.umpires}
-            </span>
-          )}
+      {(dateStr || venue) && (
+        <div className="font-mono text-[10.5px] text-pb-faint text-right">
+          {dateStr}{venue ? ` · ${venue}` : ''}
         </div>
       )}
     </div>
@@ -214,14 +148,18 @@ function ClaimButton({ row, onClaim }) {
   )
 }
 
-function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
+// One team's whole card: badge + innings label + team name + score, its
+// batting table with extras inline, then — nested in the same card, the way
+// BetterSocials' SC3 Dashboard share-image template lays it out — the
+// bowling figures of whichever team bowled at them, labelled by that
+// opponent's name. Two of these side by side is the whole scorecard.
+function TeamCard({ label, teamName, opponentName, batting = [], bowling = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
   const batted = batting
     .filter(r => !r.did_not_bat)
     .sort((a, b) => (a.batting_position ?? 999) - (b.batting_position ?? 999))
   const dnb = batting.filter(r => r.did_not_bat)
-  if (!batted.length && !dnb.length) return null
+  if (!batted.length && !dnb.length && !bowling.length) return null
 
-  // Use backend total if available, otherwise sum batting rows. Always add extras to total.
   const extras = inningsTotal?.extras ?? null
   const batsRuns = inningsTotal?.runs ?? batted.reduce((s, r) => s + (r.runs ?? 0), 0)
   const total = batsRuns != null ? batsRuns + (extras ?? 0) : null
@@ -229,16 +167,29 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
     ? inningsTotal.wickets
     : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
+  const badge = (teamName || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  // Overs faced = overs bowled at this team, i.e. the opponent's bowling figures.
+  const oversStr = ballsToOversStr(sumOversBalls(bowling))
 
   return (
     <div className="pb-card overflow-hidden">
-      {/* Card header: team name large, score large, innings label small below */}
-      <div className="px-5 pt-4 pb-3 pb-hairline-b bg-pb-surface2/20 flex items-start justify-between gap-4">
-        <div>
-          <div className="font-display font-bold text-[16px] sm:text-[18px] tracking-tight text-pb-text leading-tight">
-            {teamName}
+      {/* Card header: badge + innings label + team name, score on the right */}
+      <div className="px-5 pt-4 pb-3 pb-hairline-b bg-pb-surface2/20 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center font-display font-bold text-[13px] tracking-tight"
+            style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}
+          >
+            {badge}
           </div>
-          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mt-0.5">{label}</div>
+          <div className="min-w-0">
+            <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">
+              {label}{oversStr ? ` · ${oversStr} OV` : ''}
+            </div>
+            <div className="font-display font-bold text-[16px] sm:text-[18px] tracking-tight text-pb-text leading-tight truncate">
+              {teamName}
+            </div>
+          </div>
         </div>
         {score != null && (
           <div className="font-mono font-bold text-[22px] sm:text-[26px] pb-num leading-none shrink-0" style={{ color: 'var(--pb-accent)' }}>
@@ -248,143 +199,141 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
       </div>
 
       {/* Batting table */}
-      <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30" style={{ color: 'var(--pb-faintest)' }}>
-              <th className="font-medium py-2 pl-5 pr-3">BATTER</th>
-              <th className="font-medium py-2 pr-3 text-left max-sm:hidden">DISMISSAL</th>
-              <th className="font-medium py-2 px-3 text-right w-12" style={{ color: 'var(--pb-accent)' }}>R</th>
-              <th className="font-medium py-2 px-2 text-right w-10">B</th>
-              <th className="font-medium py-2 px-2 text-right w-8 max-md:hidden">4s</th>
-              <th className="font-medium py-2 pr-4 text-right w-8 max-md:hidden">6s</th>
-            </tr>
-          </thead>
-          <tbody>
-            {batted.map((row, i) => (
-              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                <td className="py-2 pl-5 pr-3 whitespace-nowrap">
-                  {row.player_id
-                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
-                    : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
-                  }
-                  {row.is_fill_in && <FillInBadge />}
-                  {canManage && <ClaimButton row={row} onClaim={onClaim} />}
-                </td>
-                <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
-                  {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type, row.caught_behind)}
-                </td>
-                <td className="py-2 px-3 text-right w-12">
-                  <span
-                    className="font-mono font-bold text-[14px] pb-num"
-                    style={{ color: row.runs >= 100 ? 'var(--pb-amber)' : row.runs >= 50 ? 'var(--pb-accent)' : undefined }}
-                  >
-                    {row.runs ?? '—'}
-                  </span>
-                  {row.not_out && <span className="text-pb-accent text-[11px]">*</span>}
-                </td>
-                <td className="py-2 px-2 font-mono text-[12px] text-pb-faint text-right w-10">{row.balls ?? '—'}</td>
-                <td className="py-2 px-2 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.fours ?? '—'}</td>
-                <td className="py-2 pr-4 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.sixes ?? '—'}</td>
+      {(batted.length > 0 || dnb.length > 0) && (
+        <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30" style={{ color: 'var(--pb-faintest)' }}>
+                <th className="font-medium py-2 pl-5 pr-3">BATTER</th>
+                <th className="font-medium py-2 pr-3 text-left max-sm:hidden">DISMISSAL</th>
+                <th className="font-medium py-2 px-3 text-right w-12" style={{ color: 'var(--pb-accent)' }}>R</th>
+                <th className="font-medium py-2 px-2 text-right w-10">B</th>
+                <th className="font-medium py-2 px-2 text-right w-8 max-md:hidden">4s</th>
+                <th className="font-medium py-2 pr-4 text-right w-8 max-md:hidden">6s</th>
               </tr>
-            ))}
-            {dnb.map((row, i) => (
-              <tr key={`dnb-${i}`} className="pb-hairline-t hover:bg-pb-surface2">
-                <td className="py-2 pl-5 pr-3 whitespace-nowrap">
-                  {row.player_id
-                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
-                    : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
-                  }
-                  {row.is_fill_in && <FillInBadge />}
-                  {canManage && <ClaimButton row={row} onClaim={onClaim} />}
-                </td>
-                <td className="py-2 pr-5 font-mono text-[12px] italic max-sm:hidden" style={{ color: 'var(--pb-faintest)' }}>did not bat</td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faintest text-right">—</td>
-                <td className="py-2 px-2 font-mono text-[12px] text-pb-faintest text-right">—</td>
-                <td className="py-2 px-2 font-mono text-[12px] text-pb-faintest text-right max-md:hidden">—</td>
-                <td className="py-2 pr-4 font-mono text-[12px] text-pb-faintest text-right max-md:hidden">—</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            {extras != null && extras > 0 && (
-              <tr className="pb-hairline-t">
-                <td className="py-1.5 pl-5 font-mono text-[11px] text-pb-faint" colSpan={2}>Extras</td>
-                <td className="py-1.5 px-3 font-mono text-[13px] text-pb-faint text-right">{extras}</td>
+            </thead>
+            <tbody>
+              {batted.map((row, i) => (
+                <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <td className="py-2 pl-5 pr-3 whitespace-nowrap">
+                    {row.player_id
+                      ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
+                      : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
+                    }
+                    {row.is_fill_in && <FillInBadge />}
+                    {canManage && <ClaimButton row={row} onClaim={onClaim} />}
+                  </td>
+                  <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
+                    {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type, row.caught_behind)}
+                  </td>
+                  <td className="py-2 px-3 text-right w-12">
+                    <span
+                      className="font-mono font-bold text-[14px] pb-num"
+                      style={{ color: row.runs >= 100 ? 'var(--pb-amber)' : row.runs >= 50 ? 'var(--pb-accent)' : undefined }}
+                    >
+                      {row.runs ?? '—'}
+                    </span>
+                    {row.not_out && <span className="text-pb-accent text-[11px]">*</span>}
+                  </td>
+                  <td className="py-2 px-2 font-mono text-[12px] text-pb-faint text-right w-10">{row.balls ?? '—'}</td>
+                  <td className="py-2 px-2 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.fours ?? '—'}</td>
+                  <td className="py-2 pr-4 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.sixes ?? '—'}</td>
+                </tr>
+              ))}
+              {dnb.map((row, i) => (
+                <tr key={`dnb-${i}`} className="pb-hairline-t hover:bg-pb-surface2">
+                  <td className="py-2 pl-5 pr-3 whitespace-nowrap">
+                    {row.player_id
+                      ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
+                      : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
+                    }
+                    {row.is_fill_in && <FillInBadge />}
+                    {canManage && <ClaimButton row={row} onClaim={onClaim} />}
+                  </td>
+                  <td className="py-2 pr-5 font-mono text-[12px] italic max-sm:hidden" style={{ color: 'var(--pb-faintest)' }}>did not bat</td>
+                  <td className="py-2 px-3 font-mono text-[12px] text-pb-faintest text-right">—</td>
+                  <td className="py-2 px-2 font-mono text-[12px] text-pb-faintest text-right">—</td>
+                  <td className="py-2 px-2 font-mono text-[12px] text-pb-faintest text-right max-md:hidden">—</td>
+                  <td className="py-2 pr-4 font-mono text-[12px] text-pb-faintest text-right max-md:hidden">—</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              {extras != null && extras > 0 && (
+                <tr className="pb-hairline-t">
+                  <td className="py-1.5 pl-5 font-mono text-[11px] text-pb-faint" colSpan={2}>Extras</td>
+                  <td className="py-1.5 px-3 font-mono text-[13px] text-pb-faint text-right">{extras}</td>
+                  <td colSpan={3} />
+                </tr>
+              )}
+              <tr className="pb-hairline-t bg-pb-surface2/20">
+                <td colSpan={2} className="py-2 pl-5 font-mono text-[10px] tracking-wide2 text-pb-faint hidden sm:table-cell">BATTING TOTAL</td>
+                <td className="py-2 px-3 font-mono font-bold text-pb-text text-right pb-num">{score ?? '—'}</td>
                 <td colSpan={3} />
               </tr>
-            )}
-            <tr className="pb-hairline-t bg-pb-surface2/20">
-              <td colSpan={2} className="py-2 pl-5 font-mono text-[10px] tracking-wide2 text-pb-faint hidden sm:table-cell">BATTING TOTAL</td>
-              <td className="py-2 px-3 font-mono font-bold text-pb-text text-right pb-num">{score ?? '—'}</td>
-              <td colSpan={3} />
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-function BowlingCard({ label, teamName, bowling = [], fmtName = n => n, canManage = false, onClaim }) {
-  if (!bowling.length) return null
-
-  return (
-    <div className="pb-card overflow-hidden">
-      <div className="px-5 pt-4 pb-3 pb-hairline-b bg-pb-surface2/20 flex items-start justify-between gap-4">
-        <div>
-          <div className="font-display font-bold text-[16px] sm:text-[18px] tracking-tight text-pb-text leading-tight">
-            {teamName}
-          </div>
-          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mt-0.5">{label} · BOWLING</div>
+            </tfoot>
+          </table>
         </div>
-      </div>
-      <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30" style={{ color: 'var(--pb-faintest)' }}>
-              <th className="font-medium py-2 pl-5">BOWLER</th>
-              <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-text)' }}>O</th>
-              <th className="font-medium py-2 px-3 text-right max-sm:hidden">M</th>
-              <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-text)' }}>R</th>
-              <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
-              <th className="font-medium py-2 px-3 text-right max-sm:hidden">ECON</th>
-              <th className="font-medium py-2 px-3 text-right max-md:hidden">WD</th>
-              <th className="font-medium py-2 pr-5 text-right max-md:hidden">NB</th>
-            </tr>
-          </thead>
-          <tbody>
-            {bowling.map((row, i) => (
-              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                <td className="py-2 pl-5 whitespace-nowrap">
-                  {row.player_id
-                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
-                    : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
-                  }
-                  {row.is_fill_in && <FillInBadge />}
-                  {canManage && <ClaimButton row={row} onClaim={onClaim} />}
-                </td>
-                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{fmtOvers(row.overs)}</td>
-                <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>{row.maidens ?? 0}</td>
-                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.runs ?? '—'}</td>
-                <td className="py-2 px-3 text-right">
-                  <span
-                    className="font-mono font-bold text-[13px] pb-num"
-                    style={{ color: row.wickets >= 5 ? 'var(--pb-amber)' : row.wickets >= 3 ? 'var(--pb-accent)' : 'var(--pb-text)' }}
-                  >
-                    {row.wickets ?? 0}
-                  </span>
-                </td>
-                <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
-                  {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
-                </td>
-                <td className="py-2 px-3 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.wides ?? 0}</td>
-                <td className="py-2 pr-5 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.no_balls ?? 0}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      )}
+
+      {/* Bowling table — the OPPONENT's figures bowling at this team, nested
+          in the same card so a team's whole showing (bat + bowl faced) reads
+          together, rather than split into a separate row of cards. */}
+      {bowling.length > 0 && (
+        <>
+          <div className="px-5 pt-3 pb-1.5 pb-hairline-t bg-pb-surface2/10">
+            <span className="font-mono text-[9px] tracking-wide3 text-pb-faintest">
+              {(opponentName || 'OPPONENT').toUpperCase()} BOWLING
+            </span>
+          </div>
+          <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30" style={{ color: 'var(--pb-faintest)' }}>
+                  <th className="font-medium py-2 pl-5">BOWLER</th>
+                  <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-text)' }}>O</th>
+                  <th className="font-medium py-2 px-3 text-right max-sm:hidden">M</th>
+                  <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-text)' }}>R</th>
+                  <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
+                  <th className="font-medium py-2 px-3 text-right max-sm:hidden">ECON</th>
+                  <th className="font-medium py-2 px-3 text-right max-md:hidden">WD</th>
+                  <th className="font-medium py-2 pr-5 text-right max-md:hidden">NB</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bowling.map((row, i) => (
+                  <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                    <td className="py-2 pl-5 whitespace-nowrap">
+                      {row.player_id
+                        ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
+                        : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
+                      }
+                      {row.is_fill_in && <FillInBadge />}
+                      {canManage && <ClaimButton row={row} onClaim={onClaim} />}
+                    </td>
+                    <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{fmtOvers(row.overs)}</td>
+                    <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>{row.maidens ?? 0}</td>
+                    <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.runs ?? '—'}</td>
+                    <td className="py-2 px-3 text-right">
+                      <span
+                        className="font-mono font-bold text-[13px] pb-num"
+                        style={{ color: row.wickets >= 5 ? 'var(--pb-amber)' : row.wickets >= 3 ? 'var(--pb-accent)' : 'var(--pb-text)' }}
+                      >
+                        {row.wickets ?? 0}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
+                      {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.wides ?? 0}</td>
+                    <td className="py-2 pr-5 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.no_balls ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -701,41 +650,32 @@ export default function MatchScorecard() {
             <div className="py-12 text-center text-pb-faint">No scorecard data available for this match.</div>
           </Card>
         ) : (
-          <div className="space-y-4">
-            {/* Row 1 — Batting cards */}
-            <div className={`grid gap-4 ${hasInn2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
-              <BattingCard
-                label="INNINGS 1"
-                teamName={inn1Team}
-                batting={inn1.batting}
-                inningsTotal={t1}
+          <div className={`grid gap-4 ${hasInn2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+            {/* Each team's own card: their batting, then — nested underneath —
+                the opponent's bowling figures from bowling at them. */}
+            <TeamCard
+              label="INNINGS 1"
+              teamName={inn1Team}
+              opponentName={inn2Team}
+              batting={inn1.batting}
+              bowling={inn1.bowling}
+              inningsTotal={t1}
+              fmtName={fmtName}
+              canManage={canManage}
+              onClaim={setClaimTarget}
+            />
+            {hasInn2 && (
+              <TeamCard
+                label="INNINGS 2"
+                teamName={inn2Team}
+                opponentName={inn1Team}
+                batting={inn2.batting}
+                bowling={inn2.bowling}
+                inningsTotal={t2}
                 fmtName={fmtName}
                 canManage={canManage}
                 onClaim={setClaimTarget}
               />
-              {hasInn2 && (
-                <BattingCard
-                  label="INNINGS 2"
-                  teamName={inn2Team}
-                  batting={inn2.batting}
-                  inningsTotal={t2}
-                  fmtName={fmtName}
-                  canManage={canManage}
-                  onClaim={setClaimTarget}
-                />
-              )}
-            </div>
-
-            {/* Row 2 — Bowling cards */}
-            {(inn1.bowling.length > 0 || inn2.bowling.length > 0) && (
-              <div className={`grid gap-4 ${hasInn2 && inn2.bowling.length > 0 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
-                {inn1.bowling.length > 0 && (
-                  <BowlingCard label="INNINGS 1" teamName={inn2Team} bowling={inn1.bowling} fmtName={fmtName} canManage={canManage} onClaim={setClaimTarget} />
-                )}
-                {hasInn2 && inn2.bowling.length > 0 && (
-                  <BowlingCard label="INNINGS 2" teamName={inn1Team} bowling={inn2.bowling} fmtName={fmtName} canManage={canManage} onClaim={setClaimTarget} />
-                )}
-              </div>
             )}
           </div>
         )}

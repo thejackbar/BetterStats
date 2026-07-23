@@ -1564,6 +1564,52 @@ grep -A 30 "<your own log line>"` rather than re-reading the source again —
 a real traceback finds a bug in seconds that a fourth static read of the
 same function won't.
 
+## Match scorecard page redesigned around the SC3 Dashboard layout (v8.79.0, Jul 2026)
+
+Once the data fixes above were confirmed correct against the live site,
+`MatchScorecard.jsx` was restructured to follow the layout of BetterSocials'
+`SC3_Dashboard` share-card template (`frontend/src/social/cricket-templates.jsx`),
+per direct request — toss and Player of the Match were dropped from the
+adaptation since neither is data we hold (no toss column, see the "UK
+Expansion" note elsewhere in this file on why toss isn't captured from the AU
+`/scores/*` feed either; no MOTM field anywhere in the schema).
+
+- **`MatchHeader`** shrank from a 3-column hero strip with giant score
+  numbers to a single lean meta card: grade/season on one line, the result
+  pill + `{winning_team} won by N wickets/runs` on the next (margin computed
+  client-side by `marginText()` from the two innings' own totals — chasing
+  side won ⇒ `10 - their_wickets` wickets in hand; defending side won ⇒ the
+  runs difference — since the backend has no pre-written margin string), date
+  + venue off to the side. The old toss/umpires strip is gone (those fields
+  are never populated).
+- **`BattingCard` + `BowlingCard` merged into one `TeamCard`** — matching
+  SC3's actual per-team layout: a badge (initials, since we hold no team
+  logos) + innings label + team name + big score in the card header, the
+  batting table with extras inline underneath, then — nested in the SAME
+  card, not a separate row further down the page — the opponent's bowling
+  figures, labelled `"{OPPONENT} BOWLING"`. This maps directly onto the
+  existing data shape: `innN.bowling` was already "whoever bowled during this
+  innings" (i.e. the opponent's figures), so nesting it under `innN`'s own
+  `TeamCard` needed no new field, just moving where it renders. Each card
+  also now shows overs faced next to the innings label (`sumOversBalls` +
+  `ballsToOversStr`, previously computed only for the old header's now-removed
+  RR line — reused rather than left dead).
+- The main render dropped its "batting row, then a separate bowling row"
+  two-`<div>` structure for a single side-by-side grid of two `TeamCard`s.
+  Fall of wickets and partnerships stay as their own full-width sections
+  below, unchanged — SC3 doesn't have either, but nothing here asked for
+  their removal, and dropping working features wasn't part of the brief.
+- **Verified visually, not just by build.** `npx vite build` alone would only
+  catch syntax errors, not a wrong layout — so the local dev server's `/api`
+  proxy was pointed at the live production API for one throwaway session
+  (`vite.config.js` target flipped to `https://betterat.cricket`, restored
+  after), and the actual rendered page for the reported game was screenshotted
+  via the `playwright` CLI. Confirmed against play.cricket.com.au's own page
+  for the same match: 135/7 and 136/4 in the right cards, "Mulgrave Brian
+  Bolton Realty won by 6 wickets" computed correctly, 35.0 / 31.3 overs
+  matching CA's own display, opponent bowling nested correctly under each
+  team with no duplicate rows.
+
 ## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
 
 Yearbook generation was previously **100% manual** — two separate admin
