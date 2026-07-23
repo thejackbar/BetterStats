@@ -24,6 +24,9 @@ export const CAP = {
   MANAGE_MERCH: 'manage_merch',
   MANAGE_FANTASY: 'manage_fantasy',
   MANAGE_CRM: 'manage_crm',
+  MANAGE_COMMITTEE: 'manage_committee',
+  MANAGE_VOLUNTEERS: 'manage_volunteers',
+  MANAGE_QUALIFICATIONS: 'manage_qualifications',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -51,4 +54,7 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_MERCH, label: 'Manage BetterMerch', hint: 'BetterMerch: club stock — apparel, equipment and canteen' },
   { key: CAP.MANAGE_FANTASY, label: 'Manage BetterFantasyCricket', hint: 'BetterFantasyCricket: fantasy season setup, leagues and round settlement' },
   { key: CAP.MANAGE_CRM, label: 'Manage BetterCRM', hint: 'BetterCRM: contacts, deals/pipeline and activities' },
+  { key: CAP.MANAGE_COMMITTEE, label: 'Manage committee', hint: 'Positions, terms, task register, documents, club calendar' },
+  { key: CAP.MANAGE_VOLUNTEERS, label: 'Manage volunteers', hint: 'Volunteer profiles and hours ledger' },
+  { key: CAP.MANAGE_QUALIFICATIONS, label: 'Manage qualifications', hint: 'Accreditations, WWCC, First Aid — with expiry tracking' },
 ]

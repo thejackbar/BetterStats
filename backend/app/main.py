@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -3085,6 +3085,169 @@ async def lifespan(app: FastAPI):
             ON family_members(family_id, fee_member_id) WHERE fee_member_id IS NOT NULL
         """))
 
+    # Migration 176: Committee Administration, Volunteer Management,
+    # Qualification tracking. See services/committee.py, volunteers.py,
+    # qualifications.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_positions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                responsibilities TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_committee_positions_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_positions_org ON committee_positions(organisation_id, is_active)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_terms (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                position_id UUID NOT NULL REFERENCES committee_positions(id) ON DELETE CASCADE,
+                member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                holder_name TEXT NOT NULL,
+                started_at DATE NOT NULL DEFAULT CURRENT_DATE,
+                ended_at DATE,
+                handover_notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_terms_position ON committee_terms(position_id, ended_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_terms_org ON committee_terms(organisation_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_tasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                description TEXT,
+                category TEXT NOT NULL DEFAULT 'operational',
+                position_id UUID REFERENCES committee_positions(id) ON DELETE SET NULL,
+                assigned_to_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                due_date DATE,
+                status TEXT NOT NULL DEFAULT 'todo',
+                is_recurring BOOLEAN NOT NULL DEFAULT false,
+                recurrence_note TEXT,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_tasks_org ON committee_tasks(organisation_id, status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_tasks_due ON committee_tasks(organisation_id, due_date)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_documents (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'governance',
+                url TEXT NOT NULL,
+                position_id UUID REFERENCES committee_positions(id) ON DELETE SET NULL,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_committee_documents_org ON committee_documents(organisation_id, category)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                event_type TEXT NOT NULL DEFAULT 'other',
+                starts_at TIMESTAMPTZ NOT NULL,
+                ends_at TIMESTAMPTZ,
+                location TEXT,
+                description TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_events_org ON club_events(organisation_id, starts_at)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS volunteer_profiles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                roles_interested JSONB NOT NULL DEFAULT '[]',
+                available_days JSONB NOT NULL DEFAULT '[]',
+                lives_nearby BOOLEAN NOT NULL DEFAULT false,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_volunteer_profiles_org_member UNIQUE (organisation_id, member_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS volunteer_hours (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                logged_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                hours NUMERIC(6,2) NOT NULL DEFAULT 0,
+                activity TEXT,
+                notes TEXT,
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_volunteer_hours_member ON volunteer_hours(member_id, logged_date DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_volunteer_hours_org ON volunteer_hours(organisation_id, logged_date DESC)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS qualification_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                validity_months INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_qualification_types_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_qualification_types_org ON qualification_types(organisation_id, is_active)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS member_qualifications (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                qualification_type_id UUID NOT NULL REFERENCES qualification_types(id) ON DELETE CASCADE,
+                obtained_at DATE NOT NULL DEFAULT CURRENT_DATE,
+                expires_at DATE,
+                certificate_ref TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_member_qualifications_member ON member_qualifications(member_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_member_qualifications_expiry ON member_qualifications(organisation_id, expires_at)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3272,6 +3435,9 @@ app.include_router(notifications.router)
 app.include_router(bookmarks.router)  # per-user admin sidebar favourites
 app.include_router(seo.router)
 app.include_router(families.router)
+app.include_router(committee.router)     # Committee Administration (core capability, not a paid module)
+app.include_router(volunteers.router)    # Volunteer Management (core capability, not a paid module)
+app.include_router(qualifications.router)  # Qualification tracking (core capability, not a paid module)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
 app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import

@@ -272,6 +272,86 @@ export const api = {
   applyGradeSuggestions: () =>
     request('/admin/grades/apply-suggestions', { method: 'POST' }),
 
+  // Committee Administration (core capability, not a paid module)
+  committeeListPositions: (includeInactive) =>
+    request(`/club-admin/committee/positions${includeInactive ? '?include_inactive=true' : ''}`),
+  committeePositionsCurrent: () => request('/club-admin/committee/positions/current'),
+  committeeCreatePosition: (data) =>
+    request('/club-admin/committee/positions', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdatePosition: (id, data) =>
+    request(`/club-admin/committee/positions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeArchivePosition: (id) =>
+    request(`/club-admin/committee/positions/${id}`, { method: 'DELETE' }),
+  committeeSeedStarterPositions: () =>
+    request('/club-admin/committee/positions/seed-starter', { method: 'POST' }),
+  committeePositionHistory: (id) => request(`/club-admin/committee/positions/${id}/history`),
+  committeeStartTerm: (positionId, data) =>
+    request(`/club-admin/committee/positions/${positionId}/terms`, { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateTerm: (termId, data) =>
+    request(`/club-admin/committee/terms/${termId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeEndTerm: (termId, data) =>
+    request(`/club-admin/committee/terms/${termId}/end`, { method: 'POST', body: JSON.stringify(data) }),
+  committeeListTasks: ({ status, category } = {}) => {
+    const p = new URLSearchParams()
+    if (status) p.set('status', status)
+    if (category) p.set('category', category)
+    const qs = p.toString()
+    return request(`/club-admin/committee/tasks${qs ? `?${qs}` : ''}`)
+  },
+  committeeCreateTask: (data) =>
+    request('/club-admin/committee/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateTask: (id, data) =>
+    request(`/club-admin/committee/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteTask: (id) =>
+    request(`/club-admin/committee/tasks/${id}`, { method: 'DELETE' }),
+  committeeListDocuments: (category) =>
+    request(`/club-admin/committee/documents${category ? `?category=${category}` : ''}`),
+  committeeCreateDocument: (data) =>
+    request('/club-admin/committee/documents', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateDocument: (id, data) =>
+    request(`/club-admin/committee/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteDocument: (id) =>
+    request(`/club-admin/committee/documents/${id}`, { method: 'DELETE' }),
+  committeeListEvents: (upcomingOnly) =>
+    request(`/club-admin/committee/events${upcomingOnly ? '?upcoming_only=true' : ''}`),
+  committeeCreateEvent: (data) =>
+    request('/club-admin/committee/events', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateEvent: (id, data) =>
+    request(`/club-admin/committee/events/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteEvent: (id) =>
+    request(`/club-admin/committee/events/${id}`, { method: 'DELETE' }),
+
+  // Volunteer Management (core capability, not a paid module)
+  volunteerDirectory: () => request('/club-admin/volunteers/directory'),
+  volunteerUpsertProfile: (data) =>
+    request('/club-admin/volunteers/profiles', { method: 'POST', body: JSON.stringify(data) }),
+  volunteerListHours: (memberId) => request(`/club-admin/volunteers/members/${memberId}/hours`),
+  volunteerLogHours: (data) =>
+    request('/club-admin/volunteers/hours', { method: 'POST', body: JSON.stringify(data) }),
+  volunteerDeleteHours: (id) =>
+    request(`/club-admin/volunteers/hours/${id}`, { method: 'DELETE' }),
+
+  // Qualification Management (core capability, not a paid module)
+  qualListTypes: (includeInactive) =>
+    request(`/club-admin/qualifications/types${includeInactive ? '?include_inactive=true' : ''}`),
+  qualCreateType: (data) =>
+    request('/club-admin/qualifications/types', { method: 'POST', body: JSON.stringify(data) }),
+  qualUpdateType: (id, data) =>
+    request(`/club-admin/qualifications/types/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  qualArchiveType: (id) =>
+    request(`/club-admin/qualifications/types/${id}`, { method: 'DELETE' }),
+  qualSeedStarterTypes: () =>
+    request('/club-admin/qualifications/types/seed-starter', { method: 'POST' }),
+  qualListMemberQualifications: (memberId) => request(`/club-admin/qualifications/members/${memberId}`),
+  qualAddQualification: (data) =>
+    request('/club-admin/qualifications/members/qualification', { method: 'POST', body: JSON.stringify(data) }),
+  qualUpdateQualification: (id, data) =>
+    request(`/club-admin/qualifications/qualification/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  qualDeleteQualification: (id) =>
+    request(`/club-admin/qualifications/qualification/${id}`, { method: 'DELETE' }),
+  qualExpiringReport: (withinDays) =>
+    request(`/club-admin/qualifications/expiring${withinDays ? `?within_days=${withinDays}` : ''}`),
+
   // Club admin — Membership Types (migration 175) — the cross-season
   // catalogue a member's membership_type_id points at.
   feeListMembershipTypes: (includeInactive) =>

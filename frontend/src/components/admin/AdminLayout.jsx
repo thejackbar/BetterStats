@@ -58,11 +58,19 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    heading: 'Club Admin',
+    items: [
+      { to: '/admin/committee', label: 'Committee', cap: CAP.MANAGE_COMMITTEE },
+      { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
+      { to: '/admin/qualifications', label: 'Qualifications', cap: CAP.MANAGE_QUALIFICATIONS },
+      { to: '/admin/volunteers', label: 'Volunteers', cap: CAP.MANAGE_VOLUNTEERS },
+    ],
+  },
+  {
     heading: 'Tools',
     items: [
       { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
       { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
-      { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
       { to: '/admin/import', label: 'Import Stats', cap: CAP.MANAGE_MANUAL_ENTRIES },
       { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
       { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },

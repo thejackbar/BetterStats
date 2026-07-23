@@ -98,6 +98,9 @@ const AdminFeeReports = lazy(() => import('./pages/admin/AdminFeeReports'))
 const AdminFeesSquare = lazy(() => import('./pages/admin/AdminFeesSquare'))
 const AdminFeesXero = lazy(() => import('./pages/admin/AdminFeesXero'))
 const AdminMembershipTypes = lazy(() => import('./pages/admin/AdminMembershipTypes'))
+const AdminCommittee = lazy(() => import('./pages/admin/AdminCommittee'))
+const AdminVolunteers = lazy(() => import('./pages/admin/AdminVolunteers'))
+const AdminQualifications = lazy(() => import('./pages/admin/AdminQualifications'))
 const BetterMerchHome = lazy(() => import('./pages/admin/bettermerch/BetterMerchHome'))
 const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
 const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
@@ -268,6 +271,9 @@ export default function App() {
           <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
           <Route path="/admin/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
+          <Route path="/admin/committee" element={<ProtectedRoute><AdminCommittee /></ProtectedRoute>} />
+          <Route path="/admin/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
+          <Route path="/admin/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />

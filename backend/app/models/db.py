@@ -2344,6 +2344,175 @@ class FeeXeroImportLog(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+# ─── Committee Administration, Volunteer Management, Qualifications ─────────
+# (migration 176). All three are CORE capabilities (like Families and
+# Membership Types) — gated by capability, not a paid module, nothing
+# auto-seeded. Reuse fee_members as "the person" throughout, the same
+# unification point Membership Management and Family/Household use.
+# committee_positions/committee_terms is a SEPARATE concern from the existing
+# ClubCommitteeMember (`club_committee`, the public website's simple bio
+# list) — deliberately not retrofitted, see the migration docstring.
+
+COMMITTEE_TASK_CATEGORIES = ("operational", "maintenance", "compliance", "finance", "other")
+COMMITTEE_TASK_STATUSES = ("todo", "in_progress", "done", "blocked")
+COMMITTEE_DOCUMENT_CATEGORIES = (
+    "governance", "policies", "constitution", "insurance", "grants",
+    "ground_leases", "coach_accreditation", "wwcc", "risk_assessments", "other",
+)
+CLUB_EVENT_TYPES = (
+    "committee_meeting", "working_bee", "registration_day", "agm",
+    "awards_night", "sponsor_function", "fundraising", "other",
+)
+
+
+class CommitteePosition(Base):
+    __tablename__ = "committee_positions"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_committee_positions_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    responsibilities = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeTerm(Base):
+    """Who's held a position, when. ``ended_at IS NULL`` = the current holder;
+    a position's history is every row sharing its position_id, newest first."""
+    __tablename__ = "committee_terms"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    holder_name = Column(Text, nullable=False)  # snapshot — survives member_id going NULL
+    started_at = Column(Date, nullable=False, server_default=func.current_date())
+    ended_at = Column(Date, nullable=True)
+    handover_notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeTask(Base):
+    """The Task Register + the "Calendar of Annual Tasks" from the brief,
+    unified — same shape (assigned, due date, status, category)."""
+    __tablename__ = "committee_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(Text, nullable=False, server_default="operational", default="operational")
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    assigned_to_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    due_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="todo", default="todo")
+    is_recurring = Column(Boolean, nullable=False, server_default="false", default=False)
+    recurrence_note = Column(Text, nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeDocument(Base):
+    """A link-based document registry — governance/policy docs live wherever
+    the club already keeps them (Drive, Dropbox); this just indexes them."""
+    __tablename__ = "committee_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    category = Column(Text, nullable=False, server_default="governance", default="governance")
+    url = Column(Text, nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubEvent(Base):
+    """The Club Calendar — committee meetings, working bees, the AGM, sponsor
+    functions, fundraising — distinct from cricket fixtures."""
+    __tablename__ = "club_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    event_type = Column(Text, nullable=False, server_default="other", default="other")
+    starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    location = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class VolunteerProfile(Base):
+    __tablename__ = "volunteer_profiles"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "member_id", name="uq_volunteer_profiles_org_member"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    roles_interested = Column(JSONB, nullable=False, server_default="[]", default=list)
+    available_days = Column(JSONB, nullable=False, server_default="[]", default=list)
+    lives_nearby = Column(Boolean, nullable=False, server_default="false", default=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class VolunteerHours(Base):
+    __tablename__ = "volunteer_hours"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    logged_date = Column(Date, nullable=False, server_default=func.current_date())
+    hours = Column(Numeric(6, 2), nullable=False, server_default="0")
+    activity = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class QualificationType(Base):
+    """WWCC, First Aid, coach/umpire/scorer accreditation, … ``validity_months``
+    is a default used to compute a new record's expiry at the time it's
+    logged (NULL = doesn't expire) — editable per club, not authoritative."""
+    __tablename__ = "qualification_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_qualification_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    validity_months = Column(Integer, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MemberQualification(Base):
+    __tablename__ = "member_qualifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    qualification_type_id = Column(UUID(as_uuid=True), ForeignKey("qualification_types.id", ondelete="CASCADE"), nullable=False)
+    obtained_at = Column(Date, nullable=False, server_default=func.current_date())
+    expires_at = Column(Date, nullable=True)
+    certificate_ref = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────
 # One engine, three category templates: apparel (sized/coloured variants),
 # equipment (quantity OR individual assets), food_drink (canteen/bar stock with
