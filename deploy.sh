@@ -44,7 +44,7 @@ export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 export LANGFLOW_SUPERUSER="${LANGFLOW_SUPERUSER:-}"
 export LANGFLOW_SUPERUSER_PASSWORD="${LANGFLOW_SUPERUSER_PASSWORD:-}"
 
-echo "==> [1/6] Pulling latest main into /srv/docker/betterstats"
+echo "==> [1/7] Pulling latest main into /srv/docker/betterstats"
 git -C /srv/docker/betterstats pull origin main
 
 # betterstats-backup-agent (see docs/backup-system.md) is an OPTIONAL sidecar —
@@ -57,10 +57,10 @@ if docker compose config --services 2>/dev/null | grep -qx betterstats-backup-ag
   AGENT_SVC="betterstats-backup-agent"
 fi
 
-echo "==> [2/6] Rebuilding betterstats images (no cache)"
+echo "==> [2/7] Rebuilding betterstats images (no cache)"
 docker compose build --no-cache betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
 
-echo "==> [3/6] Recreating betterstats only (db + other services untouched)"
+echo "==> [3/7] Recreating betterstats only (db + other services untouched)"
 # Why rm+up instead of `up --force-recreate`:
 # The central file pins fixed container_names (betterstats-frontend / -backend /
 # betterstats-backup-agent). With a fixed name, `--force-recreate` does a fragile
@@ -76,11 +76,11 @@ echo "==> [3/6] Recreating betterstats only (db + other services untouched)"
 # always creates clean containers on the FIRST run. Only these named services are
 # touched — db and the other ~24 apps are never affected. The agent has no
 # published port and isn't behind nginx-proxy-manager, so recreating it never
-# needs the DNS-refresh dance step [4/6] does for the frontend.
+# needs the DNS-refresh dance step [4/7] does for the frontend.
 docker compose rm -sf betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC} || true
 docker compose up -d --no-deps betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
 
-echo "==> [4/6] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
+echo "==> [4/7] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
 # Recreating betterstats-frontend gives it a NEW Docker IP. nginx-proxy-manager
 # caches the old DNS result per worker and then 502s with
 #   "betterstats-frontend could not be resolved (2: Server failure)"
@@ -111,8 +111,8 @@ else
   echo "    no proxy service found in this compose project — skipping proxy refresh"
 fi
 
-echo "==> [5/6] Backend API health check (end-to-end through the proxy)"
-# [4/6] only checks the frontend, which serves its static files even when the API
+echo "==> [5/7] Backend API health check (end-to-end through the proxy)"
+# [4/7] only checks the frontend, which serves its static files even when the API
 # is dead — so a backend that fails to boot (e.g. 'alembic upgrade head' errors, so
 # uvicorn never starts) sails through as a green deploy while login and every club
 # page hang on "Loading club data…". Hit a real API endpoint and confirm BetterStats
@@ -130,7 +130,7 @@ if [ -n "$api_ok" ]; then
 else
   echo ""
   echo "    ✗✗ BACKEND API IS DOWN — login and club data will fail."
-  echo "       (The frontend still serves static files, which is why [4/6] looked green.)"
+  echo "       (The frontend still serves static files, which is why [4/7] looked green.)"
   echo "    --- betterstats-backend container state ---"
   docker compose ps betterstats-backend || true
   echo "    --- betterstats-backend last 50 log lines ---"
@@ -142,8 +142,8 @@ else
   exit 1
 fi
 
-echo "==> [6/6] Backup-agent health check (optional — never blocks the deploy)"
-# Unlike [5/6], a bad agent doesn't take down login or club data — it only
+echo "==> [6/7] Backup-agent health check (optional — never blocks the deploy)"
+# Unlike [5/7], a bad agent doesn't take down login or club data — it only
 # means the Backups page's "Run backup now" button 502s. So this WARNS, it
 # never exits non-zero. Skipped entirely if the service isn't defined yet.
 if [ -n "$AGENT_SVC" ]; then
@@ -159,6 +159,51 @@ if [ -n "$AGENT_SVC" ]; then
   fi
 else
   echo "    betterstats-backup-agent isn't defined in the compose file yet — skipping (see docs/backup-system.md)"
+fi
+
+echo "==> [7/7] Ensuring the daily backup timer is installed and running"
+# The timer/service that fire backup.sh on a schedule (ops/backup/
+# betterstats-backup.{service,timer}) live in /etc/systemd/system — entirely
+# OUTSIDE docker compose, so nothing above ever touches them. That's exactly
+# how a General Settings -> Backups schedule silently never fired anything:
+# the unit files existed in the repo but were never actually installed on
+# this box. Self-heals every deploy: installs/updates them from the repo
+# copy if they differ, and makes sure the timer is enabled + active.
+#
+# Needs root. Uses non-interactive sudo only (`sudo -n`) — if this user
+# can't sudo without a password prompt, this step SKIPS with instructions
+# rather than hanging the deploy waiting on stdin that isn't there. Never
+# fails the deploy either way — a missing/stale timer means backups don't
+# run on schedule, not that the app itself is broken.
+UNIT_SRC_DIR="/srv/docker/betterstats/ops/backup"
+UNIT_DST_DIR="/etc/systemd/system"
+if sudo -n true 2>/dev/null; then
+  units_changed=0
+  for unit in betterstats-backup.service betterstats-backup.timer; do
+    if ! sudo -n cmp -s "$UNIT_SRC_DIR/$unit" "$UNIT_DST_DIR/$unit" 2>/dev/null; then
+      sudo -n cp "$UNIT_SRC_DIR/$unit" "$UNIT_DST_DIR/$unit"
+      units_changed=1
+    fi
+  done
+  if [ "$units_changed" = "1" ]; then
+    sudo -n systemctl daemon-reload
+    echo "    installed/updated systemd unit file(s) from the repo"
+  fi
+  if ! sudo -n systemctl is-enabled --quiet betterstats-backup.timer 2>/dev/null; then
+    sudo -n systemctl enable --now betterstats-backup.timer
+    echo "    betterstats-backup.timer was not enabled — enabled and started it now ✓"
+  elif ! sudo -n systemctl is-active --quiet betterstats-backup.timer 2>/dev/null; then
+    sudo -n systemctl start betterstats-backup.timer
+    echo "    betterstats-backup.timer was enabled but not running — started it now ✓"
+  else
+    echo "    betterstats-backup.timer already installed and active ✓"
+  fi
+else
+  echo "    ⚠ can't sudo non-interactively as $(whoami) — skipping. Install once, by hand:"
+  echo "      sudo cp $UNIT_SRC_DIR/betterstats-backup.{service,timer} $UNIT_DST_DIR/"
+  echo "      sudo systemctl daemon-reload"
+  echo "      sudo systemctl enable --now betterstats-backup.timer"
+  echo "    (or grant this user passwordless sudo for these specific commands so this step can self-heal)"
 fi
 
 echo "==> Status:"
