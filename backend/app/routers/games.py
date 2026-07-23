@@ -661,18 +661,24 @@ async def get_scorecard(
             # above) — that only means no `players` row can ever be linked for
             # a hyperlink; it must never block rebuilding the card itself from
             # Grassroots, which needs no org lookup at all to be correct.
+            # `Player.display_name` is a Python @property (display_name_override
+            # or name), not a mapped column — it can't go inside select(...)
+            # (doing so throws at request time, not at import/compile time,
+            # which is how this got past a syntax check). Select the two real
+            # columns behind it and compute the same fallback in Python.
             player_rows = []
             if org:
                 player_res = await db.execute(
-                    select(Player.id, Player.grassroots_id, Player.display_name)
+                    select(Player.id, Player.grassroots_id, Player.display_name_override, Player.name)
                     .where(Player.organisation_id == org.id)
                 )
                 player_rows = player_res.all()
             known_ids: set = {r[0] for r in player_rows}
             guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
-            id_to_display: dict[uuid.UUID, str] = {r[0]: r[2] for r in player_rows}
+            id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
             nk_to_pid: dict[tuple, uuid.UUID] = {}
-            for _pid, _guid, _dname in player_rows:
+            for _pid, _guid, _override, _name in player_rows:
+                _dname = _override or _name
                 if _dname and not _looks_redacted(_dname):
                     nk_to_pid.setdefault(_name_key(_dname), _pid)
 

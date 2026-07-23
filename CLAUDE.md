@@ -1529,6 +1529,41 @@ crashed" look identical. Anything added inside a block like this needs the
 same null-safety discipline as the rest of the function, since a silent
 `except` won't surface a shortcut taken in a hurry.
 
+**Third follow-up (same day) — the org fix above deployed clean but the bug
+was STILL live; this was the real remaining cause.** After confirming (via
+`docker exec ... grep`) that the org-safety fix was genuinely running in the
+container, the page still showed the exact same wrong numbers. The container
+logs (`docker compose logs betterstats-backend`) had the answer directly:
+`sqlalchemy.exc.ArgumentError: Column expression, FROM clause, or other
+columns clause element expected, got <property object at ...>` on
+`select(Player.id, Player.grassroots_id, Player.display_name)`.
+`Player.display_name` is a Python `@property` (`display_name_override or
+name`, see the `Player` model in `models/db.py`), not a mapped column —
+accessing it at the class level (as `select()` does) returns the property
+descriptor object itself, not something SQLAlchemy can query. This has
+nothing to do with `org` or team classification; it's a straight query bug
+in the player-linking lookup added by the original rewrite, and it fired on
+every single request, every time, regardless of which of the two prior
+fixes was live — which is exactly why "no change whatsoever" kept being the
+honest, correct observation from outside. Fixed by selecting the two real
+columns behind it (`display_name_override`, `name`) and computing the same
+`or` fallback in Python. No offline test caught this because the earlier
+verification replayed the row-construction logic in plain Python against a
+hand-fetched JSON payload — it never touched a real SQLAlchemy `select()`,
+so a query-construction bug like this one was invisible to it. `py_compile`
+doesn't catch it either, since `Player.display_name` is syntactically valid
+Python; the error only exists at the SQLAlchemy-semantics level and only
+throws when the code path actually executes.
+
+**Diagnostic order that actually worked, for next time**: (1) confirm the
+deployed code is genuinely the code you think it is (`docker exec ... grep`
+for a distinctive string — cheap, and rules out an entire class of "is my
+fix even running" confusion in one command); (2) if the code IS current and
+the bug persists, go straight to `docker compose logs <service> --since Nm |
+grep -A 30 "<your own log line>"` rather than re-reading the source again —
+a real traceback finds a bug in seconds that a fourth static read of the
+same function won't.
+
 ## Yearbook auto-generate + auto-publish on Full Rebuild (v8.61.3, Jul 2026)
 
 Yearbook generation was previously **100% manual** — two separate admin
