@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
 import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput, DEFAULT_CRM_TERMS } from './ui'
+import { TIER_TONE } from './PipelineBoard'
 
 // Deal detail/edit — used by BOTH the club CRM module and the platform-scope
 // Super Admin sales pipeline. `client` bundles the scope-specific api.js calls
 // (club vs platform) so this component itself is scope-agnostic. `terms`
 // swaps the Won/Lost/"deal" sales language for the club-facing module's own
-// vocabulary (see ui.jsx's DEFAULT_CRM_TERMS).
-export default function DealDetailModal({ dealId, open, onClose, stages, client, onChanged, moduleOptions, terms }) {
+// vocabulary (see ui.jsx's DEFAULT_CRM_TERMS). `ownerOptions` (platform scope
+// only — an internal staff pool, not a club's own users) shows/hides the
+// Owner picker; engagement score is read-only either way (mirrored from
+// marketing_clubs, computed elsewhere).
+export default function DealDetailModal({ dealId, open, onClose, stages, client, onChanged, moduleOptions, ownerOptions, terms }) {
   const toast = useToast()
   const t = { ...DEFAULT_CRM_TERMS, ...terms }
   const [deal, setDeal] = useState(null)
@@ -100,14 +104,30 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     catch (e) { toast.error(e.message || 'Could not remove contact') }
   }
 
+  const makePointOfContact = async (personId) => {
+    try { await client.setPointOfContact(dealId, { person_id: personId }); await refresh() }
+    catch (e) { toast.error(e.message || 'Could not set point of contact') }
+  }
+
   const toggleModule = (key) => {
     const cur = deal?.module_keys || []
     const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]
     patch({ module_keys: next })
   }
 
+  const titleNode = deal ? (
+    <span className="flex items-center gap-2">
+      <span className="truncate">{deal.title}</span>
+      {deal.engagement_score != null && (
+        <span title={`Engagement — ${(deal.engagement_tier || '').replace(/_/g, ' ')}`}>
+          <Pill tone={TIER_TONE[deal.engagement_tier] || 'faint'}>{deal.engagement_score}</Pill>
+        </span>
+      )}
+    </span>
+  ) : (t.itemSingular[0].toUpperCase() + t.itemSingular.slice(1))
+
   return (
-    <Modal open={open} onClose={onClose} wide title={deal ? deal.title : (t.itemSingular[0].toUpperCase() + t.itemSingular.slice(1))}
+    <Modal open={open} onClose={onClose} wide title={titleNode}
       footer={deal && deal.status === 'open' ? (
         <>
           <Btn variant="danger" onClick={archive}>Archive</Btn>
@@ -144,6 +164,14 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             <Field label="Weighted value" half>
               <div className="px-2.5 py-2 text-[13.5px] text-pb-faint">{money(deal.weighted_value_cents)}</div>
             </Field>
+            {ownerOptions && ownerOptions.length > 0 && (
+              <Field label="Owner" half>
+                <Select value={deal.owner_user_id || ''} onChange={e => patch({ owner_user_id: e.target.value || null })}>
+                  <option value="">Unassigned</option>
+                  {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </Select>
+              </Field>
+            )}
           </div>
 
           {showLostBox && (
@@ -173,15 +201,35 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Contacts</h3>
-            <div className="space-y-1.5 mb-2">
-              {contacts.length === 0 && <p className="text-[12px] text-pb-faintest">No contacts linked yet.</p>}
-              {contacts.map(c => (
-                <div key={c.id} className="flex items-center justify-between gap-2 text-[12.5px] pb-card px-2.5 py-1.5">
-                  <span className="truncate">{c.full_name}{c.email ? <span className="text-pb-faint"> · {c.email}</span> : null}</span>
-                  <button onClick={() => removeContact(c.id)} className="text-pb-faint hover:text-pb-red text-[11px]">Remove</button>
+            {(() => {
+              const poc = contacts.find(c => c.role_on_deal === 'point_of_contact')
+              const others = contacts.filter(c => c.role_on_deal !== 'point_of_contact')
+              return (
+                <div className="space-y-1.5 mb-2">
+                  {poc ? (
+                    <div className="flex items-center justify-between gap-2 text-[12.5px] pb-card px-2.5 py-1.5 border-pb-accent/40">
+                      <span className="truncate">
+                        <span className="font-mono text-[9.5px] tracking-wide text-pb-accent uppercase mr-1.5">POC</span>
+                        {poc.full_name}{poc.email ? <span className="text-pb-faint"> · {poc.email}</span> : null}
+                      </span>
+                      <button onClick={() => removeContact(poc.id)} className="text-pb-faint hover:text-pb-red text-[11px]">Remove</button>
+                    </div>
+                  ) : contacts.length > 0 && (
+                    <p className="text-[11px] text-pb-faintest">No point of contact set — pick one below.</p>
+                  )}
+                  {contacts.length === 0 && <p className="text-[12px] text-pb-faintest">No contacts linked yet.</p>}
+                  {others.map(c => (
+                    <div key={c.id} className="flex items-center justify-between gap-2 text-[12.5px] pb-card px-2.5 py-1.5">
+                      <span className="truncate">{c.full_name}{c.email ? <span className="text-pb-faint"> · {c.email}</span> : null}</span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => makePointOfContact(c.id)} className="text-pb-faint hover:text-pb-accent text-[11px]">Make POC</button>
+                        <button onClick={() => removeContact(c.id)} className="text-pb-faint hover:text-pb-red text-[11px]">Remove</button>
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )
+            })()}
             <form onSubmit={addContact} className="flex gap-2">
               <TextInput placeholder="Name" value={contactName} onChange={e => setContactName(e.target.value)} className="flex-1" />
               <TextInput placeholder="Email (optional)" value={contactEmail} onChange={e => setContactEmail(e.target.value)} className="flex-1" />
@@ -190,7 +238,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           </div>
 
           <div>
-            <h3 className="font-display font-bold text-[13px] mb-2">Activity</h3>
+            <h3 className="font-display font-bold text-[13px] mb-2">Notes &amp; activity</h3>
             <div className="space-y-2 mb-2 max-h-48 overflow-y-auto">
               {activities.length === 0 && <p className="text-[12px] text-pb-faintest">No activity logged yet.</p>}
               {activities.map(a => (

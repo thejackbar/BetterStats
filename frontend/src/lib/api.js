@@ -753,6 +753,7 @@ export const api = {
   crmListDealContacts: (dealId) => request(`/club-admin/crm/deals/${dealId}/contacts`),
   crmLinkContact: (dealId, data) => request(`/club-admin/crm/deals/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
   crmUnlinkContact: (dealId, personId) => request(`/club-admin/crm/deals/${dealId}/contacts/${personId}`, { method: 'DELETE' }),
+  crmSetPointOfContact: (dealId, data) => request(`/club-admin/crm/deals/${dealId}/point-of-contact`, { method: 'POST', body: JSON.stringify(data) }),
   crmListPeople: (q) => request(`/club-admin/crm/people${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   crmCreatePerson: (data) => request('/club-admin/crm/people', { method: 'POST', body: JSON.stringify(data) }),
   crmUpdatePerson: (id, data) => request(`/club-admin/crm/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -778,6 +779,8 @@ export const api = {
   superCrmListDealContacts: (dealId) => request(`/club-admin/super/crm/deals/${dealId}/contacts`),
   superCrmLinkContact: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmUnlinkContact: (dealId, personId) => request(`/club-admin/super/crm/deals/${dealId}/contacts/${personId}`, { method: 'DELETE' }),
+  superCrmSetPointOfContact: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/point-of-contact`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmOwners: () => request('/club-admin/super/crm/owners'),
   superCrmListPeople: (q) => request(`/club-admin/super/crm/people${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   superCrmConvertClub: (marketingClubId, data) =>
     request(`/club-admin/super/crm/from-club/${marketingClubId}`, { method: 'POST', body: JSON.stringify(data) }),

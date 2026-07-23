@@ -59,19 +59,18 @@ logger = logging.getLogger(__name__)
 _PACE_SECONDS = 0.05
 
 # Twenty's Opportunity pipeline (bootstrap_twenty.PIPELINE) -> our own
-# crm_stage.key (services/crm.py PLATFORM_DEFAULT_STAGES). Both were
-# designed together, so this is a clean 1:1 — "Self-Serve Trial" is a
-# Twenty-only distinction (a Lead-only value at creation, but also settable
-# as an Opportunity stage) and collapses onto our single "trial" stage.
+# crm_stage.key (services/crm.py PLATFORM_DEFAULT_STAGES) — a straight 1:1
+# now that the platform pipeline mirrors Twenty's exact stage set (including
+# its own distinct "Self-Serve Trial" column, no longer collapsed onto Trial).
 _OPPORTUNITY_STAGE_MAP = {
-    "TARGET": "new_lead",
+    "TARGET": "target",
     "CONTACTED": "contacted",
-    "ENGAGED": "qualified",
+    "ENGAGED": "engaged",
     "TRIAL": "trial",
-    "SELF_SERVE_TRIAL": "trial",
+    "SELF_SERVE_TRIAL": "self_serve_trial",
     "PROPOSAL": "proposal",
     "WON": "won",
-    "LOST_DORMANT": "lost",
+    "LOST_DORMANT": "lost_dormant",
 }
 
 # Twenty's Lead.leadStatus (bootstrap_twenty.py) -> our stage key, used only
@@ -80,10 +79,10 @@ _OPPORTUNITY_STAGE_MAP = {
 # action — see twenty_opportunity.py), but a Lead can outlive a since-deleted
 # Opportunity, so it's mapped defensively rather than skipped.
 _LEAD_STATUS_MAP = {
-    "NEW": "new_lead",
+    "NEW": "target",
     "WORKING": "contacted",
-    "CONVERTED": "qualified",
-    "DISCARDED": "lost",
+    "CONVERTED": "engaged",
+    "DISCARDED": "lost_dormant",
 }
 
 # Position of each stage key in the default pipeline, for the "never move
@@ -209,7 +208,7 @@ async def _import_one(http: httpx.AsyncClient, session, pipeline, stage_by_key: 
             return {"club": club.name, "skipped": f"unrecognised opportunity stage {opp.get('stage')!r}"}
         modules = _modules_from_twenty(opp.get("modulesInScope"))
         value_cents = _amount_to_cents(opp.get("amount"))
-        lost_reason = _clean_label(opp.get("lostReason")) if stage_key == "lost" else None
+        lost_reason = _clean_label(opp.get("lostReason")) if stage_key == "lost_dormant" else None
         twenty_kind, twenty_id, raw_stage = "opportunity", opp_id, opp.get("stage")
     elif lead_id:
         lead = await client.get_by_id(http, "leads", lead_id)

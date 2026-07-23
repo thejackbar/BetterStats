@@ -3,7 +3,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { PbSpinner } from '../../lib/presskit'
-import PipelineBoard from '../../components/admin/crm/PipelineBoard'
+import PipelineBoard, { TIER_TONE } from '../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import { Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money } from '../../components/admin/crm/ui'
 import { CORE, PRICED_MODULES, FANTASY } from '../../data/pricing'
@@ -19,6 +19,7 @@ const superClient = {
   listContacts: api.superCrmListDealContacts,
   linkContact: api.superCrmLinkContact,
   unlinkContact: api.superCrmUnlinkContact,
+  setPointOfContact: api.superCrmSetPointOfContact,
 }
 
 const MODULE_OPTIONS = [
@@ -76,6 +77,7 @@ export default function SuperCrm() {
   const [loading, setLoading] = useState(true)
   const [openDealId, setOpenDealId] = useState(null)
   const [showNew, setShowNew] = useState(false)
+  const [owners, setOwners] = useState([])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -90,6 +92,7 @@ export default function SuperCrm() {
   }, [status, toast])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { api.superCrmOwners().then(r => setOwners(r.owners || [])).catch(() => {}) }, [])
 
   const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
 
@@ -108,7 +111,9 @@ export default function SuperCrm() {
 
       {loading ? <PbSpinner message="Loading pipeline…" /> : (
         <>
-          {view === 'board' && board && <PipelineBoard board={board} onOpenDeal={setOpenDealId} />}
+          {view === 'board' && board && (
+            <PipelineBoard board={board} onOpenDeal={setOpenDealId} onMoved={load} client={superClient} />
+          )}
           {view === 'list' && (
             <>
               <div className="flex items-center gap-2 mb-4">
@@ -128,13 +133,14 @@ export default function SuperCrm() {
                       <th className="px-3 py-2 font-normal">Stage</th>
                       <th className="px-3 py-2 font-normal text-right">Value</th>
                       <th className="px-3 py-2 font-normal text-right">Weighted</th>
+                      <th className="px-3 py-2 font-normal">Engagement</th>
                       <th className="px-3 py-2 font-normal">Source</th>
                       <th className="px-3 py-2 font-normal">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {deals.length === 0 && (
-                      <tr><td colSpan={6} className="px-3 py-6 text-center text-pb-faintest">No deals yet.</td></tr>
+                      <tr><td colSpan={7} className="px-3 py-6 text-center text-pb-faintest">No deals yet.</td></tr>
                     )}
                     {deals.map(d => (
                       <tr key={d.id} onClick={() => setOpenDealId(d.id)} className="border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer">
@@ -142,6 +148,9 @@ export default function SuperCrm() {
                         <td className="px-3 py-2.5 text-pb-faint">{stageName(d.stage_id)}</td>
                         <td className="px-3 py-2.5 text-right">{money(d.value_cents)}</td>
                         <td className="px-3 py-2.5 text-right text-pb-faint">{money(d.weighted_value_cents)}</td>
+                        <td className="px-3 py-2.5">
+                          {d.engagement_score != null && <Pill tone={TIER_TONE[d.engagement_tier] || 'faint'}>{d.engagement_score}</Pill>}
+                        </td>
                         <td className="px-3 py-2.5 text-pb-faint">{d.source || '—'}</td>
                         <td className="px-3 py-2.5">
                           {d.status === 'won' && <Pill tone="green">Won</Pill>}
@@ -162,6 +171,7 @@ export default function SuperCrm() {
       <DealDetailModal
         dealId={openDealId} open={!!openDealId} onClose={() => setOpenDealId(null)}
         stages={stages} client={superClient} onChanged={load} moduleOptions={MODULE_OPTIONS}
+        ownerOptions={owners}
       />
     </AdminLayout>
   )

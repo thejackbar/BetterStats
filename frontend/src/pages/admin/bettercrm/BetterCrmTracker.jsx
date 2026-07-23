@@ -20,6 +20,7 @@ const clubClient = {
   listContacts: api.crmListDealContacts,
   linkContact: api.crmLinkContact,
   unlinkContact: api.crmUnlinkContact,
+  setPointOfContact: api.crmSetPointOfContact,
 }
 
 const DEFAULT_TERMS = { won: 'Won', lost: 'Lost', itemSingular: 'record', itemPlural: 'records', titleLabel: 'Title' }
@@ -112,7 +113,7 @@ export default function BetterCrmTracker() {
               className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'list' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>List</button>
           </div>
 
-          {view === 'board' && <PipelineBoard board={board} onOpenDeal={setOpenDealId} terms={terms} />}
+          {view === 'board' && <PipelineBoard board={board} onOpenDeal={setOpenDealId} onMoved={load} client={clubClient} terms={terms} />}
           {view === 'list' && (
             <>
               <div className="flex items-center gap-2 mb-4">
