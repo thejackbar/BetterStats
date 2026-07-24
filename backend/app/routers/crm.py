@@ -187,15 +187,21 @@ async def _serialize_deal(db: AsyncSession, deal) -> dict:
     stage = next((s for s in (pipeline.stages if pipeline else []) if s.id == deal.stage_id), None)
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
     row = crm_service._deal_dict(deal, stage, club)
-    trial_days = None
+    trial_days, subscribed = None, None
     if club is not None:
         try:
             by_club = await crm_service.trial_days_remaining_by_club(db, {club.id: club})
             trial_days = by_club.get(club.id)
         except Exception:  # noqa: BLE001 - a nice-to-have display field, never worth failing the deal fetch
             logger.exception("_serialize_deal: trial_days_remaining_by_club failed")
+        try:
+            by_club_subs = await crm_service.subscribed_modules_by_club(db, {club.id: club})
+            subscribed = by_club_subs.get(club.id)
+        except Exception:  # noqa: BLE001
+            logger.exception("_serialize_deal: subscribed_modules_by_club failed")
     row["trial_days_remaining"] = trial_days
     row["min_trial_days_remaining"] = min(trial_days.values()) if trial_days else None
+    row["subscribed_modules"] = subscribed or []
     return row
 
 
@@ -635,6 +641,11 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: trial_days_remaining_by_club failed")
         trial_days_by_club = {}
+    try:
+        subscribed_by_club = await crm_service.subscribed_modules_by_club(db, club_by_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: subscribed_modules_by_club failed")
+        subscribed_by_club = {}
 
     out = []
     for d in deals:
@@ -647,6 +658,7 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         trial_days = trial_days_by_club.get(d.marketing_club_id) if d.marketing_club_id else None
         row["trial_days_remaining"] = trial_days
         row["min_trial_days_remaining"] = min(trial_days.values()) if trial_days else None
+        row["subscribed_modules"] = (subscribed_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or []
         out.append(row)
     return {"deals": out}
 
@@ -671,9 +683,14 @@ async def super_recalc_product_interest(deal_id: str, db: AsyncSession = Depends
     Product Interest chips' manual toggle."""
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
-    await crm_service.recalc_product_interest(db, deal, club)
+    had_data = await crm_service.recalc_product_interest(db, deal, club)
     await db.commit()
-    return await _serialize_deal(db, deal)
+    result = await _serialize_deal(db, deal)
+    # Not a stored deal field — just tells the UI whether this recalc found
+    # real tracked visits (vs "no analytics yet, defaulted to Stats"), which
+    # otherwise look identical if the deal was already just ['core'].
+    result["recalc_had_data"] = had_data
+    return result
 
 
 @super_router.patch("/deals/{deal_id}", dependencies=[_super])

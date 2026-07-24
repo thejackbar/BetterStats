@@ -323,7 +323,15 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
   )
 }
 
-function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, channelOptions, resultCount }) {
+// Fixed pixel widths, not Tailwind width classes — the shared TextInput/
+// Select/NumberInput components hardcode `w-full` in their inputCls, and a
+// same-specificity Tailwind utility class can't reliably win against it
+// (stylesheet order decides, not JSX prop order). An inline style always
+// wins, which is what actually lets this bar fit two compact rows instead of
+// one control per line.
+const FBW = { search: '210px', owner: '120px', state: '84px', assoc: '120px', source: '130px', onboarding: '140px', num: '64px' }
+
+function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, channelOptions, resultCount, sortBy, sortDir, onSortChange }) {
   // Open by default — a filter bar that starts collapsed hides the very
   // controls someone opened this page to use (per direct instruction).
   const [open, setOpen] = useState(true)
@@ -343,60 +351,67 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
         {active && <button onClick={() => setFilters(EMPTY_FILTERS)} className="text-[11.5px] text-pb-faint hover:text-pb-red">Clear all</button>}
       </div>
       {open && (
-        <div className="mt-3 space-y-3">
-          {/* One row: club/contact search, owner, state, association, source —
-              kept narrow per direct instruction rather than each on its own line. */}
+        <div className="mt-3 space-y-2.5">
+          {/* Row 1: search + owner/state/association/source/onboarding — all
+              on one row where space allows (wraps to a 2nd row on narrow
+              screens), each pinned to a compact width instead of stretching. */}
           <div className="flex flex-wrap gap-2">
-            <TextInput placeholder="Club name or point of contact" value={filters.q} onChange={set('q')} className="flex-1 min-w-[220px]" />
-            <Select value={filters.ownerId} onChange={set('ownerId')} className="w-36">
+            <TextInput placeholder="Club name or point of contact" value={filters.q} onChange={set('q')} style={{ width: FBW.search }} />
+            <Select value={filters.ownerId} onChange={set('ownerId')} style={{ width: FBW.owner }}>
               <option value="">Any owner</option>
               <option value="__unassigned__">Unassigned</option>
               {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </Select>
-            <Select value={filters.state} onChange={set('state')} className="w-28">
+            <Select value={filters.state} onChange={set('state')} style={{ width: FBW.state }}>
               <option value="">Any state</option>
               {stateOptions.map(s => <option key={s} value={s}>{s}</option>)}
             </Select>
-            <TextInput list="crm-associations" placeholder="Association" value={filters.association} onChange={set('association')} className="w-36" />
+            <TextInput list="crm-associations" placeholder="Association" value={filters.association} onChange={set('association')} style={{ width: FBW.assoc }} />
             <datalist id="crm-associations">{associationOptions.map(a => <option key={a} value={a} />)}</datalist>
-            <Select value={filters.channel} onChange={set('channel')} className="w-36">
+            <Select value={filters.channel} onChange={set('channel')} style={{ width: FBW.source }}>
               <option value="">Any source</option>
               {channelOptions.map(c => <option key={c} value={c}>{channelLabel(c)}</option>)}
             </Select>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Select value={filters.onboarding} onChange={set('onboarding')} className="w-40">
+            <Select value={filters.onboarding} onChange={set('onboarding')} style={{ width: FBW.onboarding }}>
               {ONBOARDING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
+          </div>
+          {/* Row 2: Value $ / Engagement / Trial-expiring-days — one row. */}
+          <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-pb-faint">Value $</span>
-              <NumberInput min={0} placeholder="min" value={filters.minValue} onChange={set('minValue')} className="w-24" />
+              <NumberInput min={0} placeholder="min" value={filters.minValue} onChange={set('minValue')} style={{ width: FBW.num }} />
               <span className="text-[11px] text-pb-faint">to</span>
-              <NumberInput min={0} placeholder="max" value={filters.maxValue} onChange={set('maxValue')} className="w-24" />
+              <NumberInput min={0} placeholder="max" value={filters.maxValue} onChange={set('maxValue')} style={{ width: FBW.num }} />
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-pb-faint">Engagement</span>
-              <NumberInput min={0} max={100} placeholder="min" value={filters.minScore} onChange={set('minScore')} className="w-20" />
+              <NumberInput min={0} max={100} placeholder="min" value={filters.minScore} onChange={set('minScore')} style={{ width: FBW.num }} />
               <span className="text-[11px] text-pb-faint">to</span>
-              <NumberInput min={0} max={100} placeholder="max" value={filters.maxScore} onChange={set('maxScore')} className="w-20" />
+              <NumberInput min={0} max={100} placeholder="max" value={filters.maxScore} onChange={set('maxScore')} style={{ width: FBW.num }} />
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-pb-faint" title="Only clubs with a tracked module trial (i.e. already onboarded)">Trial expiring in (days)</span>
-              <NumberInput min={0} placeholder="min" value={filters.minTrialDays} onChange={set('minTrialDays')} className="w-20" />
+              <NumberInput min={0} placeholder="min" value={filters.minTrialDays} onChange={set('minTrialDays')} style={{ width: FBW.num }} />
               <span className="text-[11px] text-pb-faint">to</span>
-              <NumberInput min={0} placeholder="max" value={filters.maxTrialDays} onChange={set('maxTrialDays')} className="w-20" />
+              <NumberInput min={0} placeholder="max" value={filters.maxTrialDays} onChange={set('maxTrialDays')} style={{ width: FBW.num }} />
             </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {MODULE_OPTIONS.map(m => (
-              <button key={m.key} type="button" onClick={() => toggleModule(m.key)}
-                className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
-                  filters.modules.includes(m.key)
-                    ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
-                    : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
-                {m.label}
-              </button>
-            ))}
+          {/* Row 3: Product Interest chips + Sort-by, together on one line. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-0.5">
+            <div className="flex flex-wrap gap-1.5">
+              {MODULE_OPTIONS.map(m => (
+                <button key={m.key} type="button" onClick={() => toggleModule(m.key)}
+                  className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                    filters.modules.includes(m.key)
+                      ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                      : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {onSortChange && <span className="w-px self-stretch bg-pb-hairline2" />}
+            {onSortChange && <SortButtons sortBy={sortBy} sortDir={sortDir} onChange={onSortChange} />}
           </div>
         </div>
       )}
@@ -543,12 +558,8 @@ export default function SuperCrm() {
       ) : (
         <>
           <FilterBar filters={filters} setFilters={setFilters} owners={owners} stateOptions={stateOptions}
-            associationOptions={associationOptions} channelOptions={channelOptions} resultCount={filteredDeals.length} />
-
-          <div className="mb-4 -mt-2">
-            <SortButtons sortBy={sortBy} sortDir={sortDir}
-              onChange={(key, dir) => { setSortBy(key); setSortDir(dir) }} />
-          </div>
+            associationOptions={associationOptions} channelOptions={channelOptions} resultCount={filteredDeals.length}
+            sortBy={sortBy} sortDir={sortDir} onSortChange={(key, dir) => { setSortBy(key); setSortDir(dir) }} />
 
           {view === 'board' && (
             <PipelineBoard board={board} onOpenDeal={setOpenDealId} onMoved={load} client={superClient} />
@@ -585,12 +596,11 @@ export default function SuperCrm() {
                       </td></tr>
                     )}
                     {listSortedDeals.map(d => (
-                      <tr key={d.id} onClick={() => setOpenDealId(d.id)} className="border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer">
-                        <td className="px-3 py-2.5">
+                      <tr key={d.id} onClick={() => setOpenDealId(d.id)}
+                        className={`border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer ${
+                          d.is_customer ? 'border-l-2 border-l-emerald-500/70' : ''}`}>
+                        <td className="px-3 py-2.5" title={d.is_customer ? 'Already a BetterCricket subscriber' : undefined}>
                           {d.title}
-                          {d.is_customer && (
-                            <span className="ml-1.5 text-[9px] font-mono uppercase tracking-wide px-1 py-px rounded bg-emerald-500/12 text-emerald-300">customer</span>
-                          )}
                         </td>
                         <td className="px-3 py-2.5 text-pb-faint">{d.point_of_contact_name || '—'}</td>
                         <td className="px-3 py-2.5 text-pb-faint">{stageName(d.stage_id)}</td>
