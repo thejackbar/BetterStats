@@ -350,8 +350,15 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               scattered across the grid and a separate section further down. */}
           <div className="pb-card px-3 py-3 space-y-3">
             <div className="flex flex-wrap gap-3 items-start">
-              <Field label="Value ($)" width={FIELD_W.value}>
-                <NumberInput defaultValue={centsToMoneyInput(deal.value_cents)} min={0}
+              <Field label="Value ($)" width={FIELD_W.value}
+                hint={(deal.discount_amount_cents || deal.discount_percent)
+                  ? `After discount: ${money(deal.effective_value_cents ?? deal.value_cents)}` : undefined}>
+                {/* key forces the uncontrolled input to remount (and pick up
+                    the fresh defaultValue) whenever the server recomputes
+                    value_cents — e.g. toggling a Product Interest chip —
+                    otherwise the DOM node keeps showing its stale initial
+                    value even though `deal` itself has updated. */}
+                <NumberInput key={deal.value_cents} defaultValue={centsToMoneyInput(deal.value_cents)} min={0}
                   onBlur={e => patch({ value_cents: moneyToCents(e.target.value) })} />
               </Field>
               <Field label="Probability override (%)" hint={`Default: ${deal.effective_probability ?? '—'}%`} width={FIELD_W.probability}>
