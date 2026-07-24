@@ -3646,6 +3646,17 @@ async def lifespan(app: FastAPI):
             for _col in _cols:
                 await conn.execute(text(f"ALTER TABLE {_tbl} ALTER COLUMN {_col} DROP NOT NULL"))
 
+    # Migration 188: a super admin deleting a default platform-pipeline stage
+    # (e.g. "Self-Serve Trial") must stay deleted — without this, the very
+    # next read re-created it (the reconciliation pass that backfills a
+    # newly-introduced default stage onto an old pipeline can't otherwise
+    # tell "never existed" apart from "deliberately removed").
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE crm_pipelines ADD COLUMN IF NOT EXISTS removed_stage_keys "
+            "JSONB NOT NULL DEFAULT '[]'"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

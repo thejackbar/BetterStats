@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, func, update as sa_update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -169,6 +170,7 @@ async def _reconcile_platform_stages(session: AsyncSession, pipeline: CrmPipelin
     reconciled. MUST run before any CrmDeal is loaded into this session (the
     bulk stage_id reassignment below bypasses the ORM identity map)."""
     by_key = {s.key: s for s in pipeline.stages}
+    removed = set(pipeline.removed_stage_keys or [])
     changed = False
 
     for old_key, new_key in _PLATFORM_STAGE_RENAMES.items():
@@ -204,6 +206,10 @@ async def _reconcile_platform_stages(session: AsyncSession, pipeline: CrmPipelin
         changed = True
 
     for position, (key, name, prob, is_won, is_lost) in enumerate(PLATFORM_DEFAULT_STAGES):
+        if key in removed:
+            # A super admin deliberately deleted this default stage — never
+            # auto-recreate it just because it's now "missing" from the set.
+            continue
         stage = by_key.get(key)
         if stage is None:
             stage = CrmStage(pipeline_id=pipeline.id, key=key, name=name, position=position,
@@ -220,27 +226,55 @@ async def _reconcile_platform_stages(session: AsyncSession, pipeline: CrmPipelin
     return changed
 
 
-async def ensure_platform_pipeline(session: AsyncSession) -> CrmPipeline:
+async def ensure_platform_pipeline(session: AsyncSession, _retrying: bool = False) -> CrmPipeline:
     """Get-or-create BetterCricket's own sales pipeline. Exactly one always
-    exists — unlike the club scope, this one is NOT optional."""
+    exists — unlike the club scope, this one is NOT optional.
+
+    This runs on nearly every platform CRM read endpoint, so under real
+    concurrent traffic more than one in-flight request can decide "a default
+    stage is missing here, let me add it" at the same moment — right after
+    one is deleted (the reconciliation loop backfills anything in
+    PLATFORM_DEFAULT_STAGES it doesn't find), or the first time a brand-new
+    default stage ships. The loser of that race hits a UNIQUE
+    (pipeline_id, key) violation on flush/commit — previously an unhandled
+    500 on what looks like an ordinary read. Caught once here: roll back,
+    then re-fetch — the winner's write already committed, so the retry just
+    sees a complete, correct pipeline with nothing left to reconcile.
+    """
     stmt = select(CrmPipeline).options(selectinload(CrmPipeline.stages)).where(
         CrmPipeline.scope == SCOPE_PLATFORM, CrmPipeline.organisation_id.is_(None),
         CrmPipeline.is_default.is_(True))
     pipeline = (await session.execute(stmt)).scalars().first()
     if pipeline is not None:
-        if await _reconcile_platform_stages(session, pipeline):
-            await session.commit()
-            await session.refresh(pipeline, attribute_names=["stages"])
+        try:
+            if await _reconcile_platform_stages(session, pipeline):
+                await session.commit()
+                await session.refresh(pipeline, attribute_names=["stages"])
+        except IntegrityError:
+            await session.rollback()
+            if _retrying:
+                raise
+            return await ensure_platform_pipeline(session, _retrying=True)
         return pipeline
     pipeline = CrmPipeline(scope=SCOPE_PLATFORM, organisation_id=None, name="BetterCricket Sales", is_default=True)
     session.add(pipeline)
-    await session.flush()
-    for position, (key, name, prob, is_won, is_lost) in enumerate(PLATFORM_DEFAULT_STAGES):
-        session.add(CrmStage(
-            pipeline_id=pipeline.id, key=key, name=name, position=position,
-            default_probability=prob, is_won=is_won, is_lost=is_lost,
-        ))
-    await session.flush()
+    try:
+        await session.flush()
+        for position, (key, name, prob, is_won, is_lost) in enumerate(PLATFORM_DEFAULT_STAGES):
+            session.add(CrmStage(
+                pipeline_id=pipeline.id, key=key, name=name, position=position,
+                default_probability=prob, is_won=is_won, is_lost=is_lost,
+            ))
+        # Commit here — this branch used to rely on the CALLER to commit,
+        # but several read-only endpoints never do, so a brand-new platform
+        # pipeline could be flushed, returned for that one response, and then
+        # silently rolled back when the request's session closed.
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        if _retrying:
+            raise
+        return await ensure_platform_pipeline(session, _retrying=True)
     await session.refresh(pipeline, attribute_names=["stages"])
     return pipeline
 
@@ -389,6 +423,16 @@ async def delete_stage(session: AsyncSession, stage: CrmStage) -> None:
     )).scalar_one()
     if in_use:
         raise ValueError("This stage still has records in it — move or archive them first")
+    # If this is one of the platform pipeline's own PLATFORM_DEFAULT_STAGES,
+    # record its key so _reconcile_platform_stages doesn't silently recreate
+    # it on the very next read (a super admin deleting "Self-Serve Trial"
+    # otherwise saw it reappear immediately).
+    pipeline = await session.get(CrmPipeline, stage.pipeline_id)
+    if pipeline is not None and pipeline.scope == SCOPE_PLATFORM:
+        removed = list(pipeline.removed_stage_keys or [])
+        if stage.key not in removed:
+            removed.append(stage.key)
+            pipeline.removed_stage_keys = removed
     await session.delete(stage)
 
 

@@ -3560,6 +3560,13 @@ class CrmPipeline(Base):
     # rather than deleting, so its historical deals survive re-adding it later.
     template_key = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Migration 188: default-stage keys (see services/crm.py's
+    # PLATFORM_DEFAULT_STAGES) a super admin has deliberately deleted from
+    # this pipeline — the reconciliation pass that backfills a newly
+    # introduced default stage onto an old pipeline checks this list first,
+    # so a deliberate delete stays deleted instead of reappearing on the next
+    # read.
+    removed_stage_keys = Column(JSONB, nullable=False, server_default="[]", default=list)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     stages = relationship("CrmStage", cascade="all, delete-orphan", passive_deletes=True,
