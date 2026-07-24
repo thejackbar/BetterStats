@@ -2484,6 +2484,45 @@ scoped to just the scorecards that came through the photo-upload flow.
   `is_photo_upload`/`created_by_name` join, and the `exclude_id` fix to the
   duplicate check, both before shipping.
 
+## Scorecard reader — multi-format, PDFs, fielding column, eval set (v8.80.0, Jul 2026)
+
+`scorecard_ocr.py` (the Upload Historical Scorecard reader) taught about more than
+the WACA-style scorebook, prompted by a Toowoomba club's archive (1976 scorebook
+pages + a 1993 TCA "Official Summary of Match" form). Full how-to-improve-it doc:
+**`docs/scorecard-reader-eval.md`**.
+
+- **Prompt knows three format families**: the two-page scorebook, the association
+  match-summary form (one club's side only + opposition as a bare "10/111" totals
+  line → an innings with totals and an EMPTY batting list), and "anything else,
+  note the layout in read_notes". Also warned about: tally strokes in extras
+  boxes (the numeral total column wins), wickets-first "7/164" notation,
+  two-digit years → 1900s, two-day matches (first day = match.date), and
+  **pre-1980 Australian 8-ball overs** → new `match.balls_per_over` (reconcile's
+  overs check + `overs_to_balls(o, balls_per_over)` honour it; DB storage is
+  unchanged — overs stay as written on the card).
+- **Result inference is the ONE allowed deviation from transcribe-only**: blank
+  result box + completed innings that decide it → model may fill `result` and
+  set `result_inferred`, which the review screen flags ("worked out from the
+  scores, check it"). Everything else stays faithful-transcription-only.
+- **New `innings[].fielding` section** ({name, catches, catches_wk, stumpings,
+  run_outs}) for cards that credit fielders separately from dismissals (OWN
+  CATCHES column, W/K = keeper). Attached to the innings where that side was
+  FIELDING. The extract endpoint adds these names to the roster-suggestion set;
+  the review screen shows them as an editable, player-matchable table, and
+  import merges them with the dismissal-derived fielding by **max per stat** so
+  the same catch seen both ways counts once. Re-editing a saved upload seeds
+  this table from the saved `fielding_stats` so a re-save can't drop
+  column-sourced fielding.
+- **PDF uploads work end to end**: `guess_media_type` recognises `.pdf`,
+  `extract_scorecard` sends PDFs as native `document` blocks (no rasterising;
+  anthropic 0.40.0 passes the dict through), the file input accepts them and
+  previews show a file chip. Mind the API's ~32MB request cap for huge scans.
+- **Eval harness** `python -m app.scripts.scorecard_eval <cases_dir>`: local
+  (never committed) case folders of scans + a verified `expected.json`; only
+  keys present in the truth file are scored, rows matched by normalised name.
+  Run before/after any prompt/schema/model change to the reader — that's the
+  training loop, since the model itself never learns from uploads.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

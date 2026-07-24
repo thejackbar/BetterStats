@@ -297,6 +297,11 @@ export default function AdminScorecardUpload() {
   // Catches behind the stumps, per player id. The one fielding figure that can't be
   // read off a dismissal ('c wk' isn't always marked); everything else is derived.
   const [wkByPid, setWkByPid] = useState({})
+  // Fielding read straight off the card (an OWN CATCHES column on a match-summary
+  // form) rather than derived from dismissals. Editable rows the admin matches to
+  // the roster — merged with the dismissal-derived rows at import (max per stat, so
+  // the two sources never double-count the same catch).
+  const [fieldingExtra, setFieldingExtra] = useState([])
   const [warnings, setWarnings] = useState([])
 
   const [form, setForm] = useState({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
@@ -361,6 +366,15 @@ export default function AdminScorecardUpload() {
       setMatch(payload.match || {})
       setInnings(payload.innings || [])
       setWkByPid(Object.fromEntries((full.fielding_stats || []).map(f => [f.player_id, f.catches_wk || 0])))
+      // Re-seed the card-read fielding from what was saved, so a re-save can't drop
+      // fielding that originally came off an own-catches column (the dismissal-derived
+      // rows alone wouldn't cover it, and import merges by max per stat).
+      setFieldingExtra((full.fielding_stats || []).map(f => ({
+        name: (allPlayers.find(p => p.id === f.player_id)?.name) || '',
+        player_id: f.player_id,
+        catches: f.catches || 0, catches_wk: f.catches_wk || 0,
+        stumpings: f.stumpings || 0, run_outs: f.run_outs || 0,
+      })))
       setWarnings([])
       setForm({
         season_id: full.season_id || '',
@@ -399,7 +413,11 @@ export default function AdminScorecardUpload() {
   function onFiles(list) {
     const arr = Array.from(list || [])
     setFiles(arr)
-    setPreviews(arr.map(f => ({ name: f.name, url: URL.createObjectURL(f) })))
+    setPreviews(arr.map(f => ({
+      name: f.name,
+      url: URL.createObjectURL(f),
+      isPdf: f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''),
+    })))
   }
 
   const runExtract = async () => {
@@ -421,6 +439,17 @@ export default function AdminScorecardUpload() {
       }))
       setInnings(inns)
       setWkByPid({})
+      // Fielding the card lists separately from dismissals (an own-catches column):
+      // ours is whatever's attached to an innings where we FIELDED (not batting).
+      setFieldingExtra((data.innings || [])
+        .filter(inn => !inn.is_our_team)
+        .flatMap(inn => inn.fielding || [])
+        .map(f => ({
+          name: f.name || '',
+          player_id: sugg[f.name] || '',
+          catches: f.catches ?? '', catches_wk: f.catches_wk ?? '',
+          stumpings: f.stumpings ?? '', run_outs: f.run_outs ?? '',
+        })))
 
       // Best-effort defaults: date, opponent name, season.
       const oppName = data.match?.our_team
@@ -471,6 +500,7 @@ export default function AdminScorecardUpload() {
 
   // ─── immutable editors ───────────────────────────────────────────────────────
   const editInn = (idx, patch) => setInnings(prev => prev.map((x, i) => i === idx ? { ...x, ...patch } : x))
+  const editFieldingExtra = (idx, patch) => setFieldingExtra(prev => prev.map((x, i) => i === idx ? { ...x, ...patch } : x))
   const editRow = (innIdx, kind, rowIdx, patch) => setInnings(prev => prev.map((x, i) => {
     if (i !== innIdx) return x
     const rows = (x[kind] || []).map((r, j) => j === rowIdx ? { ...r, ...patch } : r)
@@ -580,9 +610,24 @@ export default function AdminScorecardUpload() {
         }
       }
     }
-    const fieldingRows = fieldingDerived
+    // Merge dismissal-derived fielding with rows read off the card's own-catches
+    // column: max per stat, so a catch visible both as a dismissal and in the column
+    // counts once. wk catches come from the review input, else the card's W/K marker.
+    const byPid = {}
+    for (const f of fieldingDerived) {
+      byPid[f.player_id] = { player_id: f.player_id, catches: f.catches, catches_wk: 0, run_outs: f.run_outs, stumpings: f.stumpings }
+    }
+    for (const f of fieldingExtra) {
+      if (!f.player_id) continue
+      const row = byPid[f.player_id] || (byPid[f.player_id] = { player_id: f.player_id, catches: 0, catches_wk: 0, run_outs: 0, stumpings: 0 })
+      row.catches = Math.max(row.catches, num(f.catches) || 0)
+      row.catches_wk = Math.max(row.catches_wk, num(f.catches_wk) || 0)
+      row.run_outs = Math.max(row.run_outs, num(f.run_outs) || 0)
+      row.stumpings = Math.max(row.stumpings, num(f.stumpings) || 0)
+    }
+    const fieldingRows = Object.values(byPid)
       .map(f => {
-        const wk = Math.min(num(wkByPid[f.player_id]) || 0, f.catches)
+        const wk = Math.min(Math.max(num(wkByPid[f.player_id]) || 0, f.catches_wk), f.catches)
         return { player_id: f.player_id, catches: f.catches, catches_wk: wk, run_outs: f.run_outs, stumpings: f.stumpings }
       })
       .filter(f => f.player_id && (f.catches || f.catches_wk || f.run_outs || f.stumpings))
@@ -651,16 +696,22 @@ export default function AdminScorecardUpload() {
 
         {step === 'upload' && (
           <div className="bg-pb-surface border pb-hairline rounded-lg p-5 max-w-2xl">
-            <label className={LABEL_CLS}>Scorecard photo(s)</label>
-            <input type="file" accept="image/*" multiple onChange={e => onFiles(e.target.files)} className="block text-sm text-pb-text" />
+            <label className={LABEL_CLS}>Scorecard photo(s) or PDF scan</label>
+            <input type="file" accept="image/*,application/pdf,.pdf" multiple onChange={e => onFiles(e.target.files)} className="block text-sm text-pb-text" />
             <p className="text-xs text-pb-faint mt-2">
-              Add every page of the one match. A typical match is two photos, one innings each.
+              Add every page of the one match. A typical match is two photos, one innings
+              each. A PDF with all the pages of one match works too.
             </p>
             {previews.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4">
-                {previews.map((p, i) => (
-                  <img key={i} src={p.url} alt={p.name} className="h-28 w-auto rounded border pb-hairline object-cover" />
-                ))}
+                {previews.map((p, i) => p.isPdf
+                  ? (
+                    <div key={i} className="h-28 px-4 flex flex-col items-center justify-center rounded border pb-hairline bg-pb-surface2 text-center">
+                      <span className="text-2xl">📄</span>
+                      <span className="text-[10px] text-pb-faint mt-1 max-w-[120px] truncate" title={p.name}>{p.name}</span>
+                    </div>
+                  )
+                  : <img key={i} src={p.url} alt={p.name} className="h-28 w-auto rounded border pb-hairline object-cover" />)}
               </div>
             )}
             <div className="mt-5">
@@ -711,6 +762,13 @@ export default function AdminScorecardUpload() {
                 </ul>
               </div>
             )}
+            {match.balls_per_over === 8 && (
+              <div className="px-4 py-3 rounded bg-pb-surface2 border pb-hairline text-xs text-pb-faint">
+                <span className="font-semibold text-pb-text">8-ball overs: </span>
+                this card is from the 8-ball-over era (pre-1980 Australia). Overs are kept
+                as written on the card.
+              </div>
+            )}
             {extract?.read_notes && (
               <div className="px-4 py-3 rounded bg-pb-surface2 border pb-hairline text-xs text-pb-faint">
                 <span className="font-semibold text-pb-text">Reader notes: </span>{extract.read_notes}
@@ -756,6 +814,11 @@ export default function AdminScorecardUpload() {
                 <div>
                   <label className={LABEL_CLS}>Result</label>
                   <input className={INPUT_CLS} value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))} />
+                  {match.result_inferred && (
+                    <p className="text-[11px] text-amber-300/90 mt-1">
+                      Not written on the card — the reader worked this out from the scores. Check it.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className={LABEL_CLS}>Winning team</label>
@@ -932,6 +995,39 @@ export default function AdminScorecardUpload() {
                     </tbody>
                   </table>
                 )}
+
+              {fieldingExtra.length > 0 && (
+                <div className="mt-5">
+                  <div className="text-[10px] font-mono text-pb-faint mb-1">FROM THE CARD'S OWN-CATCHES COLUMN</div>
+                  <p className="text-xs text-pb-faint mb-2">
+                    This card credits fielders separately from the dismissals (a summary form's catches column).
+                    Match each name to a player; a player in both lists counts once, whichever reading is higher.
+                  </p>
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b pb-hairline">
+                      <th className={TH}>Name on card</th><th className={TH}>Our player</th>
+                      <th className={TH}>Catches</th><th className={TH}>of which (wk)</th>
+                      <th className={TH}>Run outs</th><th className={TH}>Stumpings</th>
+                    </tr></thead>
+                    <tbody>
+                      {fieldingExtra.map((f, fi) => (
+                        <tr key={fi} className="border-b pb-hairline/40">
+                          <td className={TD}>
+                            <input className={SMALL_INPUT} value={f.name || ''} onChange={e => editFieldingExtra(fi, { name: e.target.value })} />
+                          </td>
+                          <td className={`${TD} min-w-[150px]`}>
+                            <PlayerSelect value={f.player_id} roster={roster} cardName={f.name} onChange={v => editFieldingExtra(fi, { player_id: v })} />
+                          </td>
+                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches ?? ''} onChange={e => editFieldingExtra(fi, { catches: e.target.value })} /></td>
+                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches_wk ?? ''} onChange={e => editFieldingExtra(fi, { catches_wk: e.target.value })} /></td>
+                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.run_outs ?? ''} onChange={e => editFieldingExtra(fi, { run_outs: e.target.value })} /></td>
+                          <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.stumpings ?? ''} onChange={e => editFieldingExtra(fi, { stumpings: e.target.value })} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
@@ -950,7 +1046,7 @@ export default function AdminScorecardUpload() {
             <div className="flex gap-3">
               {createdId && <Link to={`/games/${createdId}`} className={BTN_PRIMARY}>View match</Link>}
               <button className={BTN_SECONDARY} onClick={() => {
-                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setWarnings([]); setCreatedId(null); setEditingId(null)
+                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setFieldingExtra([]); setWarnings([]); setCreatedId(null); setEditingId(null)
                 setForm({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
               }}>{editingId ? 'Back to list' : 'Upload another'}</button>
             </div>

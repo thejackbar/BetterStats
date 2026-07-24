@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Handwriting is the hard part, so default to the most capable model for accuracy.
 # Tunable down to sonnet for cheaper/faster at some transcription-quality cost.
 MODEL = "claude-opus-4-8"
-MAX_TOKENS = 8000
+MAX_TOKENS = 12000
 MAX_IMAGES = 8
 
 # USD per million tokens for the extraction model (Opus 4.8) — used only to log an
@@ -38,13 +38,28 @@ _PRICE_INPUT_PER_MTOK = 5.00
 _PRICE_OUTPUT_PER_MTOK = 25.00
 
 _ALLOWED_MEDIA = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_PDF_MEDIA = "application/pdf"
 
 _SYSTEM = (
-    "You are a meticulous cricket scorer digitising a photographed club scorecard. "
-    "Transcribe EXACTLY what is written on the card. Do not compute, average or infer "
-    "numbers that aren't there — if a value is blank or unreadable, leave it null. "
-    "These are standard Australian grassroots scorebooks (the two-page WACA-style "
-    "book). Read them with a scorer's eye:\n"
+    "You are a meticulous cricket scorer digitising a photographed or scanned club "
+    "scorecard. Transcribe EXACTLY what is written on the card. Do not compute, average "
+    "or infer numbers that aren't there — if a value is blank or unreadable, leave it "
+    "null. The one exception is the match result (see below).\n"
+    "Club scorecards come in many layouts. The common families:\n"
+    "1. The Australian scorebook (the two-page WACA-style book): one team's innings per "
+    "page, with a BATSMAN block, a fall-of-wickets strip, a progress-score grid and a "
+    "BOWLING ANALYSIS grid.\n"
+    "2. An association OFFICIAL MATCH SUMMARY form: a single page summarising the whole "
+    "match from ONE club's side. Their batting card (name / how out / score), their OWN "
+    "BOWLERS with figures that are often only Wickets and Runs (no overs or maidens — "
+    "leave overs null), an OWN CATCHES column crediting their fielders (the wicketkeeper "
+    "marked W/K), sometimes a STUMPINGS BY WICKET-KEEPER box, extras, and the opposition "
+    "given only as a totals line (e.g. OPPONENTS' TOTALS 10/111). Record the opposition "
+    "as an innings with the totals filled in and an EMPTY batting list — never invent "
+    "opposition batters that aren't on the page.\n"
+    "3. Typed/printed sheets and other hand-ruled layouts: read whatever is present into "
+    "the same shape and note the layout in read_notes.\n"
+    "Read with a scorer's eye:\n"
     "- The BATSMAN block lists each batter, then HOW OUT (Caught / Bowled / LBW / Run "
     "Out / Stumped / Not Out), the BOWLER who got them, and a TOTAL column which is the "
     "runs that batter scored. The marks next to the name are the scoring strokes, one "
@@ -56,22 +71,43 @@ _SYSTEM = (
     "row into fall_of_wickets, including stand and the time, so partnerships can be "
     "worked out.\n"
     "- The BOWLING analysis (lower grid) lists each bowler with their over-by-over marks "
-    "and, on the right, their figures: Maidens, Wides, No Balls, Wickets, Runs. Work out "
-    "each bowler's overs from how many over-columns hold their marks: a full column is one "
-    "over of six balls, and a part-filled last column is that many balls (eight full "
-    "columns then two balls in the ninth is 8.2 overs). A column of all dots with no runs "
-    "is a maiden.\n"
-    "- Extras are recorded as No Balls, Wides, Byes and Leg Byes.\n"
+    "and, on the right, their figures: Maidens, Wides, No Balls, Wickets, Runs. When the "
+    "figures are written, use them. Otherwise work out each bowler's overs from how many "
+    "over-columns hold their marks: a full column is one over, and a part-filled last "
+    "column is that many balls. A column of all dots with no runs is a maiden.\n"
+    "- BALLS PER OVER: Australian cricket used EIGHT-ball overs before the 1979/80 "
+    "season. On a pre-1980 card, check how many ball cells one over-column of the "
+    "bowling grid holds and set match.balls_per_over (8 or 6); leave it null if you "
+    "can't tell. Modern cards are 6.\n"
+    "- Extras are recorded as No Balls, Wides, Byes and Leg Byes. Extras boxes usually "
+    "hold TALLY STROKES with the true number in a separate total column at the right "
+    "edge — two strokes '11' means 2, not eleven. Always prefer the written numeral "
+    "total over counting strokes.\n"
+    "- Australian cards write team scores wickets-first: '7/164' is 164 runs for 7 "
+    "wickets, and '10/111' is 111 all out.\n"
     "- Common shorthand: c = caught, b = bowled, lbw, st = stumped, ro/run out, "
-    "ct = caught, '†' or (wk) = the wicketkeeper, * = not out / captain.\n"
+    "ct = caught, '†' or (wk) or W/K = the wicketkeeper, * = not out / captain.\n"
     "- For every dismissal record the mode in how_out, the wicket-taking bowler in "
     "bowler, and for a catch or stumping the catcher in fielder, AND write the full "
     "dismissal_text the way a scorecard reads it: 'c Aspinall b Raneri', 'c & b Raneri', "
     "'st Brown b Raneri', 'lbw b Aspinall', 'b Browne', 'run out (Edwards)'. This lets the "
     "bowler and the catcher be credited.\n"
-    "A card usually shows ONE team's innings per page, so several photos are usually the "
-    "two innings of ONE match — combine them into one match with multiple innings, do "
-    "not invent a second match.\n"
+    "- When the card lists catches/stumpings SEPARATELY from dismissals (an OWN CATCHES "
+    "column), record them in the innings' `fielding` list — they belong on the innings "
+    "where that side was FIELDING (i.e. the other team's batting innings). Put keeper "
+    "catches in catches_wk as well as catches.\n"
+    "- DATES: old cards write two-digit years — resolve to the sensible historical "
+    "century ('2.10.76' is 1976-10-02, never 2076; day first, Australian style). A "
+    "two-day match shows two dates: use the FIRST day as match.date and mention the "
+    "second in read_notes.\n"
+    "- RESULT: transcribe the result box as written. If it is blank but the completed "
+    "innings totals clearly decide the match (including on first innings in a drawn "
+    "two-innings game), you may state the result and winning_team — then set "
+    "result_inferred true so the reviewer knows to check it.\n"
+    "A card usually shows ONE team's innings per page, so several photos/pages are "
+    "usually the innings of ONE match — combine them into one match with multiple "
+    "innings, do not invent a second match. A partial innings (a second innings barely "
+    "started before time) is still a real innings: record what's there.\n"
     "You will be told which club is OURS. For each innings set is_our_team to whether the "
     "batting side is that club. The bowling rows of an innings belong to the OTHER side "
     "(the team that was fielding). Record both teams in full. "
@@ -111,6 +147,18 @@ _BOWL = {
     "required": ["name"],
 }
 
+_FIELD = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "description": "Fielder's name exactly as written."},
+        "catches": {"type": ["integer", "null"], "description": "Catches taken (including any keeper catches)."},
+        "catches_wk": {"type": ["integer", "null"], "description": "Of those catches, how many as wicketkeeper (marked W/K or wk)."},
+        "stumpings": {"type": ["integer", "null"]},
+        "run_outs": {"type": ["integer", "null"]},
+    },
+    "required": ["name"],
+}
+
 _FOW = {
     "type": "object",
     "properties": {
@@ -142,9 +190,14 @@ _INNINGS = {
                 "total": {"type": ["integer", "null"]},
             },
         },
-        "batting": {"type": "array", "items": _BAT},
+        "batting": {"type": "array", "items": _BAT, "description": "Every batter on the card. EMPTY for a totals-only opposition innings (a summary form's OPPONENTS' TOTALS line)."},
         "bowling": {"type": "array", "items": _BOWL},
         "fall_of_wickets": {"type": "array", "items": _FOW},
+        "fielding": {
+            "type": "array",
+            "items": _FIELD,
+            "description": "Fielding credits for the side that was FIELDING during this innings, when the card lists them separately from dismissals (an OWN CATCHES column, a stumpings box). Leave empty when fielders are only named inside dismissals.",
+        },
     },
     "required": ["innings_number", "batting_team", "is_our_team", "batting", "bowling"],
 }
@@ -165,8 +218,10 @@ _TOOL = {
                     "away_team": {"type": ["string", "null"]},
                     "our_team": {"type": ["string", "null"], "description": "Which of the two clubs is OURS."},
                     "toss_won_by": {"type": ["string", "null"]},
-                    "result": {"type": ["string", "null"], "description": "Result text if shown."},
+                    "result": {"type": ["string", "null"], "description": "Result text as written; or your inferred result when the box is blank but the scores decide it (set result_inferred)."},
                     "winning_team": {"type": ["string", "null"]},
+                    "result_inferred": {"type": "boolean", "default": False, "description": "True when no result is written on the card and you deduced it from the innings totals."},
+                    "balls_per_over": {"type": ["integer", "null"], "description": "Balls per over on this card: 8 for pre-1980 Australian cards (check the bowling grid's cells per over), 6 for modern cards, null when you can't tell."},
                 },
             },
             "innings": {"type": "array", "items": _INNINGS},
@@ -179,9 +234,11 @@ _TOOL = {
 
 def guess_media_type(content_type: str | None, filename: str | None) -> str:
     ct = (content_type or "").lower().split(";")[0].strip()
-    if ct in _ALLOWED_MEDIA:
+    if ct in _ALLOWED_MEDIA or ct == _PDF_MEDIA:
         return ct
     name = (filename or "").lower()
+    if name.endswith(".pdf"):
+        return _PDF_MEDIA
     if name.endswith(".png"):
         return "image/png"
     if name.endswith(".webp"):
@@ -202,8 +259,10 @@ def _num(v):
     return int(f) if f == int(f) else f
 
 
-def overs_to_balls(o):
-    """Cricket-notation overs (10.2 = 10 overs 2 balls) → total balls. None-safe."""
+def overs_to_balls(o, balls_per_over: int = 6):
+    """Cricket-notation overs (10.2 = 10 overs 2 balls) → total balls. None-safe.
+
+    balls_per_over matters for pre-1980 Australian cards (8-ball overs)."""
     if o is None:
         return None
     try:
@@ -211,7 +270,7 @@ def overs_to_balls(o):
     except (TypeError, ValueError):
         return None
     full = int(o)
-    return full * 6 + round((o - full) * 10)
+    return full * balls_per_over + round((o - full) * 10)
 
 
 def reconcile(payload: dict) -> list[str]:
@@ -222,6 +281,7 @@ def reconcile(payload: dict) -> list[str]:
     """
     warnings: list[str] = []
     _DISMISSED_NOT = {"not out", "did not bat", "dnb", "absent", "", None}
+    bpo = (payload.get("match") or {}).get("balls_per_over") or 6
     for inn in (payload.get("innings") or []):
         n = inn.get("innings_number")
         team = inn.get("batting_team") or f"innings {n}"
@@ -236,7 +296,9 @@ def reconcile(payload: dict) -> list[str]:
             parts = [extras.get(k) for k in ("byes", "leg_byes", "wides", "no_balls", "penalty")]
             ex_total = sum(p for p in parts if p) if any(p is not None for p in parts) else None
         total = inn.get("total_runs")
-        if total is not None:
+        # A totals-only innings (a summary form's opposition line) has no batting rows
+        # to add up — skip the batting-sum check rather than flag a bogus mismatch.
+        if total is not None and bats:
             expected = run_sum + (ex_total or 0)
             if expected != total:
                 warnings.append(
@@ -279,14 +341,23 @@ def reconcile(payload: dict) -> list[str]:
                 )
 
         # Bowlers' overs should add up to the innings, when the innings overs are shown.
-        inn_balls = overs_to_balls(inn.get("overs"))
-        bowl_balls = [overs_to_balls(b.get("overs")) for b in bowls]
+        inn_balls = overs_to_balls(inn.get("overs"), bpo)
+        bowl_balls = [overs_to_balls(b.get("overs"), bpo) for b in bowls]
         if inn_balls and any(x is not None for x in bowl_balls):
             tot = sum(x for x in bowl_balls if x is not None)
-            if abs(tot - inn_balls) > 6:
+            if abs(tot - inn_balls) > bpo:
                 warnings.append(
-                    f"{label}: bowlers' overs add up to {tot // 6}.{tot % 6} but the innings is "
-                    f"{inn_balls // 6}.{inn_balls % 6} overs."
+                    f"{label}: bowlers' overs add up to {tot // bpo}.{tot % bpo} but the innings is "
+                    f"{inn_balls // bpo}.{inn_balls % bpo} overs."
+                )
+
+        # An OWN CATCHES column can't credit a keeper with more wk catches than catches.
+        for f in (inn.get("fielding") or []):
+            c, wk = f.get("catches"), f.get("catches_wk")
+            if c is not None and wk is not None and wk > c:
+                warnings.append(
+                    f"{label}: {f.get('name') or 'a fielder'} is shown with {wk} keeper catches "
+                    f"but only {c} catches in total."
                 )
     return warnings
 
@@ -334,6 +405,13 @@ def _normalise(data: dict) -> dict:
                 "batter_out": (f.get("batter_out") or None),
                 "stand": _num(f.get("stand")),
             } for f in (inn.get("fall_of_wickets") or []) if f.get("wicket") is not None],
+            "fielding": [{
+                "name": (f.get("name") or "").strip(),
+                "catches": _num(f.get("catches")),
+                "catches_wk": _num(f.get("catches_wk")),
+                "stumpings": _num(f.get("stumpings")),
+                "run_outs": _num(f.get("run_outs")),
+            } for f in (inn.get("fielding") or []) if (f.get("name") or "").strip()],
         })
     return {
         "match": {
@@ -346,6 +424,8 @@ def _normalise(data: dict) -> dict:
             "toss_won_by": match.get("toss_won_by") or None,
             "result": match.get("result") or None,
             "winning_team": match.get("winning_team") or None,
+            "result_inferred": bool(match.get("result_inferred")),
+            "balls_per_over": _num(match.get("balls_per_over")),
         },
         "innings": out_innings,
         # read_notes is the one field here that's genuinely the model's own
@@ -357,10 +437,12 @@ def _normalise(data: dict) -> dict:
 
 
 async def extract_scorecard(images: list[tuple[bytes, str]], our_club_name: str) -> dict:
-    """Read scorecard photo(s) and return a structured both-team scorecard.
+    """Read scorecard photo(s)/PDF scan(s) and return a structured both-team scorecard.
 
-    images: list of (raw_bytes, media_type). our_club_name helps the model decide which
-    side is ours. Returns {available: True, match, innings, warnings, read_notes} or
+    images: list of (raw_bytes, media_type) — a media_type of application/pdf goes up as
+    a document block (the model reads PDF pages natively), everything else as an image.
+    our_club_name helps the model decide which side is ours. Returns
+    {available: True, match, innings, warnings, read_notes} or
     {available: False, message} when the model can't be reached.
     """
     if not settings.anthropic_api_key:
@@ -376,14 +458,20 @@ async def extract_scorecard(images: list[tuple[bytes, str]], our_club_name: str)
 
     content: list = []
     for raw, media_type in images[:MAX_IMAGES]:
-        content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(raw).decode()},
-        })
+        if media_type == _PDF_MEDIA:
+            content.append({
+                "type": "document",
+                "source": {"type": "base64", "media_type": _PDF_MEDIA, "data": base64.b64encode(raw).decode()},
+            })
+        else:
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(raw).decode()},
+            })
     content.append({
         "type": "text",
         "text": (
-            f"Our club is \"{our_club_name}\". Transcribe these scorecard photo(s) into one match. "
+            f"Our club is \"{our_club_name}\". Transcribe these scorecard photo(s)/page(s) into one match. "
             "Set is_our_team on each innings accordingly, record both teams in full, and call "
             "record_scorecard once."
         ),

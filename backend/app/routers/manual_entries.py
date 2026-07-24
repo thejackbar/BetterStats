@@ -1234,7 +1234,7 @@ async def extract_scorecard_upload(
         if raw:
             images.append((raw, scorecard_ocr.guess_media_type(f.content_type, f.filename)))
     if not images:
-        raise HTTPException(status_code=422, detail="No readable images were uploaded.")
+        raise HTTPException(status_code=422, detail="No readable images or PDFs were uploaded.")
 
     result = await scorecard_ocr.extract_scorecard(images, club.name)
     if not result.get("available"):
@@ -1244,8 +1244,9 @@ async def extract_scorecard_upload(
     index = _build_match_index(players)
 
     # Suggest roster matches only for names that should be OURS: our batters (our
-    # innings), our bowlers (the opposition's batting innings) and the fielders named
-    # in opposition dismissals. Opposition batters/bowlers stay free text.
+    # innings), our bowlers (the opposition's batting innings), the fielders named
+    # in opposition dismissals, and our fielders from an own-catches column (attached
+    # to the innings where we fielded). Opposition batters/bowlers stay free text.
     our_names: set[str] = set()
     for inn in (result.get("innings") or []):
         if inn.get("is_our_team"):
@@ -1259,6 +1260,9 @@ async def extract_scorecard_upload(
             for b in inn.get("batting") or []:
                 if b.get("fielder"):
                     our_names.add(b["fielder"])
+            for f in inn.get("fielding") or []:
+                if f.get("name"):
+                    our_names.add(f["name"])
 
     result["suggestions"] = {nm: (str(m.id) if (m := _suggest_player(nm, index)) else "") for nm in our_names}
     result["roster"] = [
