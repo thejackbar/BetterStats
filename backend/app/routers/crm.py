@@ -50,6 +50,8 @@ class DealCreate(BaseModel):
     expected_close_date: Optional[date] = None
     owner_user_id: Optional[str] = None
     marketing_club_id: Optional[str] = None  # platform scope only
+    onboarding_method: Optional[str] = None
+    lead_source: Optional[str] = None
 
 
 class DealUpdate(BaseModel):
@@ -60,6 +62,11 @@ class DealUpdate(BaseModel):
     module_keys: Optional[List[str]] = None
     expected_close_date: Optional[date] = None
     owner_user_id: Optional[str] = None
+    onboarding_method: Optional[str] = None
+    lead_source: Optional[str] = None
+    discount_amount_cents: Optional[int] = None
+    discount_percent: Optional[int] = None
+    discount_reason: Optional[str] = None
 
 
 class StageMoveBody(BaseModel):
@@ -167,7 +174,17 @@ async def _serialize_deal(db: AsyncSession, deal) -> dict:
     pipeline = await crm_service.get_deal_pipeline(db, deal)
     stage = next((s for s in (pipeline.stages if pipeline else []) if s.id == deal.stage_id), None)
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
-    return crm_service._deal_dict(deal, stage, club)
+    row = crm_service._deal_dict(deal, stage, club)
+    trial_days = None
+    if club is not None:
+        try:
+            by_club = await crm_service.trial_days_remaining_by_club(db, {club.id: club})
+            trial_days = by_club.get(club.id)
+        except Exception:  # noqa: BLE001 - a nice-to-have display field, never worth failing the deal fetch
+            logger.exception("_serialize_deal: trial_days_remaining_by_club failed")
+    row["trial_days_remaining"] = trial_days
+    row["min_trial_days_remaining"] = min(trial_days.values()) if trial_days else None
+    return row
 
 
 async def _deal_stage_or_404(db: AsyncSession, deal, stage_id: str):
@@ -202,10 +219,17 @@ async def _create_deal_in_pipeline(db: AsyncSession, pipeline: CrmPipeline, scop
         value_cents=body.value_cents, currency=body.currency, probability=body.probability,
         module_keys=body.module_keys, expected_close_date=body.expected_close_date,
         owner_user_id=_uuid_or_404(body.owner_user_id) if body.owner_user_id else None,
-        source="manual",
+        source="manual", onboarding_method=body.onboarding_method, lead_source=body.lead_source,
     )
     await db.commit()
     return await _serialize_deal(db, deal)
+
+
+async def _update_deal_or_422(db: AsyncSession, deal, **fields) -> None:
+    try:
+        await crm_service.update_deal(db, deal, **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 async def _resolve_contact_person(db: AsyncSession, body: DealContactBody, *,
@@ -370,7 +394,7 @@ async def club_get_deal(deal_id: str, club: Organisation = Depends(get_current_c
 async def club_update_deal(deal_id: str, body: DealUpdate, club: Organisation = Depends(get_current_club),
                            db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
-    await crm_service.update_deal(db, deal, **body.model_dump(exclude_unset=True))
+    await _update_deal_or_422(db, deal, **body.model_dump(exclude_unset=True))
     await db.commit()
     return await _serialize_deal(db, deal)
 
@@ -594,6 +618,11 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: acquisition_channels_by_club failed")
         channel_by_club = {}
+    try:
+        trial_days_by_club = await crm_service.trial_days_remaining_by_club(db, club_by_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: trial_days_remaining_by_club failed")
+        trial_days_by_club = {}
 
     out = []
     for d in deals:
@@ -603,6 +632,9 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         row["marketing_club_state"] = club.state if club else None
         row["marketing_club_association"] = club.association_name if club else None
         row["acquisition_channel"] = (channel_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or d.source
+        trial_days = trial_days_by_club.get(d.marketing_club_id) if d.marketing_club_id else None
+        row["trial_days_remaining"] = trial_days
+        row["min_trial_days_remaining"] = min(trial_days.values()) if trial_days else None
         out.append(row)
     return {"deals": out}
 
@@ -623,7 +655,7 @@ async def super_get_deal(deal_id: str, db: AsyncSession = Depends(get_db)):
 @super_router.patch("/deals/{deal_id}", dependencies=[_super])
 async def super_update_deal(deal_id: str, body: DealUpdate, db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
-    await crm_service.update_deal(db, deal, **body.model_dump(exclude_unset=True))
+    await _update_deal_or_422(db, deal, **body.model_dump(exclude_unset=True))
     await db.commit()
     return await _serialize_deal(db, deal)
 

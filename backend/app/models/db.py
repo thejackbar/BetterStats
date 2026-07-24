@@ -3613,6 +3613,19 @@ class CrmDeal(Base):
     lost_reason = Column(Text, nullable=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial
+    # Migration 184: how this club came to be onboarded (independent of `source`,
+    # which is about how the DEAL/row was created) — self_serve_trial |
+    # super_admin_trial | direct_subscriber | none.
+    onboarding_method = Column(Text, nullable=True)
+    # Original acquisition channel — edm | meta_ads | outreach | referral |
+    # google_search | ai_search_assistants | other.
+    lead_source = Column(Text, nullable=True)
+    # A super admin's discretionary discount on top of the module-derived
+    # value_cents — at most one of amount/percent is set at a time (enforced
+    # at the API layer); discount_reason is mandatory whenever either is set.
+    discount_amount_cents = Column(Integer, nullable=True)
+    discount_percent = Column(Integer, nullable=True)
+    discount_reason = Column(Text, nullable=True)
     archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

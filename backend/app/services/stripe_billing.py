@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -109,13 +110,15 @@ def _parse_billing_keys(metadata) -> list[str]:
     return [k for k in raw.split(",") if k in BILLABLE_MODULES]
 
 
-def _push_to_twenty(org_id) -> None:
+def _push_to_twenty(org_id, crm_stage_key: Optional[str] = None) -> None:
     # Best-effort, mirrors every other subscription-change call site (see
     # club_admin.py::approve_module_request) — never let a Twenty hiccup fail
-    # a webhook Stripe expects a fast 2xx from.
+    # a webhook Stripe expects a fast 2xx from. ``crm_stage_key`` threads
+    # through to _push_club_to_twenty so a real Stripe payment event keeps
+    # BetterCricket's own CRM pipeline in lockstep too, not just Twenty.
     try:
         from app.routers.club_admin import _push_club_to_twenty
-        _push_club_to_twenty(org_id)
+        _push_club_to_twenty(org_id, crm_stage_key=crm_stage_key)
     except Exception:
         logger.exception("Stripe billing: Twenty push failed")
 
@@ -169,7 +172,10 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
         await discount_coupons.mark_redemption_confirmed(db, redemption_id, subscription_id)
 
     await db.commit()
-    _push_to_twenty(org.id)
+    # A completed Stripe Checkout is a genuine conversion — the strongest
+    # possible "became a customer" signal, so the CRM deal moves to Won
+    # immediately rather than waiting on any periodic refresh.
+    _push_to_twenty(org.id, crm_stage_key="won")
 
 
 async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
@@ -269,7 +275,10 @@ async def handle_subscription_deleted(db: AsyncSession, subscription: dict) -> N
         await _record_action(db, org, key, "cancel", "Subscription cancelled in Stripe", now)
     org.stripe_subscription_id = None
     await db.commit()
-    _push_to_twenty(org.id)
+    # "auto_cancel" only demotes the CRM deal to Lost/Dormant if the org is
+    # left holding nothing billable at all (a still-trialing or otherwise
+    # granted module elsewhere means the deal stays exactly where it is).
+    _push_to_twenty(org.id, crm_stage_key="auto_cancel")
 
 
 async def sweep_dangling_stripe_subscriptions(db: AsyncSession) -> list[str]:

@@ -89,6 +89,22 @@ export function Kpi({ label, value, accent, warn }) {
 // both without either audience seeing the other's jargon.
 export const DEFAULT_CRM_TERMS = { won: 'Won', lost: 'Lost', itemSingular: 'deal', itemPlural: 'deals', titleLabel: 'Title' }
 
+// Product Interest / module_keys vocabulary, shared by every surface that
+// renders a deal's modules (Kanban card, list view, detail modal) — the raw
+// backend keys are lowercase billing_pricing keys ('core' for BetterStats),
+// always shown Sentence Case and in this fixed order regardless of the
+// order module_keys happens to store them in.
+export const MODULE_ORDER = ['core', 'select', 'socials', 'admin', 'iq', 'fantasy']
+export const MODULE_LABELS = { core: 'Stats', select: 'Select', socials: 'Socials', admin: 'Admin', iq: 'IQ', fantasy: 'Fantasy' }
+export const moduleLabel = (key) => MODULE_LABELS[key] || (key ? key[0].toUpperCase() + key.slice(1) : key)
+// Sorted-for-display copy of a module_keys array — always Stats-first through
+// Fantasy-last, with anything unrecognised tacked on the end alphabetically.
+export const sortModuleKeys = (keys) => {
+  const known = MODULE_ORDER.filter(k => (keys || []).includes(k))
+  const unknown = (keys || []).filter(k => !MODULE_ORDER.includes(k)).sort()
+  return [...known, ...unknown]
+}
+
 export function Pill({ children, tone = 'faint' }) {
   const tones = {
     faint: 'bg-pb-surface2 text-pb-faint',
@@ -99,5 +115,27 @@ export function Pill({ children, tone = 'faint' }) {
   }
   return <span className={`inline-flex items-center gap-1 px-1.5 py-px rounded font-mono text-[10px] tracking-wide ${tones[tone] || tones.faint}`}>{children}</span>
 }
+
+// How a club came to be onboarded — shown/edited on the deal detail card.
+export const ONBOARDING_METHOD_OPTIONS = [
+  { value: '', label: 'Not set' },
+  { value: 'self_serve_trial', label: 'Self-Serve Trial' },
+  { value: 'super_admin_trial', label: 'Super Admin Trial' },
+  { value: 'direct_subscriber', label: 'Direct to Subscriber (no trial)' },
+  { value: 'none', label: 'None (not yet onboarded)' },
+]
+
+// Original acquisition channel, as a manually-set field on the deal (distinct
+// from the auto-derived acquisition_channel shown in the CRM list/filters).
+export const LEAD_SOURCE_OPTIONS = [
+  { value: '', label: 'Not set' },
+  { value: 'edm', label: 'EDM' },
+  { value: 'meta_ads', label: 'Meta Ads' },
+  { value: 'outreach', label: 'Outreach' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'google_search', label: 'Google Search' },
+  { value: 'ai_search_assistants', label: 'AI / Search Assistants' },
+  { value: 'other', label: 'Other' },
+]
 
 export { Icon }

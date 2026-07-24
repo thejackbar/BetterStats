@@ -1246,6 +1246,43 @@ async def bulk_set_excluded(session: AsyncSession, excluded: bool,
     return {"updated": len(ids), "excluded": excluded}
 
 
+async def push_clubs_to_crm(session: AsyncSession, filters: Optional[dict] = None,
+                            stage_key: str = "manually_added", limit: Optional[int] = None) -> dict:
+    """Upsert every club in the current filtered Club Directory result set
+    directly into BetterCricket's own platform CRM pipeline (services/crm.py)
+    at ``stage_key`` — a super admin manually deciding "these clubs belong in
+    the pipeline now" rather than waiting for an enquiry/trial/webhook signal
+    to create the deal organically. ``advance_only=False`` (unlike the
+    auto-triggered sync_platform_deal_for_club call sites elsewhere) since
+    this is a deliberate human action, not a background signal that should
+    defer to wherever a deal already sits."""
+    from app.services import crm as crm_service
+    ids = await _filtered_club_ids(session, filters)
+    if limit:
+        ids = ids[:limit]
+    if not ids:
+        return {"pushed": 0, "errors": 0}
+    pipeline = await crm_service.ensure_platform_pipeline(session)
+    await session.commit()
+    pushed, errors = 0, 0
+    for club_id in ids:
+        club = await session.get(MarketingClub, club_id)
+        if club is None:
+            continue
+        try:
+            modules = sorted(set(club.trial_modules or []) | set(club.requested_trial_modules or []))
+            await crm_service.sync_platform_deal_for_club(
+                session, club, stage_key=stage_key, source="manual",
+                module_keys=modules, advance_only=False)
+            await session.commit()
+            pushed += 1
+        except Exception:  # noqa: BLE001 - one bad club can't stop the rest
+            await session.rollback()
+            errors += 1
+            logger.exception("club_directory: push_clubs_to_crm failed for %s", club_id)
+    return {"pushed": pushed, "errors": errors, "total": len(ids), "pipeline_id": str(pipeline.id)}
+
+
 async def set_utm(session: AsyncSession, club_id: str, utm: str) -> Optional[dict]:
     """Set a club's UTM code (manual edit). Blank resets it to the name-derived
     default. Returns the new value, or None if the club isn't found."""
