@@ -3600,6 +3600,14 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE crm_stages ADD COLUMN IF NOT EXISTS hidden_from_board BOOLEAN NOT NULL DEFAULT false"
         ))
 
+    # Migration 184: CRM deal onboarding method, lead source, discretionary discount.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS onboarding_method TEXT"))
+        await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS lead_source TEXT"))
+        await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS discount_amount_cents INTEGER"))
+        await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS discount_percent INTEGER"))
+        await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS discount_reason TEXT"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

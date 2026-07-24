@@ -6,8 +6,7 @@ import { PbSpinner } from '../../lib/presskit'
 import PipelineBoard, { TIER_TONE } from '../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
-import { Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money } from '../../components/admin/crm/ui'
-import { CORE, PRICED_MODULES, FANTASY } from '../../data/pricing'
+import { Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel } from '../../components/admin/crm/ui'
 
 const superClient = {
   getDeal: api.superCrmGetDeal,
@@ -21,17 +20,16 @@ const superClient = {
   linkContact: api.superCrmLinkContact,
   unlinkContact: api.superCrmUnlinkContact,
   setPointOfContact: api.superCrmSetPointOfContact,
+  updatePerson: api.superCrmUpdatePerson,
   deletePermanent: api.superCrmDeleteDealPermanent,
   addStage: api.superCrmAddStage,
   updateStage: api.superCrmUpdateStage,
   deleteStage: api.superCrmDeleteStage,
 }
 
-const MODULE_OPTIONS = [
-  { key: CORE.key, label: CORE.name },
-  ...PRICED_MODULES.map(m => ({ key: m.key, label: m.name })),
-  { key: FANTASY.key, label: FANTASY.name },
-]
+// Sentence-Case, fixed-order module vocabulary (Stats/Select/Socials/Admin/
+// IQ/Fantasy) shared everywhere a deal's Product Interest is shown/edited.
+const MODULE_OPTIONS = MODULE_ORDER.map(key => ({ key, label: moduleLabel(key) }))
 
 // Known acquisition_channel raw values (services/crm.py::acquisition_channels_by_club)
 // — anything else (e.g. a raw utm_source like "google"/"facebook") is shown verbatim.
@@ -48,8 +46,51 @@ const CHANNEL_LABELS = {
 const channelLabel = (v) => CHANNEL_LABELS[v] || v
 
 const EMPTY_FILTERS = {
-  q: '', pocName: '', ownerId: '', modules: [], minValue: '', maxValue: '',
+  q: '', ownerId: '', modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', channel: '',
+  onboarding: '', minTrialDays: '', maxTrialDays: '',
+}
+
+const ONBOARDING_OPTIONS = [
+  { value: '', label: 'Any onboarding' },
+  { value: 'self_serve', label: 'Self-Serve' },
+  { value: 'not_self_serve', label: 'Not Self-Serve' },
+  { value: 'customer', label: 'Customer' },
+  { value: 'not_onboarded', label: 'Not Onboarded' },
+]
+
+// Sort-within-stage: a horizontal row of mutually exclusive buttons, each
+// cycling not-selected -> asc -> desc, instead of a dropdown + direction
+// toggle pair.
+const SORT_OPTIONS = [
+  { key: '', label: 'Recent' },
+  { key: 'club', label: 'Club name' },
+  { key: 'value', label: 'Dollar value' },
+  { key: 'engagement', label: 'Engagement score' },
+]
+
+function SortButtons({ sortBy, sortDir, onChange }) {
+  const click = (key) => {
+    if (key === '') { onChange('', 'asc'); return }
+    if (sortBy !== key) { onChange(key, 'asc'); return }
+    onChange(key, sortDir === 'asc' ? 'desc' : 'asc')
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] text-pb-faint mr-1">Sort by</span>
+      {SORT_OPTIONS.map(o => {
+        const selected = o.key === '' ? sortBy === '' : sortBy === o.key
+        const arrow = o.key === '' ? '' : (selected ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '')
+        return (
+          <button key={o.key || 'recent'} type="button" onClick={() => click(o.key)}
+            className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+              selected ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+            {o.label}{arrow}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 // Groups a flat deal list by stage into the same shape services/crm.py's
@@ -67,8 +108,9 @@ function buildBoard(stages, deals) {
     for (const d of stageDeals) {
       if (d.status === 'open') {
         const eff = d.effective_probability ?? 0
-        stageValue += d.value_cents
-        stageWeighted += Math.round(d.value_cents * eff / 100)
+        const effectiveValue = d.effective_value_cents ?? d.value_cents
+        stageValue += effectiveValue
+        stageWeighted += Math.round(effectiveValue * eff / 100)
         totalOpenCount += 1
       }
     }
@@ -87,6 +129,23 @@ function buildBoard(stages, deals) {
     stages: stagesOut,
     totals: { open_value_cents: totalOpenValue, weighted_value_cents: totalWeighted, open_count: totalOpenCount },
   }
+}
+
+// A clickable column heading for the List view — the sort arrow sits right
+// next to the label (not off in its own column), cycling asc/desc on click.
+function SortableTh({ label, sortKey, align, sortBy, sortDir, onSort }) {
+  const active = sortBy === sortKey
+  return (
+    <th className={`px-3 py-2 font-normal cursor-pointer select-none hover:text-pb-text ${align === 'right' ? 'text-right' : 'text-left'}`}
+      onClick={() => onSort(sortKey)}>
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+        <span>{label}</span>
+        <span className="text-[9px] w-2.5 inline-block text-center text-pb-accent">
+          {active ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+        </span>
+      </span>
+    </th>
+  )
 }
 
 function NewDealModal({ open, onClose, stages, onCreated }) {
@@ -129,7 +188,9 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
 }
 
 function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, channelOptions, resultCount }) {
-  const [open, setOpen] = useState(false)
+  // Open by default — a filter bar that starts collapsed hides the very
+  // controls someone opened this page to use (per direct instruction).
+  const [open, setOpen] = useState(true)
   const set = (key) => (e) => setFilters(f => ({ ...f, [key]: e.target.value }))
   const toggleModule = (key) => setFilters(f => ({
     ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
@@ -147,26 +208,30 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
       </div>
       {open && (
         <div className="mt-3 space-y-3">
+          {/* One row: club/contact search, owner, state, association, source —
+              kept narrow per direct instruction rather than each on its own line. */}
           <div className="flex flex-wrap gap-2">
-            <TextInput placeholder="Club / deal name" value={filters.q} onChange={set('q')} className="w-52" />
-            <TextInput placeholder="Point of contact" value={filters.pocName} onChange={set('pocName')} className="w-44" />
-            <Select value={filters.ownerId} onChange={set('ownerId')} className="w-40">
+            <TextInput placeholder="Club name or point of contact" value={filters.q} onChange={set('q')} className="flex-1 min-w-[220px]" />
+            <Select value={filters.ownerId} onChange={set('ownerId')} className="w-36">
               <option value="">Any owner</option>
               <option value="__unassigned__">Unassigned</option>
               {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </Select>
-            <Select value={filters.state} onChange={set('state')} className="w-32">
+            <Select value={filters.state} onChange={set('state')} className="w-28">
               <option value="">Any state</option>
               {stateOptions.map(s => <option key={s} value={s}>{s}</option>)}
             </Select>
-            <TextInput list="crm-associations" placeholder="Association" value={filters.association} onChange={set('association')} className="w-44" />
+            <TextInput list="crm-associations" placeholder="Association" value={filters.association} onChange={set('association')} className="w-36" />
             <datalist id="crm-associations">{associationOptions.map(a => <option key={a} value={a} />)}</datalist>
-            <Select value={filters.channel} onChange={set('channel')} className="w-44">
+            <Select value={filters.channel} onChange={set('channel')} className="w-36">
               <option value="">Any source</option>
               {channelOptions.map(c => <option key={c} value={c}>{channelLabel(c)}</option>)}
             </Select>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Select value={filters.onboarding} onChange={set('onboarding')} className="w-40">
+              {ONBOARDING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-pb-faint">Value $</span>
               <NumberInput min={0} placeholder="min" value={filters.minValue} onChange={set('minValue')} className="w-24" />
@@ -178,6 +243,12 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
               <NumberInput min={0} max={100} placeholder="min" value={filters.minScore} onChange={set('minScore')} className="w-20" />
               <span className="text-[11px] text-pb-faint">to</span>
               <NumberInput min={0} max={100} placeholder="max" value={filters.maxScore} onChange={set('maxScore')} className="w-20" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-pb-faint" title="Only clubs with a tracked module trial (i.e. already onboarded)">Trial expiring in (days)</span>
+              <NumberInput min={0} placeholder="min" value={filters.minTrialDays} onChange={set('minTrialDays')} className="w-20" />
+              <span className="text-[11px] text-pb-faint">to</span>
+              <NumberInput min={0} placeholder="max" value={filters.maxTrialDays} onChange={set('maxTrialDays')} className="w-20" />
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -231,25 +302,36 @@ export default function SuperCrm() {
   const channelOptions = useMemo(() => [...new Set(deals.map(d => d.acquisition_channel).filter(Boolean))].sort(), [deals])
 
   const filteredDeals = useMemo(() => {
+    // One search box matches EITHER the club/deal name or its point of
+    // contact — per direct instruction, rather than two separate fields.
     const needle = filters.q.trim().toLowerCase()
-    const pocNeedle = filters.pocName.trim().toLowerCase()
     const assocNeedle = filters.association.trim().toLowerCase()
     const minValueCents = filters.minValue !== '' ? Math.round(Number(filters.minValue) * 100) : null
     const maxValueCents = filters.maxValue !== '' ? Math.round(Number(filters.maxValue) * 100) : null
     const minScore = filters.minScore !== '' ? Number(filters.minScore) : null
     const maxScore = filters.maxScore !== '' ? Number(filters.maxScore) : null
+    const minTrialDays = filters.minTrialDays !== '' ? Number(filters.minTrialDays) : null
+    const maxTrialDays = filters.maxTrialDays !== '' ? Number(filters.maxTrialDays) : null
     return deals.filter(d => {
-      if (needle && !`${d.title} ${d.marketing_club_name || ''}`.toLowerCase().includes(needle)) return false
-      if (pocNeedle && !(d.point_of_contact_name || '').toLowerCase().includes(pocNeedle)) return false
+      if (needle && !`${d.title} ${d.marketing_club_name || ''} ${d.point_of_contact_name || ''}`
+        .toLowerCase().includes(needle)) return false
       if (filters.ownerId === '__unassigned__' ? d.owner_user_id : (filters.ownerId && d.owner_user_id !== filters.ownerId)) return false
       if (filters.modules.length && !filters.modules.some(m => (d.module_keys || []).includes(m))) return false
-      if (minValueCents != null && d.value_cents < minValueCents) return false
-      if (maxValueCents != null && d.value_cents > maxValueCents) return false
+      if (minValueCents != null && (d.effective_value_cents ?? d.value_cents) < minValueCents) return false
+      if (maxValueCents != null && (d.effective_value_cents ?? d.value_cents) > maxValueCents) return false
       if (minScore != null && (d.engagement_score == null || d.engagement_score < minScore)) return false
       if (maxScore != null && (d.engagement_score == null || d.engagement_score > maxScore)) return false
       if (filters.state && d.marketing_club_state !== filters.state) return false
       if (assocNeedle && !(d.marketing_club_association || '').toLowerCase().includes(assocNeedle)) return false
       if (filters.channel && d.acquisition_channel !== filters.channel) return false
+      if (filters.onboarding === 'self_serve' && d.onboarding_method !== 'self_serve_trial') return false
+      if (filters.onboarding === 'not_self_serve' && d.onboarding_method === 'self_serve_trial') return false
+      if (filters.onboarding === 'customer' && !d.is_customer) return false
+      if (filters.onboarding === 'not_onboarded' && (d.is_customer || (d.onboarding_method && d.onboarding_method !== 'none'))) return false
+      if ((minTrialDays != null || maxTrialDays != null)
+        && (d.min_trial_days_remaining == null
+          || (minTrialDays != null && d.min_trial_days_remaining < minTrialDays)
+          || (maxTrialDays != null && d.min_trial_days_remaining > maxTrialDays))) return false
       return true
     })
   }, [deals, filters])
@@ -260,7 +342,7 @@ export default function SuperCrm() {
     if (!sortBy) return filteredDeals
     const dir = sortDir === 'desc' ? -1 : 1
     const key = sortBy === 'club' ? (d => (d.marketing_club_name || d.title || '').toLowerCase())
-      : sortBy === 'value' ? (d => d.value_cents || 0)
+      : sortBy === 'value' ? (d => d.effective_value_cents ?? d.value_cents ?? 0)
       : (d => d.engagement_score ?? -1)
     return [...filteredDeals].sort((a, b) => {
       const av = key(a), bv = key(b)
@@ -272,6 +354,37 @@ export default function SuperCrm() {
 
   const board = useMemo(() => buildBoard(stages, sortedDeals), [stages, sortedDeals])
   const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
+
+  // The List view sorts independently of the Board's "sort within stage"
+  // control — every visible column, not just the four the Board exposes.
+  const [listSortBy, setListSortBy] = useState('')
+  const [listSortDir, setListSortDir] = useState('asc')
+  const listSortedDeals = useMemo(() => {
+    if (!listSortBy) return filteredDeals
+    const dir = listSortDir === 'desc' ? -1 : 1
+    const keyFns = {
+      club: d => (d.marketing_club_name || d.title || '').toLowerCase(),
+      poc: d => (d.point_of_contact_name || '').toLowerCase(),
+      stage: d => stageName(d.stage_id).toLowerCase(),
+      value: d => d.effective_value_cents ?? d.value_cents ?? 0,
+      weighted: d => d.weighted_value_cents ?? 0,
+      engagement: d => d.engagement_score ?? -1,
+      source: d => (channelLabel(d.acquisition_channel) || '').toLowerCase(),
+      status: d => d.status || '',
+    }
+    const key = keyFns[listSortBy] || (() => 0)
+    return [...filteredDeals].sort((a, b) => {
+      const av = key(a), bv = key(b)
+      if (av < bv) return -1 * dir
+      if (av > bv) return 1 * dir
+      return 0
+    })
+  }, [filteredDeals, listSortBy, listSortDir, stages])
+
+  const clickListSort = (key) => {
+    if (listSortBy !== key) { setListSortBy(key); setListSortDir('asc'); return }
+    setListSortDir(d => d === 'asc' ? 'desc' : 'asc')
+  }
 
   return (
     <AdminLayout>
@@ -292,20 +405,9 @@ export default function SuperCrm() {
           <FilterBar filters={filters} setFilters={setFilters} owners={owners} stateOptions={stateOptions}
             associationOptions={associationOptions} channelOptions={channelOptions} resultCount={filteredDeals.length} />
 
-          <div className="flex items-center gap-2 mb-4 -mt-2">
-            <span className="text-[11px] text-pb-faint">Sort {view === 'board' ? 'within stage' : ''} by</span>
-            <Select value={sortBy} onChange={e => setSortBy(e.target.value)} className="w-40">
-              <option value="">Default (recent)</option>
-              <option value="club">Club name</option>
-              <option value="value">Dollar value</option>
-              <option value="engagement">Engagement score</option>
-            </Select>
-            {sortBy && (
-              <button onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                className="px-2.5 py-1 rounded-full text-[11.5px] border border-pb-hairline2 text-pb-faint hover:text-pb-text">
-                {sortDir === 'asc' ? '↑ Ascending' : '↓ Descending'}
-              </button>
-            )}
+          <div className="mb-4 -mt-2">
+            <SortButtons sortBy={sortBy} sortDir={sortDir}
+              onChange={(key, dir) => { setSortBy(key); setSortDir(dir) }} />
           </div>
 
           {view === 'board' && (
@@ -326,28 +428,33 @@ export default function SuperCrm() {
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="text-left text-pb-faint border-b border-pb-hairline">
-                      <th className="px-3 py-2 font-normal">Club</th>
-                      <th className="px-3 py-2 font-normal">Point of contact</th>
-                      <th className="px-3 py-2 font-normal">Stage</th>
-                      <th className="px-3 py-2 font-normal text-right">Value</th>
-                      <th className="px-3 py-2 font-normal text-right">Weighted</th>
-                      <th className="px-3 py-2 font-normal">Engagement</th>
-                      <th className="px-3 py-2 font-normal">Source</th>
-                      <th className="px-3 py-2 font-normal">Status</th>
+                      <SortableTh label="Club" sortKey="club" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Point of contact" sortKey="poc" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Stage" sortKey="stage" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Value" sortKey="value" align="right" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Weighted" sortKey="weighted" align="right" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Engagement" sortKey="engagement" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Source" sortKey="source" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Status" sortKey="status" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedDeals.length === 0 && (
+                    {listSortedDeals.length === 0 && (
                       <tr><td colSpan={8} className="px-3 py-6 text-center text-pb-faintest">
                         {deals.length === 0 ? 'No deals yet.' : 'No deals match these filters.'}
                       </td></tr>
                     )}
-                    {sortedDeals.map(d => (
+                    {listSortedDeals.map(d => (
                       <tr key={d.id} onClick={() => setOpenDealId(d.id)} className="border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer">
-                        <td className="px-3 py-2.5">{d.title}</td>
+                        <td className="px-3 py-2.5">
+                          {d.title}
+                          {d.is_customer && (
+                            <span className="ml-1.5 text-[9px] font-mono uppercase tracking-wide px-1 py-px rounded bg-emerald-500/12 text-emerald-300">customer</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-pb-faint">{d.point_of_contact_name || '—'}</td>
                         <td className="px-3 py-2.5 text-pb-faint">{stageName(d.stage_id)}</td>
-                        <td className="px-3 py-2.5 text-right">{money(d.value_cents)}</td>
+                        <td className="px-3 py-2.5 text-right">{money(d.effective_value_cents ?? d.value_cents)}</td>
                         <td className="px-3 py-2.5 text-right text-pb-faint">{money(d.weighted_value_cents)}</td>
                         <td className="px-3 py-2.5">
                           {d.engagement_score != null && <Pill tone={TIER_TONE[d.engagement_tier] || 'faint'}>{d.engagement_score}</Pill>}

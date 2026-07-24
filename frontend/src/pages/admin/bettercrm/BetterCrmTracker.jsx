@@ -21,6 +21,7 @@ const clubClient = {
   linkContact: api.crmLinkContact,
   unlinkContact: api.crmUnlinkContact,
   setPointOfContact: api.crmSetPointOfContact,
+  updatePerson: api.crmUpdatePerson,
 }
 
 const DEFAULT_TERMS = { won: 'Won', lost: 'Lost', itemSingular: 'record', itemPlural: 'records', titleLabel: 'Title' }

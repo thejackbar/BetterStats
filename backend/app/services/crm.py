@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, func, update as sa_update
@@ -41,6 +42,7 @@ from sqlalchemy.orm import selectinload
 from app.models.db import (
     CrmPerson, CrmPersonRole, CrmPipeline, CrmStage, CrmDeal, CrmDealContact, CrmActivity,
     MarketingClub, MarketingClubContact, User, ClubMembership, Organisation, ClubOnboardingRequest,
+    OrgModuleSubscription,
 )
 from app.services.billing_pricing import price_for
 
@@ -62,7 +64,11 @@ DEAL_STATUSES = ("open", "won", "lost")
 # (key, name, default_probability, is_won, is_lost) — mirrors Twenty's own
 # Opportunity pipeline exactly (bootstrap_twenty.PIPELINE), so a deal's stage
 # means the same thing whichever system is looked at during/after cutover.
+# "manually_added" is BetterCricket's own addition (not in Twenty) — the
+# landing stage for a club pushed straight from the Club Directory rather
+# than arriving via an enquiry/trial/webhook signal.
 PLATFORM_DEFAULT_STAGES = [
+    ("manually_added", "Manually Added", 5, False, False),
     ("target", "Target", 10, False, False),
     ("contacted", "Contacted", 20, False, False),
     ("engaged", "Engaged", 35, False, False),
@@ -401,9 +407,25 @@ def _effective_probability(deal: CrmDeal, stage: Optional[CrmStage]) -> Optional
     return stage.default_probability if stage else None
 
 
+def _effective_value_cents(deal: CrmDeal) -> int:
+    """``value_cents`` (the module-derived, bundle-discounted base price) minus
+    a super admin's own discretionary discount, if any — at most one of
+    amount/percent applies at a time (amount wins if somehow both are set).
+    This is what pipeline totals/weighted value are computed from; the raw
+    ``value_cents`` stays the undiscounted reference figure."""
+    base = deal.value_cents or 0
+    if deal.discount_amount_cents:
+        return max(0, base - int(deal.discount_amount_cents))
+    if deal.discount_percent:
+        pct = max(0, min(100, int(deal.discount_percent)))
+        return max(0, round(base * (100 - pct) / 100))
+    return base
+
+
 def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
                club: Optional[MarketingClub] = None) -> dict:
     eff = _effective_probability(deal, stage)
+    effective_value = _effective_value_cents(deal)
     return {
         "id": str(deal.id),
         "scope": deal.scope,
@@ -418,22 +440,29 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         "engagement_score": club.engagement_score if club else None,
         "engagement_tier": club.engagement_tier if club else None,
         "marketing_club_name": club.name if club else None,
+        "is_customer": bool(club.existing_org_id) if club else None,
         "pipeline_id": str(deal.pipeline_id),
         "stage_id": str(deal.stage_id),
         "stage_key": stage.key if stage else None,
         "stage_name": stage.name if stage else None,
         "title": deal.title,
         "value_cents": deal.value_cents,
+        "discount_amount_cents": deal.discount_amount_cents,
+        "discount_percent": deal.discount_percent,
+        "discount_reason": deal.discount_reason,
+        "effective_value_cents": effective_value,
         "currency": deal.currency,
         "probability": deal.probability,
         "effective_probability": eff,
-        "weighted_value_cents": round(deal.value_cents * eff / 100) if eff is not None else None,
+        "weighted_value_cents": round(effective_value * eff / 100) if eff is not None else None,
         "module_keys": deal.module_keys or [],
         "expected_close_date": deal.expected_close_date.isoformat() if deal.expected_close_date else None,
         "status": deal.status,
         "lost_reason": deal.lost_reason,
         "owner_user_id": str(deal.owner_user_id) if deal.owner_user_id else None,
         "source": deal.source,
+        "onboarding_method": deal.onboarding_method,
+        "lead_source": deal.lead_source,
         "archived_at": deal.archived_at.isoformat() if deal.archived_at else None,
         "created_at": deal.created_at.isoformat() if deal.created_at else None,
         "updated_at": deal.updated_at.isoformat() if deal.updated_at else None,
@@ -500,8 +529,9 @@ def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal],
             deals_out.append(_deal_dict(d, stage, club_by_id.get(d.marketing_club_id)))
             if d.status == "open":
                 eff = _effective_probability(d, stage) or 0
-                stage_value += d.value_cents
-                stage_weighted += round(d.value_cents * eff / 100)
+                effective_value = _effective_value_cents(d)
+                stage_value += effective_value
+                stage_weighted += round(effective_value * eff / 100)
                 total_open_count += 1
         total_open_value += stage_value
         total_weighted += stage_weighted
@@ -555,40 +585,72 @@ async def get_deal_pipeline(session: AsyncSession, deal: CrmDeal) -> Optional[Cr
     return (await session.execute(stmt)).scalars().first()
 
 
+def value_from_modules(module_keys) -> int:
+    """The bundle-discounted module price (billing_pricing.price_for), in
+    cents — the ONE place a platform deal's Product-Interest-driven Value is
+    computed from, so it can never silently drift from module_keys."""
+    keys = sorted(set(module_keys or []))
+    if not keys:
+        return 0
+    return int(round(price_for(keys)["total"] * 100))
+
+
 async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_id,
                       title: str, organisation_id=None, marketing_club_id=None,
                       value_cents: int = 0, currency: str = "AUD",
                       probability: Optional[int] = None, module_keys=None,
                       expected_close_date=None, owner_user_id=None,
-                      source: str = "manual") -> CrmDeal:
+                      source: str = "manual", onboarding_method: Optional[str] = None,
+                      lead_source: Optional[str] = None) -> CrmDeal:
+    keys = list(module_keys or [])
+    # A platform deal's Value is Product-Interest-driven (see value_from_modules)
+    # — a club-scope tracker (sponsors/grants/custom) has no module_keys concept
+    # and keeps value_cents fully manual, same as before.
+    if scope == SCOPE_PLATFORM and keys:
+        value_cents = value_from_modules(keys)
     deal = CrmDeal(
         scope=scope, organisation_id=organisation_id, marketing_club_id=marketing_club_id,
         pipeline_id=pipeline_id, stage_id=stage_id, title=(title or "Untitled deal")[:300],
         value_cents=max(0, int(value_cents or 0)), currency=currency or "AUD",
-        probability=probability, module_keys=list(module_keys or []),
+        probability=probability, module_keys=keys,
         expected_close_date=expected_close_date, owner_user_id=owner_user_id, source=source,
+        onboarding_method=onboarding_method, lead_source=lead_source,
     )
     session.add(deal)
     await session.flush()
     return deal
 
 
-_DEAL_CLEARABLE_FIELDS = ("probability", "expected_close_date", "owner_user_id")
+_DEAL_CLEARABLE_FIELDS = ("probability", "expected_close_date", "owner_user_id",
+                         "onboarding_method", "lead_source",
+                         "discount_amount_cents", "discount_percent", "discount_reason")
 
 
 async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal:
     for key in ("title", "value_cents", "currency", "probability", "module_keys",
-                "expected_close_date", "owner_user_id"):
+                "expected_close_date", "owner_user_id", "onboarding_method", "lead_source",
+                "discount_amount_cents", "discount_percent", "discount_reason"):
         if key not in fields:
             continue
         # Most fields never take an explicit null (title/value_cents/module_keys
-        # shouldn't ever be wiped by omission-vs-null ambiguity), but these three
-        # are legitimately clearable (e.g. "unassign the owner") — the request
-        # body sending an explicit None for them means "clear it", not "no
-        # change" (an unsent field is simply absent from `fields` at all, since
-        # the router calls model_dump(exclude_unset=True)).
+        # shouldn't ever be wiped by omission-vs-null ambiguity), but these are
+        # legitimately clearable (e.g. "unassign the owner", "remove the
+        # discount") — the request body sending an explicit None for them
+        # means "clear it", not "no change" (an unsent field is simply absent
+        # from `fields` at all, since the router calls
+        # model_dump(exclude_unset=True)).
         if fields[key] is not None or key in _DEAL_CLEARABLE_FIELDS:
             setattr(deal, key, fields[key])
+    # Product Interest drives Value automatically for a platform deal — editing
+    # module_keys recomputes value_cents from the bundle-discounted module
+    # price, so the two fields can never silently drift apart. Club-scope
+    # deals (sponsors/grants/custom trackers) keep value_cents fully manual.
+    if deal.scope == SCOPE_PLATFORM and "module_keys" in fields and fields["module_keys"] is not None:
+        keys = sorted(set(fields["module_keys"] or []))
+        if keys:
+            deal.value_cents = value_from_modules(keys)
+    if (deal.discount_amount_cents or deal.discount_percent) and not (deal.discount_reason or "").strip():
+        raise ValueError("A discretionary discount requires a reason")
     deal.updated_at = func.now()
     return deal
 
@@ -841,6 +903,35 @@ async def acquisition_channels_by_club(session: AsyncSession, club_by_id: dict) 
         if not channel:
             channel = onboarding_source_by_club.get(cid)
         out[cid] = channel
+    return out
+
+
+async def trial_days_remaining_by_club(session: AsyncSession, club_by_id: dict) -> dict:
+    """marketing_club_id -> {billable_module_key: days_remaining}, for every
+    club linked to an onboarded org with at least one currently-live module
+    trial — batched (no N+1). Powers both the CRM card's per-module trial
+    countdown and the "trial expiring between X and Y days" filter. A
+    prospect that's never been onboarded (no existing_org_id) has no tracked
+    trial_ends_at at all and is simply absent from the result."""
+    from app.auth.modules import STATUS_TRIAL, billing_key_for
+    org_to_club = {c.existing_org_id: cid for cid, c in club_by_id.items() if c.existing_org_id}
+    if not org_to_club:
+        return {}
+    rows = (await session.execute(
+        select(OrgModuleSubscription.organisation_id, OrgModuleSubscription.module_key,
+              OrgModuleSubscription.trial_ends_at)
+        .where(OrgModuleSubscription.organisation_id.in_(org_to_club.keys()),
+              OrgModuleSubscription.status == STATUS_TRIAL,
+              OrgModuleSubscription.trial_ends_at.isnot(None))
+    )).all()
+    now = datetime.now(timezone.utc)
+    out: dict = {}
+    for org_id, module_key, ends_at in rows:
+        cid = org_to_club.get(org_id)
+        if cid is None:
+            continue
+        days = max(0, (ends_at - now).days)
+        out.setdefault(cid, {})[billing_key_for(module_key)] = days
     return out
 
 

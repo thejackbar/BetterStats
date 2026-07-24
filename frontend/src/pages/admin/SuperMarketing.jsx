@@ -964,6 +964,23 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const formatPushToCrmResult = (r) =>
+    `Pushed ${r.pushed || 0} of ${r.total || 0} club(s) into BetterCricket CRM at "Manually Added"`
+    + (r.errors ? `, ${r.errors} errored (see logs).` : '.')
+
+  const pushToCrm = async () => {
+    if (!window.confirm(
+      `Upsert all ${total} club(s) in the current filtered list into the BetterCricket CRM pipeline `
+      + `at the "Manually Added" stage?`)) return
+    setBusy('push-crm'); setMsg(''); setError('')
+    try {
+      const r = await api.mktPushToCrm({ ...filters })
+      if (r.error) { setError(r.error); return }
+      setMsg('Pushing to BetterCricket CRM… this can take a while for a large list. You can leave this page.')
+      await pollTwentyJob(api.mktPushToCrmStatus, formatPushToCrmResult)
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
   const refreshTwentyEngagement = async () => {
     setBusy('twenty-refresh'); setMsg(''); setError('')
     try {
@@ -1328,6 +1345,10 @@ export default function SuperMarketing() {
             <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
                     title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
               {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
+            </button>
+            <button className={BTN} disabled={busy === 'push-crm'} onClick={pushToCrm}
+                    title="Upsert the currently-filtered clubs directly into BetterCricket's own CRM pipeline at the 'Manually Added' stage (idempotent — re-running just advances the same deal)">
+              {busy === 'push-crm' ? 'Pushing...' : 'Push to BetterCricket CRM'}
             </button>
             <button className={BTN} disabled={busy === 'twenty-refresh'} onClick={refreshTwentyEngagement}
                     title="Recompute the engagement score for every club already in Twenty from the latest usage breadcrumbs (runs daily too)">

@@ -758,6 +758,7 @@ export const api = {
   crmListPeople: (q) => request(`/club-admin/crm/people${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   crmCreatePerson: (data) => request('/club-admin/crm/people', { method: 'POST', body: JSON.stringify(data) }),
   crmUpdatePerson: (id, data) => request(`/club-admin/crm/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superCrmUpdatePerson: (id, data) => request(`/club-admin/super/crm/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   crmAddPersonRole: (id, data) => request(`/club-admin/crm/people/${id}/roles`, { method: 'POST', body: JSON.stringify(data) }),
   // ─── BetterCRM — platform scope (BetterCricket's own sales pipeline) ────────
   superCrmPipeline: () => request('/club-admin/super/crm/pipeline'),
@@ -872,6 +873,9 @@ export const api = {
   mktExportTwenty: (payload) =>
     request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
   mktExportTwentyStatus: () => request('/club-admin/marketing/export-twenty/status'),
+  mktPushToCrm: (payload) =>
+    request('/club-admin/marketing/push-to-crm', { method: 'POST', body: JSON.stringify(payload) }),
+  mktPushToCrmStatus: () => request('/club-admin/marketing/push-to-crm/status'),
   mktRefreshTwentyEngagement: () =>
     request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
   mktRefreshTwentyEngagementStatus: () => request('/club-admin/marketing/refresh-twenty-engagement/status'),

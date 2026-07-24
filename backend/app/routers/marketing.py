@@ -442,6 +442,60 @@ async def export_twenty_status(_=Depends(require_super_admin)):
     return dict(_twenty_export)
 
 
+class PushToCrmBody(DirFilterFields):
+    # Where a pushed club lands — 'Manually Added' by default (see
+    # services/crm.py PLATFORM_DEFAULT_STAGES), but any existing platform
+    # stage key works.
+    stage_key: str = "manually_added"
+    limit: Optional[int] = None
+
+
+_crm_push: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "result": None, "error": None,
+}
+
+
+async def _push_to_crm_bg(filters: dict, stage_key: str, limit):
+    try:
+        async with async_session_maker() as session:
+            res = await cd.push_clubs_to_crm(session, filters, stage_key=stage_key, limit=limit)
+        _settle_bg(_crm_push, res)
+    except Exception as e:  # noqa: BLE001 — never let a CRM error wedge the runner
+        _crm_push["result"], _crm_push["error"] = None, str(e)
+    finally:
+        _crm_push["running"] = False
+        _crm_push["finished_at"] = _now_iso()
+
+
+@router.post("/push-to-crm")
+async def push_to_crm(body: PushToCrmBody, background: BackgroundTasks,
+                      db: AsyncSession = Depends(get_db),
+                      _=Depends(require_super_admin)):
+    """Upsert every club in the currently-filtered Club Directory result set
+    directly into BetterCricket's OWN platform CRM pipeline (not Twenty) at
+    ``stage_key`` (default 'Manually Added') — a super admin explicitly
+    deciding these clubs belong in the sales pipeline right now, distinct
+    from the enquiry/trial/webhook signals that create a deal automatically.
+    Runs in the background (same pattern as /export-twenty) since a large
+    filtered set means many individual upserts; poll /push-to-crm/status."""
+    if _crm_push["running"] and not _bg_stale(_crm_push):
+        return {"status": "already_running", "started_at": _crm_push["started_at"]}
+    filters = await cd.expand_shortcode(db, _filter_kwargs(
+        body.q, body.state, body.association, body.status, body.postcode_from,
+        body.postcode_to, body.contact, body.person, modes=_modes_from(body),
+        associations=body.associations, visited=body.visited, countries=body.countries))
+    _crm_push.update(running=True, started_at=_now_iso(), finished_at=None, result=None, error=None)
+    background.add_task(_push_to_crm_bg, filters, body.stage_key, body.limit)
+    return {"status": "started"}
+
+
+@router.get("/push-to-crm/status")
+async def push_to_crm_status(_=Depends(require_super_admin)):
+    """Current/last BetterCricket-CRM push state for the UI poller."""
+    return dict(_crm_push)
+
+
 _twenty_engagement_refresh: dict = {
     "running": False, "started_at": None, "finished_at": None,
     "result": None, "error": None,

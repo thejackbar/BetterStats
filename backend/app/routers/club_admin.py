@@ -47,7 +47,26 @@ _background_tasks: set = set()
 _player_sync_running: set = set()
 
 
-def _push_club_to_twenty(org_id, force_hot: bool = False) -> None:
+async def _org_billable_module_keys(session, org_id) -> list:
+    """The billing_pricing-shaped module keys this org CURRENTLY holds (any
+    ACTIVE_STATUSES row; Core excluded, matching org_entitled_modules' own
+    exclusion) — for a CRM platform deal's module_keys/value, and for
+    deciding whether a cancel has left the org holding nothing at all. Always
+    opens its own query (no relationship pre-load assumed) since every
+    caller is a background task with a fresh session."""
+    from app.models.db import Organisation
+    from app.auth.modules import org_entitled_modules, billing_key_for, BILLABLE_MODULES
+    org = (await session.execute(
+        select(Organisation).options(selectinload(Organisation.module_subscriptions))
+        .where(Organisation.id == org_id)
+    )).scalar_one_or_none()
+    if org is None:
+        return []
+    held = org_entitled_modules(org) & set(BILLABLE_MODULES)
+    return sorted({billing_key_for(m) for m in held})
+
+
+def _push_club_to_twenty(org_id, force_hot: bool = False, crm_stage_key: Optional[str] = None) -> None:
     """Fire-and-forget: push one club's Company fields (paid/trial modules, ARR,
     renewal) to Twenty after a subscription change. No-op when Twenty isn't
     configured; never raises into the request.
@@ -56,7 +75,19 @@ def _push_club_to_twenty(org_id, force_hot: bool = False) -> None:
     approve_module_request's trial branch) also forces the engagement score to
     Hot (100) and upserts a real Lead, same treatment as a direct "onboard my
     club" enquiry — a club being put on a trial is too strong a signal to wait
-    on the gradual recency/frequency formula or the nightly refresh."""
+    on the gradual recency/frequency formula or the nightly refresh.
+
+    ``crm_stage_key`` keeps BetterCricket's OWN sales pipeline in lockstep with
+    the Twenty push, in the SAME background task — per direct instruction, our
+    own CRM must reflect every action immediately, not lag behind Twenty's
+    periodic/manual-only refresh. Defaults to "trial" whenever force_hot is set
+    and no explicit key was given (every existing force_hot call site IS a
+    trial signal); pass an explicit key for a non-trial signal (e.g. "won" on
+    a genuine Stripe/subscribe conversion). The special value "auto_cancel"
+    re-checks this org's CURRENTLY held billable modules (after the caller's
+    own commit) and only moves the deal to "lost_dormant" if none are left — a
+    partial cancel (one module of several) shouldn't demote a deal that's
+    still live for everything else the club holds."""
     async def _run():
         try:
             from app.services import twenty_sync
@@ -65,6 +96,31 @@ def _push_club_to_twenty(org_id, force_hot: bool = False) -> None:
             await twenty_sync.push_org_company(org_id, engagement_override=override)
         except Exception:
             _logging.getLogger(__name__).exception("twenty push failed")
+
+        stage_key = crm_stage_key if crm_stage_key is not None else ("trial" if force_hot else None)
+        if not stage_key:
+            return
+        try:
+            from app.models.db import async_session_maker, MarketingClub
+            from app.services import crm as crm_service
+            async with async_session_maker() as session:
+                resolved_key = stage_key
+                if resolved_key == "auto_cancel":
+                    held = await _org_billable_module_keys(session, org_id)
+                    if held:
+                        return
+                    resolved_key = "lost_dormant"
+                mc = (await session.execute(
+                    select(MarketingClub).where(MarketingClub.existing_org_id == org_id)
+                )).scalar_one_or_none()
+                if mc is None:
+                    return
+                modules = await _org_billable_module_keys(session, org_id)
+                await crm_service.sync_platform_deal_for_club(
+                    session, mc, stage_key=resolved_key, source="auto_trial", module_keys=modules)
+                await session.commit()
+        except Exception:
+            _logging.getLogger(__name__).exception("crm sync failed")
     task = asyncio.create_task(_run())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -2753,7 +2809,10 @@ async def cancel_own_module(
     )
     await db.commit()
     await db.refresh(club, attribute_names=["module_subscriptions"])
-    _push_club_to_twenty(club.id)
+    # "auto_cancel" only demotes the CRM deal to Lost/Dormant if this cancel left
+    # NOTHING billable held — cancelling one of several modules shouldn't
+    # demote a deal that's still live for everything else the club holds.
+    _push_club_to_twenty(club.id, crm_stage_key="auto_cancel")
     return {"ok": True, "cancelled": targets}
 
 
@@ -3003,8 +3062,12 @@ async def approve_module_request(
     # Keep Twenty in step with the new paid/trial split (best-effort, configured-only).
     # A trial approval is put-on-a-trial in every sense a direct grant is
     # (start_module_trial above) — force the same Hot(100)+Lead treatment;
-    # subscribe/cancel stay the ordinary billing-fields-only push.
-    _push_club_to_twenty(org.id, force_hot=(req.kind == "trial"))
+    # a subscribe approval is a genuine conversion (CRM deal -> Won); cancel
+    # stays the ordinary billing-fields-only Twenty push, with the CRM deal
+    # only demoted if the org is left holding nothing billable at all.
+    _push_club_to_twenty(
+        org.id, force_hot=(req.kind == "trial"),
+        crm_stage_key=("won" if req.kind == "subscribe" else "auto_cancel" if req.kind == "cancel" else None))
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return {"ok": True, "club": _club_payload(org)}
 
