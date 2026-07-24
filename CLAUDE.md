@@ -2484,6 +2484,98 @@ scoped to just the scorecards that came through the photo-upload flow.
   `is_photo_upload`/`created_by_name` join, and the `exclude_id` fix to the
   duplicate check, both before shipping.
 
+## Scorecard reader — multi-format, PDFs, fielding column, eval set (v8.80.0, Jul 2026)
+
+`scorecard_ocr.py` (the Upload Historical Scorecard reader) taught about more than
+the WACA-style scorebook, prompted by a Toowoomba club's archive (1976 scorebook
+pages + a 1993 TCA "Official Summary of Match" form). Full how-to-improve-it doc:
+**`docs/scorecard-reader-eval.md`**.
+
+- **Prompt knows three format families**: the two-page scorebook, the association
+  match-summary form (one club's side only + opposition as a bare "10/111" totals
+  line → an innings with totals and an EMPTY batting list), and "anything else,
+  note the layout in read_notes". Also warned about: tally strokes in extras
+  boxes (the numeral total column wins), wickets-first "7/164" notation,
+  two-digit years → 1900s, two-day matches (first day = match.date), and
+  **pre-1980 Australian 8-ball overs** → new `match.balls_per_over` (reconcile's
+  overs check + `overs_to_balls(o, balls_per_over)` honour it; DB storage is
+  unchanged — overs stay as written on the card).
+- **Result inference is the ONE allowed deviation from transcribe-only**: blank
+  result box + completed innings that decide it → model may fill `result` and
+  set `result_inferred`, which the review screen flags ("worked out from the
+  scores, check it"). Everything else stays faithful-transcription-only.
+- **New `innings[].fielding` section** ({name, catches, catches_wk, stumpings,
+  run_outs}) for cards that credit fielders separately from dismissals (OWN
+  CATCHES column, W/K = keeper). Attached to the innings where that side was
+  FIELDING. The extract endpoint adds these names to the roster-suggestion set;
+  the review screen shows them as an editable, player-matchable table, and
+  import merges them with the dismissal-derived fielding by **max per stat** so
+  the same catch seen both ways counts once. Re-editing a saved upload seeds
+  this table from the saved `fielding_stats` so a re-save can't drop
+  column-sourced fielding.
+- **PDF uploads work end to end**: `guess_media_type` recognises `.pdf`,
+  `extract_scorecard` sends PDFs as native `document` blocks (no rasterising;
+  anthropic 0.40.0 passes the dict through), the file input accepts them and
+  previews show a file chip. Mind the API's ~32MB request cap for huge scans.
+- **Eval harness** `python -m app.scripts.scorecard_eval <cases_dir>`: local
+  (never committed) case folders of scans + a verified `expected.json`; only
+  keys present in the truth file are scored, rows matched by normalised name.
+  Run before/after any prompt/schema/model change to the reader — that's the
+  training loop, since the model itself never learns from uploads.
+- **Tracked-fields toggles (v8.80.1, migration 184)**: a "This card tracks"
+  panel on the review screen (balls faced / 4s & 6s / maidens / bowler
+  wides+no-balls). Unticked → the column is hidden AND imports as **NULL, not
+  0** — `manual_batting_innings.fours/sixes` and
+  `manual_bowling_spells.maidens/wides/no_balls` went nullable (the synced
+  tables always were, so every effective-view reader already copes). The
+  pydantic defaults stay `Optional[int] = 0`, so the CSV import and hand-typed
+  manual-game form (which omit rather than null the fields) are byte-for-byte
+  unchanged; only an EXPLICIT null means "not recorded". Toggle defaults come
+  from whether the reader found any value; re-editing a saved upload recovers
+  the choice from the stored rows' nulls. The prompt also tells the model to
+  leave untracked stats null, never 0.
+- **Card-error vs misread flags (v8.80.3)**: `reconcile()` now returns
+  `list[dict]` `{kind, text}` instead of `list[str]` — `kind` is `card_error`
+  (the card's OWN figures don't reconcile: batting≠total, wickets≠FOW count,
+  bowling≠total, overs mismatch — a decades-old scorer slip, fix-or-keep) or
+  `misread` (a value the READER likely got wrong: dismissal bowler not in the
+  analysis, boundaries>runs, keeper catches>catches — worth fixing). The reader
+  still transcribes faithfully; nothing auto-corrects. Frontend
+  (`AdminScorecardUpload.jsx`) renders two boxes: amber "the original scorecard
+  doesn't add up here (correct below or import as-is to keep the card's
+  figures)" and red "likely misreads — worth fixing above", and the import
+  confirm spells out the keep-or-fix choice (button reads "Import, keep
+  original" when only card errors remain). The eval prints `w["text"]`. Old
+  plain-string warnings tolerated on the frontend via `asWarn`. Per direct
+  request: read exactly what the card says, flag where it's wrong, let the user
+  choose.
+- **Name cross-referencing across the card (v8.80.2)**: the standout
+  handwriting win, from a real correction pass — the same person is written
+  many times (batting order, bowling analysis, a "c Smith" catcher, a "b Jones"
+  wicket-taker, fall-of-wickets) with wildly varying legibility. The prompt now
+  says to read EVERY occurrence and use the clearest as the true spelling, then
+  use it everywhere: the **bowling analysis is authority for bowler names** (a
+  dismissing bowler is always one of the analysed bowlers), the **batting order
+  authority for batter names** — but never collapse two players who merely share
+  a surname (N Ziebell ≠ R Ziebell). `reconcile()` backs it with an advisory:
+  `_name_close` (surname-level `SequenceMatcher`, ≥0.6) flags a dismissal bowler
+  whose name isn't among that innings' analysed bowlers — the exact
+  "S Willingslow" that's really "G Wittingslow" case. Worked examples baked into
+  the prompt (Wittingslow, Houser/Heuser, Pascoe initials). Verified truth file
+  for the 1976 Railways match kept locally as the first eval golden case.
+- **Roster matching = the historical-import engine (v8.80.1)**: the extract
+  endpoint now runs card names through `import_ingest.match_players` (the same
+  exact → middle-initial-tolerant → "Surname Initial" form → blocked
+  SequenceMatcher pipeline BetterImport and the Merge Players fuzzy pairs
+  use) instead of the old bespoke `_suggest_player` token matcher.
+  Auto-fill policy: exact hits, plus a single candidate at confidence ≥0.9
+  (the unique "G Evans" surname+initial case — parity with the old matcher);
+  everything else ships as `result["match_info"]` candidates, which
+  `PlayerSelect` shows as a one-click "CLOSE MATCHES" group with confidence %
+  at the top of every picker (batters, bowlers, dismissal fielders, own-catches
+  rows). `_suggest_player` still exists for `_replace_game_children`'s
+  import-time FOW/partnership name resolution — unchanged on purpose.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.

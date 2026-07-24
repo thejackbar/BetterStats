@@ -1554,8 +1554,9 @@ class ManualBattingInnings(Base):
     batting_position = Column(Integer, nullable=True)
     runs = Column(Integer, server_default="0", nullable=False)
     balls = Column(Integer, nullable=True)
-    fours = Column(Integer, server_default="0", nullable=False)
-    sixes = Column(Integer, server_default="0", nullable=False)
+    # NULL = the card didn't track it (migration 184); 0 = a tracked zero.
+    fours = Column(Integer, server_default="0", nullable=True)
+    sixes = Column(Integer, server_default="0", nullable=True)
     strike_rate = Column(Numeric(6, 2), nullable=True)
     dismissal_type = Column(Text, nullable=True)
     not_out = Column(Boolean, server_default="false", nullable=False)
@@ -1573,11 +1574,12 @@ class ManualBowlingSpell(Base):
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     innings_number = Column(Integer, server_default="1", nullable=False)
     overs = Column(Numeric(4, 1), nullable=True)
-    maidens = Column(Integer, server_default="0", nullable=False)
+    # NULL maidens/wides/no_balls = the card didn't track them (migration 184).
+    maidens = Column(Integer, server_default="0", nullable=True)
     runs = Column(Integer, server_default="0", nullable=False)
     wickets = Column(Integer, server_default="0", nullable=False)
-    wides = Column(Integer, server_default="0", nullable=False)
-    no_balls = Column(Integer, server_default="0", nullable=False)
+    wides = Column(Integer, server_default="0", nullable=True)
+    no_balls = Column(Integer, server_default="0", nullable=True)
     economy = Column(Numeric(5, 2), nullable=True)
 
     manual_game = relationship("ManualGame", back_populates="bowling_spells")
