@@ -183,7 +183,10 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
   const addContact = async (e) => {
     e.preventDefault()
-    if (!contactName.trim()) return
+    // Previously silently did nothing here — reported as "no error message
+    // but no details were saved", which is exactly what a blank Name looks
+    // like with zero feedback.
+    if (!contactName.trim()) { toast.error('Enter a name to add a contact'); return }
     try {
       await client.linkContact(dealId, {
         full_name: contactName.trim(), email: contactEmail.trim() || undefined,

@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
 import { money, Pill, DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_LABELS } from './ui'
+import { moduleBrand } from '../../../lib/moduleBrand'
+
+const BETTERSTATS_LOGO = moduleBrand('stats').logo
 
 export const TIER_TONE = { HOT: 'red', WARM: 'amber', COLD: 'faint', NOT_INTERESTED: 'faint' }
 
@@ -134,15 +137,22 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 const baseCents = deal.value_cents || 0
                 const effCents = deal.effective_value_cents ?? baseCents
                 const discountCents = baseCents - effCents
+                // Subscribed = actually paying for at least one module — the
+                // precise field, not the looser is_customer ("has ever been
+                // onboarded"). This is what earns the logo badge.
+                const isSubscriber = (deal.subscribed_modules || []).length > 0
                 return (
                 <div key={deal.id} draggable={!!client?.moveStage}
                   onDragStart={e => { setDraggingId(deal.id); e.dataTransfer.effectAllowed = 'move' }}
                   onDragEnd={() => { setDraggingId(null); setOverStageId(null) }}
                   onClick={() => onOpenDeal(deal.id)}
-                  title={deal.is_customer ? 'Already a BetterCricket subscriber' : undefined}
                   className={`pb-card w-full text-left px-3 py-2.5 hover:border-pb-accent/40 transition cursor-pointer relative ${
-                    deal.is_customer ? 'border-2 border-emerald-500/70 shadow-[0_2px_14px_-4px_rgba(16,185,129,0.55)]' : ''} ${
+                    isSubscriber ? 'pr-7' : ''} ${
                     deal.status !== 'open' ? 'opacity-60' : ''} ${draggingId === deal.id ? 'opacity-40' : ''}`}>
+                  {isSubscriber && (
+                    <img src={BETTERSTATS_LOGO} alt="" title="Subscribed to a BetterCricket module"
+                      className="absolute top-2 right-2 w-4 h-4 rounded shrink-0" />
+                  )}
                   <div className="font-medium text-[13px] truncate mb-1">{deal.title}</div>
                   {deal.point_of_contact_name && (
                     <div className="text-[11px] text-pb-faint truncate">{deal.point_of_contact_name}</div>
