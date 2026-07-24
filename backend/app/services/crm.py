@@ -596,25 +596,30 @@ def value_from_modules(module_keys) -> int:
     return int(round(price_for(keys)["total"] * 100))
 
 
-async def recalc_product_interest(session: AsyncSession, deal: CrmDeal, club: Optional[MarketingClub]) -> CrmDeal:
+async def recalc_product_interest(session: AsyncSession, deal: CrmDeal, club: Optional[MarketingClub]) -> bool:
     """Re-derive a platform deal's Product Interest (module_keys) from the
     linked club's tracked website visits (club_directory.club_visit_detail's
     ranked ``inferred_modules``), and recompute value_cents to match. Always
     switches the deal back to 'auto' — the counterpart to a super admin
     manually overriding a module chip (which sets 'manual'). A deal with no
     linked club, or a club with no tracked visits at all, falls back to
-    ``['core']`` (never leaves module_keys empty)."""
+    ``['core']`` (never leaves module_keys empty). Returns whether any real
+    tracked visit was actually found — a caller/UI can tell "recalculated
+    from N page views" apart from "no analytics yet, defaulted to Stats",
+    which otherwise look identical when the deal was already just ['core']."""
     from app.services import club_directory
     inferred = ["core"]
+    had_data = False
     if club is not None:
         detail = await club_directory.club_visit_detail(session, club.id)
         if detail.get("inferred_modules"):
             inferred = detail["inferred_modules"]
+            had_data = bool(detail.get("views"))
     deal.module_keys = inferred
     deal.value_cents = value_from_modules(inferred)
     deal.product_interest_source = "auto"
     deal.updated_at = func.now()
-    return deal
+    return had_data
 
 
 async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_id,
@@ -956,6 +961,31 @@ async def trial_days_remaining_by_club(session: AsyncSession, club_by_id: dict) 
         days = max(0, (ends_at - now).days)
         out.setdefault(cid, {})[billing_key_for(module_key)] = days
     return out
+
+
+async def subscribed_modules_by_club(session: AsyncSession, club_by_id: dict) -> dict:
+    """marketing_club_id -> [billable_module_key, ...] the club is ALREADY a
+    PAYING subscriber for (active/past_due, never a trial) — the counterpart
+    to trial_days_remaining_by_club. Lets the card grey out a module chip and
+    suppress its trial countdown once the club has actually bought it,
+    instead of showing a stale "days remaining" for a module they no longer
+    need to trial."""
+    from app.auth.modules import PAID_STATUSES, billing_key_for
+    org_to_club = {c.existing_org_id: cid for cid, c in club_by_id.items() if c.existing_org_id}
+    if not org_to_club:
+        return {}
+    rows = (await session.execute(
+        select(OrgModuleSubscription.organisation_id, OrgModuleSubscription.module_key)
+        .where(OrgModuleSubscription.organisation_id.in_(org_to_club.keys()),
+              OrgModuleSubscription.status.in_(PAID_STATUSES))
+    )).all()
+    out: dict = {}
+    for org_id, module_key in rows:
+        cid = org_to_club.get(org_id)
+        if cid is None:
+            continue
+        out.setdefault(cid, set()).add(billing_key_for(module_key))
+    return {cid: sorted(keys) for cid, keys in out.items()}
 
 
 async def list_platform_owners(session: AsyncSession) -> list[dict]:

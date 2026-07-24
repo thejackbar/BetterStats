@@ -7,6 +7,16 @@ import {
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
 
+// Deliberately narrow — these fields sit in an `max-w-3xl` modal (~730px of
+// content width) and don't need anywhere near half of it each; the shared
+// Field `width` prop pins an explicit flex-basis via inline style, since a
+// same-specificity Tailwind width class can't reliably beat the shared
+// inputCls's `w-full`.
+const FIELD_W = {
+  title: '230px', value: '110px', stage: '170px', probability: '160px',
+  closeDate: '150px', weighted: '110px', owner: '160px', onboarding: '190px', leadSource: '130px',
+}
+
 // Website Analytics — only meaningful for a platform deal linked to a
 // Marketing Directory club (deal.marketing_club_id). Reuses the SAME
 // super-admin endpoint the Club Directory's own "visited the site" panel
@@ -213,6 +223,17 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     await patch({ discount_amount_cents: null, discount_percent: null, discount_reason: null })
   }
 
+  // Discards in-progress (unsaved) edits to the discount fields, reverting to
+  // whatever's actually persisted on the deal — collapses the editor back to
+  // "+ Add a discount" only if nothing was saved yet (a saved discount stays
+  // editable; Remove is the button for actually deleting it).
+  const cancelDiscount = () => {
+    setDiscountAmount(deal.discount_amount_cents != null ? centsToMoneyInput(deal.discount_amount_cents) : '')
+    setDiscountPercent(deal.discount_percent ?? '')
+    setDiscountReason(deal.discount_reason || '')
+    if (!deal.discount_amount_cents && !deal.discount_percent) setShowDiscount(false)
+  }
+
   const makePointOfContact = async (personId) => {
     try { await client.setPointOfContact(dealId, { person_id: personId }); await refresh() }
     catch (e) { toast.error(e.message || 'Could not set point of contact') }
@@ -233,18 +254,15 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
       const updated = await client.recalcProductInterest(dealId)
       setDeal(updated)
       onChanged?.()
+      toast.success(updated.recalc_had_data
+        ? `Recalculated from tracked website activity — now ${sortModuleKeys(updated.module_keys).map(moduleLabel).join(', ')}`
+        : 'No tracked website visits for this club yet — defaulted to Stats')
     } catch (e) { toast.error(e.message || 'Could not recalculate') } finally { setSaving(false) }
   }
 
   const titleNode = deal ? (
-    <span className="flex items-center gap-2">
-      <span className="truncate">{deal.title}</span>
-      {deal.is_customer && (
-        <span title="Already a BetterCricket subscriber"
-          className="text-[9px] font-mono uppercase tracking-wide px-1 py-px rounded bg-emerald-500/12 text-emerald-300 shrink-0">
-          customer
-        </span>
-      )}
+    <span className="flex items-center gap-2" title={deal.is_customer ? 'Already a BetterCricket subscriber' : undefined}>
+      <span className={`truncate ${deal.is_customer ? 'border-b-2 border-emerald-500/70 pb-0.5' : ''}`}>{deal.title}</span>
       {deal.engagement_score != null && (
         <span title={`Engagement — ${(deal.engagement_tier || '').replace(/_/g, ' ')}`}>
           <Pill tone={TIER_TONE[deal.engagement_tier] || 'faint'}>{deal.engagement_score}</Pill>
@@ -295,46 +313,96 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             </div>
           )}
           <div className="flex flex-wrap gap-3">
-            <Field label={t.titleLabel} half>
+            <Field label={t.titleLabel} width={FIELD_W.title}>
               <TextInput defaultValue={deal.title} onBlur={e => e.target.value !== deal.title && patch({ title: e.target.value })} />
             </Field>
-            <Field label="Value ($)" half>
-              <NumberInput defaultValue={centsToMoneyInput(deal.value_cents)} min={0}
-                onBlur={e => patch({ value_cents: moneyToCents(e.target.value) })} />
-            </Field>
-            <Field label="Stage" half>
+            <Field label="Stage" width={FIELD_W.stage}>
               <Select value={deal.stage_id} disabled={saving} onChange={e => moveStage(e.target.value)}>
                 {(stages || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </Select>
             </Field>
-            <Field label="Probability override (%)" hint={`Stage default: ${deal.effective_probability ?? '—'}%`} half>
-              <NumberInput min={0} max={100} defaultValue={deal.probability ?? ''} placeholder="auto"
-                onBlur={e => patch({ probability: e.target.value === '' ? null : Number(e.target.value) })} />
-            </Field>
-            <Field label="Expected close date" half>
+            <Field label="Expected close date" width={FIELD_W.closeDate}>
               <TextInput type="date" defaultValue={deal.expected_close_date || ''}
                 onBlur={e => patch({ expected_close_date: e.target.value || null })} />
             </Field>
-            <Field label="Weighted value" half>
-              <div className="px-2.5 py-2 text-[13.5px] text-pb-faint">{money(deal.weighted_value_cents)}</div>
-            </Field>
             {ownerOptions && ownerOptions.length > 0 && (
-              <Field label="Owner" half>
+              <Field label="Owner" width={FIELD_W.owner}>
                 <Select value={deal.owner_user_id || ''} onChange={e => patch({ owner_user_id: e.target.value || null })}>
                   <option value="">Unassigned</option>
                   {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </Select>
               </Field>
             )}
-            <Field label="Onboarding method" half>
+            <Field label="Onboarding method" width={FIELD_W.onboarding}>
               <Select value={deal.onboarding_method || ''} onChange={e => patch({ onboarding_method: e.target.value || null })}>
                 {ONBOARDING_METHOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </Field>
-            <Field label="Lead source" half>
+            <Field label="Lead source" width={FIELD_W.leadSource}>
               <Select value={deal.lead_source || ''} onChange={e => patch({ lead_source: e.target.value || null })}>
                 {LEAD_SOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
+            </Field>
+          </div>
+
+          {/* Value / probability / weighted-value / discount are all the same
+              financial-outcome cluster — kept together in one box instead of
+              scattered across the grid and a separate section further down. */}
+          <div className="pb-card px-3 py-3 space-y-3">
+            <div className="flex flex-wrap gap-3 items-start">
+              <Field label="Value ($)" width={FIELD_W.value}>
+                <NumberInput defaultValue={centsToMoneyInput(deal.value_cents)} min={0}
+                  onBlur={e => patch({ value_cents: moneyToCents(e.target.value) })} />
+              </Field>
+              <Field label="Probability override (%)" hint={`Default: ${deal.effective_probability ?? '—'}%`} width={FIELD_W.probability}>
+                <NumberInput min={0} max={100} defaultValue={deal.probability ?? ''} placeholder="auto"
+                  onBlur={e => patch({ probability: e.target.value === '' ? null : Number(e.target.value) })} />
+              </Field>
+              <Field label="Weighted value" width={FIELD_W.weighted}>
+                <div className="px-2.5 py-2 text-[13.5px] text-pb-faint">{money(deal.weighted_value_cents)}</div>
+              </Field>
+              {(deal.discount_amount_cents || deal.discount_percent) > 0 && (
+                <Field label="Discount">
+                  <div className="px-2.5 py-2 text-[13.5px] text-pb-amber">
+                    −{money((deal.value_cents || 0) - (deal.effective_value_cents ?? deal.value_cents))}
+                  </div>
+                </Field>
+              )}
+            </div>
+
+            <Field label="Discretionary discount">
+              {!showDiscount ? (
+                <Btn variant="ghost" sm onClick={() => setShowDiscount(true)}>+ Add a discount</Btn>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div style={{ width: '110px' }}>
+                      <span className="block text-[10.5px] text-pb-faint mb-1">Amount ($)</span>
+                      <NumberInput min={0} value={discountAmount}
+                        onChange={e => { setDiscountAmount(e.target.value); if (e.target.value) setDiscountPercent('') }} />
+                    </div>
+                    <span className="text-[11px] text-pb-faintest pb-2">or</span>
+                    <div style={{ width: '100px' }}>
+                      <span className="block text-[10.5px] text-pb-faint mb-1">Percent (%)</span>
+                      <NumberInput min={0} max={100} value={discountPercent}
+                        onChange={e => { setDiscountPercent(e.target.value); if (e.target.value) setDiscountAmount('') }} />
+                    </div>
+                    <div className="flex-1 min-w-[180px]">
+                      <span className="block text-[10.5px] text-pb-faint mb-1">Reason (required)</span>
+                      <TextInput value={discountReason} onChange={e => setDiscountReason(e.target.value)}
+                        placeholder="e.g. loyalty renewal incentive" />
+                    </div>
+                    <Btn variant="primary" sm onClick={saveDiscount} disabled={saving}>Save</Btn>
+                    <Btn variant="ghost" sm onClick={cancelDiscount} disabled={saving}>Cancel</Btn>
+                    {(deal.discount_amount_cents || deal.discount_percent) && (
+                      <Btn variant="ghost" sm onClick={clearDiscount}>Remove</Btn>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-pb-faint">
+                    {money(deal.value_cents)} base → <span className="text-pb-text font-medium">{money(deal.effective_value_cents ?? deal.value_cents)}</span> after discount
+                  </p>
+                </div>
+              )}
             </Field>
           </div>
 
@@ -393,40 +461,6 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               </Field>
             )
           })()}
-
-          <Field label="Discretionary discount">
-            {!showDiscount ? (
-              <Btn variant="ghost" sm onClick={() => setShowDiscount(true)}>+ Add a discount</Btn>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-2 items-end">
-                  <div className="w-32">
-                    <span className="block text-[10.5px] text-pb-faint mb-1">Amount ($)</span>
-                    <NumberInput min={0} value={discountAmount}
-                      onChange={e => { setDiscountAmount(e.target.value); if (e.target.value) setDiscountPercent('') }} />
-                  </div>
-                  <span className="text-[11px] text-pb-faintest pb-2">or</span>
-                  <div className="w-28">
-                    <span className="block text-[10.5px] text-pb-faint mb-1">Percent (%)</span>
-                    <NumberInput min={0} max={100} value={discountPercent}
-                      onChange={e => { setDiscountPercent(e.target.value); if (e.target.value) setDiscountAmount('') }} />
-                  </div>
-                  <div className="flex-1 min-w-[180px]">
-                    <span className="block text-[10.5px] text-pb-faint mb-1">Reason (required)</span>
-                    <TextInput value={discountReason} onChange={e => setDiscountReason(e.target.value)}
-                      placeholder="e.g. loyalty renewal incentive" />
-                  </div>
-                  <Btn variant="primary" sm onClick={saveDiscount} disabled={saving}>Save</Btn>
-                  {(deal.discount_amount_cents || deal.discount_percent) && (
-                    <Btn variant="ghost" sm onClick={clearDiscount}>Remove</Btn>
-                  )}
-                </div>
-                <p className="text-[11px] text-pb-faint">
-                  {money(deal.value_cents)} base → <span className="text-pb-text font-medium">{money(deal.effective_value_cents ?? deal.value_cents)}</span> after discount
-                </p>
-              </div>
-            )}
-          </Field>
 
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Contacts</h3>

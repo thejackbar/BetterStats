@@ -29,9 +29,14 @@ export function Btn({ children, onClick, variant = 'ghost', sm, disabled, icon, 
   )
 }
 
-export function Field({ label, children, hint, half }) {
+export function Field({ label, children, hint, half, width }) {
+  // `width` (e.g. "140px") pins an explicit flex-basis via inline style, which
+  // reliably wins over the shared inputCls's `w-full` (same-specificity
+  // Tailwind utilities are order-dependent, not override-safe) — use it for
+  // any field that shouldn't stretch to the modal's full grid width.
+  const style = width ? { flexBasis: width, maxWidth: width, minWidth: 0 } : undefined
   return (
-    <label className={half ? 'block flex-1 min-w-0 basis-[calc(50%-6px)]' : 'block'}>
+    <label className={half && !width ? 'block flex-1 min-w-0 basis-[calc(50%-6px)]' : width ? 'block flex-none' : 'block'} style={style}>
       <span className="block text-[11.5px] text-pb-faint mb-[5px]">{label}</span>
       {children}
       {hint && <span className="block text-[10.5px] text-pb-faintest mt-1">{hint}</span>}
@@ -124,6 +129,7 @@ export const ONBOARDING_METHOD_OPTIONS = [
   { value: 'direct_subscriber', label: 'Direct to Subscriber (no trial)' },
   { value: 'none', label: 'None (not yet onboarded)' },
 ]
+export const ONBOARDING_METHOD_LABELS = Object.fromEntries(ONBOARDING_METHOD_OPTIONS.map(o => [o.value, o.label]))
 
 // Original acquisition channel, as a manually-set field on the deal (distinct
 // from the auto-derived acquisition_channel shown in the CRM list/filters).
