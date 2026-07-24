@@ -621,6 +621,13 @@ export default function AdminScorecardUpload() {
     return Object.values(byPid)
   }, [innings, rosterName])
 
+  // reconcile() flags split into the card's own arithmetic slips (fix or keep — the
+  // user's call) vs likely reader misreads (worth correcting). Tolerate the old
+  // plain-string shape in case a re-edit ever carries legacy warnings.
+  const asWarn = w => (typeof w === 'string' ? { kind: 'card_error', text: w } : w)
+  const cardErrors = useMemo(() => warnings.map(asWarn).filter(w => w.kind === 'card_error'), [warnings])
+  const misreads = useMemo(() => warnings.map(asWarn).filter(w => w.kind === 'misread'), [warnings])
+
   const unmatched = useMemo(() => {
     let n = 0
     for (const inn of innings) {
@@ -805,11 +812,30 @@ export default function AdminScorecardUpload() {
                 </ul>
               </div>
             )}
-            {warnings.length > 0 && (
+            {cardErrors.length > 0 && (
               <div className="px-4 py-3 rounded bg-amber-500/10 border border-amber-400/30">
-                <div className="text-amber-300 text-sm font-semibold mb-1">Worth a second look</div>
+                <div className="text-amber-300 text-sm font-semibold mb-1">
+                  The original scorecard doesn't add up here
+                </div>
+                <p className="text-amber-200/90 text-xs mb-2">
+                  The reader transcribed the card exactly as written. At these spots the card's
+                  own figures don't reconcile, usually an old scorer's slip. You can correct
+                  them in the tables below, or import as-is to keep the card's original figures.
+                </p>
                 <ul className="list-disc list-inside text-amber-200/90 text-xs space-y-0.5">
-                  {warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  {cardErrors.map((w, i) => <li key={i}>{w.text}</li>)}
+                </ul>
+              </div>
+            )}
+            {misreads.length > 0 && (
+              <div className="px-4 py-3 rounded bg-red-500/10 border border-red-400/30">
+                <div className="text-red-300 text-sm font-semibold mb-1">Likely misreads — worth fixing above</div>
+                <p className="text-red-200/90 text-xs mb-2">
+                  These look like the reader misread the card rather than the card being wrong.
+                  Check them against the scan and correct them before importing.
+                </p>
+                <ul className="list-disc list-inside text-red-200/90 text-xs space-y-0.5">
+                  {misreads.map((w, i) => <li key={i}>{w.text}</li>)}
                 </ul>
               </div>
             )}
@@ -1133,13 +1159,28 @@ export default function AdminScorecardUpload() {
               <h3 className="text-lg font-semibold text-pb-text mb-2">{editingId ? 'Save changes to this scorecard?' : 'Import this match?'}</h3>
               <div className="text-sm text-pb-faint mb-4 space-y-2">
                 <p>{editingId ? 'This updates the saved game and its stats in place.' : 'It will be saved as a manual game and counted in the stats.'} Reversible from the Audit tab.</p>
+                {cardErrors.length > 0 && (
+                  <p className="text-amber-300/90 text-xs">
+                    The original scorecard has {cardErrors.length === 1 ? 'a spot' : `${cardErrors.length} spots`} where
+                    its figures don't add up. If you haven't corrected {cardErrors.length === 1 ? 'it' : 'them'} above,
+                    importing keeps the card's original numbers as written — which is fine for a faithful record.
+                  </p>
+                )}
+                {misreads.length > 0 && (
+                  <p className="text-red-300 text-xs">
+                    {misreads.length === 1 ? 'A likely misread is' : `${misreads.length} likely misreads are`} still
+                    flagged. Consider fixing {misreads.length === 1 ? 'it' : 'them'} above before importing.
+                  </p>
+                )}
                 {dupes.length > 0
                   ? <p className="text-red-300 text-xs">Heads up: your club already has {dupes.length === 1 ? 'a game' : `${dupes.length} games`} on {form.played_at}. If this is the same match, importing will double-count it. Only proceed if it's a different game.</p>
                   : <p className="text-amber-300/90 text-xs">No existing game found on this date, so it won't double up.</p>}
               </div>
               <div className="flex justify-end gap-2">
-                <button className={BTN_SECONDARY} onClick={() => setConfirm(false)}>Cancel</button>
-                <button className={BTN_PRIMARY} disabled={busy} onClick={doImport}>{busy ? 'Saving…' : (editingId ? 'Save changes' : 'Import')}</button>
+                <button className={BTN_SECONDARY} onClick={() => setConfirm(false)}>{cardErrors.length > 0 || misreads.length > 0 ? 'Go back & edit' : 'Cancel'}</button>
+                <button className={BTN_PRIMARY} disabled={busy} onClick={doImport}>
+                  {busy ? 'Saving…' : (editingId ? 'Save changes' : (cardErrors.length > 0 ? 'Import, keep original' : 'Import'))}
+                </button>
               </div>
             </div>
           </div>

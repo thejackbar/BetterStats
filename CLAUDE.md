@@ -2534,6 +2534,21 @@ pages + a 1993 TCA "Official Summary of Match" form). Full how-to-improve-it doc
   from whether the reader found any value; re-editing a saved upload recovers
   the choice from the stored rows' nulls. The prompt also tells the model to
   leave untracked stats null, never 0.
+- **Card-error vs misread flags (v8.80.3)**: `reconcile()` now returns
+  `list[dict]` `{kind, text}` instead of `list[str]` — `kind` is `card_error`
+  (the card's OWN figures don't reconcile: batting≠total, wickets≠FOW count,
+  bowling≠total, overs mismatch — a decades-old scorer slip, fix-or-keep) or
+  `misread` (a value the READER likely got wrong: dismissal bowler not in the
+  analysis, boundaries>runs, keeper catches>catches — worth fixing). The reader
+  still transcribes faithfully; nothing auto-corrects. Frontend
+  (`AdminScorecardUpload.jsx`) renders two boxes: amber "the original scorecard
+  doesn't add up here (correct below or import as-is to keep the card's
+  figures)" and red "likely misreads — worth fixing above", and the import
+  confirm spells out the keep-or-fix choice (button reads "Import, keep
+  original" when only card errors remain). The eval prints `w["text"]`. Old
+  plain-string warnings tolerated on the frontend via `asWarn`. Per direct
+  request: read exactly what the card says, flag where it's wrong, let the user
+  choose.
 - **Name cross-referencing across the card (v8.80.2)**: the standout
   handwriting win, from a real correction pass — the same person is written
   many times (batting order, bowling analysis, a "c Smith" catcher, a "b Jones"

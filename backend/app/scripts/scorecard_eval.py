@@ -175,7 +175,8 @@ async def run_case(case_dir: Path) -> Tally | None:
     for d in tally.diffs:
         print(d)
     if result.get("warnings"):
-        print("  reconcile warnings: " + "; ".join(result["warnings"]))
+        print("  reconcile warnings: " + "; ".join(
+            w["text"] if isinstance(w, dict) else str(w) for w in result["warnings"]))
     return tally
 
 

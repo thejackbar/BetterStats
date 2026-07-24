@@ -316,14 +316,26 @@ def _name_close(a: str, b: str) -> float:
     return SequenceMatcher(None, sa, sb).ratio()
 
 
-def reconcile(payload: dict) -> list[str]:
-    """Advisory cross-checks that flag the cells most likely misread.
+def reconcile(payload: dict) -> list[dict]:
+    """Advisory cross-checks that flag where the card and its numbers disagree.
 
-    Never blocks an import — it just tells the reviewer where the card and the numbers
-    disagree (batting that doesn't add up to the total, wickets that don't tally, a
-    dismissing bowler whose name isn't among that innings' bowlers).
+    Never blocks an import — the reader transcribes the card exactly as written, and
+    these just tell the reviewer where to look, so they can correct a cell or keep the
+    card's original (a decades-old scorer's arithmetic slip is real history, not the
+    reader's fault). Each warning carries a `kind`:
+
+      - "card_error": the card's OWN figures don't reconcile (batting doesn't add up to
+        the stated total, wickets don't tally, overs don't add up). Usually an original
+        scorer error — fix it or keep it as the card has it, the reviewer's call.
+      - "misread": a value that looks like the READER misread it (a dismissing bowler
+        not in the analysis, boundaries worth more than the batter's runs). Worth
+        correcting above before importing.
     """
-    warnings: list[str] = []
+    warnings: list[dict] = []
+
+    def add(kind: str, text: str):
+        warnings.append({"kind": kind, "text": text})
+
     _DISMISSED_NOT = {"not out", "did not bat", "dnb", "absent", "", None}
     bpo = (payload.get("match") or {}).get("balls_per_over") or 6
     for inn in (payload.get("innings") or []):
@@ -345,32 +357,30 @@ def reconcile(payload: dict) -> list[str]:
         if total is not None and bats:
             expected = run_sum + (ex_total or 0)
             if expected != total:
-                warnings.append(
+                add("card_error",
                     f"{label}: batting {run_sum}"
                     + (f" + {ex_total} extras" if ex_total else "")
-                    + f" = {expected}, but the card total reads {total} (off by {total - expected})."
-                )
+                    + f" = {expected}, but the card total reads {total} (off by {total - expected}).")
 
         dismissed = [b for b in bats if not b.get("not_out") and not b.get("did_not_bat")
                      and (b.get("how_out") or "").strip().lower() not in _DISMISSED_NOT]
         wkts = inn.get("total_wickets")
         fow = inn.get("fall_of_wickets") or []
         if wkts is not None and fow and len(fow) != wkts:
-            warnings.append(f"{label}: {wkts} wickets fell but {len(fow)} fall-of-wickets rows were read.")
+            add("card_error", f"{label}: {wkts} wickets fell but {len(fow)} fall-of-wickets rows were read.")
         bowl_wkts = sum((b.get("wickets") or 0) for b in bowls)
         if wkts is not None and bowl_wkts > wkts:
-            warnings.append(f"{label}: bowlers were credited {bowl_wkts} wickets but only {wkts} fell.")
+            add("card_error", f"{label}: bowlers were credited {bowl_wkts} wickets but only {wkts} fell.")
 
         bowl_runs = sum((b.get("runs") or 0) for b in bowls if b.get("runs") is not None)
         if total is not None and bowls and bowl_runs:
             byes = (extras.get("byes") or 0) + (extras.get("leg_byes") or 0)
             gap = total - (bowl_runs + byes)
             if abs(gap) > 5:
-                warnings.append(
+                add("card_error",
                     f"{label}: bowling concedes {bowl_runs}"
                     + (f" + {byes} byes/leg-byes" if byes else "")
-                    + f" = {bowl_runs + byes}, but the innings total is {total} (off by {gap})."
-                )
+                    + f" = {bowl_runs + byes}, but the innings total is {total} (off by {gap}).")
 
         # Boundaries can't be worth more than the batter's total runs.
         for b in bats:
@@ -379,10 +389,9 @@ def reconcile(payload: dict) -> list[str]:
                 continue
             bnd = 4 * (b.get("fours") or 0) + 6 * (b.get("sixes") or 0)
             if bnd > r:
-                warnings.append(
+                add("misread",
                     f"{label}: {b.get('name') or 'a batter'} is shown with {b.get('fours') or 0}x4 and "
-                    f"{b.get('sixes') or 0}x6 ({bnd} in boundaries) but only {r} runs."
-                )
+                    f"{b.get('sixes') or 0}x6 ({bnd} in boundaries) but only {r} runs.")
 
         # A dismissing bowler is ALWAYS one of the bowlers in this innings' analysis
         # (you can't be dismissed by someone who didn't bowl). A 'b Willingslow' that
@@ -397,11 +406,10 @@ def reconcile(payload: dict) -> list[str]:
                     continue
                 if max((_name_close(bn, cand) for cand in bowler_names), default=0.0) < 0.6:
                     flagged.add(bn)
-                    warnings.append(
+                    add("misread",
                         f"{label}: a wicket is credited to bowler \"{bn}\", but no bowler by that "
                         f"name is in the bowling analysis ({', '.join(bowler_names)}) — check the "
-                        f"spelling against the analysis, they're the same person."
-                    )
+                        f"spelling against the analysis, they're the same person.")
 
         # Bowlers' overs should add up to the innings, when the innings overs are shown.
         inn_balls = overs_to_balls(inn.get("overs"), bpo)
@@ -409,19 +417,17 @@ def reconcile(payload: dict) -> list[str]:
         if inn_balls and any(x is not None for x in bowl_balls):
             tot = sum(x for x in bowl_balls if x is not None)
             if abs(tot - inn_balls) > bpo:
-                warnings.append(
+                add("card_error",
                     f"{label}: bowlers' overs add up to {tot // bpo}.{tot % bpo} but the innings is "
-                    f"{inn_balls // bpo}.{inn_balls % bpo} overs."
-                )
+                    f"{inn_balls // bpo}.{inn_balls % bpo} overs.")
 
         # An OWN CATCHES column can't credit a keeper with more wk catches than catches.
         for f in (inn.get("fielding") or []):
             c, wk = f.get("catches"), f.get("catches_wk")
             if c is not None and wk is not None and wk > c:
-                warnings.append(
+                add("misread",
                     f"{label}: {f.get('name') or 'a fielder'} is shown with {wk} keeper catches "
-                    f"but only {c} catches in total."
-                )
+                    f"but only {c} catches in total.")
     return warnings
 
 
