@@ -2534,6 +2534,20 @@ pages + a 1993 TCA "Official Summary of Match" form). Full how-to-improve-it doc
   from whether the reader found any value; re-editing a saved upload recovers
   the choice from the stored rows' nulls. The prompt also tells the model to
   leave untracked stats null, never 0.
+- **Name cross-referencing across the card (v8.80.2)**: the standout
+  handwriting win, from a real correction pass — the same person is written
+  many times (batting order, bowling analysis, a "c Smith" catcher, a "b Jones"
+  wicket-taker, fall-of-wickets) with wildly varying legibility. The prompt now
+  says to read EVERY occurrence and use the clearest as the true spelling, then
+  use it everywhere: the **bowling analysis is authority for bowler names** (a
+  dismissing bowler is always one of the analysed bowlers), the **batting order
+  authority for batter names** — but never collapse two players who merely share
+  a surname (N Ziebell ≠ R Ziebell). `reconcile()` backs it with an advisory:
+  `_name_close` (surname-level `SequenceMatcher`, ≥0.6) flags a dismissal bowler
+  whose name isn't among that innings' analysed bowlers — the exact
+  "S Willingslow" that's really "G Wittingslow" case. Worked examples baked into
+  the prompt (Wittingslow, Houser/Heuser, Pascoe initials). Verified truth file
+  for the 1976 Railways match kept locally as the first eval golden case.
 - **Roster matching = the historical-import engine (v8.80.1)**: the extract
   endpoint now runs card names through `import_ingest.match_players` (the same
   exact → middle-initial-tolerant → "Surname Initial" form → blocked

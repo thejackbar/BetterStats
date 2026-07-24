@@ -29,6 +29,29 @@ two-day matches (first day is the match date), 8-ball overs on pre-1980 cards
 (`match.balls_per_over`), and inferring a result only when the scores decide it
 (flagged `result_inferred` so the review screen says to check it).
 
+## Names: cross-reference the whole card
+
+The single biggest handwriting win. The same person is written many times on a
+card — in the batting order, in the bowling analysis, as a catcher in a "c Smith"
+dismissal, as the wicket-taker in a "b Jones", and in the fall-of-wickets — and
+the legibility varies wildly between them. A bowler that reads "S Willingslow" in
+a cramped how-out column is plainly "G Wittingslow" in the bowling analysis right
+below it; "T Houser" on one page is "I Heuser" on the next. The prompt tells the
+model to read *every* occurrence and use the clearest one as the true spelling,
+then use that one spelling everywhere. The two authorities:
+
+- The **bowling analysis** is the authority for bowler names. A dismissing bowler
+  is always one of the analysed bowlers (you can't be out to someone who didn't
+  bowl), so a "b X" reads as whichever analysis bowler it matches.
+- The **batting order** is the authority for batter names, so a fall-of-wickets
+  or fielder name that is a known player takes that player's spelling.
+
+It must NOT collapse two different people who merely share a surname ("N Ziebell"
+and "R Ziebell" are different players). `reconcile()` backs this up with an
+advisory: a dismissal bowler whose surname doesn't fuzzy-match any bowler in that
+innings' analysis is flagged for the reviewer, which is the exact
+"S Willingslow" → "G Wittingslow" case.
+
 ## Adding a verified card to the eval set
 
 Keep a local folder (not in the repo; the scans are big and carry names), one

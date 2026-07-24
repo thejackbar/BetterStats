@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 
 from app.config.settings import settings
 from app.services.llm_text import strip_em_dashes
@@ -111,6 +112,26 @@ _SYSTEM = (
     "usually the innings of ONE match — combine them into one match with multiple "
     "innings, do not invent a second match. A partial innings (a second innings barely "
     "started before time) is still a real innings: record what's there.\n"
+    "- CROSS-REFERENCE NAMES ACROSS THE WHOLE CARD. The SAME person is written many "
+    "times — as a batter in the order, as a bowler in the bowling analysis, as the "
+    "catcher in a 'c Smith' dismissal, as the wicket-taker in a 'b Jones' dismissal, and "
+    "in the fall-of-wickets 'outgoing batsman' row — and handwriting quality varies "
+    "between them. Before you settle a name, look at EVERY place it appears and use the "
+    "CLEAREST, most complete instance as the true spelling, then use that one spelling "
+    "everywhere. The BOWLING ANALYSIS is the authority for bowler names: a bowler scrawled "
+    "in a batter's 'how out' column is ALWAYS one of the bowlers listed in that innings' "
+    "analysis, so read it as whichever analysis bowler it matches — never emit a "
+    "dismissal bowler who isn't in the analysis. The batting order is the authority for "
+    "batter names: a name in the fall-of-wickets or a fielder's name that matches a "
+    "player already in the order is that same player, spelled the same way. Worked "
+    "examples from a real 1976 card: a dismissing bowler that looks like 'S Willingslow' "
+    "in a how-out column but is clearly 'G Wittingslow' in the bowling analysis is "
+    "'G Wittingslow' in both places; one that looks like 'T Houser' on one page but "
+    "'I Heuser' on another is the one person 'I Heuser' throughout; a fielder 'B Pascoe' "
+    "who also appears as a bowler should carry the same initial in both. Do NOT, however, "
+    "collapse two genuinely different people who merely share a surname — 'N Ziebell' and "
+    "'R Ziebell' are different players; only unify instances that are plainly the same "
+    "person written more or less legibly.\n"
     "You will be told which club is OURS. For each innings set is_our_team to whether the "
     "batting side is that club. The bowling rows of an innings belong to the OTHER side "
     "(the team that was fielding). Record both teams in full. "
@@ -276,11 +297,31 @@ def overs_to_balls(o, balls_per_over: int = 6):
     return full * balls_per_over + round((o - full) * 10)
 
 
+def _surname_key(name) -> str:
+    """Longest alphabetic token of a name, lowercased — a rough surname for the
+    fuzzy cross-checks (initials and dots dropped)."""
+    toks = [t for t in re.split(r"[^a-z]+", (name or "").lower()) if len(t) >= 2]
+    return max(toks, key=len) if toks else ""
+
+
+def _name_close(a: str, b: str) -> float:
+    """Surname-level similarity in [0,1] — tolerates a misread letter or initial so
+    'wittingslow' vs 'willingslow' scores high but two different surnames score low."""
+    from difflib import SequenceMatcher
+    sa, sb = _surname_key(a), _surname_key(b)
+    if not sa or not sb:
+        return 0.0
+    if sa == sb or sa in sb or sb in sa:
+        return 1.0
+    return SequenceMatcher(None, sa, sb).ratio()
+
+
 def reconcile(payload: dict) -> list[str]:
     """Advisory cross-checks that flag the cells most likely misread.
 
     Never blocks an import — it just tells the reviewer where the card and the numbers
-    disagree (batting that doesn't add up to the total, wickets that don't tally).
+    disagree (batting that doesn't add up to the total, wickets that don't tally, a
+    dismissing bowler whose name isn't among that innings' bowlers).
     """
     warnings: list[str] = []
     _DISMISSED_NOT = {"not out", "did not bat", "dnb", "absent", "", None}
@@ -342,6 +383,25 @@ def reconcile(payload: dict) -> list[str]:
                     f"{label}: {b.get('name') or 'a batter'} is shown with {b.get('fours') or 0}x4 and "
                     f"{b.get('sixes') or 0}x6 ({bnd} in boundaries) but only {r} runs."
                 )
+
+        # A dismissing bowler is ALWAYS one of the bowlers in this innings' analysis
+        # (you can't be dismissed by someone who didn't bowl). A 'b Willingslow' that
+        # doesn't match any analysed bowler is a misread name — flag it so the reviewer
+        # reconciles it (e.g. to the clearly-written 'G Wittingslow' in the analysis).
+        bowler_names = [b.get("name") for b in bowls if (b.get("name") or "").strip()]
+        if bowler_names:
+            flagged: set[str] = set()
+            for b in bats:
+                bn = (b.get("bowler") or "").strip()
+                if not bn or bn in flagged:
+                    continue
+                if max((_name_close(bn, cand) for cand in bowler_names), default=0.0) < 0.6:
+                    flagged.add(bn)
+                    warnings.append(
+                        f"{label}: a wicket is credited to bowler \"{bn}\", but no bowler by that "
+                        f"name is in the bowling analysis ({', '.join(bowler_names)}) — check the "
+                        f"spelling against the analysis, they're the same person."
+                    )
 
         # Bowlers' overs should add up to the innings, when the innings overs are shown.
         inn_balls = overs_to_balls(inn.get("overs"), bpo)
