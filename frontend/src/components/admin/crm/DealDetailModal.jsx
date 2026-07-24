@@ -468,7 +468,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               const poc = contacts.find(c => c.role_on_deal === 'point_of_contact')
               const others = contacts.filter(c => c.role_on_deal !== 'point_of_contact')
               const phoneField = (c) => editPhoneId === c.id ? (
-                <TextInput autoFocus defaultValue={c.phone || ''} placeholder="Mobile" className="w-32 shrink-0"
+                <TextInput autoFocus defaultValue={c.phone || ''} placeholder="Mobile" className="shrink-0" style={{ width: '92px' }}
                   onBlur={e => savePhone(c.id, e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditPhoneId(null) }} />
               ) : (
@@ -500,10 +500,13 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                 </div>
               )
             })()}
-            <form onSubmit={addContact} className="flex gap-2">
-              <TextInput placeholder="Name" value={contactName} onChange={e => setContactName(e.target.value)} className="flex-1" />
-              <TextInput placeholder="Email (optional)" value={contactEmail} onChange={e => setContactEmail(e.target.value)} className="flex-1" />
-              <TextInput placeholder="Mobile (optional)" value={contactPhone} onChange={e => setContactPhone(e.target.value)} className="w-32 shrink-0" />
+            {/* flex-wrap so a narrow modal drops Mobile+Add to a second line
+                instead of pushing Add off the right edge; Name/Email get
+                real typing room, Mobile stays just wide enough for a number. */}
+            <form onSubmit={addContact} className="flex flex-wrap gap-2">
+              <TextInput placeholder="Full name" value={contactName} onChange={e => setContactName(e.target.value)} style={{ width: '260px' }} />
+              <TextInput placeholder="Email (optional)" value={contactEmail} onChange={e => setContactEmail(e.target.value)} style={{ width: '260px' }} />
+              <TextInput placeholder="Mobile" value={contactPhone} onChange={e => setContactPhone(e.target.value)} style={{ width: '92px' }} />
               <Btn type="submit" variant="ghost" sm>Add</Btn>
             </form>
           </div>
