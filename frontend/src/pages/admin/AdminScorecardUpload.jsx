@@ -169,13 +169,17 @@ function OppClubSearch({ value, onPick }) {
 }
 
 // ─── Player picker for our rows (searchable, like the app's player search) ──────
-function PlayerSelect({ value, roster, cardName, onChange }) {
+// `candidates` are the backend's close matches for this card name (same fuzzy
+// engine as historical imports and Merge Players) — shown first with their
+// confidence, so a near-miss spelling is one click instead of a search.
+function PlayerSelect({ value, roster, cardName, onChange, candidates = [] }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const selected = roster.find(p => p.id === value)
   const t = q.trim().toLowerCase()
   const matches = (t ? roster.filter(p => (p.name || '').toLowerCase().includes(t)) : roster).slice(0, 40)
+  const cands = t ? [] : candidates.filter(c => roster.some(p => p.id === c.player_id))
   return (
     <div ref={ref} className="relative">
       <input
@@ -192,6 +196,20 @@ function PlayerSelect({ value, roster, cardName, onChange }) {
           {value && (
             <button type="button" className="block w-full text-left px-3 py-1.5 text-xs text-pb-faint hover:bg-pb-surface2"
               onMouseDown={() => { onChange(''); setOpen(false) }}>— clear —</button>
+          )}
+          {cands.length > 0 && (
+            <>
+              <div className="px-3 pt-1.5 pb-0.5 font-mono text-[9px] text-pb-faint">CLOSE MATCHES</div>
+              {cands.map(c => (
+                <button type="button" key={`cand-${c.player_id}`}
+                  className="block w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
+                  onMouseDown={() => { onChange(c.player_id); setOpen(false) }}>
+                  {c.name}
+                  {c.confidence != null && <span className="text-pb-faint text-xs"> · {Math.round(c.confidence * 100)}%</span>}
+                </button>
+              ))}
+              <div className="border-t pb-hairline" />
+            </>
           )}
           {matches.length === 0
             ? <div className="px-3 py-2 text-xs text-pb-faint">No match</div>
@@ -302,6 +320,12 @@ export default function AdminScorecardUpload() {
   // the roster — merged with the dismissal-derived rows at import (max per stat, so
   // the two sources never double-count the same catch).
   const [fieldingExtra, setFieldingExtra] = useState([])
+  // Which optional stat columns this card actually tracks. Unticked → the column
+  // is hidden on review and imports as null ("not recorded"), never a fake 0 —
+  // a summary form has no 4s/6s or maidens at all. Defaults come from whether
+  // the reader found any value for the field.
+  const ALL_TRACKED = { balls: true, boundaries: true, maidens: true, bowler_extras: true }
+  const [tracked, setTracked] = useState(ALL_TRACKED)
   const [warnings, setWarnings] = useState([])
 
   const [form, setForm] = useState({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
@@ -375,6 +399,15 @@ export default function AdminScorecardUpload() {
         catches: f.catches || 0, catches_wk: f.catches_wk || 0,
         stumpings: f.stumpings || 0, run_outs: f.run_outs || 0,
       })))
+      // Recover the tracked-columns choice from what the last save stored:
+      // null = wasn't tracked. No rows at all → leave everything on.
+      const bat = full.batting_innings || [], bowl = full.bowling_spells || []
+      setTracked({
+        balls: bat.length ? bat.some(r => r.balls != null) : true,
+        boundaries: bat.length ? bat.some(r => r.fours != null || r.sixes != null) : true,
+        maidens: bowl.length ? bowl.some(r => r.maidens != null) : true,
+        bowler_extras: bowl.length ? bowl.some(r => r.wides != null || r.no_balls != null) : true,
+      })
       setWarnings([])
       setForm({
         season_id: full.season_id || '',
@@ -450,6 +483,16 @@ export default function AdminScorecardUpload() {
           catches: f.catches ?? '', catches_wk: f.catches_wk ?? '',
           stumpings: f.stumpings ?? '', run_outs: f.run_outs ?? '',
         })))
+      // Default the tracked-columns toggles to what the reader actually found —
+      // a card with no 4s/6s or maidens anywhere starts with those unticked.
+      const anyBat = f => (data.innings || []).some(inn => (inn.batting || []).some(b => b[f] != null))
+      const anyBowl = f => (data.innings || []).some(inn => (inn.bowling || []).some(b => b[f] != null))
+      setTracked({
+        balls: anyBat('balls'),
+        boundaries: anyBat('fours') || anyBat('sixes'),
+        maidens: anyBowl('maidens'),
+        bowler_extras: anyBowl('wides') || anyBowl('no_balls'),
+      })
 
       // Best-effort defaults: date, opponent name, season.
       const oppName = data.match?.our_team
@@ -473,6 +516,9 @@ export default function AdminScorecardUpload() {
   }
 
   const rosterName = useCallback(id => (roster.find(p => p.id === id)?.name) || '', [roster])
+  // Close-match candidates for a card name (the historical-import fuzzy engine,
+  // returned by the extract endpoint) — shown at the top of each player picker.
+  const candsFor = useCallback(name => (extract?.match_info?.[name]?.candidates) || [], [extract])
 
   // Normalise one extracted batting row into the split-dismissal shape: a canonical
   // `how_out` mode + fielder/bowler. For an opposition innings the fielder/bowler are
@@ -593,8 +639,10 @@ export default function AdminScorecardUpload() {
           if (!b.player_id) continue
           battingRows.push({
             player_id: b.player_id, innings_number: inn.innings_number || 1,
-            batting_position: num(b.position), runs: num(b.runs) || 0, balls: num(b.balls),
-            fours: num(b.fours) || 0, sixes: num(b.sixes) || 0,
+            batting_position: num(b.position), runs: num(b.runs) || 0,
+            balls: tracked.balls ? num(b.balls) : null,
+            fours: tracked.boundaries ? (num(b.fours) || 0) : null,
+            sixes: tracked.boundaries ? (num(b.sixes) || 0) : null,
             dismissal_type: (b.dismissal_text || composeDismissal(b.how_out, b.fielder, b.bowler)) || null,
             not_out: !!b.not_out, did_not_bat: !!b.did_not_bat,
           })
@@ -604,8 +652,11 @@ export default function AdminScorecardUpload() {
           if (!b.player_id) continue
           bowlingRows.push({
             player_id: b.player_id, innings_number: inn.innings_number || 1,
-            overs: num(b.overs), maidens: num(b.maidens) || 0, runs: num(b.runs) || 0,
-            wickets: num(b.wickets) || 0, wides: num(b.wides) || 0, no_balls: num(b.no_balls) || 0,
+            overs: num(b.overs),
+            maidens: tracked.maidens ? (num(b.maidens) || 0) : null,
+            runs: num(b.runs) || 0, wickets: num(b.wickets) || 0,
+            wides: tracked.bowler_extras ? (num(b.wides) || 0) : null,
+            no_balls: tracked.bowler_extras ? (num(b.no_balls) || 0) : null,
           })
         }
       }
@@ -835,6 +886,24 @@ export default function AdminScorecardUpload() {
               </div>
             </div>
 
+            {/* Which optional columns this card records */}
+            <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
+              <h2 className="text-sm font-semibold text-pb-text mb-1">This card tracks</h2>
+              <p className="text-xs text-pb-faint mb-2">
+                Untick anything this card doesn't record. Unticked fields are hidden below
+                and import as "not recorded" rather than a zero, so they never drag a
+                player's boundary or discipline stats.
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                {[['balls', 'Balls faced'], ['boundaries', '4s & 6s'], ['maidens', 'Maidens'], ['bowler_extras', 'Bowler wides & no-balls']].map(([k, label]) => (
+                  <label key={k} className="flex items-center gap-2 text-sm text-pb-text">
+                    <input type="checkbox" checked={!!tracked[k]} onChange={e => setTracked(t => ({ ...t, [k]: e.target.checked }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             {/* Innings */}
             {innings.map((inn, ii) => (
               <div key={ii} className="bg-pb-surface border pb-hairline rounded-lg p-5">
@@ -868,8 +937,10 @@ export default function AdminScorecardUpload() {
                     <thead><tr className="border-b pb-hairline">
                       <th className={TH}>Batter</th>
                       {inn.is_our_team && <th className={TH}>Our player</th>}
-                      <th className={TH}>Pos</th><th className={TH}>R</th><th className={TH}>B</th>
-                      <th className={TH}>4s</th><th className={TH}>6s</th>
+                      <th className={TH}>Pos</th><th className={TH}>R</th>
+                      {tracked.balls && <th className={TH}>B</th>}
+                      {tracked.boundaries && <th className={TH}>4s</th>}
+                      {tracked.boundaries && <th className={TH}>6s</th>}
                       <th className={TH}>How out</th><th className={TH}>Fielder</th><th className={TH}>Bowler</th>
                     </tr></thead>
                     <tbody>
@@ -880,28 +951,28 @@ export default function AdminScorecardUpload() {
                           </td>
                           {inn.is_our_team && (
                             <td className={`${TD} min-w-[150px]`}>
-                              <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} onChange={v => editRow(ii, 'batting', ri, { player_id: v })} />
+                              <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} candidates={candsFor(b.name)} onChange={v => editRow(ii, 'batting', ri, { player_id: v })} />
                             </td>
                           )}
                           <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.position ?? ''} onChange={e => editRow(ii, 'batting', ri, { position: e.target.value })} /></td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={b.runs ?? ''} onChange={e => editRow(ii, 'batting', ri, { runs: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.balls ?? ''} onChange={e => editRow(ii, 'batting', ri, { balls: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.fours ?? ''} onChange={e => editRow(ii, 'batting', ri, { fours: e.target.value })} /></td>
-                          <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.sixes ?? ''} onChange={e => editRow(ii, 'batting', ri, { sixes: e.target.value })} /></td>
+                          {tracked.balls && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.balls ?? ''} onChange={e => editRow(ii, 'batting', ri, { balls: e.target.value })} /></td>}
+                          {tracked.boundaries && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.fours ?? ''} onChange={e => editRow(ii, 'batting', ri, { fours: e.target.value })} /></td>}
+                          {tracked.boundaries && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.sixes ?? ''} onChange={e => editRow(ii, 'batting', ri, { sixes: e.target.value })} /></td>}
                           <td className={TD}><ModeSelect value={b.how_out || ''} onChange={v => editDismissal(ii, ri, { how_out: v })} /></td>
                           <td className={`${TD} min-w-[140px]`}>
                             {!modeHasFielder(b.how_out)
                               ? <span className="text-pb-faint/40 text-xs">—</span>
                               : inn.is_our_team
                                 ? <input className={SMALL_INPUT} placeholder="fielder (opp)" value={b.fielder || ''} onChange={e => editDismissal(ii, ri, { fielder: e.target.value })} />
-                                : <PlayerSelect value={b.fielder_id || ''} roster={roster} cardName={b.fielder} onChange={v => editDismissal(ii, ri, { fielder_id: v, fielder: rosterName(v) })} />}
+                                : <PlayerSelect value={b.fielder_id || ''} roster={roster} cardName={b.fielder} candidates={candsFor(b.fielder)} onChange={v => editDismissal(ii, ri, { fielder_id: v, fielder: rosterName(v) })} />}
                           </td>
                           <td className={`${TD} min-w-[140px]`}>
                             {!modeHasBowler(b.how_out)
                               ? <span className="text-pb-faint/40 text-xs">—</span>
                               : inn.is_our_team
                                 ? <input className={SMALL_INPUT} placeholder="bowler (opp)" value={b.bowler || ''} onChange={e => editDismissal(ii, ri, { bowler: e.target.value })} />
-                                : <PlayerSelect value={b.bowler_id || ''} roster={roster} cardName={b.bowler} onChange={v => editDismissal(ii, ri, { bowler_id: v, bowler: rosterName(v) })} />}
+                                : <PlayerSelect value={b.bowler_id || ''} roster={roster} cardName={b.bowler} candidates={candsFor(b.bowler)} onChange={v => editDismissal(ii, ri, { bowler_id: v, bowler: rosterName(v) })} />}
                           </td>
                         </tr>
                       ))}
@@ -919,8 +990,11 @@ export default function AdminScorecardUpload() {
                       <thead><tr className="border-b pb-hairline">
                         <th className={TH}>Bowler</th>
                         {!inn.is_our_team && <th className={TH}>Our player</th>}
-                        <th className={TH}>O</th><th className={TH}>M</th><th className={TH}>R</th>
-                        <th className={TH}>W</th><th className={TH}>Wd</th><th className={TH}>Nb</th>
+                        <th className={TH}>O</th>
+                        {tracked.maidens && <th className={TH}>M</th>}
+                        <th className={TH}>R</th><th className={TH}>W</th>
+                        {tracked.bowler_extras && <th className={TH}>Wd</th>}
+                        {tracked.bowler_extras && <th className={TH}>Nb</th>}
                       </tr></thead>
                       <tbody>
                         {(inn.bowling || []).map((b, ri) => (
@@ -928,15 +1002,15 @@ export default function AdminScorecardUpload() {
                             <td className={TD}><input className={SMALL_INPUT} value={b.name || ''} onChange={e => editRow(ii, 'bowling', ri, { name: e.target.value })} /></td>
                             {!inn.is_our_team && (
                               <td className={`${TD} min-w-[150px]`}>
-                                <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} onChange={v => editRow(ii, 'bowling', ri, { player_id: v })} />
+                                <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} candidates={candsFor(b.name)} onChange={v => editRow(ii, 'bowling', ri, { player_id: v })} />
                               </td>
                             )}
                             <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={b.overs ?? ''} onChange={e => editRow(ii, 'bowling', ri, { overs: e.target.value })} /></td>
-                            <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.maidens ?? ''} onChange={e => editRow(ii, 'bowling', ri, { maidens: e.target.value })} /></td>
+                            {tracked.maidens && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.maidens ?? ''} onChange={e => editRow(ii, 'bowling', ri, { maidens: e.target.value })} /></td>}
                             <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.runs ?? ''} onChange={e => editRow(ii, 'bowling', ri, { runs: e.target.value })} /></td>
                             <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.wickets ?? ''} onChange={e => editRow(ii, 'bowling', ri, { wickets: e.target.value })} /></td>
-                            <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.wides ?? ''} onChange={e => editRow(ii, 'bowling', ri, { wides: e.target.value })} /></td>
-                            <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.no_balls ?? ''} onChange={e => editRow(ii, 'bowling', ri, { no_balls: e.target.value })} /></td>
+                            {tracked.bowler_extras && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.wides ?? ''} onChange={e => editRow(ii, 'bowling', ri, { wides: e.target.value })} /></td>}
+                            {tracked.bowler_extras && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.no_balls ?? ''} onChange={e => editRow(ii, 'bowling', ri, { no_balls: e.target.value })} /></td>}
                           </tr>
                         ))}
                       </tbody>
@@ -1016,7 +1090,7 @@ export default function AdminScorecardUpload() {
                             <input className={SMALL_INPUT} value={f.name || ''} onChange={e => editFieldingExtra(fi, { name: e.target.value })} />
                           </td>
                           <td className={`${TD} min-w-[150px]`}>
-                            <PlayerSelect value={f.player_id} roster={roster} cardName={f.name} onChange={v => editFieldingExtra(fi, { player_id: v })} />
+                            <PlayerSelect value={f.player_id} roster={roster} cardName={f.name} candidates={candsFor(f.name)} onChange={v => editFieldingExtra(fi, { player_id: v })} />
                           </td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches ?? ''} onChange={e => editFieldingExtra(fi, { catches: e.target.value })} /></td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches_wk ?? ''} onChange={e => editFieldingExtra(fi, { catches_wk: e.target.value })} /></td>
@@ -1046,7 +1120,7 @@ export default function AdminScorecardUpload() {
             <div className="flex gap-3">
               {createdId && <Link to={`/games/${createdId}`} className={BTN_PRIMARY}>View match</Link>}
               <button className={BTN_SECONDARY} onClick={() => {
-                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setFieldingExtra([]); setWarnings([]); setCreatedId(null); setEditingId(null)
+                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setFieldingExtra([]); setTracked(ALL_TRACKED); setWarnings([]); setCreatedId(null); setEditingId(null)
                 setForm({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
               }}>{editingId ? 'Back to list' : 'Upload another'}</button>
             </div>

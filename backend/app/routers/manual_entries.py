@@ -116,8 +116,11 @@ class ManualBattingIn(BaseModel):
     batting_position: Optional[int] = None
     runs: int = 0
     balls: Optional[int] = None
-    fours: int = 0
-    sixes: int = 0
+    # Default 0 keeps every existing writer unchanged; an EXPLICIT null means
+    # "the card doesn't track this" and stores NULL (migration 184), so a
+    # summary form with no 4s/6s column never reads as "hit zero boundaries".
+    fours: Optional[int] = 0
+    sixes: Optional[int] = 0
     strike_rate: Optional[float] = None
     dismissal_type: Optional[str] = None
     not_out: bool = False
@@ -128,11 +131,11 @@ class ManualBowlingIn(BaseModel):
     player_id: str
     innings_number: int = 1
     overs: Optional[float] = None
-    maidens: int = 0
+    maidens: Optional[int] = 0
     runs: int = 0
     wickets: int = 0
-    wides: int = 0
-    no_balls: int = 0
+    wides: Optional[int] = 0
+    no_balls: Optional[int] = 0
     economy: Optional[float] = None
 
 
@@ -1227,6 +1230,7 @@ async def extract_scorecard_upload(
     extraction, matches our players, picks the season/grade/opponent, then posts to
     POST /games like any other manual game."""
     from app.services import scorecard_ocr
+    from app.services.import_ingest import match_players
 
     images: list[tuple[bytes, str]] = []
     for f in files[: scorecard_ocr.MAX_IMAGES]:
@@ -1241,7 +1245,6 @@ async def extract_scorecard_upload(
         raise HTTPException(status_code=503, detail=result.get("message") or "Scorecard reading is unavailable.")
 
     players = (await db.execute(select(Player).where(Player.organisation_id == club.id))).scalars().all()
-    index = _build_match_index(players)
 
     # Suggest roster matches only for names that should be OURS: our batters (our
     # innings), our bowlers (the opposition's batting innings), the fielders named
@@ -1264,7 +1267,24 @@ async def extract_scorecard_upload(
                 if f.get("name"):
                     our_names.add(f["name"])
 
-    result["suggestions"] = {nm: (str(m.id) if (m := _suggest_player(nm, index)) else "") for nm in our_names}
+    # Match card names with the SAME engine the historical import (BetterImport)
+    # and Merge Players use — import_ingest.match_players: exact normalised name,
+    # first+last with middle-initial tolerance, "Surname Initial" form, then
+    # blocked SequenceMatcher fuzzy with scored candidates. Auto-fill only what
+    # the old scorecard matcher auto-filled: a truly exact hit, or a unique
+    # high-confidence candidate (the "G Evans" surname+initial form) — everything
+    # else surfaces as close-match candidates for the reviewer to confirm.
+    name_matches = match_players(sorted(our_names), [(p.id, _player_display_name(p)) for p in players])
+    suggestions: dict[str, str] = {}
+    for nm, info in name_matches.items():
+        pid = info.get("player_id") or ""
+        if not pid and info.get("status") == "fuzzy":
+            cands = info.get("candidates") or []
+            if len(cands) == 1 and (cands[0].get("confidence") or 0) >= 0.9:
+                pid = cands[0]["player_id"]
+        suggestions[nm] = pid
+    result["suggestions"] = suggestions
+    result["match_info"] = name_matches
     result["roster"] = [
         {"id": str(p.id), "name": _player_display_name(p)}
         for p in sorted(players, key=lambda p: (p.display_name_override or p.name or "").lower())

@@ -3600,6 +3600,17 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE crm_stages ADD COLUMN IF NOT EXISTS hidden_from_board BOOLEAN NOT NULL DEFAULT false"
         ))
 
+    # Migration 184: untracked stat columns on an uploaded scorecard import as
+    # NULL ("not recorded"), never a fake 0 — a summary form has no 4s/6s or
+    # maidens at all. Defaults stay, so existing writers that send 0 are unchanged.
+    async with engine.begin() as conn:
+        for _tbl, _cols in (
+            ("manual_batting_innings", ("fours", "sixes")),
+            ("manual_bowling_spells", ("maidens", "wides", "no_balls")),
+        ):
+            for _col in _cols:
+                await conn.execute(text(f"ALTER TABLE {_tbl} ALTER COLUMN {_col} DROP NOT NULL"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

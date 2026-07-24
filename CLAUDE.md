@@ -2522,6 +2522,30 @@ pages + a 1993 TCA "Official Summary of Match" form). Full how-to-improve-it doc
   keys present in the truth file are scored, rows matched by normalised name.
   Run before/after any prompt/schema/model change to the reader — that's the
   training loop, since the model itself never learns from uploads.
+- **Tracked-fields toggles (v8.80.1, migration 184)**: a "This card tracks"
+  panel on the review screen (balls faced / 4s & 6s / maidens / bowler
+  wides+no-balls). Unticked → the column is hidden AND imports as **NULL, not
+  0** — `manual_batting_innings.fours/sixes` and
+  `manual_bowling_spells.maidens/wides/no_balls` went nullable (the synced
+  tables always were, so every effective-view reader already copes). The
+  pydantic defaults stay `Optional[int] = 0`, so the CSV import and hand-typed
+  manual-game form (which omit rather than null the fields) are byte-for-byte
+  unchanged; only an EXPLICIT null means "not recorded". Toggle defaults come
+  from whether the reader found any value; re-editing a saved upload recovers
+  the choice from the stored rows' nulls. The prompt also tells the model to
+  leave untracked stats null, never 0.
+- **Roster matching = the historical-import engine (v8.80.1)**: the extract
+  endpoint now runs card names through `import_ingest.match_players` (the same
+  exact → middle-initial-tolerant → "Surname Initial" form → blocked
+  SequenceMatcher pipeline BetterImport and the Merge Players fuzzy pairs
+  use) instead of the old bespoke `_suggest_player` token matcher.
+  Auto-fill policy: exact hits, plus a single candidate at confidence ≥0.9
+  (the unique "G Evans" surname+initial case — parity with the old matcher);
+  everything else ships as `result["match_info"]` candidates, which
+  `PlayerSelect` shows as a one-click "CLOSE MATCHES" group with confidence %
+  at the top of every picker (batters, bowlers, dismissal fielders, own-catches
+  rows). `_suggest_player` still exists for `_replace_game_children`'s
+  import-time FOW/partnership name resolution — unchanged on purpose.
 
 ## Notification Centre (v7.7.3, May 2026)
 
