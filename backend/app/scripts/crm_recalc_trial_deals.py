@@ -14,16 +14,25 @@ Two passes over every OPEN, non-archived platform deal, in priority order:
    should reflect what they're actually trialing / about to be billed for
    once the trial converts.
 
-2. **No active trial anywhere, but Stats (billing key "core") is already
-   flagged as a Product Interest on the deal** — a club can show up here
-   with no trial history at all (a manually-added prospect) or a lapsed
-   one that never converted. Still worth re-running the analytics recalc
-   to keep the chips current, and Value ($) is set to just the Stats
-   module's own price (not a bundle — there's nothing else to bundle with
-   here since no other module is in play).
+2. **No active trial anywhere, but Stats is the deal's Product Interest** —
+   either explicitly (module_keys contains billing key "core") OR because
+   module_keys is EMPTY. An empty module_keys is deliberately included:
+   the deal detail modal's own Product Interest chips (DealDetailModal.jsx)
+   default an empty list to showing Stats selected — "a club with no
+   Product Interest set at all is always assumed to want at least Stats"
+   — but that default is display-only and is never written back to the
+   row, so a plain `"core" in module_keys` check misses every deal that
+   looks like it has Stats selected in the UI but has never actually had
+   its Product Interest touched. Matching the UI's own convention here is
+   what "Stats already flagged as a Product Interest in the CRM" means in
+   practice for the bulk of deals. Still worth re-running the analytics
+   recalc to keep the chips current, and Value ($) is set to just the
+   Stats module's own price (not a bundle — there's nothing else to
+   bundle with here since no other module is in play).
 
-A deal that's neither — no active trial AND Stats isn't already flagged —
-is left untouched; there's no trial or expressed interest to price against.
+A deal that's neither — no active trial AND Product Interest explicitly
+holds some OTHER module set that doesn't include Stats — is left
+untouched; there's no trial or Stats interest to price against.
 
 Usage from the backend container (matches the rest of app/scripts/*):
   docker exec -e PYTHONPATH=/app betterstats-backend \\
@@ -44,7 +53,9 @@ STATS_KEY = "core"  # billing_pricing / value_from_modules key for BetterStats
 # run so a stale container image (docker compose exec runs whatever code was
 # baked into the image at last build, NOT the latest git commit) is obvious
 # from the output rather than silently only doing the older subset of work.
-SCRIPT_VERSION = 2  # v2: adds the "no trial but Stats already flagged" branch
+SCRIPT_VERSION = 3  # v3: stats-only branch also matches an EMPTY module_keys
+                    # (the UI's own "no Product Interest set = assume Stats"
+                    # convention), not just an explicit "core" entry
 
 
 async def _apply(session, deal, club, target_module_keys: list, reason: str, dry_run: bool) -> bool:
@@ -81,11 +92,15 @@ async def run(dry_run: bool = False) -> None:
         trial_days = await crm_service.trial_days_remaining_by_club(session, club_by_id)
 
         trial_targets = [d for d in deals if d.marketing_club_id in trial_days]
-        # No active trial anywhere for this club, but Stats is already on
-        # the deal's Product Interest — priced on just the Stats module.
+        # No active trial anywhere for this club, and Stats is the deal's
+        # Product Interest — either explicitly, or because module_keys is
+        # empty (matches the deal detail modal's own "no Product Interest
+        # set at all defaults to Stats" display convention — see the
+        # module docstring above).
         stats_targets = [
             d for d in deals
-            if d.marketing_club_id not in trial_days and STATS_KEY in (d.module_keys or [])
+            if d.marketing_club_id not in trial_days
+            and (not d.module_keys or STATS_KEY in d.module_keys)
         ]
 
         print(
