@@ -1103,6 +1103,41 @@ async def set_excluded(session: AsyncSession, club_id: str, excluded: bool) -> O
 SALES_MODULE_KEYS = ("core", "select", "socials", "admin", "iq", "fantasy")
 DEMO_STATUSES = ("in_trial", "trial_expired", "customer")
 
+# Public marketing page path -> SALES_MODULE_KEYS key, for inferring a
+# prospect's Product Interest from which module pages their site visitors
+# actually looked at. Deliberately a FRESH map, not a reuse of
+# comms_segments._VISIT_PATH_SQL — that map's keys ("betteriq", "stats") don't
+# line up with SALES_MODULE_KEYS ("iq", "core"), and re-keying it in place
+# would risk breaking the BetterComms segment filter it already serves.
+_PRODUCT_INTEREST_PATH_RE = [
+    (re.compile(r"^/modules/betterstats(/|$)", re.I), "core"),
+    (re.compile(r"^/modules/betterselect(/|$)", re.I), "select"),
+    (re.compile(r"^/modules/bettersocials(/|$)", re.I), "socials"),
+    (re.compile(r"^/modules/betteradmin(/|$)", re.I), "admin"),
+    (re.compile(r"^/modules/betteriq(/|$)", re.I), "iq"),
+    (re.compile(r"^/modules/betterfantasy(/|$)", re.I), "fantasy"),
+]
+_CONTACT_PAGE_RE = re.compile(r"^/contact(/|$)", re.I)
+
+
+def infer_product_interest_from_pages(pages) -> list:
+    """Rank Product Interest module keys from a club_visit_detail()-shaped
+    ``pages`` list (``[{"page": path, "views": n}, ...]``), summing views per
+    module page and keeping any module with at least one view, ranked by
+    total views. Falls back to ``["core"]`` when nothing module-specific was
+    ever viewed — a club is always assumed to want at least BetterStats."""
+    scores: dict = {}
+    for row in (pages or []):
+        path = (row.get("page") or "").strip()
+        views = int(row.get("views") or 0)
+        for rx, key in _PRODUCT_INTEREST_PATH_RE:
+            if rx.match(path):
+                scores[key] = scores.get(key, 0) + views
+                break
+    if not scores:
+        return ["core"]
+    return [k for k, _v in sorted(scores.items(), key=lambda kv: (-kv[1], SALES_MODULE_KEYS.index(kv[0])))]
+
 
 def _clean_modules(values) -> list:
     if not isinstance(values, list):
@@ -1597,7 +1632,7 @@ _RESOLVED_VISITS = (
     f"  (SELECT mc.id FROM marketing_clubs mc JOIN organisations o ON o.id = mc.existing_org_id "
     f"     WHERE o.slug = {_PATH_CODE} AND {_PATH_CODE} <> '' LIMIT 1)"
     ")::text AS cid, "
-    "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, "
+    "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, ue.ip_hash AS ip_hash, "
     "ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
     "FROM usage_events ue WHERE ue.event_type = 'page_view' "
     # A stale UTM captured once in a browser tab (see visitor.js getLinkCode())
@@ -1757,16 +1792,22 @@ async def top_clubs_by_visits(session: AsyncSession, metric: str, n: int,
 
 async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> dict:
     """Full breadcrumb trail for one club: overall totals, the pages they viewed
-    (top first) and the most-recent visits. Resolves visits through the alias map
-    the same way the list does. Powers the expanded-row 'visited the site' panel."""
+    (top first), the most-recent visits, an IP-distribution snapshot, whether
+    the Contact page was ever hit, and an analytics-derived Product Interest
+    ranking (see infer_product_interest_from_pages). Resolves visits through
+    the alias map the same way the list does. Powers the expanded-row
+    'visited the site' panel AND the CRM card's Website Analytics panel."""
     cid = str(club_id or "").strip()
     empty = {"club_id": cid, "views": 0, "visitors": 0,
-             "first_seen": None, "last_seen": None, "pages": [], "recent": []}
+             "first_seen": None, "last_seen": None, "pages": [], "recent": [],
+             "unique_ips": 0, "visits_per_ip": None, "distinct_days": 0,
+             "contact_page_visited": False, "inferred_modules": []}
     if not cid:
         return empty
     base = f"FROM ({_RESOLVED_VISITS}) v WHERE v.cid = :cid"
     summary = (await session.execute(text(
         "SELECT COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors, "
+        "COUNT(DISTINCT v.ip_hash) AS unique_ips, COUNT(DISTINCT v.created_at::date) AS distinct_days, "
         f"MIN(v.created_at) AS first_seen, MAX(v.created_at) AS last_seen {base}"),
         {"cid": cid})).one()
     if not summary.views:
@@ -1780,20 +1821,28 @@ async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> 
         f"SELECT v.path, v.created_at, v.traffic_source, v.country, v.city {base} "
         "ORDER BY v.created_at DESC LIMIT :lim"),
         {"cid": cid, "lim": max(1, min(int(limit or 50), 200))})).all()
+    pages_out = [{"page": p.page, "views": int(p.views or 0),
+                 "last_seen": p.last_seen.isoformat() if p.last_seen else None}
+                for p in pages]
+    unique_ips = int(summary.unique_ips or 0)
+    views = int(summary.views or 0)
     return {
         "club_id": cid,
-        "views": int(summary.views or 0),
+        "views": views,
         "visitors": int(summary.visitors or 0),
         "first_seen": summary.first_seen.isoformat() if summary.first_seen else None,
         "last_seen": summary.last_seen.isoformat() if summary.last_seen else None,
-        "pages": [{"page": p.page, "views": int(p.views or 0),
-                   "last_seen": p.last_seen.isoformat() if p.last_seen else None}
-                  for p in pages],
+        "pages": pages_out,
         "recent": [{"path": r.path,
                     "at": r.created_at.isoformat() if r.created_at else None,
                     "source": r.traffic_source,
                     "country": r.country, "city": r.city}
                    for r in recent],
+        "unique_ips": unique_ips,
+        "visits_per_ip": round(views / unique_ips, 1) if unique_ips else None,
+        "distinct_days": int(summary.distinct_days or 0),
+        "contact_page_visited": any(_CONTACT_PAGE_RE.match(p["page"] or "") for p in pages_out),
+        "inferred_modules": infer_product_interest_from_pages(pages_out),
     }
 
 

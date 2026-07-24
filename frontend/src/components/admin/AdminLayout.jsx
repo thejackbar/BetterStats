@@ -114,6 +114,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
   { to: '/admin/super/crm', label: 'Sales Pipeline (CRM)' },
+  { to: '/admin/super/crm/targets', label: 'Sales Targets (CRM)' },
   { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
   { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics' },
   { to: '/admin/usage', label: 'Usage' },

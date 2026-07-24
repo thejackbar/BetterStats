@@ -463,6 +463,7 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         "source": deal.source,
         "onboarding_method": deal.onboarding_method,
         "lead_source": deal.lead_source,
+        "product_interest_source": deal.product_interest_source,
         "archived_at": deal.archived_at.isoformat() if deal.archived_at else None,
         "created_at": deal.created_at.isoformat() if deal.created_at else None,
         "updated_at": deal.updated_at.isoformat() if deal.updated_at else None,
@@ -595,6 +596,27 @@ def value_from_modules(module_keys) -> int:
     return int(round(price_for(keys)["total"] * 100))
 
 
+async def recalc_product_interest(session: AsyncSession, deal: CrmDeal, club: Optional[MarketingClub]) -> CrmDeal:
+    """Re-derive a platform deal's Product Interest (module_keys) from the
+    linked club's tracked website visits (club_directory.club_visit_detail's
+    ranked ``inferred_modules``), and recompute value_cents to match. Always
+    switches the deal back to 'auto' — the counterpart to a super admin
+    manually overriding a module chip (which sets 'manual'). A deal with no
+    linked club, or a club with no tracked visits at all, falls back to
+    ``['core']`` (never leaves module_keys empty)."""
+    from app.services import club_directory
+    inferred = ["core"]
+    if club is not None:
+        detail = await club_directory.club_visit_detail(session, club.id)
+        if detail.get("inferred_modules"):
+            inferred = detail["inferred_modules"]
+    deal.module_keys = inferred
+    deal.value_cents = value_from_modules(inferred)
+    deal.product_interest_source = "auto"
+    deal.updated_at = func.now()
+    return deal
+
+
 async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_id,
                       title: str, organisation_id=None, marketing_club_id=None,
                       value_cents: int = 0, currency: str = "AUD",
@@ -629,7 +651,8 @@ _DEAL_CLEARABLE_FIELDS = ("probability", "expected_close_date", "owner_user_id",
 async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal:
     for key in ("title", "value_cents", "currency", "probability", "module_keys",
                 "expected_close_date", "owner_user_id", "onboarding_method", "lead_source",
-                "discount_amount_cents", "discount_percent", "discount_reason"):
+                "discount_amount_cents", "discount_percent", "discount_reason",
+                "product_interest_source"):
         if key not in fields:
             continue
         # Most fields never take an explicit null (title/value_cents/module_keys
