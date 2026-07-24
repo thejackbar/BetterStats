@@ -40,6 +40,12 @@ from app.services import crm as crm_service
 
 STATS_KEY = "core"  # billing_pricing / value_from_modules key for BetterStats
 
+# Bumped whenever the script's behaviour changes — printed at the top of every
+# run so a stale container image (docker compose exec runs whatever code was
+# baked into the image at last build, NOT the latest git commit) is obvious
+# from the output rather than silently only doing the older subset of work.
+SCRIPT_VERSION = 2  # v2: adds the "no trial but Stats already flagged" branch
+
 
 async def _apply(session, deal, club, target_module_keys: list, reason: str, dry_run: bool) -> bool:
     """Recalc Product Interest from analytics, then pin Value ($) to
@@ -67,6 +73,7 @@ async def _apply(session, deal, club, target_module_keys: list, reason: str, dry
 
 
 async def run(dry_run: bool = False) -> None:
+    print(f"crm_recalc_trial_deals v{SCRIPT_VERSION} (trial-branch + stats-only-branch)")
     async with async_session_maker() as session:
         pipeline = await crm_service.ensure_platform_pipeline(session)
         deals = await crm_service.list_deals(session, pipeline.id, status="open")
