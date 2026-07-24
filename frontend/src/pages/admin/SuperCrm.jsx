@@ -12,6 +12,7 @@ import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
 import {
   Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
+  LEAD_SOURCE_OPTIONS,
 } from '../../components/admin/crm/ui'
 
 const CHART_TOOLTIP_STYLE = { background: 'var(--pb-surface, #0b1220)', border: '1px solid var(--pb-hairline, #1a2540)', fontSize: 12 }
@@ -183,7 +184,7 @@ const channelLabel = (v) => CHANNEL_LABELS[v] || v
 
 const EMPTY_FILTERS = {
   q: '', ownerId: '', modules: [], minValue: '', maxValue: '',
-  minScore: '', maxScore: '', state: '', association: '', channel: '',
+  minScore: '', maxScore: '', state: '', association: '', leadSource: '',
   onboarding: '', minTrialDays: '', maxTrialDays: '', trialExpired: false, customersOnly: false,
 }
 
@@ -333,7 +334,7 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
 // doubled — both per direct instruction.
 const FBW = { search: '210px', owner: '120px', state: '120px', assoc: '240px', source: '130px', onboarding: '140px', num: '64px' }
 
-function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, channelOptions, resultCount, sortBy, sortDir, onSortChange }) {
+function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, resultCount, sortBy, sortDir, onSortChange }) {
   // Open by default — a filter bar that starts collapsed hides the very
   // controls someone opened this page to use (per direct instruction).
   const [open, setOpen] = useState(true)
@@ -372,9 +373,14 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
             </Select>
             <TextInput list="crm-associations" placeholder="Association" value={filters.association} onChange={set('association')} style={{ width: FBW.assoc }} />
             <datalist id="crm-associations">{associationOptions.map(a => <option key={a} value={a} />)}</datalist>
-            <Select value={filters.channel} onChange={set('channel')} style={{ width: FBW.source }}>
+            {/* Same fixed vocabulary as the deal detail modal's own Lead
+                Source field — was previously a freeform list derived from
+                the auto-tracked acquisition_channel (raw club slugs, UTM
+                sources, etc.), which didn't match what's actually pickable
+                on the deal itself. */}
+            <Select value={filters.leadSource} onChange={set('leadSource')} style={{ width: FBW.source }}>
               <option value="">Any source</option>
-              {channelOptions.map(c => <option key={c} value={c}>{channelLabel(c)}</option>)}
+              {LEAD_SOURCE_OPTIONS.filter(o => o.value).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
             <Select value={filters.onboarding} onChange={set('onboarding')} style={{ width: FBW.onboarding }}>
               {ONBOARDING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -473,7 +479,6 @@ export default function SuperCrm() {
 
   const stateOptions = useMemo(() => [...new Set(deals.map(d => d.marketing_club_state).filter(Boolean))].sort(), [deals])
   const associationOptions = useMemo(() => [...new Set(deals.map(d => d.marketing_club_association).filter(Boolean))].sort(), [deals])
-  const channelOptions = useMemo(() => [...new Set(deals.map(d => d.acquisition_channel).filter(Boolean))].sort(), [deals])
 
   const filteredDeals = useMemo(() => {
     // One search box matches EITHER the club/deal name or its point of
@@ -497,7 +502,7 @@ export default function SuperCrm() {
       if (maxScore != null && (d.engagement_score == null || d.engagement_score > maxScore)) return false
       if (filters.state && d.marketing_club_state !== filters.state) return false
       if (assocNeedle && !(d.marketing_club_association || '').toLowerCase().includes(assocNeedle)) return false
-      if (filters.channel && d.acquisition_channel !== filters.channel) return false
+      if (filters.leadSource && d.lead_source !== filters.leadSource) return false
       if (filters.onboarding === 'self_serve' && d.onboarding_method !== 'self_serve_trial') return false
       if (filters.onboarding === 'not_self_serve' && d.onboarding_method === 'self_serve_trial') return false
       if (filters.onboarding === 'customer' && !d.is_customer) return false
@@ -586,7 +591,7 @@ export default function SuperCrm() {
       ) : (
         <>
           <FilterBar filters={filters} setFilters={setFilters} owners={owners} stateOptions={stateOptions}
-            associationOptions={associationOptions} channelOptions={channelOptions} resultCount={filteredDeals.length}
+            associationOptions={associationOptions} resultCount={filteredDeals.length}
             sortBy={sortBy} sortDir={sortDir} onSortChange={(key, dir) => { setSortBy(key); setSortDir(dir) }} />
 
           {view === 'board' && (
