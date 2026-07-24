@@ -27,6 +27,7 @@ from app.models.db import Organisation, MarketingClub, CrmStage, CrmPipeline, ge
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
+from app.services import crm_targets
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,17 @@ class ConvertToDealBody(BaseModel):
 class AddTrackerBody(BaseModel):
     template_key: Optional[str] = None
     name: Optional[str] = None  # required when template_key is omitted (a custom tracker)
+
+
+class TargetUpsert(BaseModel):
+    period_type: str  # month | quarter | fiscal_year
+    period_key: str   # '2026-07' | '2026-Q3' | 'FY2026'
+    target_clubs_won: Optional[int] = None
+    target_arr_cents: Optional[int] = None
+    target_revenue_cents: Optional[int] = None
+    target_trials: Optional[int] = None
+    target_conversion_rate: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class StageCreate(BaseModel):
@@ -652,6 +664,18 @@ async def super_get_deal(deal_id: str, db: AsyncSession = Depends(get_db)):
     return await _serialize_deal(db, deal)
 
 
+@super_router.post("/deals/{deal_id}/recalc-product-interest", dependencies=[_super])
+async def super_recalc_product_interest(deal_id: str, db: AsyncSession = Depends(get_db)):
+    """Re-derive this deal's Product Interest from the linked club's tracked
+    website visits, overwriting any manual override — the counterpart to the
+    Product Interest chips' manual toggle."""
+    deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
+    club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    await crm_service.recalc_product_interest(db, deal, club)
+    await db.commit()
+    return await _serialize_deal(db, deal)
+
+
 @super_router.patch("/deals/{deal_id}", dependencies=[_super])
 async def super_update_deal(deal_id: str, body: DealUpdate, db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
@@ -813,3 +837,44 @@ async def super_convert_club_to_deal(marketing_club_id: str, body: ConvertToDeal
         deal.title = body.title
     await db.commit()
     return await _serialize_deal(db, deal)
+
+
+# ─── Sales targets (Dashboard + dedicated Targets page) ──────────────────────
+
+@super_router.get("/targets", dependencies=[_super])
+async def super_list_targets(period_type: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    rows = await crm_targets.list_targets(db, period_type=period_type)
+    return {"targets": [crm_targets.target_dict(t) for t in rows]}
+
+
+@super_router.post("/targets", dependencies=[_super])
+async def super_upsert_target(body: TargetUpsert, current_user=Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    try:
+        target = await crm_targets.upsert_target(
+            db, period_type=body.period_type, period_key=body.period_key, created_by=current_user.id,
+            target_clubs_won=body.target_clubs_won, target_arr_cents=body.target_arr_cents,
+            target_revenue_cents=body.target_revenue_cents, target_trials=body.target_trials,
+            target_conversion_rate=body.target_conversion_rate, notes=body.notes)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return crm_targets.target_dict(target)
+
+
+@super_router.delete("/targets/{target_id}", dependencies=[_super])
+async def super_delete_target(target_id: str, db: AsyncSession = Depends(get_db)):
+    ok = await crm_targets.delete_target(db, _uuid_or_404(target_id))
+    await db.commit()
+    return {"deleted": ok}
+
+
+@super_router.get("/targets/actuals", dependencies=[_super])
+async def super_target_actuals(period_type: str, period_key: str, db: AsyncSession = Depends(get_db)):
+    """Computed actuals for ANY period (whether or not a target row exists
+    for it yet) — see services/crm_targets.py's module docstring for which
+    figures are exact vs best-effort proxies (no stage-history table)."""
+    try:
+        return await crm_targets.compute_actuals(db, period_type, period_key)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))

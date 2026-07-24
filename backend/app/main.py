@@ -3608,6 +3608,33 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS discount_percent INTEGER"))
         await conn.execute(text("ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS discount_reason TEXT"))
 
+    # Migration 185: BetterCRM sales targets (clubs won / ARR / revenue / trials / conversion).
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_targets (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                period_type TEXT NOT NULL,
+                period_key TEXT NOT NULL,
+                target_clubs_won INTEGER,
+                target_arr_cents BIGINT,
+                target_revenue_cents BIGINT,
+                target_trials INTEGER,
+                target_conversion_rate INTEGER,
+                notes TEXT,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (period_type, period_key)
+            )
+        """))
+
+    # Migration 186: CRM deal Product Interest source (auto | manual).
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS product_interest_source "
+            "TEXT NOT NULL DEFAULT 'auto'"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

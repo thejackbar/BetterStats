@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Link } from 'react-router-dom'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
@@ -6,7 +10,138 @@ import { PbSpinner } from '../../lib/presskit'
 import PipelineBoard, { TIER_TONE } from '../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
-import { Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel } from '../../components/admin/crm/ui'
+import {
+  Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
+} from '../../components/admin/crm/ui'
+
+const CHART_TOOLTIP_STYLE = { background: 'var(--pb-surface, #0b1220)', border: '1px solid var(--pb-hairline, #1a2540)', fontSize: 12 }
+const AXIS_TICK = { fill: 'var(--pb-faint, #64748b)', fontSize: 10 }
+
+// Read-only analysis over the SAME deal list Board/List already have loaded —
+// no separate fetch. "Trial conversions" and "pipeline by stage" are current
+// snapshots, not historical trends (no stage-transition history is kept —
+// see services/crm_targets.py's own docstring for the same caveat).
+function CrmDashboard({ deals, stages }) {
+  const stageData = useMemo(() => {
+    const openDeals = deals.filter(d => d.status === 'open')
+    return stages.map(s => {
+      const inStage = openDeals.filter(d => d.stage_id === s.id)
+      const value = inStage.reduce((sum, d) => sum + (d.effective_value_cents ?? d.value_cents ?? 0), 0)
+      const weighted = inStage.reduce((sum, d) => sum + (d.weighted_value_cents ?? 0), 0)
+      return { name: s.name, count: inStage.length, value: Math.round(value / 100), weighted: Math.round(weighted / 100) }
+    })
+  }, [deals, stages])
+
+  const leadSourceData = useMemo(() => {
+    const counts = {}
+    for (const d of deals) {
+      const key = d.lead_source || d.acquisition_channel || 'unknown'
+      counts[key] = (counts[key] || 0) + 1
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }))
+  }, [deals])
+
+  const moduleData = useMemo(() => {
+    const counts = {}
+    for (const d of deals) for (const k of (d.module_keys || [])) counts[k] = (counts[k] || 0) + 1
+    return sortModuleKeys(Object.keys(counts)).map(k => ({ name: moduleLabel(k), count: counts[k] }))
+  }, [deals])
+
+  const trialStats = useMemo(() => {
+    const trialOnboarded = deals.filter(d => ['self_serve_trial', 'super_admin_trial'].includes(d.onboarding_method))
+    const won = trialOnboarded.filter(d => d.status === 'won')
+    const lost = trialOnboarded.filter(d => d.status === 'lost')
+    const open = trialOnboarded.filter(d => d.status === 'open')
+    return {
+      total: trialOnboarded.length, won: won.length, open: open.length,
+      rate: (won.length + lost.length) ? Math.round(100 * won.length / (won.length + lost.length)) : null,
+    }
+  }, [deals])
+
+  return (
+    <div className="space-y-5">
+      <div className="pb-card px-4 py-3">
+        <h3 className="font-display font-bold text-[13px] mb-2">Clubs by stage</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={stageData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+            <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={55} />
+            <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+            <Bar dataKey="count" name="Clubs" fill="var(--pb-accent, #16c784)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="pb-card px-4 py-3">
+        <h3 className="font-display font-bold text-[13px] mb-2">Pipeline value by stage ($, weighted vs unweighted)</h3>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={stageData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+            <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={55} />
+            <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+            <Tooltip formatter={v => `$${Number(v).toLocaleString()}`} contentStyle={CHART_TOOLTIP_STYLE} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="value" name="Unweighted" fill="var(--pb-accent, #16c784)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="weighted" name="Weighted" fill="var(--pb-amber, #f5a623)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="pb-card px-4 py-3">
+          <h3 className="font-display font-bold text-[13px] mb-2">Lead source</h3>
+          <ResponsiveContainer width="100%" height={Math.max(160, leadSourceData.length * 28)}>
+            <BarChart data={leadSourceData} layout="vertical" margin={{ left: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+              <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={110} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+              <Bar dataKey="count" fill="var(--pb-accent, #16c784)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="pb-card px-4 py-3">
+          <h3 className="font-display font-bold text-[13px] mb-2">Module interest</h3>
+          <ResponsiveContainer width="100%" height={Math.max(160, moduleData.length * 28)}>
+            <BarChart data={moduleData} layout="vertical" margin={{ left: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+              <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={80} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+              <Bar dataKey="count" fill="var(--pb-accent, #16c784)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="pb-card px-4 py-3">
+        <h3 className="font-display font-bold text-[13px] mb-2">Trial conversions</h3>
+        <p className="text-[12px] text-pb-faint mb-2">
+          Deals onboarded via a trial (Self-Serve or Super Admin) — a current snapshot, not a
+          historical trend (no stage-history table is kept).
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px]">
+          <div><div className="text-pb-faint text-[10.5px] uppercase">Total ever trialled</div><div className="font-display font-bold text-[16px]">{trialStats.total}</div></div>
+          <div><div className="text-pb-faint text-[10.5px] uppercase">Still trialling</div><div className="font-display font-bold text-[16px]">{trialStats.open}</div></div>
+          <div><div className="text-pb-faint text-[10.5px] uppercase">Converted (Won)</div><div className="font-display font-bold text-[16px] text-emerald-300">{trialStats.won}</div></div>
+          <div><div className="text-pb-faint text-[10.5px] uppercase">Conversion rate</div><div className="font-display font-bold text-[16px]">{trialStats.rate != null ? `${trialStats.rate}%` : '—'}</div></div>
+        </div>
+      </div>
+
+      <div className="pb-card px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 className="font-display font-bold text-[13px]">Targets &amp; projections</h3>
+          <p className="text-[12px] text-pb-faint">Define targets by month/quarter/FY, track progress and a run-rate forecast.</p>
+        </div>
+        <Link to="/admin/super/crm/targets"
+          className="px-3 py-1.5 rounded-lg text-[12.5px] border border-pb-hairline2 text-pb-text hover:border-pb-accent">
+          Open Sales Targets →
+        </Link>
+      </div>
+    </div>
+  )
+}
 
 const superClient = {
   getDeal: api.superCrmGetDeal,
@@ -21,6 +156,7 @@ const superClient = {
   unlinkContact: api.superCrmUnlinkContact,
   setPointOfContact: api.superCrmSetPointOfContact,
   updatePerson: api.superCrmUpdatePerson,
+  recalcProductInterest: api.superCrmRecalcProductInterest,
   deletePermanent: api.superCrmDeleteDealPermanent,
   addStage: api.superCrmAddStage,
   updateStage: api.superCrmUpdateStage,
@@ -395,12 +531,16 @@ export default function SuperCrm() {
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'board' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Board</button>
           <button onClick={() => setView('list')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'list' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>List</button>
+          <button onClick={() => setView('dashboard')}
+            className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'dashboard' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Dashboard</button>
           <Btn variant="ghost" sm onClick={() => setShowStages(true)}>Manage stages</Btn>
           <Btn variant="primary" sm onClick={() => setShowNew(true)}>New deal</Btn>
         </div>
       </div>
 
-      {loading ? <PbSpinner message="Loading pipeline…" /> : (
+      {loading ? <PbSpinner message="Loading pipeline…" /> : view === 'dashboard' ? (
+        <CrmDashboard deals={deals} stages={stages} />
+      ) : (
         <>
           <FilterBar filters={filters} setFilters={setFilters} owners={owners} stateOptions={stateOptions}
             associationOptions={associationOptions} channelOptions={channelOptions} resultCount={filteredDeals.length} />

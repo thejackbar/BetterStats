@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Boolean, Integer, Numeric, Date, Text, ForeignKey,
+    Column, Boolean, Integer, BigInteger, Numeric, Date, Text, ForeignKey,
     TIMESTAMP, JSON, UniqueConstraint, LargeBinary, Index, text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -3626,6 +3626,11 @@ class CrmDeal(Base):
     discount_amount_cents = Column(Integer, nullable=True)
     discount_percent = Column(Integer, nullable=True)
     discount_reason = Column(Text, nullable=True)
+    # Migration 186: 'auto' (module_keys last set by the analytics-inferred
+    # recalculation) vs 'manual' (a super admin explicitly toggled a module
+    # chip) — lets the UI show which mode a deal is in and offer a
+    # "recalculate from analytics" action that only makes sense in 'auto'.
+    product_interest_source = Column(Text, nullable=False, server_default="auto", default="auto")
     archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -3668,6 +3673,33 @@ class CrmActivity(Base):
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     meta = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CrmTarget(Base):
+    """One sales target for a period (migration 185) — BetterCricket's own
+    platform pipeline only (there is no club-scope equivalent). ``period_type``
+    is 'month' | 'quarter' | 'fiscal_year'; ``period_key`` is the matching key
+    ('2026-07' | '2026-Q3' | 'FY2026' — FY runs 1 Jul -> 30 Jun, named for the
+    year it ENDS in, the common AU convention). Every target_* field is
+    optional — a target can track just clubs_won without also setting ARR,
+    for instance."""
+    __tablename__ = "crm_targets"
+    __table_args__ = (
+        UniqueConstraint("period_type", "period_key", name="uq_crm_targets_period"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    period_type = Column(Text, nullable=False)
+    period_key = Column(Text, nullable=False)
+    target_clubs_won = Column(Integer, nullable=True)
+    target_arr_cents = Column(BigInteger, nullable=True)
+    target_revenue_cents = Column(BigInteger, nullable=True)
+    target_trials = Column(Integer, nullable=True)
+    target_conversion_rate = Column(Integer, nullable=True)  # percent, 0-100
+    notes = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── KlubPro → BetterStats migration audit + rollback (migration 072) ─────────

@@ -777,6 +777,13 @@ export const api = {
   superCrmGetDeal: (id) => request(`/club-admin/super/crm/deals/${id}`),
   superCrmUpdateDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   superCrmMoveDealStage: (id, data) => request(`/club-admin/super/crm/deals/${id}/stage`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmRecalcProductInterest: (id) => request(`/club-admin/super/crm/deals/${id}/recalc-product-interest`, { method: 'POST' }),
+  superCrmListTargets: (periodType) =>
+    request(`/club-admin/super/crm/targets${periodType ? `?period_type=${periodType}` : ''}`),
+  superCrmUpsertTarget: (body) => request('/club-admin/super/crm/targets', { method: 'POST', body: JSON.stringify(body) }),
+  superCrmDeleteTarget: (id) => request(`/club-admin/super/crm/targets/${id}`, { method: 'DELETE' }),
+  superCrmTargetActuals: (periodType, periodKey) =>
+    request(`/club-admin/super/crm/targets/actuals?period_type=${periodType}&period_key=${encodeURIComponent(periodKey)}`),
   superCrmCloseDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmArchiveDeal: (id) => request(`/club-admin/super/crm/deals/${id}`, { method: 'DELETE' }),
   superCrmDeleteDealPermanent: (id, resetClub) =>
