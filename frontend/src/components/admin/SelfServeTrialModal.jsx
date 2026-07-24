@@ -100,9 +100,9 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   // mode only — internal Super Admin trial creation isn't part of the ad
   // campaign this feeds). Never awaited/blocks the UI; a beacon failure is
   // silently dropped, same posture as the Meta pixel calls elsewhere here.
-  const trackFunnelStep = (stepName) => {
+  const trackFunnelStep = (stepName, club = null) => {
     if (!publicMode) return
-    api.publicSelfServeTrackStep(stepName, getVisitorId()).catch(() => {})
+    api.publicSelfServeTrackStep(stepName, getVisitorId(), club).catch(() => {})
   }
 
   useEffect(() => {
@@ -161,7 +161,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
       .then((prepared) => {
         if (!alive) return
         setPreparedClub(prepared)
-        trackFunnelStep('club_prepared')
+        trackFunnelStep('club_prepared', { name: prepared.name, org_id: prepared.org_id })
         if (publicMode && typeof window !== 'undefined' && typeof window.fbq === 'function') {
           window.fbq('track', 'Lead', {
             content_name: 'Self-serve trial started',

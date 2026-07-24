@@ -107,6 +107,20 @@ async def registration_funnel(
     return {"funnel": await meta_ads.get_registration_step_funnel(db, days)}
 
 
+@router.get("/selected-clubs")
+async def selected_clubs(
+    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Names the clubs behind the registration wizard's "Club selected" count —
+    the detail the step funnel (which only counts anonymous visitors) can't
+    give. Merges the club captured on the selection beacon with the Terms-step
+    acknowledgements and completed registrations, reporting the furthest step
+    each club reached. See meta_ads.get_selected_clubs."""
+    return await meta_ads.get_selected_clubs(db, days)
+
+
 @router.get("/ad-signups")
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow

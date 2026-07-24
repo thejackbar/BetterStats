@@ -1310,6 +1310,7 @@ export const api = {
   metaAdsLeadAdjustments: () => request('/club-admin/meta-ads/leads/adjustments'),
   metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   metaAdsRegistrationFunnel: (days = 30) => request(`/club-admin/meta-ads/registration-funnel?days=${days}`),
+  metaAdsSelectedClubs: (days = 30) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>
@@ -1383,10 +1384,17 @@ export const api = {
   // Fire-and-forget step-transition beacon for the registration funnel
   // breakdown on the Meta Ads dashboard — callers should not await/block on
   // this (see trackFunnelStep in SelfServeTrialModal.jsx).
-  publicSelfServeTrackStep: (step, visitorId) =>
+  publicSelfServeTrackStep: (step, visitorId, club = null) =>
     request('/public/self-serve/track-step', {
       method: 'POST',
-      body: JSON.stringify({ step, visitor_id: visitorId }),
+      body: JSON.stringify({
+        step,
+        visitor_id: visitorId,
+        // Only sent alongside the club_prepared step — names the picked club so
+        // a dropped-off visitor's selection is recoverable on the Meta Ads page.
+        club_name: club?.name || undefined,
+        club_org_id: club?.org_id || undefined,
+      }),
     }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),

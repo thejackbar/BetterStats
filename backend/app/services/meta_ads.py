@@ -9,7 +9,7 @@ outage surfaces as a typed error on the HQ page instead of a 500.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -442,6 +442,135 @@ async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LE
         })
         prev = value
     return stages
+
+
+# Furthest step a selected club is known to have reached, strongest last. The
+# funnel above counts anonymous visitors; this names the clubs behind the
+# "Club selected" count wherever we can identify one.
+_SELECTED_STEP_RANK = {"selected": 1, "terms": 2, "completed": 3}
+_SELECTED_STEP_LABEL = {
+    1: "Club selected",
+    2: "Reached Terms & privacy",
+    3: "Registration completed",
+}
+
+
+async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> dict:
+    """Name the clubs behind the registration wizard's "Club selected" count.
+
+    The step funnel (get_registration_step_funnel) only counts anonymous
+    visitor_ids per step — it can't say WHICH club a dropped-off visitor picked.
+    This fills that in from three sources, merged by normalised club name and
+    reporting the furthest step each one reached:
+
+      1. the `club_prepared` beacon's own metadata — the club captured at
+         selection time (public_self_serve.py track_step, from Jul 2026 on);
+      2. self_serve_acknowledgements.club_name — anyone who reached the Terms
+         step, recoverable even for selections made before (1) existed;
+      3. organisations.signup_source — anyone who completed registration.
+
+    Selections made before the beacon captured the club AND that never reached
+    the Terms step are unidentifiable; those are returned only as an
+    `anonymous` count so the total still reconciles with the funnel."""
+    window = {"days": days}
+
+    # (1) Beacon rows that carry a club name (going forward). Plus a count of
+    # the ones that don't — selections we genuinely can't attribute.
+    beacon_rows = (await db.execute(text("""
+        SELECT metadata->>'club_name'   AS club_name,
+               metadata->>'club_org_id' AS org_id,
+               MIN(created_at)          AS first_at,
+               MAX(created_at)          AS last_at,
+               COUNT(DISTINCT visitor_id) AS visitors
+        FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND route = 'club_prepared'
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
+        GROUP BY 1, 2
+    """), window)).mappings().all()
+
+    anon = (await db.execute(text("""
+        SELECT COUNT(DISTINCT visitor_id) AS n
+        FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND route = 'club_prepared'
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND visitor_id IS NOT NULL
+          AND NULLIF(TRIM(metadata->>'club_name'), '') IS NULL
+    """), window)).scalar() or 0
+
+    # (2) Terms-step acknowledgements — carry the club name and an email.
+    ack_rows = (await db.execute(text("""
+        SELECT club_name, MIN(email) AS email,
+               MIN(accepted_at) AS first_at, MAX(accepted_at) AS last_at
+        FROM self_serve_acknowledgements
+        WHERE accepted_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY club_name
+    """), window)).mappings().all()
+
+    # (3) Completed self-serve registrations — the org plus when it was created
+    # (orgs carry no created_at; the idempotency key holds the timestamp).
+    done_rows = (await db.execute(text("""
+        SELECT o.name AS club_name, o.slug, o.id::text AS org_id,
+               MIN(k.created_at) AS at
+        FROM organisations o
+        JOIN self_serve_idempotency_keys k ON k.org_id = o.id
+        WHERE o.signup_source IS NOT NULL
+          AND k.created_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY o.name, o.slug, o.id
+    """), window)).mappings().all()
+
+    clubs: dict[str, dict] = {}
+
+    def _upsert(name, rank, *, first_at=None, last_at=None, org_id=None,
+                slug=None, email=None, visitors=0):
+        key = (name or "").strip().lower()
+        if not key:
+            return
+        c = clubs.setdefault(key, {
+            "name": (name or "").strip(), "furthest_rank": 0, "furthest_step": "",
+            "first_at": None, "last_at": None, "org_id": None, "slug": None,
+            "email": None, "visitors": 0,
+        })
+        if rank > c["furthest_rank"]:
+            c["furthest_rank"] = rank
+            c["furthest_step"] = _SELECTED_STEP_LABEL[rank]
+        for field, val in (("first_at", first_at), ("last_at", last_at)):
+            if val is not None:
+                cur = c[field]
+                if cur is None or (val < cur if field == "first_at" else val > cur):
+                    c[field] = val
+        if org_id and not c["org_id"]:
+            c["org_id"] = org_id
+        if slug and not c["slug"]:
+            c["slug"] = slug
+        if email and not c["email"]:
+            c["email"] = email
+        c["visitors"] = max(c["visitors"], visitors or 0)
+
+    for r in beacon_rows:
+        _upsert(r["club_name"], _SELECTED_STEP_RANK["selected"],
+                first_at=r["first_at"], last_at=r["last_at"],
+                org_id=r["org_id"], visitors=int(r["visitors"] or 0))
+    for r in ack_rows:
+        _upsert(r["club_name"], _SELECTED_STEP_RANK["terms"],
+                first_at=r["first_at"], last_at=r["last_at"], email=r["email"])
+    for r in done_rows:
+        _upsert(r["club_name"], _SELECTED_STEP_RANK["completed"],
+                first_at=r["at"], last_at=r["at"], org_id=r["org_id"], slug=r["slug"])
+
+    # Newest selection first; a club with no timestamp (shouldn't happen — every
+    # source supplies one) sinks to the bottom without tripping the aware/naive
+    # datetime comparison.
+    _floor = datetime.min.replace(tzinfo=timezone.utc)
+    rows = sorted(clubs.values(), key=lambda c: c["last_at"] or _floor, reverse=True)
+    for c in rows:
+        c["first_at"] = c["first_at"].isoformat() if c["first_at"] else None
+        c["last_at"] = c["last_at"].isoformat() if c["last_at"] else None
+        c.pop("furthest_rank", None)
+
+    return {"clubs": rows, "identified": len(rows), "anonymous": int(anon)}
 
 
 def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],

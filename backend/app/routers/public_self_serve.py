@@ -118,6 +118,12 @@ async def search_clubs(q: str = "", request: Request = None, db: AsyncSession = 
 class TrackStepRequest(BaseModel):
     step: str
     visitor_id: Optional[str] = None
+    # The club picked at step 1, sent alongside the `club_prepared` beacon so a
+    # dropped-off visitor's chosen club is recoverable (the funnel otherwise
+    # only counts anonymous visitor_ids per step). Both optional — the beacon
+    # stays fire-and-forget and never blocks the wizard.
+    club_name: Optional[str] = None
+    club_org_id: Optional[str] = None
 
 
 @router.post("/track-step")
@@ -135,6 +141,15 @@ async def track_step(data: TrackStepRequest, request: Request):
     step = (data.step or "").strip()
     if step not in FUNNEL_STEPS:
         raise HTTPException(status_code=422, detail="Unknown step")
+    # Stash the selected club on the beacon row so "which clubs got picked"
+    # is answerable, not just "how many". Clipped, and only kept when present.
+    club_name = (data.club_name or "").strip()[:200]
+    club_org_id = (data.club_org_id or "").strip()[:64]
+    metadata = {}
+    if club_name:
+        metadata["club_name"] = club_name
+    if club_org_id:
+        metadata["club_org_id"] = club_org_id
     record_event_bg(
         event_type="self_serve_step",
         method="POST",
@@ -144,6 +159,7 @@ async def track_step(data: TrackStepRequest, request: Request):
         ip=client_ip(request),
         user_agent=request.headers.get("user-agent"),
         visitor_id=(data.visitor_id or "").strip()[:64] or None,
+        metadata=metadata or None,
     )
     return {"ok": True}
 

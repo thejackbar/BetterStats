@@ -276,6 +276,7 @@ export default function SuperMetaAds() {
   const [attribution, setAttribution] = useState(null)
   const [adSignups, setAdSignups] = useState(null)
   const [registrationFunnel, setRegistrationFunnel] = useState(null)
+  const [selectedClubs, setSelectedClubs] = useState(null)
 
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
@@ -291,6 +292,7 @@ export default function SuperMetaAds() {
     api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
     api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
+    api.metaAdsSelectedClubs().then(setSelectedClubs).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -532,6 +534,72 @@ export default function SuperMetaAds() {
                   stages={registrationFunnel}
                   title="Registration wizard: where visitors drop off (last 30 days)"
                 />
+              </div>
+            )}
+
+            {/* Which clubs are behind the "Club selected" count — named wherever
+                we can identify them (beacon metadata, Terms-step name, or a
+                completed registration). */}
+            {selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0) && (
+              <div className="pb-card p-4 mb-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+                    Clubs selected in the wizard (last 30 days)
+                  </div>
+                  <span className="font-mono text-[10px] text-pb-faintest">
+                    {selectedClubs.identified} identified
+                    {selectedClubs.anonymous > 0 && <> &middot; {selectedClubs.anonymous} not captured</>}
+                  </span>
+                </div>
+
+                {selectedClubs.clubs.length === 0 ? (
+                  <p className="text-xs text-pb-faint">
+                    {selectedClubs.anonymous} club selection{selectedClubs.anonymous === 1 ? '' : 's'} in
+                    this window, but none can be named yet — they were picked before the club was captured
+                    on the selection beacon and never reached the Terms step. New selections from now on
+                    will be named here.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
+                          <th className="px-2 py-2">Club</th>
+                          <th className="px-2 py-2">Furthest step</th>
+                          <th className="px-2 py-2">Contact email</th>
+                          <th className="px-2 py-2">Last seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedClubs.clubs.map((c) => (
+                          <tr key={c.name + (c.org_id || '')} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
+                            <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
+                              {c.slug ? <a href={`/${c.slug}`} className="hover:underline">{c.name}</a> : c.name}
+                            </td>
+                            <td className="px-2 py-2">
+                              <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+                                c.furthest_step === 'Registration completed'
+                                  ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+                                  : c.furthest_step === 'Reached Terms & privacy'
+                                    ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                    : 'border-pb-hairline text-pb-faint'
+                              }`}>
+                                {c.furthest_step}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{c.email || '–'}</td>
+                            <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="font-mono text-[9px] text-pb-faintest mt-3">
+                  The step funnel above counts anonymous visitors; this names the clubs behind them. A club
+                  is identified from the selection beacon (captured from this release on), the club name on
+                  a Terms-step acknowledgement, or a completed registration &mdash; whichever it reached furthest.
+                </p>
               </div>
             )}
 
