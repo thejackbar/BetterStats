@@ -184,7 +184,7 @@ const channelLabel = (v) => CHANNEL_LABELS[v] || v
 const EMPTY_FILTERS = {
   q: '', ownerId: '', modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', channel: '',
-  onboarding: '', minTrialDays: '', maxTrialDays: '',
+  onboarding: '', minTrialDays: '', maxTrialDays: '', trialExpired: false, customersOnly: false,
 }
 
 const ONBOARDING_OPTIONS = [
@@ -329,7 +329,9 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
 // (stylesheet order decides, not JSX prop order). An inline style always
 // wins, which is what actually lets this bar fit two compact rows instead of
 // one control per line.
-const FBW = { search: '210px', owner: '120px', state: '84px', assoc: '120px', source: '130px', onboarding: '140px', num: '64px' }
+// State pinned to the same width as Owner (was narrower); Association
+// doubled — both per direct instruction.
+const FBW = { search: '210px', owner: '120px', state: '120px', assoc: '240px', source: '130px', onboarding: '140px', num: '64px' }
 
 function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, channelOptions, resultCount, sortBy, sortDir, onSortChange }) {
   // Open by default — a filter bar that starts collapsed hides the very
@@ -339,7 +341,9 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
   const toggleModule = (key) => setFilters(f => ({
     ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
   }))
-  const active = Object.entries(filters).some(([k, v]) => Array.isArray(v) ? v.length > 0 : v !== '')
+  const toggleBool = (key) => setFilters(f => ({ ...f, [key]: !f[key] }))
+  const active = Object.entries(filters).some(([k, v]) =>
+    typeof v === 'boolean' ? v : Array.isArray(v) ? v.length > 0 : v !== '')
 
   return (
     <div className="pb-card px-4 py-3 mb-4">
@@ -396,6 +400,18 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
               <span className="text-[11px] text-pb-faint">to</span>
               <NumberInput min={0} placeholder="max" value={filters.maxTrialDays} onChange={set('maxTrialDays')} style={{ width: FBW.num }} />
             </div>
+            <button type="button" onClick={() => toggleBool('trialExpired')}
+              title="At least one module's trial has run out"
+              className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                filters.trialExpired ? 'bg-pb-amber/15 border-pb-amber/50 text-pb-amber' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+              Trial expired
+            </button>
+            <button type="button" onClick={() => toggleBool('customersOnly')}
+              title="Club is a paying subscriber for at least one module"
+              className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                filters.customersOnly ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+              Customers
+            </button>
           </div>
           {/* Row 3: Product Interest chips + Sort-by, together on one line. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-0.5">
@@ -483,6 +499,11 @@ export default function SuperCrm() {
         && (d.min_trial_days_remaining == null
           || (minTrialDays != null && d.min_trial_days_remaining < minTrialDays)
           || (maxTrialDays != null && d.min_trial_days_remaining > maxTrialDays))) return false
+      // trial_days_remaining_by_club clamps at 0 (never negative), so a 0
+      // reads as "ends today or already ended" — the closest this data lets
+      // us get to "expired" without a day of slack either way.
+      if (filters.trialExpired && d.min_trial_days_remaining !== 0) return false
+      if (filters.customersOnly && !(d.subscribed_modules && d.subscribed_modules.length > 0)) return false
       return true
     })
   }, [deals, filters])

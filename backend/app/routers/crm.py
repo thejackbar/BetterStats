@@ -490,6 +490,7 @@ async def club_link_contact(deal_id: str, body: DealContactBody, club: Organisat
     person = await _resolve_contact_person(db, body, organisation_id=club.id)
     await crm_service.link_deal_contact(db, deal.id, person.id, body.role_on_deal)
     await db.commit()
+    await db.refresh(person, attribute_names=["roles"])
     return crm_service._person_dict(person)
 
 
@@ -527,6 +528,7 @@ async def club_create_person(body: PersonCreate, club: Organisation = Depends(ge
     if body.notes:
         person.notes = body.notes
     await db.commit()
+    await db.refresh(person, attribute_names=["roles"])
     return crm_service._person_dict(person)
 
 
@@ -541,6 +543,7 @@ async def club_update_person(person_id: str, body: PersonUpdate, club: Organisat
         if val is not None:
             setattr(person, field, val)
     await db.commit()
+    await db.refresh(person, attribute_names=["roles"])
     return crm_service._person_dict(person)
 
 
@@ -777,6 +780,7 @@ async def super_link_contact(deal_id: str, body: DealContactBody, db: AsyncSessi
     person = await _resolve_contact_person(db, body, marketing_club_id=deal.marketing_club_id)
     await crm_service.link_deal_contact(db, deal.id, person.id, body.role_on_deal)
     await db.commit()
+    await db.refresh(person, attribute_names=["roles"])
     return crm_service._person_dict(person)
 
 
@@ -820,6 +824,7 @@ async def super_create_person(body: PersonCreate, marketing_club_id: Optional[st
     if body.notes:
         person.notes = body.notes
     await db.commit()
+    await db.refresh(person, attribute_names=["roles"])
     return crm_service._person_dict(person)
 
 
@@ -833,6 +838,7 @@ async def super_update_person(person_id: str, body: PersonUpdate, db: AsyncSessi
         if val is not None:
             setattr(person, field, val)
     await db.commit()
+    await db.refresh(person, attribute_names=["roles"])
     return crm_service._person_dict(person)
 
 
