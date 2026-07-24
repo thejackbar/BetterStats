@@ -21,6 +21,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, MarketingClub, CrmStage, CrmPipeline, get_db
@@ -381,9 +382,18 @@ async def club_delete_stage(stage_id: str, club: Organisation = Depends(get_curr
     stage = await _club_stage_or_404(db, club.id, stage_id)
     try:
         await crm_service.delete_stage(db, stage)
+        await db.commit()
     except ValueError as e:
+        await db.rollback()
         raise HTTPException(status_code=409, detail=str(e))
-    await db.commit()
+    except IntegrityError:
+        # The empty-check and the actual DELETE aren't atomic — a deal can
+        # land in this exact stage in between (e.g. a background CRM-sync
+        # write from a live self-serve trial signup), which only shows up as
+        # a DB-level FK violation at commit time, not the ValueError above.
+        await db.rollback()
+        raise HTTPException(status_code=409,
+                           detail="A new record was just added to this stage — move or archive it, then try again")
     return {"deleted": True}
 
 
@@ -604,9 +614,18 @@ async def super_delete_stage(stage_id: str, db: AsyncSession = Depends(get_db)):
     stage = await _platform_stage_or_404(db, stage_id)
     try:
         await crm_service.delete_stage(db, stage)
+        await db.commit()
     except ValueError as e:
+        await db.rollback()
         raise HTTPException(status_code=409, detail=str(e))
-    await db.commit()
+    except IntegrityError:
+        # The empty-check and the actual DELETE aren't atomic — a deal can
+        # land in this exact stage in between (e.g. a background CRM-sync
+        # write from a live self-serve trial signup), which only shows up as
+        # a DB-level FK violation at commit time, not the ValueError above.
+        await db.rollback()
+        raise HTTPException(status_code=409,
+                           detail="A new record was just added to this stage — move or archive it, then try again")
     return {"deleted": True}
 
 

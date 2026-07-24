@@ -475,7 +475,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               const poc = contacts.find(c => c.role_on_deal === 'point_of_contact')
               const others = contacts.filter(c => c.role_on_deal !== 'point_of_contact')
               const phoneField = (c) => editPhoneId === c.id ? (
-                <TextInput autoFocus defaultValue={c.phone || ''} placeholder="Mobile" className="shrink-0" style={{ width: '92px' }}
+                <TextInput autoFocus defaultValue={c.phone || ''} placeholder="Mobile" className="shrink-0" style={{ width: '101px' }}
                   onBlur={e => savePhone(c.id, e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditPhoneId(null) }} />
               ) : (
@@ -513,7 +513,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             <form onSubmit={addContact} className="flex flex-wrap gap-2">
               <TextInput placeholder="Full name" value={contactName} onChange={e => setContactName(e.target.value)} style={{ width: '260px' }} />
               <TextInput placeholder="Email (optional)" value={contactEmail} onChange={e => setContactEmail(e.target.value)} style={{ width: '260px' }} />
-              <TextInput placeholder="Mobile" value={contactPhone} onChange={e => setContactPhone(e.target.value)} style={{ width: '92px' }} />
+              <TextInput placeholder="Mobile" value={contactPhone} onChange={e => setContactPhone(e.target.value)} style={{ width: '101px' }} />
               <Btn type="submit" variant="ghost" sm>Add</Btn>
             </form>
           </div>

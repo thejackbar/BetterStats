@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -442,6 +442,13 @@ export default function SuperCrm() {
   const [stages, setStages] = useState([])
   const [status, setStatus] = useState('open')
   const [loading, setLoading] = useState(true)
+  // Only the very FIRST load shows the full-page spinner (which unmounts the
+  // whole board). Every later refresh — a drag/drop move, a filter change, a
+  // deal edit — must keep the existing board mounted underneath, or its
+  // horizontally-scrolled position resets to the left every time (reported:
+  // scrolling right to see Trial Stage, dropping a deal there, and losing
+  // that scroll position because the board briefly unmounted).
+  const loadedOnce = useRef(false)
   const [openDealId, setOpenDealId] = useState(null)
   const [showNew, setShowNew] = useState(false)
   const [showStages, setShowStages] = useState(false)
@@ -451,14 +458,14 @@ export default function SuperCrm() {
   const [sortDir, setSortDir] = useState('asc')
 
   const load = useCallback(() => {
-    setLoading(true)
+    if (!loadedOnce.current) setLoading(true)
     Promise.all([
       api.superCrmStages(),
       api.superCrmListDeals({ status: status || undefined }),
     ])
       .then(([s, d]) => { setStages(s.stages || []); setDeals(d.deals || []) })
       .catch(e => toast.error(e.message || 'Could not load the sales pipeline'))
-      .finally(() => setLoading(false))
+      .finally(() => { setLoading(false); loadedOnce.current = true })
   }, [status, toast])
 
   useEffect(() => { load() }, [load])
