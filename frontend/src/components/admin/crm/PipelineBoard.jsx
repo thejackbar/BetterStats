@@ -167,6 +167,11 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                       {ONBOARDING_METHOD_LABELS[deal.onboarding_method] || deal.onboarding_method}
                     </div>
                   )}
+                  {!deal.stage_auto_locked && deal.status === 'open' && (
+                    <div title="Stage still moves itself — a repeat Contact-Us enquiry or an engagement score over 70 can advance it. Move it by hand to stop that.">
+                      <Pill>auto</Pill>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-[12px] text-pb-faint">{money(effCents)}</span>
                     {discountCents > 0 && (

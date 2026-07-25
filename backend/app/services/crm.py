@@ -508,6 +508,7 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         "onboarding_method": deal.onboarding_method,
         "lead_source": deal.lead_source,
         "product_interest_source": deal.product_interest_source,
+        "stage_auto_locked": deal.stage_auto_locked,
         "archived_at": deal.archived_at.isoformat() if deal.archived_at else None,
         "created_at": deal.created_at.isoformat() if deal.created_at else None,
         "updated_at": deal.updated_at.isoformat() if deal.updated_at else None,
@@ -1121,7 +1122,11 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
     deal BACKWARD — a fresh low-signal enquiry can't demote a deal that's
     already in Proposal. Value is priced from ``module_keys`` via the same
     ``billing_pricing.price_for()`` the Account page / Stripe Checkout use, so
-    the pipeline's dollar figure is never a second, drifting estimate."""
+    the pipeline's dollar figure is never a second, drifting estimate.
+
+    A deal with ``stage_auto_locked`` set (a super admin has deliberately
+    moved its stage by hand) is never auto-advanced — module_keys/value_cents
+    still merge in, only the stage move is skipped."""
     pipeline = await ensure_platform_pipeline(session)
     stage_by_key = {s.key: s for s in pipeline.stages}
     target_stage = stage_by_key.get(stage_key)
@@ -1150,8 +1155,9 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
         deal = existing
         current_stage = stage_by_key.get(
             next((s.key for s in pipeline.stages if s.id == deal.stage_id), None))
-        should_move = (not advance_only or current_stage is None
-                      or target_stage.position > current_stage.position)
+        should_move = (not deal.stage_auto_locked and
+                      (not advance_only or current_stage is None
+                       or target_stage.position > current_stage.position))
         if should_move:
             await move_stage(session, deal, target_stage)
         deal.module_keys = sorted(set(deal.module_keys or []) | set(keys))
@@ -1164,15 +1170,65 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
     return deal
 
 
+async def maybe_promote_by_engagement_score(session: AsyncSession, club: MarketingClub, *,
+                                            threshold: int = 70) -> Optional[CrmDeal]:
+    """Promote a club's existing open platform deal straight to Engaged once
+    its (already-computed, already-cached) engagement score passes
+    ``threshold`` — per direct instruction, Target OR Contacted both qualify.
+    Never creates a deal from nothing (a score alone, with no deal on the
+    board yet, isn't itself a reason to start one); never moves a deal
+    that's already past Engaged (Trial/Proposal/Won/…), is closed, or has
+    ``stage_auto_locked`` set. Caller is responsible for having already
+    computed/cached ``club.engagement_score`` this call — this function does
+    no scoring itself."""
+    score = club.engagement_score
+    if score is None or score <= threshold:
+        return None
+    pipeline = await ensure_platform_pipeline(session)
+    stage_by_key = {s.key: s for s in pipeline.stages}
+    engaged_stage = stage_by_key.get("engaged")
+    if engaged_stage is None:
+        return None
+    deal = (await session.execute(
+        select(CrmDeal).where(
+            CrmDeal.pipeline_id == pipeline.id,
+            CrmDeal.marketing_club_id == club.id,
+            CrmDeal.status == "open",
+            CrmDeal.archived_at.is_(None),
+        ).order_by(CrmDeal.created_at.desc())
+    )).scalars().first()
+    if deal is None or deal.stage_auto_locked:
+        return None
+    current_key = next((s.key for s in pipeline.stages if s.id == deal.stage_id), None)
+    if current_key not in ("target", "contacted"):
+        return None
+    await move_stage(session, deal, engaged_stage)
+    await log_activity(
+        session, deal_id=deal.id, type="system",
+        body=f"Auto-promoted to Engaged: engagement score {score} > {threshold}")
+    return deal
+
+
 async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                                 email: str = "", phone: Optional[str] = None) -> dict:
     """Backgrounded counterpart to ``twenty_sync.push_onboarding_enquiry`` — a
     direct 'onboard my club' enquiry (either the short CTA modal or the full
     Contact page) is the strongest buying signal a prospect can give, so it
-    also ensures a New Lead platform deal exists (or advances an existing
-    one). Opens its own session; never raises."""
+    also ensures a platform deal exists (or advances an existing one).
+
+    Per direct instruction, the enquiry COUNT decides the target stage: the
+    first-ever Contact-Us submission from this club moves the deal straight
+    to Contacted (a fresh deal is created there, never left sitting at
+    Target); a second (or later) submission moves it on to Engaged. Reuses
+    ``twenty_sync._onboarding_signal`` — the same email/visitor/club-name
+    matching the engagement-score formula already counts this signal by — so
+    "how many times has this club contacted us" can never drift from what the
+    score itself already believes. The row this call is counting was already
+    committed by ``routers/public_contact.py`` before this background task
+    fires, so the just-submitted enquiry is included in the count. Opens its
+    own session; never raises."""
     from app.models.db import async_session_maker
-    from app.services.twenty_sync import _resolve_onboarding_club
+    from app.services.twenty_sync import _resolve_onboarding_club, _onboarding_signal
     try:
         async with async_session_maker() as session:
             club, contact = await _resolve_onboarding_club(
@@ -1183,10 +1239,12 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                 session, marketing_club_id=club.id,
                 full_name=contact_name or (contact.full_name if contact else "") or club_name,
                 email=email, phone=phone)
+            count, _last_at = await _onboarding_signal(session, club, club.utm_code)
+            stage_key = "contacted" if count <= 1 else "engaged"
             deal = await sync_platform_deal_for_club(
-                session, club, stage_key="target", source="auto_enquiry", person_id=person.id)
+                session, club, stage_key=stage_key, source="auto_enquiry", person_id=person.id)
             await session.commit()
-            return {"deal_id": str(deal.id)}
+            return {"deal_id": str(deal.id), "onboarding_request_count": count}
     except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
         logger.exception("crm: failed to sync deal for enquiry (%s)", club_name)
         return {"error": "failed"}

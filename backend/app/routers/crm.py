@@ -728,6 +728,11 @@ async def super_move_stage(deal_id: str, body: StageMoveBody, db: AsyncSession =
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     _, stage = await _deal_stage_or_404(db, deal, body.stage_id)
     await crm_service.move_stage(db, deal, stage, probability=body.probability)
+    # A super admin deliberately choosing a stage here — as opposed to the
+    # automatic engine's Contact-Us-count/engagement-score promotions — locks
+    # the deal out of further auto-promotion (see
+    # crm_service.sync_platform_deal_for_club/maybe_promote_by_engagement_score).
+    deal.stage_auto_locked = True
     await db.commit()
     return await _serialize_deal(db, deal)
 

@@ -3657,6 +3657,15 @@ async def lifespan(app: FastAPI):
             "JSONB NOT NULL DEFAULT '[]'"
         ))
 
+    # Migration 189: crm_deals.stage_auto_locked — set the moment a human
+    # explicitly moves a deal's stage, so the auto-promotion engine (below)
+    # never nudges that deal forward again.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS stage_auto_locked "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

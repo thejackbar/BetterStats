@@ -3640,6 +3640,10 @@ class CrmDeal(Base):
     # chip) — lets the UI show which mode a deal is in and offer a
     # "recalculate from analytics" action that only makes sense in 'auto'.
     product_interest_source = Column(Text, nullable=False, server_default="auto", default="auto")
+    # Migration 189: set the moment a human explicitly drags/sets this deal's
+    # stage — the auto-promotion engine (Contact-Us count, engagement score >
+    # 70) then leaves it alone rather than nudging it forward again.
+    stage_auto_locked = Column(Boolean, nullable=False, server_default="false", default=False)
     archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
