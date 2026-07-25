@@ -2362,7 +2362,11 @@ export default function PlayerProfile() {
   const fielding = data.career_fielding
   const battingInnings = data.batting_innings ?? []
   const bowlingSpells = data.bowling_spells ?? []
-  const orgSlug = org ? (sessionStorage.getItem('bs_last_slug') || '') : ''
+  // Prefer the slug carried on the org record itself — sessionStorage is only
+  // set once a visitor has already been on a club page this session, so a cold
+  // landing (e.g. a shared player link) would otherwise have no way back to the
+  // club. Fall back to the session value for older API responses.
+  const orgSlug = org?.slug || (org ? (sessionStorage.getItem('bs_last_slug') || '') : '')
 
   // Ranked achievements for the header badges
   const headerAchievements = (() => {
@@ -2401,6 +2405,8 @@ export default function PlayerProfile() {
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 font-mono text-[10.5px] tracking-wide2 text-pb-faint mb-4">
+          {orgSlug && org?.name && <Link to={`/${orgSlug}`} className="hover:text-pb-text">{org.name.toUpperCase()}</Link>}
+          {orgSlug && org?.name && <span>/</span>}
           {orgSlug && <Link to={`/${orgSlug}/players`} className="hover:text-pb-text">PLAYERS</Link>}
           {orgSlug && <span>/</span>}
           <span className="text-pb-dim">{fmtName(player.display_name).toUpperCase()}</span>
@@ -2410,7 +2416,11 @@ export default function PlayerProfile() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 mb-6 items-end">
           <div>
             <Label>
-              {org?.name || ''} · {player.player_role || player.role || 'PLAYER'}
+              {org?.name
+                ? (orgSlug
+                    ? <Link to={`/${orgSlug}`} className="hover:text-pb-text transition-colors">{org.name}</Link>
+                    : org.name)
+                : ''} · {player.player_role || player.role || 'PLAYER'}
               {player.is_overseas && (
                 <span className="ml-2 inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border"
                   style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', color: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)' }}>
