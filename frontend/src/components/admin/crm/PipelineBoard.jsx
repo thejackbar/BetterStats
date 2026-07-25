@@ -89,7 +89,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
         </div>
       )}
 
-      <div className="flex gap-3 overflow-x-auto pb-2 items-start">
+      <div className="flex gap-3 overflow-x-auto pb-2 items-stretch">
         {visibleStages.map(stage => {
           const isMin = minimized.has(stage.id)
           if (isMin) {
@@ -99,7 +99,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 onDragLeave={() => setOverStageId(id => (id === stage.id ? null : id))}
                 onDrop={e => { e.preventDefault(); drop(stage.id) }}>
                 <button onClick={() => toggleMinimized(stage.id)} title={`Expand ${stage.name}`}
-                  className={`w-full pb-card px-1 py-2.5 flex flex-col items-center gap-2 hover:border-pb-accent/40 transition ${
+                  className={`w-full h-full pb-card px-1 py-2.5 flex flex-col items-center gap-2 hover:border-pb-accent/40 transition ${
                     overStageId === stage.id ? 'ring-2 ring-pb-accent/50 bg-pb-accent/5' : ''}`}>
                   <span className="text-pb-faint text-[13px] leading-none">›</span>
                   <span className="font-mono text-[10px] text-pb-faintest">{stage.deal_count}</span>
@@ -110,7 +110,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
             )
           }
           return (
-          <div key={stage.id} className="w-64 shrink-0"
+          <div key={stage.id} className="w-64 shrink-0 flex flex-col"
             onDragOver={e => { if (draggingId) { e.preventDefault(); setOverStageId(stage.id) } }}
             onDragLeave={() => setOverStageId(id => (id === stage.id ? null : id))}
             onDrop={e => { e.preventDefault(); drop(stage.id) }}>
@@ -128,7 +128,12 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   className="text-pb-faintest hover:text-pb-accent text-[13px] leading-none px-0.5">‹</button>
               </div>
             </div>
-            <div className={`space-y-2 min-h-[60px] rounded-lg transition ${
+            {/* flex-1 + min-h so this fills the WHOLE rest of the column (matching
+                the tallest column, via items-stretch on the row above) — a short
+                column must still be a full-height drop target, not just as tall as
+                its own few cards, or a drag from a long column has nowhere to land
+                once the target column's cards scroll out of the viewport. */}
+            <div className={`flex-1 space-y-2 min-h-[60px] rounded-lg transition ${
               overStageId === stage.id ? 'ring-2 ring-pb-accent/50 bg-pb-accent/5' : ''}`}>
               {stage.deals.length === 0 && (
                 <div className="pb-card px-3 py-4 text-center text-[11.5px] text-pb-faintest border-dashed">No {t.itemPlural}</div>
