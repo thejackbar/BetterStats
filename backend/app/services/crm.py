@@ -43,7 +43,7 @@ from sqlalchemy.orm import selectinload
 from app.models.db import (
     CrmPerson, CrmPersonRole, CrmPipeline, CrmStage, CrmDeal, CrmDealContact, CrmActivity,
     MarketingClub, MarketingClubContact, User, ClubMembership, Organisation, ClubOnboardingRequest,
-    OrgModuleSubscription,
+    OrgModuleSubscription, Season, Grade, Player, OnboardingWizardState,
 )
 from app.services.billing_pricing import price_for
 
@@ -1030,6 +1030,84 @@ async def subscribed_modules_by_club(session: AsyncSession, club_by_id: dict) ->
             continue
         out.setdefault(cid, set()).add(billing_key_for(module_key))
     return {cid: sorted(keys) for cid, keys in out.items()}
+
+
+async def club_stats_by_club(session: AsyncSession, club_by_id: dict) -> dict:
+    """marketing_club_id -> onboarded-club facts for the Kanban card's state
+    line (a subscriber/trialing club only): seasons/grades/players counts,
+    setup progress (done/total), and 'active since' (the earliest module
+    subscription start). Mirrors the All Clubs page's own per-club stats
+    (club_admin.list_all_clubs) but scoped to just the orgs linked to CRM
+    deals, and batched (no N+1). A prospect that's never been onboarded (no
+    existing_org_id) has no org-level facts and is simply absent from the
+    result."""
+    # Deferred import: onboarding_wizard imports auth.modules which pulls in a
+    # chain that would be circular at module load; club_admin does the same
+    # deferred import for the same reason.
+    from app.auth.modules import org_entitled_modules
+    from app.routers.onboarding_wizard import _applicable_groups
+
+    org_to_club = {c.existing_org_id: cid for cid, c in club_by_id.items() if c.existing_org_id}
+    if not org_to_club:
+        return {}
+    org_ids = list(org_to_club.keys())
+
+    orgs = (await session.execute(
+        select(Organisation)
+        .options(selectinload(Organisation.module_subscriptions))
+        .where(Organisation.id.in_(org_ids))
+    )).scalars().all()
+
+    seasons_by_org = {row[0]: row[1] for row in (await session.execute(
+        select(Season.organisation_id, func.count(Season.id))
+        .where(Season.organisation_id.in_(org_ids))
+        .group_by(Season.organisation_id)
+    )).all()}
+    players_by_org = {row[0]: row[1] for row in (await session.execute(
+        select(Player.organisation_id, func.count(Player.id))
+        .where(Player.organisation_id.in_(org_ids))
+        .group_by(Player.organisation_id)
+    )).all()}
+    grades_by_org = {row[0]: row[1] for row in (await session.execute(
+        select(Season.organisation_id, func.count(Grade.id))
+        .select_from(Grade)
+        .join(Season, Season.id == Grade.season_id)
+        .where(Season.organisation_id.in_(org_ids))
+        .group_by(Season.organisation_id)
+    )).all()}
+    wizard_by_org = {s.organisation_id: s for s in (await session.execute(
+        select(OnboardingWizardState).where(OnboardingWizardState.organisation_id.in_(org_ids))
+    )).scalars().all()}
+    # "Active since" = when the club first held any module (trial or paid).
+    # started_at has a server default so it's always set; coalesce the trial
+    # start under it in case a trial row predates its own started_at.
+    active_since_by_org = {row[0]: row[1] for row in (await session.execute(
+        select(OrgModuleSubscription.organisation_id,
+              func.min(func.coalesce(OrgModuleSubscription.trial_started_at,
+                                     OrgModuleSubscription.started_at)))
+        .where(OrgModuleSubscription.organisation_id.in_(org_ids))
+        .group_by(OrgModuleSubscription.organisation_id)
+    )).all()}
+
+    out: dict = {}
+    for o in orgs:
+        cid = org_to_club.get(o.id)
+        if cid is None:
+            continue
+        entitled = org_entitled_modules(o)
+        keys = [s["key"] for g in _applicable_groups(entitled) for s in g["steps"]]
+        wiz = wizard_by_org.get(o.id)
+        completed = set((wiz.completed_steps or []) if wiz else [])
+        active_since = active_since_by_org.get(o.id)
+        out[cid] = {
+            "seasons_count": seasons_by_org.get(o.id, 0),
+            "grades_count": grades_by_org.get(o.id, 0),
+            "players_count": players_by_org.get(o.id, 0),
+            "setup_done": sum(1 for k in keys if k in completed),
+            "setup_total": len(keys),
+            "active_since": active_since.isoformat() if active_since else None,
+        }
+    return out
 
 
 async def list_platform_owners(session: AsyncSession) -> list[dict]:

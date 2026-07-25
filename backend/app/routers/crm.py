@@ -668,6 +668,11 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: subscribed_modules_by_club failed")
         subscribed_by_club = {}
+    try:
+        stats_by_club = await crm_service.club_stats_by_club(db, club_by_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: club_stats_by_club failed")
+        stats_by_club = {}
 
     out = []
     for d in deals:
@@ -681,6 +686,10 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         row["trial_days_remaining"] = trial_days
         row["min_trial_days_remaining"] = min(trial_days.values()) if trial_days else None
         row["subscribed_modules"] = (subscribed_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or []
+        # Onboarded-club facts (seasons/grades/players/setup/active-since) for
+        # the Kanban card's state line — only present for a linked, onboarded
+        # club (a subscriber or trialing club); absent for a bare prospect.
+        row["club_stats"] = stats_by_club.get(d.marketing_club_id) if d.marketing_club_id else None
         out.append(row)
     return {"deals": out}
 
