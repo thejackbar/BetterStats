@@ -34,6 +34,24 @@ A deal that's neither — no active trial AND Product Interest explicitly
 holds some OTHER module set that doesn't include Stats — is left
 untouched; there's no trial or Stats interest to price against.
 
+v4 — deal discovery is no longer pipeline_id-scoped. Earlier versions
+fetched deals via `list_deals(session, pipeline.id, status="open")`, tying
+the whole batch to whatever single pipeline row `ensure_platform_pipeline()`
+resolves to. If production ever ended up with more than one `crm_pipelines`
+row with `scope='platform'` (a real historical risk — a past bug in
+`ensure_platform_pipeline`'s pipeline-creation branch, fixed earlier in the
+same work as migration 188, could plausibly have left a stray duplicate
+pipeline row from before that fix was live), a deal sitting under a
+different/stale platform pipeline_id than the one currently resolved as
+canonical would be silently invisible to this script — even though it
+displays completely normally in the web UI (which resolves the exact same
+single pipeline.id the script used to). v4 instead queries
+`CrmDeal.scope == 'platform'` directly, across every platform pipeline row,
+and prints a warning if it finds more than one platform pipeline and/or
+deals spanning more than one distinct pipeline_id — so a run's own output
+tells you whether this was ever actually the cause of a "why isn't this
+deal matching" gap.
+
 Usage from the backend container (matches the rest of app/scripts/*):
   docker exec -e PYTHONPATH=/app betterstats-backend \\
     python -m app.scripts.crm_recalc_trial_deals
@@ -44,7 +62,9 @@ Usage from the backend container (matches the rest of app/scripts/*):
 import asyncio
 import sys
 
-from app.models.db import async_session_maker
+from sqlalchemy import select
+
+from app.models.db import async_session_maker, CrmDeal, CrmPipeline
 from app.services import crm as crm_service
 
 STATS_KEY = "core"  # billing_pricing / value_from_modules key for BetterStats
@@ -53,9 +73,15 @@ STATS_KEY = "core"  # billing_pricing / value_from_modules key for BetterStats
 # run so a stale container image (docker compose exec runs whatever code was
 # baked into the image at last build, NOT the latest git commit) is obvious
 # from the output rather than silently only doing the older subset of work.
-SCRIPT_VERSION = 3  # v3: stats-only branch also matches an EMPTY module_keys
-                    # (the UI's own "no Product Interest set = assume Stats"
-                    # convention), not just an explicit "core" entry
+SCRIPT_VERSION = 4  # v4: fetch deals by scope='platform' directly instead of
+                    # a single resolved pipeline_id, and warn if more than one
+                    # platform pipeline row exists — a deal sitting under a
+                    # DIFFERENT (stale/duplicate) pipeline id than the one
+                    # ensure_platform_pipeline() currently resolves to would
+                    # otherwise be silently invisible to this script (and to
+                    # the web UI's own board/list, which resolves the SAME
+                    # single pipeline.id) even though its Product Interest
+                    # and stage look completely normal.
 
 
 async def _apply(session, deal, club, target_module_keys: list, reason: str, dry_run: bool) -> bool:
@@ -86,8 +112,34 @@ async def _apply(session, deal, club, target_module_keys: list, reason: str, dry
 async def run(dry_run: bool = False) -> None:
     print(f"crm_recalc_trial_deals v{SCRIPT_VERSION} (trial-branch + stats-only-branch)")
     async with async_session_maker() as session:
+        # Runs the usual get-or-create/reconcile so stages exist — but the
+        # deal query below deliberately does NOT filter by this pipeline's
+        # id (see v4 note above).
         pipeline = await crm_service.ensure_platform_pipeline(session)
-        deals = await crm_service.list_deals(session, pipeline.id, status="open")
+
+        all_platform_pipeline_ids = (await session.execute(
+            select(CrmPipeline.id).where(CrmPipeline.scope == crm_service.SCOPE_PLATFORM)
+        )).scalars().all()
+        if len(all_platform_pipeline_ids) > 1:
+            print(
+                f"  ! WARNING: {len(all_platform_pipeline_ids)} platform pipeline rows exist "
+                f"(expected exactly 1) — ids: {[str(i) for i in all_platform_pipeline_ids]}. "
+                f"Querying deals by scope='platform' across all of them, not just "
+                f"the one ensure_platform_pipeline() resolved to ({pipeline.id})."
+            )
+
+        deals = (await session.execute(
+            select(CrmDeal).where(
+                CrmDeal.scope == crm_service.SCOPE_PLATFORM,
+                CrmDeal.archived_at.is_(None),
+                CrmDeal.status == "open",
+            )
+        )).scalars().all()
+        distinct_pipeline_ids = {d.pipeline_id for d in deals}
+        if len(distinct_pipeline_ids) > 1:
+            print(f"  ! {len(deals)} open platform deal(s) span {len(distinct_pipeline_ids)} "
+                 f"different pipeline_id values: {[str(i) for i in distinct_pipeline_ids]}")
+
         club_by_id = await crm_service.clubs_by_ids(session, (d.marketing_club_id for d in deals))
         trial_days = await crm_service.trial_days_remaining_by_club(session, club_by_id)
 
