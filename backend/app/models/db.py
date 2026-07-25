@@ -3621,7 +3621,7 @@ class CrmDeal(Base):
     status = Column(Text, nullable=False, server_default="open", default="open")  # open | won | lost
     lost_reason = Column(Text, nullable=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial
+    source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import
     # Migration 184: how this club came to be onboarded (independent of `source`,
     # which is about how the DEAL/row was created) — self_serve_trial |
     # super_admin_trial | direct_subscriber | none.
