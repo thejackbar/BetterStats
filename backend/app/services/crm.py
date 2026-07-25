@@ -1190,3 +1190,140 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
     except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
         logger.exception("crm: failed to sync deal for enquiry (%s)", club_name)
         return {"error": "failed"}
+
+
+# ─── Self-serve trial registration → local CRM deal ──────────────────────────
+# A self-serve registration (routers/self_serve_trial.py's shared submit(), hit
+# by both the super-admin-testing internal flow and the public /trial flow)
+# starts a 14-day trial of every module the registrant picked, with no human
+# in the loop — the same real signal push_self_serve_registration already
+# gives Twenty. The local pipeline deserves the same treatment, independent of
+# whether Twenty itself is configured.
+
+# Domains from frontend/src/lib/visitor.js's CLICK_IDS ad-network table (only
+# the ones this classifier distinguishes) plus common AI assistant/search
+# referrers — used to bucket a registrant's first-touch acquisition into the
+# deal detail modal's own Lead Source vocabulary (ui.jsx LEAD_SOURCE_OPTIONS).
+_META_ADS_UTM_SOURCES = {"facebook", "meta", "fb", "instagram"}
+_GOOGLE_REFERRER_HOSTS = ("google.com", "google.com.au", "google.co.")
+_AI_ASSISTANT_REFERRER_HOSTS = (
+    "chatgpt.com", "chat.openai.com", "perplexity.ai", "claude.ai",
+    "gemini.google.com", "copilot.microsoft.com", "you.com",
+)
+
+
+def lead_source_from_attribution(attribution: Optional[dict]) -> Optional[str]:
+    """Best-effort classification of a registrant's first-touch acquisition
+    (frontend/src/lib/visitor.js getAttribution() — utm_source/utm_campaign/
+    click_source/landing_referrer) into the deal's own lead_source vocabulary.
+    Order matters — an EDM link's own utm_campaign wins over an ad-network
+    click id it might also carry (e.g. an EDM link opened from inside a
+    Facebook in-app browser). Returns None (leave "Not set") when nothing
+    recognisable is present — never guesses "other" on no signal at all.
+    Tolerant of an unclipped, client-supplied dict (this may run against the
+    raw request body, not the allowlisted/clipped copy public_self_serve.py
+    stores onto the org) — a non-string value for a known key is treated as
+    absent rather than raising."""
+    if not isinstance(attribution, dict):
+        return None
+    def _s(key: str) -> str:
+        v = attribution.get(key)
+        return v.strip().lower() if isinstance(v, str) else ""
+    utm_campaign = _s("utm_campaign")
+    utm_source = _s("utm_source")
+    click_source = _s("click_source")
+    referrer = _s("landing_referrer")
+
+    if utm_campaign == "edm":
+        return "edm"
+    if click_source == "facebook" or utm_source in _META_ADS_UTM_SOURCES:
+        return "meta_ads"
+    if click_source == "google" or utm_source == "google" or any(h in referrer for h in _GOOGLE_REFERRER_HOSTS):
+        return "google_search"
+    if any(h in referrer for h in _AI_ASSISTANT_REFERRER_HOSTS):
+        return "ai_search_assistants"
+    return None
+
+
+async def sync_self_serve_trial_deal(session: AsyncSession, club: MarketingClub, *,
+                                     lead_source: Optional[str] = None) -> Optional[CrmDeal]:
+    """Get-or-create the ONE open platform deal for a club that just completed
+    self-serve trial registration, and pin it to what that registration always
+    means: Trial stage, 'Self-Serve Trial' onboarding method, and BetterStats'
+    own $399 base value. module_keys is deliberately left alone (empty on a
+    fresh deal) rather than filled with every trialled module — the deal
+    detail modal's own Product Interest chips already default an empty list to
+    showing Stats selected (see crm_recalc_trial_deals.py's docstring for the
+    same convention), and pricing every trialled module in would inflate Value
+    ($) well past $399. A super admin (or the recalc script) can broaden
+    Product Interest and reprice later once real analytics/trial usage backs
+    it up.
+
+    Unlike sync_platform_deal_for_club (an ongoing, advance-only signal for
+    later trial/enquiry activity), this always wins: a self-serve signup is
+    never a step backward, so it force-moves the deal to Trial and
+    force-stamps the onboarding method even if a prior enquiry left the deal
+    somewhere else (typically Target, unset). ``lead_source`` is optional
+    since only the public flow has first-touch ad attribution to derive one
+    from (see lead_source_from_attribution) — pass None to leave it as-is."""
+    pipeline = await ensure_platform_pipeline(session)
+    stage_by_key = {s.key: s for s in pipeline.stages}
+    trial_stage = stage_by_key.get("trial")
+    if trial_stage is None:
+        return None
+
+    existing = (await session.execute(
+        select(CrmDeal).where(
+            CrmDeal.pipeline_id == pipeline.id,
+            CrmDeal.marketing_club_id == club.id,
+            CrmDeal.status == "open",
+            CrmDeal.archived_at.is_(None),
+        ).order_by(CrmDeal.created_at.desc())
+    )).scalars().first()
+
+    value_cents = value_from_modules(["core"])
+    if existing is None:
+        deal = await create_deal(
+            session, scope=SCOPE_PLATFORM, marketing_club_id=club.id,
+            pipeline_id=pipeline.id, stage_id=trial_stage.id, title=club.name,
+            value_cents=value_cents, source="self_serve_trial",
+            onboarding_method="self_serve_trial", lead_source=lead_source,
+        )
+    else:
+        deal = existing
+        await move_stage(session, deal, trial_stage)
+        deal.onboarding_method = "self_serve_trial"
+        if lead_source:
+            deal.lead_source = lead_source
+        if not deal.module_keys:
+            deal.value_cents = value_cents
+        deal.updated_at = func.now()
+    return deal
+
+
+async def sync_self_serve_trial_registration(*, org_id, org_name: str, contact_name: str = "",
+                                             email: str = "", phone: Optional[str] = None,
+                                             attribution: Optional[dict] = None) -> dict:
+    """Backgrounded counterpart to (and fired alongside)
+    twenty_sync.push_self_serve_registration — creates/advances the ONE local
+    BetterCRM platform deal for a brand-new self-serve trial registration.
+    Deliberately independent of whether Twenty is configured (unlike the
+    Twenty push, which no-ops entirely when it isn't): BetterCricket's own
+    pipeline must reflect a real registration regardless of that external
+    integration's state, so this resolves the MarketingClub itself rather than
+    relying on the Twenty push having already done so. Opens its own session;
+    never raises."""
+    from app.models.db import async_session_maker
+    from app.services.twenty_sync import _resolve_self_serve_club
+    try:
+        async with async_session_maker() as session:
+            club, _contact = await _resolve_self_serve_club(
+                session, org_id=org_id, org_name=org_name, contact_name=contact_name,
+                email=email, phone=phone)
+            deal = await sync_self_serve_trial_deal(
+                session, club, lead_source=lead_source_from_attribution(attribution))
+            await session.commit()
+            return {"deal_id": str(deal.id)} if deal else {"skipped": "no trial stage"}
+    except Exception:  # noqa: BLE001 - a CRM hiccup can't undo the registration that already committed
+        logger.exception("crm: failed to sync self-serve trial deal for org %s", org_id)
+        return {"error": "failed"}

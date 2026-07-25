@@ -263,8 +263,12 @@ class PublicSubmitRequest(sst.SubmitRequest):
     # check. Optional: a storage-blocked browser may not send it, and the OTP
     # + honeypot gates stand on their own.
     form_started_at: Optional[int] = None
-    # First-touch acquisition record, verbatim from visitor.js getAttribution().
-    attribution: Optional[dict] = None
+    # `attribution` (first-touch acquisition record, verbatim from visitor.js
+    # getAttribution()) is inherited from sst.SubmitRequest — the base class
+    # gained it so the shared submit() handler can classify the new platform
+    # deal's Lead Source (crm.lead_source_from_attribution) for both the
+    # public flow (real attribution) and the internal testing flow (always
+    # None). Only the public flow ever actually sends a populated one.
     # First-party visitor id (localStorage UUID) so the registration links back
     # to the anonymous browsing journey on the super-admin Usage page — same
     # field the Contact form sends.

@@ -572,6 +572,13 @@ class SubmitRequest(BaseModel):
     password: str = ""
     confirm_password: str = ""
     modules: list[str] = []
+    # First-touch ad attribution (frontend/src/lib/visitor.js getAttribution()) —
+    # only ever populated by the public flow (routers/public_self_serve.py's
+    # PublicSubmitRequest extends this with the same field name, so it just
+    # flows straight through); the internal super-admin testing flow has none
+    # to give and leaves it None. Used to classify the new platform deal's
+    # Lead Source — see crm.lead_source_from_attribution.
+    attribution: "dict | None" = None
 
 
 @router.post("/submit")
@@ -779,6 +786,20 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             twenty_sync.push_self_serve_registration,
             org_id=org.id, org_name=name, contact_name=user.display_name,
             email=email, phone=user.mobile_number or None, modules=list(requested_modules),
+        )
+        # Same signal, BetterCricket's own pipeline: pin the local platform
+        # deal to Trial / Self-Serve Trial onboarding method / $399 base value
+        # (see crm.sync_self_serve_trial_deal's own docstring for why value
+        # stays at the Stats base rather than every trialled module's price).
+        # Deliberately a SEPARATE background task from the Twenty push above,
+        # not nested inside it — push_self_serve_registration no-ops entirely
+        # when Twenty isn't configured, and this local sync must not inherit
+        # that gate.
+        from app.services import crm as crm_service
+        background_tasks.add_task(
+            crm_service.sync_self_serve_trial_registration,
+            org_id=org.id, org_name=name, contact_name=user.display_name,
+            email=email, phone=user.mobile_number or None, attribution=data.attribution,
         )
     except Exception:
         logger.error(
