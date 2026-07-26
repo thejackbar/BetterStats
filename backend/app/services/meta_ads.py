@@ -1,8 +1,9 @@
 """Meta Marketing API client + recommendation logic for the Meta Ads HQ dashboard.
 
 Reads BetterCricket's own ad account (platform-level, not club data) — the
-campaign in settings.meta_campaign_id (currently "BC_AU_SelfServe_Aug2026",
-the self-serve trial campaign; the Jul 2026 early-bird was the first). No SDK, plain httpx
+campaign in settings.meta_campaign_id (currently "BC_AU_Trials_CBO_Aug2026",
+the broad cold trials campaign to /trial; BC_AU_SelfServe_Aug2026 and the Jul
+2026 early-bird came before it). No SDK, plain httpx
 against the Graph API. Every call is wrapped so a bad/expired token or a Meta
 outage surfaces as a typed error on the HQ page instead of a 500.
 """
@@ -28,6 +29,10 @@ TIMEOUT = 20.0
 # belong to the CURRENT campaign (settings.meta_campaign_id) without a second
 # round-trip — see that function.
 AD_DESTINATIONS = {
+    # BC_AU_Trials_CBO_Aug2026 (current) — club-history hero → /trial. The
+    # utm_content here must match the tag on the ad's own destination URL for
+    # get_registration_count() to tie a real signup back to this campaign.
+    "120250150859240121": {"campaign_id": "120250149119070121", "name": "Ad_ClubHistory_Trial_Hero_v3", "destination": "betterat.cricket/trial", "utm_content": "club_history_hero"},
     # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
     # same tag the ad-signups report groups by (see routers/meta_ads.py).
     "120249908493850121": {"campaign_id": "120249890918010121", "name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
@@ -58,7 +63,7 @@ _LEAD_ACTION_TYPES = {
 # these back from get_latest_summary() rather than the frontend hardcoding
 # its own copy (that drifted once already, see the campaign-budget line on
 # the KPI card before this file owned it).
-CAMPAIGN_BUDGET_AUD = 520.0
+CAMPAIGN_BUDGET_AUD = 750.0  # A$25/day CBO over the ~30-day pacing window
 CAMPAIGN_LENGTH_DAYS = 30
 
 

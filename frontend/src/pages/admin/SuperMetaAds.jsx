@@ -6,7 +6,7 @@ import {
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
-const DEFAULT_BUDGET = 520
+const DEFAULT_BUDGET = 750
 const DEFAULT_LENGTH_DAYS = 30
 
 const TREND_RANGES = [
@@ -346,8 +346,8 @@ export default function SuperMetaAds() {
   const header = (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Self-Serve Trial Campaign</h1>
-        <p className="text-sm text-pb-dim mt-1">BC_AU_SelfServe_Aug2026 &middot; ~{lengthDays} days from launch</p>
+        <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Trials Campaign</h1>
+        <p className="text-sm text-pb-dim mt-1">BC_AU_Trials_CBO_Aug2026 &middot; ~{lengthDays} days from launch</p>
       </div>
       <div className="flex items-center gap-3">
         <span className="font-mono text-[10px] text-pb-faint">
