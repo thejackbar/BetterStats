@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
@@ -197,7 +198,12 @@ export default function SuperCrmTargets() {
   return (
     <AdminLayout>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h1 className="font-display font-bold text-xl">BetterCRM — Sales Targets</h1>
+        <div>
+          <Link to="/admin/super/crm" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">
+            &larr; SALES PIPELINE
+          </Link>
+          <h1 className="font-display font-bold text-xl">BetterCRM — Sales Targets</h1>
+        </div>
         <div className="flex items-center gap-2">
           <NumberInput value={fyYear} onChange={e => setFyYear(Number(e.target.value) || fyYear)} className="w-24" />
           <span className="text-[11px] text-pb-faint">FY (Jul-Jun)</span>
