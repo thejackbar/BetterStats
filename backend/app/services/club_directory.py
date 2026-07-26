@@ -1668,6 +1668,58 @@ def _visited_in_sql(mc: str = "marketing_clubs") -> str:
     return f"{mc}.id::text IN (SELECT v.cid FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL)"
 
 
+async def resolve_marketing_club_id(session: AsyncSession, *, org_id=None, utm_id=None,
+                                    utm_source=None, path=None, email=None,
+                                    user_id=None) -> Optional[str]:
+    """Single-event reverse lookup — the live-traffic counterpart to
+    ``_RESOLVED_VISITS`` (which resolves a whole table of page_view rows in
+    bulk). Given the signal ONE just-recorded usage_event or email open/click
+    carries, find the ONE MarketingClub it most likely belongs to, so a CRM
+    engagement check (crm.check_web_signal_promotion) can fire immediately
+    instead of waiting on a periodic sweep. Cheapest/most-precise first: a
+    logged-in staff member's own org (an onboarded club's own traffic) beats
+    an email match against a known officer, beats a raw utm_code, beats a
+    manual alias, beats the page-path fallback. Same "don't misattribute
+    staff browsing" guard the bulk query uses: a logged-in user on an
+    ``/admin`` path never resolves here (their org, if any, is already
+    covered by the org_id branch)."""
+    if user_id and (path or "").split("?", 1)[0].lower().startswith("/admin"):
+        return None
+    if org_id:
+        row = (await session.execute(
+            select(MarketingClub.id).where(MarketingClub.existing_org_id == org_id).limit(1)
+        )).scalar_one_or_none()
+        if row is not None:
+            return str(row)
+    if email:
+        row = (await session.execute(text(
+            "SELECT marketing_club_id FROM marketing_club_contacts "
+            "WHERE lower(email) = :email AND email IS NOT NULL AND email <> '' LIMIT 1"
+        ), {"email": email.strip().lower()})).scalar_one_or_none()
+        if row is not None:
+            return str(row)
+    path_code = ""
+    if path:
+        parts = path.split("?", 1)[0].split("/")
+        path_code = parts[1] if len(parts) > 1 else ""
+    if not (utm_id or utm_source or path_code):
+        return None
+    row = (await session.execute(text(
+        "SELECT COALESCE("
+        "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        "     WHERE a.utm_value = :utm_id AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        "     WHERE a.utm_value = :utm_source AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        "     WHERE a.utm_value = :path_code AND :path_code <> '' AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = :utm_id LIMIT 1), "
+        "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = :utm_source LIMIT 1), "
+        "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = :path_code AND :path_code <> '' LIMIT 1)"
+        ") AS cid"
+    ), {"utm_id": utm_id, "utm_source": utm_source, "path_code": path_code})).scalar_one_or_none()
+    return row
+
+
 # ─── Login-intent (visited a club's pages, then went to /login) ─────────────
 # /login itself never resolves to a club through _RESOLVED_VISITS — it's a
 # single global route, not a club slug or UTM code — so a visitor hitting it

@@ -269,6 +269,25 @@ async def record_event(
         except RuntimeError:
             pass
 
+    # CRM — event-driven check (no periodic sweep anywhere) for the
+    # score-based Target/Contacted -> Engaged rule (crm.py). Skip an
+    # authenticated admin-panel request outright (the biggest single source
+    # of volume, and never a signal for a still-prospect club anyway — an
+    # onboarded club's own org_id is caught by user_id-less public traffic to
+    # its site instead); crm.check_web_signal_promotion's own two gates
+    # (resolve a club at all, then does it even have an open early-stage
+    # deal) filter out virtually everything else before doing any real work.
+    if not (user_id and path and path.split("?", 1)[0].lower().startswith("/admin")):
+        try:
+            from app.services.crm import check_web_signal_promotion
+            asyncio.get_running_loop().create_task(
+                check_web_signal_promotion(
+                    org_id=org_id, utm_id=utm_id, utm_source=utm_source,
+                    path=path, user_id=user_id)
+            )
+        except RuntimeError:
+            pass
+
 
 async def _enrich_geo(*, ip: str, ip_hash: str, row_id: int, country: Optional[str]) -> None:
     """Look up city/region/coords via ip-api.com, cache, and UPDATE the row.

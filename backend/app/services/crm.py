@@ -1226,47 +1226,66 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     return await maybe_promote_by_engagement_score(session, club)
 
 
-async def sweep_engagement_promotions(session: AsyncSession) -> dict:
-    """Frequent, Twenty-independent safety net for the score-based
-    Target/Contacted -> Engaged rule. Discrete signal events (an enquiry, a
-    trial request/grant, a subscription change) already trigger an immediate
-    ``sync_engagement_promotion`` call right at the point they happen — this
-    sweep exists for the case that isn't a single discrete event: a score
-    creeping over the threshold purely from ordinary web/email accumulation.
-    Scoped to only the clubs that could possibly need it — every open,
-    not-``stage_auto_locked`` platform deal still sitting at Target or
-    Contacted — rather than every club in the directory, so it stays cheap
-    enough to run every few minutes (see jobs/scheduler.py) instead of once a
-    day. Commits per-club so one bad club's failure can't roll back the rest."""
-    from app.services.twenty_sync import _engagement
-    pipeline = await ensure_platform_pipeline(session)
-    stage_ids = [s.id for s in pipeline.stages if s.key in ("target", "contacted")]
-    if not stage_ids:
-        return {"checked": 0, "promoted": 0}
-    rows = (await session.execute(
-        select(CrmDeal, MarketingClub)
-        .join(MarketingClub, MarketingClub.id == CrmDeal.marketing_club_id)
-        .where(CrmDeal.pipeline_id == pipeline.id, CrmDeal.status == "open",
-              CrmDeal.archived_at.is_(None), CrmDeal.stage_id.in_(stage_ids),
-              CrmDeal.stage_auto_locked.is_(False))
-    )).all()
-    checked, promoted = 0, 0
-    for _deal, club in rows:
-        try:
+async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=None,
+                                     path=None, email=None, user_id=None) -> dict:
+    """Fully event-driven — fired directly from the write path of a web
+    page-view/API event (usage_tracker.record_event) or an email open/click
+    (ses_events), in place of any periodic sweep. No polling anywhere: this
+    IS the check, run at the moment the signal happens.
+
+    Two cheap gates before the real (pricier) engagement recompute ever
+    runs, so this is safe to fire on a genuinely hot path:
+      1. ``club_directory.resolve_marketing_club_id`` — does this event's
+         org/utm/path/email even match a known prospect club? Most traffic
+         (unrecognised visitors, an onboarded club's routine authenticated
+         admin use once org_id resolves but see gate 2, a real customer's
+         public fan traffic) resolves to nothing or is filtered right here.
+      2. Does that club currently have an open, non-``stage_auto_locked``
+         platform deal sitting at Target or Contacted? A single indexed
+         query. A customer or trial club's deal is already past Engaged, so
+         this is what actually filters out the high-volume authenticated
+         traffic case gate 1's org_id match lets through.
+    Only a club that clears BOTH gates pays for the full
+    ``sync_engagement_promotion`` (the ``twenty_sync._engagement`` scan +
+    the promotion check). Opens its own session; never raises — this must
+    never be allowed to affect the request it was fired alongside."""
+    if not (org_id or utm_id or utm_source or path or email):
+        return {"skipped": "no signal"}
+    from app.models.db import async_session_maker
+    from app.services.club_directory import resolve_marketing_club_id
+    try:
+        async with async_session_maker() as session:
+            club_id = await resolve_marketing_club_id(
+                session, org_id=org_id, utm_id=utm_id, utm_source=utm_source,
+                path=path, email=email, user_id=user_id)
+            if club_id is None:
+                return {"skipped": "no club match"}
+            pipeline = await ensure_platform_pipeline(session)
+            stage_ids = [s.id for s in pipeline.stages if s.key in ("target", "contacted")]
+            if not stage_ids:
+                return {"skipped": "no stages"}
+            has_open = (await session.execute(
+                select(CrmDeal.id).where(
+                    CrmDeal.pipeline_id == pipeline.id, CrmDeal.marketing_club_id == club_id,
+                    CrmDeal.status == "open", CrmDeal.archived_at.is_(None),
+                    CrmDeal.stage_id.in_(stage_ids), CrmDeal.stage_auto_locked.is_(False),
+                ).limit(1)
+            )).scalar_one_or_none()
+            if has_open is None:
+                return {"skipped": "no early-stage deal"}
+            club = await session.get(MarketingClub, club_id)
+            if club is None:
+                return {"skipped": "no club row"}
             org = (await session.get(
                         Organisation, club.existing_org_id,
                         options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
-            await _engagement(session, club, org)
-            result = await maybe_promote_by_engagement_score(session, club)
+            deal = await sync_engagement_promotion(session, club, org)
             await session.commit()
-            checked += 1
-            if result is not None:
-                promoted += 1
-        except Exception:  # noqa: BLE001 - one bad club can't stop the sweep
-            await session.rollback()
-            logger.exception("crm: engagement sweep failed for club %s", club.id)
-    return {"checked": checked, "promoted": promoted}
+            return {"promoted": bool(deal)}
+    except Exception:  # noqa: BLE001 - fired from a hot path, must never raise
+        logger.exception("crm: web/email-signal promotion check failed")
+        return {"error": "failed"}
 
 
 async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
