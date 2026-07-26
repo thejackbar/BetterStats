@@ -323,7 +323,7 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
     let alive = true
     const t = setTimeout(() => {
       setSearching(true)
-      api.mktClubs({ q: query.trim(), limit: 8 }).then(r => {
+      api.mktQuickSearchClubs(query.trim(), 8).then(r => {
         if (!alive) return
         setCandidates(r.clubs || [])
         setSearched(true)
