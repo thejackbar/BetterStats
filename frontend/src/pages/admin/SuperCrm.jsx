@@ -12,7 +12,7 @@ import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
 import {
   Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
-  LEAD_SOURCE_OPTIONS,
+  LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel,
 } from '../../components/admin/crm/ui'
 
 const CHART_TOOLTIP_STYLE = { background: 'var(--pb-surface, #0b1220)', border: '1px solid var(--pb-hairline, #1a2540)', fontSize: 12 }
@@ -287,31 +287,168 @@ function SortableTh({ label, sortKey, align, sortBy, sortDir, onSort }) {
 
 function NewDealModal({ open, onClose, stages, onCreated }) {
   const toast = useToast()
-  const [title, setTitle] = useState('')
+  // The "Club" field doubles as the search box AND the eventual deal title —
+  // matching a candidate just fills it with the canonical name; typing past
+  // that (or finding no match at all) keeps whatever free text is there, so
+  // a brand-new club/organisation not yet in our Directory can still be
+  // entered as a deal.
+  const [query, setQuery] = useState('')
+  const [selectedClub, setSelectedClub] = useState(null)
+  const [candidates, setCandidates] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [searched, setSearched] = useState(false)
   const [valueDollars, setValueDollars] = useState('')
   const [stageId, setStageId] = useState(stages?.[0]?.id || '')
+  const [contactId, setContactId] = useState('')
+  const [customContact, setCustomContact] = useState(false)
+  const [contactName, setContactName] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
+  const [contactPhone, setContactPhone] = useState('')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { if (open) { setTitle(''); setValueDollars(''); setStageId(stages?.[0]?.id || '') } }, [open, stages])
+  useEffect(() => {
+    if (!open) return
+    setQuery(''); setSelectedClub(null); setCandidates([]); setSearched(false)
+    setValueDollars(''); setStageId(stages?.[0]?.id || '')
+    setContactId(''); setCustomContact(false); setContactName(''); setContactEmail(''); setContactPhone('')
+  }, [open, stages])
+
+  // Live search-as-you-type against the Club Directory (marketing_clubs) —
+  // same idea as the public self-serve trial registration's "search for your
+  // club" step, but over what we've already crawled/onboarded rather than a
+  // live PlayHQ lookup, since a super admin creating a deal is almost always
+  // for a club we already know about.
+  useEffect(() => {
+    if (!open || selectedClub || query.trim().length < 2) { setCandidates([]); setSearched(false); return }
+    let alive = true
+    const t = setTimeout(() => {
+      setSearching(true)
+      api.mktClubs({ q: query.trim(), limit: 8 }).then(r => {
+        if (!alive) return
+        setCandidates(r.clubs || [])
+        setSearched(true)
+      }).catch(() => { if (alive) { setCandidates([]); setSearched(true) } })
+        .finally(() => { if (alive) setSearching(false) })
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [query, open, selectedClub])
+
+  const pickClub = (club) => {
+    setSelectedClub(club)
+    setQuery(club.name)
+    setCandidates([])
+    const top = (club.contacts || [])[0]
+    if (top) { setContactId(top.id); setCustomContact(false) } else { setContactId(''); setCustomContact(true) }
+  }
+
+  const clearClub = () => {
+    setSelectedClub(null)
+    setContactId(''); setCustomContact(false)
+  }
 
   const submit = async (e) => {
     e.preventDefault()
-    if (!title.trim()) return
+    if (!query.trim()) return
     setSaving(true)
     try {
-      await api.superCrmCreateDeal({
-        title: title.trim(), stage_id: stageId || undefined,
+      const deal = await api.superCrmCreateDeal({
+        title: query.trim(), stage_id: stageId || undefined,
         value_cents: Math.round(Number(valueDollars || 0) * 100),
+        marketing_club_id: selectedClub?.id || undefined,
       })
+      // Point of contact — reuses the SAME resolve-or-create-a-CrmPerson path
+      // the deal detail modal's own contact picker calls; a Directory contact
+      // (no CrmPerson yet) or a freshly typed one are handled identically.
+      const chosen = (selectedClub?.contacts || []).find(c => c.id === contactId)
+      const hasCustom = customContact && (contactName.trim() || contactEmail.trim() || contactPhone.trim())
+      if (selectedClub && (chosen || hasCustom)) {
+        try {
+          await api.superCrmSetPointOfContact(deal.id, chosen
+            ? { full_name: chosen.full_name, email: chosen.email || undefined, phone: chosen.mobile || undefined }
+            : { full_name: contactName.trim() || undefined, email: contactEmail.trim() || undefined, phone: contactPhone.trim() || undefined })
+        } catch { /* the deal itself is already created — a contact hiccup shouldn't undo that */ }
+      }
       onCreated()
       onClose()
     } catch (e2) { toast.error(e2.message || 'Could not create deal') } finally { setSaving(false) }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New deal">
+    <Modal open={open} onClose={onClose} title="New deal" wide>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Title"><TextInput autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Applecross Cricket Club" /></Field>
+        <Field label="Club" hint="Search the Club Directory, or type a name if it isn't there yet.">
+          <div className="relative">
+            <TextInput autoFocus value={query} placeholder="e.g. Applecross Cricket Club"
+              onChange={e => { setQuery(e.target.value); if (selectedClub && e.target.value !== selectedClub.name) clearClub() }} />
+            {!selectedClub && candidates.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full pb-card divide-y divide-pb-hairline max-h-64 overflow-y-auto">
+                {candidates.map(c => (
+                  <button key={c.id} type="button" onClick={() => pickClub(c)}
+                    className="w-full text-left px-3 py-2 hover:bg-pb-accent/10 transition">
+                    <div className="text-[13px] font-medium flex items-center gap-1.5">
+                      {c.name}
+                      {c.is_customer && <Pill tone="faint">already onboarded</Pill>}
+                    </div>
+                    <div className="text-[11px] text-pb-faint">{[c.suburb, c.state].filter(Boolean).join(', ') || 'No address on file'}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {!selectedClub && !searching && searched && candidates.length === 0 && query.trim().length >= 2 && (
+            <p className="text-[11px] text-pb-faintest mt-1">No match in the Club Directory — this creates a deal for a new club/organisation.</p>
+          )}
+        </Field>
+
+        {selectedClub && (
+          <div className="pb-card px-3 py-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[13px] font-medium flex items-center gap-1.5">
+                  {selectedClub.name}
+                  {selectedClub.is_customer && <Pill tone="faint">already onboarded</Pill>}
+                </div>
+                <div className="text-[11.5px] text-pb-faint">
+                  {[selectedClub.address_line1, selectedClub.suburb, selectedClub.state, selectedClub.postcode]
+                    .filter(Boolean).join(', ') || 'No address on file'}
+                </div>
+              </div>
+              <button type="button" onClick={clearClub} className="text-[11px] text-pb-faint hover:text-pb-text shrink-0">Change</button>
+            </div>
+
+            <div>
+              <div className="text-[11px] text-pb-faint uppercase tracking-wide mb-1">Point of contact</div>
+              {(selectedClub.contacts || []).length === 0 && (
+                <p className="text-[11.5px] text-pb-faintest mb-1">No contacts on file for this club yet.</p>
+              )}
+              <div className="space-y-1">
+                {(selectedClub.contacts || []).map(c => (
+                  <label key={c.id} className="flex items-center gap-2 text-[12.5px]">
+                    <input type="radio" name="poc" checked={!customContact && contactId === c.id}
+                      onChange={() => { setContactId(c.id); setCustomContact(false) }} />
+                    <span>
+                      {c.full_name || 'Unnamed'}{c.role ? ` — ${c.role}` : ''}{c.email ? ` · ${c.email}` : ''}{c.mobile ? ` · ${c.mobile}` : ''}
+                    </span>
+                  </label>
+                ))}
+                <label className="flex items-center gap-2 text-[12.5px]">
+                  <input type="radio" name="poc" checked={customContact} onChange={() => setCustomContact(true)} />
+                  <span>A different contact</span>
+                </label>
+              </div>
+              {customContact && (
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  <TextInput placeholder="Name" value={contactName} onChange={e => setContactName(e.target.value)} />
+                  <TextInput placeholder="Email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} />
+                  <TextInput placeholder="Mobile" value={contactPhone} onChange={e => setContactPhone(e.target.value)} />
+                </div>
+              )}
+            </div>
+
+            <WebsiteAnalyticsPanel marketingClubId={selectedClub.id} />
+          </div>
+        )}
+
         <Field label="Value ($)"><NumberInput min={0} value={valueDollars} onChange={e => setValueDollars(e.target.value)} /></Field>
         <Field label="Stage">
           <Select value={stageId} onChange={e => setStageId(e.target.value)}>
