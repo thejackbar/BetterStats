@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
@@ -164,6 +165,9 @@ export default function SuperCrmAutomation() {
   return (
     <AdminLayout>
       <div className="mb-4">
+        <Link to="/admin/super/crm" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">
+          &larr; SALES PIPELINE
+        </Link>
         <h1 className="font-display font-bold text-xl">BetterCRM — Sales Automation</h1>
         <p className="text-[12.5px] text-pb-faint mt-1 max-w-3xl">
           Every criterion that automatically creates or advances a platform-pipeline deal —
