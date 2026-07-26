@@ -784,6 +784,12 @@ export const api = {
   superCrmDeleteTarget: (id) => request(`/club-admin/super/crm/targets/${id}`, { method: 'DELETE' }),
   superCrmTargetActuals: (periodType, periodKey) =>
     request(`/club-admin/super/crm/targets/actuals?period_type=${periodType}&period_key=${encodeURIComponent(periodKey)}`),
+  superCrmListAutomation: () => request('/club-admin/super/crm/automation'),
+  superCrmCreateAutomation: (data) =>
+    request('/club-admin/super/crm/automation', { method: 'POST', body: JSON.stringify(data) }),
+  superCrmUpdateAutomation: (id, data) =>
+    request(`/club-admin/super/crm/automation/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superCrmDeleteAutomation: (id) => request(`/club-admin/super/crm/automation/${id}`, { method: 'DELETE' }),
   superCrmCloseDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmArchiveDeal: (id) => request(`/club-admin/super/crm/deals/${id}`, { method: 'DELETE' }),
   superCrmDeleteDealPermanent: (id, resetClub) =>

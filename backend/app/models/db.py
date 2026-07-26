@@ -3599,6 +3599,33 @@ class CrmStage(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CrmAutomationRule(Base):
+    """A configurable, persistent criterion for the PLATFORM pipeline's
+    automatic deal creation/stage-promotion (migration 190) — replaces what
+    used to be hardcoded thresholds and target stages. ``trigger`` is one of
+    services/crm_rules.py's TRIGGERS keys (enquiry_count, engagement_score,
+    trial_requested, trial_started, subscription_won, subscription_cancelled,
+    self_serve_signup). ``params`` carries the trigger-specific numeric
+    condition ({"count": N} or {"threshold": N}; {} for the others).
+    ``target_stage_key`` is a platform CrmStage.key — looked up dynamically at
+    evaluation time, so a rule harmlessly no-ops if that stage is later
+    renamed/deleted rather than erroring. ``force`` bypasses the normal
+    advance-only (never-move-backward) semantics, matching the historical
+    self-serve-signup behaviour. Managed by a super admin at
+    /admin/super/crm-automation; evaluated by crm_rules.resolve()."""
+    __tablename__ = "crm_automation_rules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    trigger = Column(Text, nullable=False)
+    label = Column(Text, nullable=False)
+    params = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    target_stage_key = Column(Text, nullable=False)
+    force = Column(Boolean, nullable=False, server_default="false", default=False)
+    enabled = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CrmDeal(Base):
     """One Opportunity/Deal. ``value_cents``/``module_keys`` mirror the public
     pricing vocabulary (see billing_pricing.py) for a platform deal's product

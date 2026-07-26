@@ -1170,25 +1170,22 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
     return deal
 
 
-async def maybe_promote_by_engagement_score(session: AsyncSession, club: MarketingClub, *,
-                                            threshold: int = 70) -> Optional[CrmDeal]:
-    """Promote a club's existing open platform deal straight to Engaged once
-    its (already-computed, already-cached) engagement score passes
-    ``threshold`` — per direct instruction, Target OR Contacted both qualify.
-    Never creates a deal from nothing (a score alone, with no deal on the
-    board yet, isn't itself a reason to start one); never moves a deal
-    that's already past Engaged (Trial/Proposal/Won/…), is closed, or has
-    ``stage_auto_locked`` set. Caller is responsible for having already
-    computed/cached ``club.engagement_score`` this call — this function does
-    no scoring itself."""
+async def maybe_promote_by_engagement_score(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
+    """Promote a club's existing open platform deal per the super-admin-
+    configured 'engagement_score' automation rules (services/crm_rules.py) —
+    the threshold and target stage are no longer hardcoded. Never creates a
+    deal from nothing (a score alone, with no deal on the board yet, isn't
+    itself a reason to start one); never moves a deal backward (advance-only,
+    via sync_platform_deal_for_club) or one with ``stage_auto_locked`` set.
+    Caller is responsible for having already computed/cached
+    ``club.engagement_score`` this call — this function does no scoring
+    itself. A no-op (returns None) if every 'engagement_score' rule is
+    disabled, or none is satisfied by the current score."""
+    from app.services import crm_rules
     score = club.engagement_score
-    if score is None or score <= threshold:
+    if score is None:
         return None
     pipeline = await ensure_platform_pipeline(session)
-    stage_by_key = {s.key: s for s in pipeline.stages}
-    engaged_stage = stage_by_key.get("engaged")
-    if engaged_stage is None:
-        return None
     deal = (await session.execute(
         select(CrmDeal).where(
             CrmDeal.pipeline_id == pipeline.id,
@@ -1199,13 +1196,19 @@ async def maybe_promote_by_engagement_score(session: AsyncSession, club: Marketi
     )).scalars().first()
     if deal is None or deal.stage_auto_locked:
         return None
-    current_key = next((s.key for s in pipeline.stages if s.id == deal.stage_id), None)
-    if current_key not in ("target", "contacted"):
+    match = await crm_rules.resolve(session, pipeline, "engagement_score", score=score)
+    if match is None:
         return None
-    await move_stage(session, deal, engaged_stage)
+    stage_by_key = {s.key: s for s in pipeline.stages}
+    target_stage = stage_by_key[match["stage_key"]]
+    current_stage = stage_by_key.get(next((s.key for s in pipeline.stages if s.id == deal.stage_id), None))
+    should_move = (match["force"] or current_stage is None or target_stage.position > current_stage.position)
+    if not should_move or target_stage.id == deal.stage_id:
+        return None
+    await move_stage(session, deal, target_stage)
     await log_activity(
         session, deal_id=deal.id, type="system",
-        body=f"Auto-promoted to Engaged: engagement score {score} > {threshold}")
+        body=f"Auto-promoted to {target_stage.name}: engagement score {score} (rule: engagement_score)")
     return deal
 
 
@@ -1319,9 +1322,19 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                 full_name=contact_name or (contact.full_name if contact else "") or club_name,
                 email=email, phone=phone)
             count, _last_at = await _onboarding_signal(session, club, club.utm_code)
-            stage_key = "contacted" if count <= 1 else "engaged"
-            deal = await sync_platform_deal_for_club(
-                session, club, stage_key=stage_key, source="auto_enquiry", person_id=person.id)
+            from app.services import crm_rules
+            pipeline = await ensure_platform_pipeline(session)
+            match = await crm_rules.resolve(session, pipeline, "enquiry_count", count=count)
+            if match is None:
+                # Every 'enquiry_count' rule is disabled (or none is satisfied
+                # yet, e.g. only a count>=2 rule exists) — per the configured
+                # criteria, this enquiry alone isn't reason enough to
+                # create/advance a deal. The score-based check below still runs.
+                deal = None
+            else:
+                deal = await sync_platform_deal_for_club(
+                    session, club, stage_key=match["stage_key"], source="auto_enquiry",
+                    person_id=person.id, advance_only=not match["force"])
             # This enquiry may itself be enough to push the (freshly recomputed)
             # engagement score over the threshold — check right now rather than
             # waiting for the sweep, in the same session/commit.
@@ -1330,7 +1343,7 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                    if club.existing_org_id else None)
             await sync_engagement_promotion(session, club, org)
             await session.commit()
-            return {"deal_id": str(deal.id), "onboarding_request_count": count}
+            return {"deal_id": str(deal.id) if deal else None, "onboarding_request_count": count}
     except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
         logger.exception("crm: failed to sync deal for enquiry (%s)", club_name)
         return {"error": "failed"}
@@ -1403,45 +1416,33 @@ async def sync_self_serve_trial_deal(session: AsyncSession, club: MarketingClub,
     Product Interest and reprice later once real analytics/trial usage backs
     it up.
 
-    Unlike sync_platform_deal_for_club (an ongoing, advance-only signal for
-    later trial/enquiry activity), this always wins: a self-serve signup is
-    never a step backward, so it force-moves the deal to Trial and
-    force-stamps the onboarding method even if a prior enquiry left the deal
-    somewhere else (typically Target, unset). ``lead_source`` is optional
-    since only the public flow has first-touch ad attribution to derive one
-    from (see lead_source_from_attribution) — pass None to leave it as-is."""
+    Per the super-admin-configured 'self_serve_signup' automation rule
+    (services/crm_rules.py — seeded to force=True, matching the historical
+    behaviour), this normally always wins even over a deal that's further
+    along: a self-serve signup is real news, not a step backward. Delegates
+    the actual create-or-advance to ``sync_platform_deal_for_club`` (passing
+    ``advance_only=not match["force"]``) rather than moving the stage
+    directly, so — unlike before this became configurable — a deal a super
+    admin has deliberately ``stage_auto_locked`` is now respected here too,
+    consistent with every other automatic trigger. ``lead_source`` is
+    optional since only the public flow has first-touch ad attribution to
+    derive one from (see lead_source_from_attribution) — pass None to leave
+    it as-is. Returns None if the 'self_serve_signup' rule is disabled or its
+    target stage doesn't exist."""
+    from app.services import crm_rules
     pipeline = await ensure_platform_pipeline(session)
-    stage_by_key = {s.key: s for s in pipeline.stages}
-    trial_stage = stage_by_key.get("trial")
-    if trial_stage is None:
+    match = await crm_rules.resolve(session, pipeline, "self_serve_signup")
+    if match is None:
         return None
-
-    existing = (await session.execute(
-        select(CrmDeal).where(
-            CrmDeal.pipeline_id == pipeline.id,
-            CrmDeal.marketing_club_id == club.id,
-            CrmDeal.status == "open",
-            CrmDeal.archived_at.is_(None),
-        ).order_by(CrmDeal.created_at.desc())
-    )).scalars().first()
-
-    value_cents = value_from_modules(["core"])
-    if existing is None:
-        deal = await create_deal(
-            session, scope=SCOPE_PLATFORM, marketing_club_id=club.id,
-            pipeline_id=pipeline.id, stage_id=trial_stage.id, title=club.name,
-            value_cents=value_cents, source="self_serve_trial",
-            onboarding_method="self_serve_trial", lead_source=lead_source,
-        )
-    else:
-        deal = existing
-        await move_stage(session, deal, trial_stage)
-        deal.onboarding_method = "self_serve_trial"
-        if lead_source:
-            deal.lead_source = lead_source
-        if not deal.module_keys:
-            deal.value_cents = value_cents
-        deal.updated_at = func.now()
+    deal = await sync_platform_deal_for_club(
+        session, club, stage_key=match["stage_key"], source="self_serve_trial",
+        advance_only=not match["force"])
+    deal.onboarding_method = "self_serve_trial"
+    if lead_source:
+        deal.lead_source = lead_source
+    if not deal.module_keys:
+        deal.value_cents = value_from_modules(["core"])
+    deal.updated_at = func.now()
     return deal
 
 

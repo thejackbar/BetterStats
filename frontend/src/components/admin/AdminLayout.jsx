@@ -113,6 +113,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/meta-ads', label: 'Meta Ads' },
   { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
   { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
+  { to: '/admin/super/crm/automation', label: 'Sales Automation (CRM)' },
   { to: '/admin/super/crm', label: 'Sales Pipeline (CRM)' },
   { to: '/admin/super/crm/targets', label: 'Sales Targets (CRM)' },
   { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },

@@ -1212,13 +1212,26 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
         except Exception:  # noqa: BLE001 - the CRM push must never block the save
             logger.exception("club_directory: failed to push trial engagement for %s", club.id)
         # Local CRM pipeline equivalent — advance (or create) this club's
-        # platform deal to Trial, same trigger as the Twenty push above.
+        # platform deal per the super-admin-configured 'trial_started' /
+        # 'trial_requested' automation rule (services/crm_rules.py), same
+        # trigger moment as the Twenty push above. Prefers 'trial_started'
+        # whenever a module is actually being trialed now (added_trial or
+        # became_in_trial) — 'trial_requested' only fires when this save was
+        # purely adding a REQUESTED (not yet granted) module.
         try:
             from sqlalchemy.orm import selectinload
-            from app.services.crm import sync_platform_deal_for_club, sync_engagement_promotion
-            deal_modules = sorted(set(club.trial_modules or []) | set(added_modules))
-            await sync_platform_deal_for_club(
-                session, club, stage_key="trial", source="auto_trial", module_keys=deal_modules)
+            from app.services import crm_rules
+            from app.services.crm import (
+                ensure_platform_pipeline, sync_platform_deal_for_club, sync_engagement_promotion,
+            )
+            trigger = "trial_started" if (added_trial or became_in_trial) else "trial_requested"
+            pipeline = await ensure_platform_pipeline(session)
+            match = await crm_rules.resolve(session, pipeline, trigger)
+            if match is not None:
+                deal_modules = sorted(set(club.trial_modules or []) | set(added_modules))
+                await sync_platform_deal_for_club(
+                    session, club, stage_key=match["stage_key"], source="auto_trial",
+                    module_keys=deal_modules, advance_only=not match["force"])
             # Also check the score-based promotion right now, independent of
             # whether Twenty is configured — harmless no-op once the deal above
             # is already past Engaged (trial always is), but keeps this call
