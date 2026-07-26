@@ -32,7 +32,7 @@ AD_DESTINATIONS = {
     # BC_AU_Trials_CBO_Aug2026 (current) — club-history hero → /trial. The
     # utm_content here must match the tag on the ad's own destination URL for
     # get_registration_count() to tie a real signup back to this campaign.
-    "120250150707460121": {"campaign_id": "120250149119070121", "name": "Ad_ClubHistory_Trial_Hero_v2", "destination": "betterat.cricket/trial", "utm_content": "club_history_hero"},
+    "120250150859240121": {"campaign_id": "120250149119070121", "name": "Ad_ClubHistory_Trial_Hero_v3", "destination": "betterat.cricket/trial", "utm_content": "club_history_hero"},
     # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
     # same tag the ad-signups report groups by (see routers/meta_ads.py).
     "120249908493850121": {"campaign_id": "120249890918010121", "name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
