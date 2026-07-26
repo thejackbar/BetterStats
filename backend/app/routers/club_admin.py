@@ -118,6 +118,15 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_stage_key: Optiona
                 modules = await _org_billable_module_keys(session, org_id)
                 await crm_service.sync_platform_deal_for_club(
                     session, mc, stage_key=resolved_key, source="auto_trial", module_keys=modules)
+                # Also check the score-based Target/Contacted -> Engaged rule right
+                # now, independent of whether Twenty is configured (the Twenty push
+                # above already no-ops silently when it isn't) — a subscription
+                # change is exactly the kind of discrete event that shouldn't wait
+                # for the sweep. Harmless no-op once the deal above is already past
+                # Engaged (e.g. force_hot's own move to Trial).
+                org = await session.get(Organisation, org_id,
+                                        options=[selectinload(Organisation.module_subscriptions)])
+                await crm_service.sync_engagement_promotion(session, mc, org)
                 await session.commit()
         except Exception:
             _logging.getLogger(__name__).exception("crm sync failed")

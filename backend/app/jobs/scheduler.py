@@ -124,6 +124,29 @@ async def refresh_twenty_leads_tasks():
         logger.error(f"Twenty leads/tasks refresh failed: {e}")
 
 
+async def sweep_crm_engagement_promotions():
+    """Frequent, Twenty-independent safety net for the score-based
+    Target/Contacted -> Engaged auto-promotion rule (crm.py). Every discrete
+    signal event (a Contact-Us enquiry, a trial request/grant, a subscription
+    change) already triggers an immediate check right at the point it
+    happens — this sweep only exists to catch the case with no single event
+    to hang off: a score creeping over the threshold from ordinary web/email
+    accumulation. Scoped to just the (normally small) set of open platform
+    deals still sitting at Target or Contacted, so running it every few
+    minutes stays cheap — unlike refresh_twenty_engagement above, this does
+    NOT check settings.twenty_configured, since the local pipeline must keep
+    moving whether or not the external Twenty integration is set up."""
+    from app.services import crm as crm_service
+    async with async_session_maker() as session:
+        try:
+            stats = await crm_service.sweep_engagement_promotions(session)
+            if stats.get("promoted"):
+                logger.info(f"CRM engagement promotion sweep: {stats}")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"CRM engagement promotion sweep failed: {e}")
+
+
 async def crawl_marketing_clubs():
     """Detail the next slice of the marketing club directory frontier. Off-peak,
     small nightly cap, opt-in (marketing_crawl_enabled). Resumable through the
@@ -367,6 +390,19 @@ def start_scheduler():
         trigger="interval",
         minutes=15,
         id="fantasy_draft_tick",
+        replace_existing=True,
+    )
+    # BetterCricket CRM — safety-net sweep for the score-based Target/Contacted
+    # -> Engaged rule, every 10 minutes. Deliberately NOT the daily
+    # daily_twenty_engagement job above (Twenty-gated, only touches
+    # already-exported clubs) — discrete events already trigger an immediate
+    # check, this only catches a gradually-crept-over score with no single
+    # event to hang off.
+    scheduler.add_job(
+        sweep_crm_engagement_promotions,
+        trigger="interval",
+        minutes=10,
+        id="crm_engagement_promotion_sweep",
         replace_existing=True,
     )
     # Per-module subscriptions — sweep expired trials daily so the held-modules

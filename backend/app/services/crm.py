@@ -1209,6 +1209,66 @@ async def maybe_promote_by_engagement_score(session: AsyncSession, club: Marketi
     return deal
 
 
+async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
+                                    org: Optional[Organisation] = None) -> Optional[CrmDeal]:
+    """Recompute one club's engagement score and immediately check the
+    score-based Target/Contacted -> Engaged promotion, right now, in the
+    caller's own session. ``twenty_sync._engagement`` is a pure local
+    read/compute over our own tables (usage_events/email_events/etc) — it
+    never calls out to Twenty — so this works whether or not Twenty is
+    configured, unlike routing through ``push_club_and_contacts``. A
+    single-club recompute is a handful of indexed queries, cheap enough to
+    run inline wherever a real signal event already has a session+club in
+    hand (an enquiry, a trial request/grant, a subscription change) rather
+    than waiting for a scheduled sweep. Caller commits."""
+    from app.services.twenty_sync import _engagement
+    await _engagement(session, club, org)
+    return await maybe_promote_by_engagement_score(session, club)
+
+
+async def sweep_engagement_promotions(session: AsyncSession) -> dict:
+    """Frequent, Twenty-independent safety net for the score-based
+    Target/Contacted -> Engaged rule. Discrete signal events (an enquiry, a
+    trial request/grant, a subscription change) already trigger an immediate
+    ``sync_engagement_promotion`` call right at the point they happen — this
+    sweep exists for the case that isn't a single discrete event: a score
+    creeping over the threshold purely from ordinary web/email accumulation.
+    Scoped to only the clubs that could possibly need it — every open,
+    not-``stage_auto_locked`` platform deal still sitting at Target or
+    Contacted — rather than every club in the directory, so it stays cheap
+    enough to run every few minutes (see jobs/scheduler.py) instead of once a
+    day. Commits per-club so one bad club's failure can't roll back the rest."""
+    from app.services.twenty_sync import _engagement
+    pipeline = await ensure_platform_pipeline(session)
+    stage_ids = [s.id for s in pipeline.stages if s.key in ("target", "contacted")]
+    if not stage_ids:
+        return {"checked": 0, "promoted": 0}
+    rows = (await session.execute(
+        select(CrmDeal, MarketingClub)
+        .join(MarketingClub, MarketingClub.id == CrmDeal.marketing_club_id)
+        .where(CrmDeal.pipeline_id == pipeline.id, CrmDeal.status == "open",
+              CrmDeal.archived_at.is_(None), CrmDeal.stage_id.in_(stage_ids),
+              CrmDeal.stage_auto_locked.is_(False))
+    )).all()
+    checked, promoted = 0, 0
+    for _deal, club in rows:
+        try:
+            org = (await session.get(
+                        Organisation, club.existing_org_id,
+                        options=[selectinload(Organisation.module_subscriptions)])
+                   if club.existing_org_id else None)
+            await _engagement(session, club, org)
+            result = await maybe_promote_by_engagement_score(session, club)
+            await session.commit()
+            checked += 1
+            if result is not None:
+                promoted += 1
+        except Exception:  # noqa: BLE001 - one bad club can't stop the sweep
+            await session.rollback()
+            logger.exception("crm: engagement sweep failed for club %s", club.id)
+    return {"checked": checked, "promoted": promoted}
+
+
 async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                                 email: str = "", phone: Optional[str] = None) -> dict:
     """Backgrounded counterpart to ``twenty_sync.push_onboarding_enquiry`` — a
@@ -1243,6 +1303,13 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
             stage_key = "contacted" if count <= 1 else "engaged"
             deal = await sync_platform_deal_for_club(
                 session, club, stage_key=stage_key, source="auto_enquiry", person_id=person.id)
+            # This enquiry may itself be enough to push the (freshly recomputed)
+            # engagement score over the threshold — check right now rather than
+            # waiting for the sweep, in the same session/commit.
+            org = (await session.get(Organisation, club.existing_org_id,
+                                     options=[selectinload(Organisation.module_subscriptions)])
+                   if club.existing_org_id else None)
+            await sync_engagement_promotion(session, club, org)
             await session.commit()
             return {"deal_id": str(deal.id), "onboarding_request_count": count}
     except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
