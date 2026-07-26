@@ -146,6 +146,22 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 // precise field, not the looser is_customer ("has ever been
                 // onboarded"). This is what earns the logo badge.
                 const isSubscriber = (deal.subscribed_modules || []).length > 0
+                // In trial for at least one module — min_trial_days_remaining
+                // is the min over trial_days_remaining, so non-null ⇒ a live
+                // module trial exists.
+                const isTrialing = deal.min_trial_days_remaining != null
+                // Onboarded-club context line (state + seasons/grades/players
+                // + setup progress + active-since), shown once a club is a
+                // subscriber or on trial — mirrors the All Clubs detail line.
+                const cs = deal.club_stats
+                const stateLine = (isSubscriber || isTrialing) ? [
+                  deal.marketing_club_state,
+                  cs && `${cs.seasons_count ?? 0} season${(cs.seasons_count ?? 0) === 1 ? '' : 's'}`,
+                  cs && `${cs.grades_count ?? 0} grade${(cs.grades_count ?? 0) === 1 ? '' : 's'}`,
+                  cs && `${cs.players_count ?? 0} player${(cs.players_count ?? 0) === 1 ? '' : 's'}`,
+                  cs && cs.setup_total > 0 && `setup ${cs.setup_done}/${cs.setup_total}`,
+                  cs && cs.active_since && `active since ${new Date(cs.active_since).toLocaleDateString('en-AU')}`,
+                ].filter(Boolean).join(' · ') : ''
                 return (
                 <div key={deal.id} draggable={!!client?.moveStage}
                   onDragStart={e => { setDraggingId(deal.id); e.dataTransfer.effectAllowed = 'move' }}
@@ -188,6 +204,9 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                         )
                       })}
                     </div>
+                  )}
+                  {stateLine && (
+                    <div className="font-mono text-[9.5px] text-pb-faintest mt-1.5 leading-snug">{stateLine}</div>
                   )}
                   {deal.status === 'won' && <Pill tone="green">{t.won}</Pill>}
                   {deal.status === 'lost' && <Pill tone="red">{t.lost}</Pill>}
