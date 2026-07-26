@@ -441,6 +441,34 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
   )
 }
 
+// Landing page for the pipeline's settings — one place to reach both
+// Sales Automation (the automation-rules page, a full navigation since it's
+// its own route) and Manage Stages (a modal, opened right from here).
+function SettingsModal({ open, onClose, onManageStages }) {
+  if (!open) return null
+  return (
+    <Modal open={open} onClose={onClose} title="Pipeline settings">
+      <div className="space-y-2">
+        <Link to="/admin/super/crm/automation" onClick={onClose}
+          className="block pb-card px-3 py-2.5 hover:border-pb-accent/40 transition">
+          <div className="font-medium text-[13px]">Sales Automation</div>
+          <div className="text-[11.5px] text-pb-faint mt-0.5">
+            The criteria that automatically create or promote deals — Contact-Us enquiry
+            count, engagement score threshold, trial/subscription events, self-serve signup.
+          </div>
+        </Link>
+        <button type="button" onClick={onManageStages}
+          className="w-full text-left pb-card px-3 py-2.5 hover:border-pb-accent/40 transition">
+          <div className="font-medium text-[13px]">Manage Stages</div>
+          <div className="text-[11.5px] text-pb-faint mt-0.5">
+            Add, rename, reorder, hide or delete the pipeline's stages.
+          </div>
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function SuperCrm() {
   const toast = useToast()
   const [view, setView] = useState('board')
@@ -458,6 +486,7 @@ export default function SuperCrm() {
   const [openDealId, setOpenDealId] = useState(null)
   const [showNew, setShowNew] = useState(false)
   const [showStages, setShowStages] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [owners, setOwners] = useState([])
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [sortBy, setSortBy] = useState('')
@@ -580,7 +609,7 @@ export default function SuperCrm() {
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'list' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>List</button>
           <button onClick={() => setView('dashboard')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'dashboard' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Dashboard</button>
-          <Btn variant="ghost" sm onClick={() => setShowStages(true)}>Manage stages</Btn>
+          <Btn variant="ghost" sm onClick={() => setShowSettings(true)}>Settings</Btn>
           <Btn variant="primary" sm onClick={() => setShowNew(true)}>New deal</Btn>
         </div>
       </div>
@@ -658,6 +687,8 @@ export default function SuperCrm() {
       )}
 
       <NewDealModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
+      <SettingsModal open={showSettings} onClose={() => setShowSettings(false)}
+        onManageStages={() => { setShowSettings(false); setShowStages(true) }} />
       <ManageStagesModal open={showStages} onClose={() => setShowStages(false)} stages={stages} onChanged={load} client={superClient} />
       <DealDetailModal
         dealId={openDealId} open={!!openDealId} onClose={() => setOpenDealId(null)}
