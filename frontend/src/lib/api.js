@@ -851,6 +851,11 @@ export const api = {
     const qs = mktQS(params)
     return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
   },
+  // Cheap name-only typeahead for the CRM New Deal club search — NOT mktClubs
+  // (the full directory list), which also computes a COUNT(*) and scans all
+  // usage_events for visit/login-intent stats the New Deal modal never shows.
+  mktQuickSearchClubs: (q, limit = 8) =>
+    request(`/club-admin/marketing/clubs/quick-search?q=${encodeURIComponent(q)}&limit=${limit}`),
   mktAssociations: () => request('/club-admin/marketing/associations'),
   mktCountries: () => request('/club-admin/marketing/countries'),
   mktResolveAssociation: (id, name) =>
