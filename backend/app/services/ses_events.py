@@ -174,6 +174,19 @@ async def ingest_ses_event(session: AsyncSession, event: dict) -> dict:
     # permanent bounce / complaint flips the Person's emailable flags; an open or
     # click records BetterComms Email as their contact source + the campaign.
     await _push_ses_to_twenty(session, etype, subtype, ses_message_id, recipients)
+    # Event-driven local-CRM check (independent of whether Twenty is
+    # configured, unlike the push above) — an open/click is exactly the kind
+    # of signal event the score-based Target/Contacted -> Engaged rule should
+    # react to immediately rather than on any periodic schedule. Fired here,
+    # not inside _push_ses_to_twenty, so it still runs when Twenty isn't set up.
+    if etype in ("open", "click"):
+        import asyncio
+        from app.services.crm import check_web_signal_promotion
+        for email in recipients:
+            try:
+                asyncio.get_running_loop().create_task(check_web_signal_promotion(email=email))
+            except RuntimeError:
+                pass
     return {"status": "ok", "event": etype, "recipients": len(recipients)}
 
 

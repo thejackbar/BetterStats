@@ -29,6 +29,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
 from app.services import crm_targets
+from app.services import crm_rules
 
 logger = logging.getLogger(__name__)
 
@@ -737,6 +738,11 @@ async def super_move_stage(deal_id: str, body: StageMoveBody, db: AsyncSession =
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     _, stage = await _deal_stage_or_404(db, deal, body.stage_id)
     await crm_service.move_stage(db, deal, stage, probability=body.probability)
+    # A super admin deliberately choosing a stage here — as opposed to the
+    # automatic engine's Contact-Us-count/engagement-score promotions — locks
+    # the deal out of further auto-promotion (see
+    # crm_service.sync_platform_deal_for_club/maybe_promote_by_engagement_score).
+    deal.stage_auto_locked = True
     await db.commit()
     return await _serialize_deal(db, deal)
 
@@ -929,3 +935,75 @@ async def super_target_actuals(period_type: str, period_key: str, db: AsyncSessi
         return await crm_targets.compute_actuals(db, period_type, period_key)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+# ─── Automation rules (services/crm_rules.py) ────────────────────────────────
+# Configurable, persistent criteria for the platform pipeline's automatic
+# deal creation/stage-promotion — managed at /admin/super/crm-automation.
+
+class AutomationRuleCreate(BaseModel):
+    trigger: str
+    label: str
+    target_stage_key: str
+    params: dict = {}
+    force: bool = False
+    enabled: bool = True
+
+
+class AutomationRuleUpdate(BaseModel):
+    label: Optional[str] = None
+    target_stage_key: Optional[str] = None
+    params: Optional[dict] = None
+    force: Optional[bool] = None
+    enabled: Optional[bool] = None
+
+
+@super_router.get("/automation", dependencies=[_super])
+async def super_list_automation(db: AsyncSession = Depends(get_db)):
+    """Every configured rule, plus the trigger catalogue (crm_rules.TRIGGERS)
+    and the platform pipeline's current stages — everything the Super Admin
+    automation-rules page needs in one call."""
+    rules = await crm_rules.list_rules(db)
+    pipeline = await crm_service.ensure_platform_pipeline(db)
+    return {
+        "rules": [crm_rules.rule_dict(r) for r in rules],
+        "triggers": [
+            {"key": key, **spec} for key, spec in crm_rules.TRIGGERS.items()
+        ],
+        "stages": crm_service.stage_dicts(pipeline),
+    }
+
+
+@super_router.post("/automation", dependencies=[_super])
+async def super_create_automation(body: AutomationRuleCreate, db: AsyncSession = Depends(get_db)):
+    try:
+        rule = await crm_rules.create_rule(
+            db, trigger=body.trigger, label=body.label, target_stage_key=body.target_stage_key,
+            params=body.params, force=body.force, enabled=body.enabled)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return crm_rules.rule_dict(rule)
+
+
+@super_router.patch("/automation/{rule_id}", dependencies=[_super])
+async def super_update_automation(rule_id: str, body: AutomationRuleUpdate, db: AsyncSession = Depends(get_db)):
+    rule = await crm_rules.get_rule(db, _uuid_or_404(rule_id))
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    try:
+        await crm_rules.update_rule(db, rule, **body.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return crm_rules.rule_dict(rule)
+
+
+@super_router.delete("/automation/{rule_id}", dependencies=[_super])
+async def super_delete_automation(rule_id: str, db: AsyncSession = Depends(get_db)):
+    rule = await crm_rules.get_rule(db, _uuid_or_404(rule_id))
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    await crm_rules.delete_rule(db, rule)
+    await db.commit()
+    return {"deleted": True}

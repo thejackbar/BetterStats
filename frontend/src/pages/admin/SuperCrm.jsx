@@ -511,10 +511,9 @@ export default function SuperCrm() {
         && (d.min_trial_days_remaining == null
           || (minTrialDays != null && d.min_trial_days_remaining < minTrialDays)
           || (maxTrialDays != null && d.min_trial_days_remaining > maxTrialDays))) return false
-      // trial_days_remaining_by_club clamps at 0 (never negative), so a 0
-      // reads as "ends today or already ended" — the closest this data lets
-      // us get to "expired" without a day of slack either way.
-      if (filters.trialExpired && d.min_trial_days_remaining !== 0) return false
+      // trial_days_remaining_by_club is signed (negative = past its end
+      // date) — 0 means "due today", not yet expired.
+      if (filters.trialExpired && !(d.min_trial_days_remaining < 0)) return false
       if (filters.customersOnly && !(d.subscribed_modules && d.subscribed_modules.length > 0)) return false
       return true
     })

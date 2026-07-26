@@ -369,6 +369,11 @@ def start_scheduler():
         id="fantasy_draft_tick",
         replace_existing=True,
     )
+    # BetterCricket CRM — the score-based Target/Contacted -> Engaged rule has
+    # no scheduled job at all: crm.check_web_signal_promotion fires directly
+    # from usage_tracker.record_event (every web/API event) and ses_events
+    # (every email open/click), so the check is fully event-driven — see
+    # crm.py's own docstrings for why no periodic sweep is needed.
     # Per-module subscriptions — sweep expired trials daily so the held-modules
     # cache drops a lapsed trial for the synchronous gate too.
     scheduler.add_job(

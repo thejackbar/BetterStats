@@ -1212,12 +1212,34 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
         except Exception:  # noqa: BLE001 - the CRM push must never block the save
             logger.exception("club_directory: failed to push trial engagement for %s", club.id)
         # Local CRM pipeline equivalent — advance (or create) this club's
-        # platform deal to Trial, same trigger as the Twenty push above.
+        # platform deal per the super-admin-configured 'trial_started' /
+        # 'trial_requested' automation rule (services/crm_rules.py), same
+        # trigger moment as the Twenty push above. Prefers 'trial_started'
+        # whenever a module is actually being trialed now (added_trial or
+        # became_in_trial) — 'trial_requested' only fires when this save was
+        # purely adding a REQUESTED (not yet granted) module.
         try:
-            from app.services.crm import sync_platform_deal_for_club
-            deal_modules = sorted(set(club.trial_modules or []) | set(added_modules))
-            await sync_platform_deal_for_club(
-                session, club, stage_key="trial", source="auto_trial", module_keys=deal_modules)
+            from sqlalchemy.orm import selectinload
+            from app.services import crm_rules
+            from app.services.crm import (
+                ensure_platform_pipeline, sync_platform_deal_for_club, sync_engagement_promotion,
+            )
+            trigger = "trial_started" if (added_trial or became_in_trial) else "trial_requested"
+            pipeline = await ensure_platform_pipeline(session)
+            match = await crm_rules.resolve(session, pipeline, trigger)
+            if match is not None:
+                deal_modules = sorted(set(club.trial_modules or []) | set(added_modules))
+                await sync_platform_deal_for_club(
+                    session, club, stage_key=match["stage_key"], source="auto_trial",
+                    module_keys=deal_modules, advance_only=not match["force"])
+            # Also check the score-based promotion right now, independent of
+            # whether Twenty is configured — harmless no-op once the deal above
+            # is already past Engaged (trial always is), but keeps this call
+            # site consistent with every other discrete-event trigger.
+            org = (await session.get(Organisation, club.existing_org_id,
+                                     options=[selectinload(Organisation.module_subscriptions)])
+                   if club.existing_org_id else None)
+            await sync_engagement_promotion(session, club, org)
             await session.commit()
         except Exception:  # noqa: BLE001 - the CRM sync must never block the save
             logger.exception("club_directory: failed to sync CRM deal for %s", club.id)
@@ -1657,6 +1679,58 @@ _RESOLVED_VISITS = (
 # marketing_utm_aliases(utm_value) UNIQUE, organisations(slug).
 def _visited_in_sql(mc: str = "marketing_clubs") -> str:
     return f"{mc}.id::text IN (SELECT v.cid FROM ({_RESOLVED_VISITS}) v WHERE v.cid IS NOT NULL)"
+
+
+async def resolve_marketing_club_id(session: AsyncSession, *, org_id=None, utm_id=None,
+                                    utm_source=None, path=None, email=None,
+                                    user_id=None) -> Optional[str]:
+    """Single-event reverse lookup — the live-traffic counterpart to
+    ``_RESOLVED_VISITS`` (which resolves a whole table of page_view rows in
+    bulk). Given the signal ONE just-recorded usage_event or email open/click
+    carries, find the ONE MarketingClub it most likely belongs to, so a CRM
+    engagement check (crm.check_web_signal_promotion) can fire immediately
+    instead of waiting on a periodic sweep. Cheapest/most-precise first: a
+    logged-in staff member's own org (an onboarded club's own traffic) beats
+    an email match against a known officer, beats a raw utm_code, beats a
+    manual alias, beats the page-path fallback. Same "don't misattribute
+    staff browsing" guard the bulk query uses: a logged-in user on an
+    ``/admin`` path never resolves here (their org, if any, is already
+    covered by the org_id branch)."""
+    if user_id and (path or "").split("?", 1)[0].lower().startswith("/admin"):
+        return None
+    if org_id:
+        row = (await session.execute(
+            select(MarketingClub.id).where(MarketingClub.existing_org_id == org_id).limit(1)
+        )).scalar_one_or_none()
+        if row is not None:
+            return str(row)
+    if email:
+        row = (await session.execute(text(
+            "SELECT marketing_club_id FROM marketing_club_contacts "
+            "WHERE lower(email) = :email AND email IS NOT NULL AND email <> '' LIMIT 1"
+        ), {"email": email.strip().lower()})).scalar_one_or_none()
+        if row is not None:
+            return str(row)
+    path_code = ""
+    if path:
+        parts = path.split("?", 1)[0].split("/")
+        path_code = parts[1] if len(parts) > 1 else ""
+    if not (utm_id or utm_source or path_code):
+        return None
+    row = (await session.execute(text(
+        "SELECT COALESCE("
+        "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        "     WHERE a.utm_value = :utm_id AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        "     WHERE a.utm_value = :utm_source AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        "     WHERE a.utm_value = :path_code AND :path_code <> '' AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = :utm_id LIMIT 1), "
+        "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = :utm_source LIMIT 1), "
+        "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = :path_code AND :path_code <> '' LIMIT 1)"
+        ") AS cid"
+    ), {"utm_id": utm_id, "utm_source": utm_source, "path_code": path_code})).scalar_one_or_none()
+    return row
 
 
 # ─── Login-intent (visited a club's pages, then went to /login) ─────────────

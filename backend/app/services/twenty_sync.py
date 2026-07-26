@@ -1292,6 +1292,14 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
             engagement = await _engagement(session, club, org)
             if engagement_override:
                 engagement = {**engagement, **engagement_override}
+            # Local BetterCRM equivalent of Twenty's own OPPORTUNITY_AUTO_THRESHOLD
+            # gate below — a club's score (forced-Hot override or the ordinary
+            # formula) crossing 70 promotes its existing platform deal straight to
+            # Engaged. See crm.maybe_promote_by_engagement_score's own docstring
+            # for why it never creates a deal from nothing.
+            from app.services import crm as crm_service
+            club.engagement_score = engagement.get("engagementScore")
+            await crm_service.maybe_promote_by_engagement_score(session, club)
             company = {**_company_values(club, org, all_unsub=all_unsub), **engagement}
             club_stage = company["lifecycleStage"]
 
@@ -1831,6 +1839,12 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                             options=[selectinload(Organisation.module_subscriptions)])
                        if club.existing_org_id else None)
                 fields = await _engagement(session, club, org)
+                # Local BetterCRM equivalent of the OPPORTUNITY_AUTO_THRESHOLD gate
+                # below — a club whose score has crossed 70 on this recompute gets
+                # its existing platform deal promoted to Engaged. See
+                # crm.maybe_promote_by_engagement_score's own docstring.
+                from app.services import crm as crm_service
+                await crm_service.maybe_promote_by_engagement_score(session, club)
                 all_unsub = await _all_contacts_unsubscribed(session, club.id)
                 # Recompute the full lifecycle stage every refresh (not just the
                 # suppression override) so it — and the Lead mirror below — actually

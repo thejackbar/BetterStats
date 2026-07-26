@@ -66,7 +66,7 @@ async def _org_billable_module_keys(session, org_id) -> list:
     return sorted({billing_key_for(m) for m in held})
 
 
-def _push_club_to_twenty(org_id, force_hot: bool = False, crm_stage_key: Optional[str] = None) -> None:
+def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[str] = None) -> None:
     """Fire-and-forget: push one club's Company fields (paid/trial modules, ARR,
     renewal) to Twenty after a subscription change. No-op when Twenty isn't
     configured; never raises into the request.
@@ -77,16 +77,17 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_stage_key: Optiona
     club" enquiry — a club being put on a trial is too strong a signal to wait
     on the gradual recency/frequency formula or the nightly refresh.
 
-    ``crm_stage_key`` keeps BetterCricket's OWN sales pipeline in lockstep with
+    ``crm_trigger`` keeps BetterCricket's OWN sales pipeline in lockstep with
     the Twenty push, in the SAME background task — per direct instruction, our
     own CRM must reflect every action immediately, not lag behind Twenty's
-    periodic/manual-only refresh. Defaults to "trial" whenever force_hot is set
-    and no explicit key was given (every existing force_hot call site IS a
-    trial signal); pass an explicit key for a non-trial signal (e.g. "won" on
-    a genuine Stripe/subscribe conversion). The special value "auto_cancel"
-    re-checks this org's CURRENTLY held billable modules (after the caller's
-    own commit) and only moves the deal to "lost_dormant" if none are left — a
-    partial cancel (one module of several) shouldn't demote a deal that's
+    periodic/manual-only refresh. It's one of ``crm_rules.TRIGGERS``'
+    subscription/trial keys ('trial_requested' | 'trial_started' |
+    'subscription_won' | 'subscription_cancelled') — the STAGE each one
+    resolves to (and whether it's even enabled at all) is a super-admin
+    configured automation rule (services/crm_rules.py), not hardcoded here.
+    'subscription_cancelled' re-checks this org's CURRENTLY held billable
+    modules (after the caller's own commit) and only fires if none are left —
+    a partial cancel (one module of several) shouldn't demote a deal that's
     still live for everything else the club holds."""
     async def _run():
         try:
@@ -97,27 +98,37 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_stage_key: Optiona
         except Exception:
             _logging.getLogger(__name__).exception("twenty push failed")
 
-        stage_key = crm_stage_key if crm_stage_key is not None else ("trial" if force_hot else None)
-        if not stage_key:
+        if not crm_trigger:
             return
         try:
             from app.models.db import async_session_maker, MarketingClub
-            from app.services import crm as crm_service
+            from app.services import crm as crm_service, crm_rules
             async with async_session_maker() as session:
-                resolved_key = stage_key
-                if resolved_key == "auto_cancel":
+                if crm_trigger == "subscription_cancelled":
                     held = await _org_billable_module_keys(session, org_id)
                     if held:
                         return
-                    resolved_key = "lost_dormant"
                 mc = (await session.execute(
                     select(MarketingClub).where(MarketingClub.existing_org_id == org_id)
                 )).scalar_one_or_none()
                 if mc is None:
                     return
-                modules = await _org_billable_module_keys(session, org_id)
-                await crm_service.sync_platform_deal_for_club(
-                    session, mc, stage_key=resolved_key, source="auto_trial", module_keys=modules)
+                pipeline = await crm_service.ensure_platform_pipeline(session)
+                match = await crm_rules.resolve(session, pipeline, crm_trigger)
+                if match is not None:
+                    modules = await _org_billable_module_keys(session, org_id)
+                    await crm_service.sync_platform_deal_for_club(
+                        session, mc, stage_key=match["stage_key"], source="auto_trial",
+                        module_keys=modules, advance_only=not match["force"])
+                # Also check the score-based Target/Contacted -> Engaged rule right
+                # now, independent of whether Twenty is configured (the Twenty push
+                # above already no-ops silently when it isn't) — a subscription
+                # change is exactly the kind of discrete event that shouldn't wait
+                # for the sweep. Harmless no-op once the deal above is already past
+                # Engaged (e.g. a trial_started rule's own move to Trial).
+                org = await session.get(Organisation, org_id,
+                                        options=[selectinload(Organisation.module_subscriptions)])
+                await crm_service.sync_engagement_promotion(session, mc, org)
                 await session.commit()
         except Exception:
             _logging.getLogger(__name__).exception("crm sync failed")
@@ -2468,7 +2479,7 @@ async def start_module_trial(
     # nightly refresh, same as the approve_module_request path below. force_hot
     # forces the score to 100 and upserts a Lead rather than waiting for the
     # gradual formula to notice.
-    _push_club_to_twenty(org.id, force_hot=True)
+    _push_club_to_twenty(org.id, force_hot=True, crm_trigger="trial_started")
     return _club_payload(org)
 
 
@@ -2725,7 +2736,7 @@ async def start_own_module_trial(
     await db.refresh(club, attribute_names=["module_subscriptions"])
     # Same signal-strength reasoning as start_module_trial / create_module_request's
     # trial branch — a trial actually starting always forces Hot(100)+Lead.
-    _push_club_to_twenty(club.id, force_hot=True)
+    _push_club_to_twenty(club.id, force_hot=True, crm_trigger="trial_started")
     return {"ok": True}
 
 
@@ -2809,10 +2820,11 @@ async def cancel_own_module(
     )
     await db.commit()
     await db.refresh(club, attribute_names=["module_subscriptions"])
-    # "auto_cancel" only demotes the CRM deal to Lost/Dormant if this cancel left
-    # NOTHING billable held — cancelling one of several modules shouldn't
-    # demote a deal that's still live for everything else the club holds.
-    _push_club_to_twenty(club.id, crm_stage_key="auto_cancel")
+    # 'subscription_cancelled' only fires (per the configured automation rule)
+    # if this cancel left NOTHING billable held — cancelling one of several
+    # modules shouldn't demote a deal that's still live for everything else
+    # the club holds.
+    _push_club_to_twenty(club.id, crm_trigger="subscription_cancelled")
     return {"ok": True, "cancelled": targets}
 
 
@@ -2924,7 +2936,7 @@ async def create_module_request(
         # A club asking for a trial itself is as strong a signal as being put on
         # one — force the same Hot(100)+Lead treatment (start_module_trial /
         # approve_module_request give it at the grant end; this is the ask end).
-        _push_club_to_twenty(club.id, force_hot=True)
+        _push_club_to_twenty(club.id, force_hot=True, crm_trigger="trial_requested")
     await db.refresh(req)
     return _request_payload(req, org_name=club.name, requester=current_user.username)
 
@@ -3067,7 +3079,9 @@ async def approve_module_request(
     # only demoted if the org is left holding nothing billable at all.
     _push_club_to_twenty(
         org.id, force_hot=(req.kind == "trial"),
-        crm_stage_key=("won" if req.kind == "subscribe" else "auto_cancel" if req.kind == "cancel" else None))
+        crm_trigger=("subscription_won" if req.kind == "subscribe"
+                    else "subscription_cancelled" if req.kind == "cancel"
+                    else "trial_started" if req.kind == "trial" else None))
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return {"ok": True, "club": _club_payload(org)}
 

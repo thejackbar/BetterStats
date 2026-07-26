@@ -3657,6 +3657,43 @@ async def lifespan(app: FastAPI):
             "JSONB NOT NULL DEFAULT '[]'"
         ))
 
+    # Migration 189: crm_deals.stage_auto_locked — set the moment a human
+    # explicitly moves a deal's stage, so the auto-promotion engine (below)
+    # never nudges that deal forward again.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS stage_auto_locked "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+
+    # Migration 190: crm_automation_rules — configurable, persistent criteria
+    # for platform-pipeline deal creation/stage-promotion (super admin managed
+    # at /admin/super/crm-automation). Seeded once, only if empty, with the
+    # exact rule set that used to be hardcoded — see services/crm_rules.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_automation_rules (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                trigger TEXT NOT NULL,
+                label TEXT NOT NULL,
+                params JSONB NOT NULL DEFAULT '{}',
+                target_stage_key TEXT NOT NULL,
+                force BOOLEAN NOT NULL DEFAULT FALSE,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_automation_rules_trigger "
+            "ON crm_automation_rules(trigger)"
+        ))
+    from app.models.db import async_session_maker as _async_session_maker_190
+    from app.services import crm_rules as _crm_rules
+    async with _async_session_maker_190() as _crm_rules_session:
+        if await _crm_rules.seed_defaults(_crm_rules_session):
+            await _crm_rules_session.commit()
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

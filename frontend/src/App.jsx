@@ -117,6 +117,7 @@ const BetterCrmTracker = lazy(() => import('./pages/admin/bettercrm/BetterCrmTra
 const BetterCrmPeople = lazy(() => import('./pages/admin/bettercrm/BetterCrmPeople'))
 const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const SuperCrmTargets = lazy(() => import('./pages/admin/SuperCrmTargets'))
+const SuperCrmAutomation = lazy(() => import('./pages/admin/SuperCrmAutomation'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
@@ -329,6 +330,7 @@ export default function App() {
           <Route path="/admin/crm/:pipelineId" element={<ProtectedRoute requireModule="crm"><BetterCrmTracker /></ProtectedRoute>} />
           <Route path="/admin/super/crm" element={<ProtectedRoute requireRole="super_admin"><SuperCrm /></ProtectedRoute>} />
           <Route path="/admin/super/crm/targets" element={<ProtectedRoute requireRole="super_admin"><SuperCrmTargets /></ProtectedRoute>} />
+          <Route path="/admin/super/crm/automation" element={<ProtectedRoute requireRole="super_admin"><SuperCrmAutomation /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />
