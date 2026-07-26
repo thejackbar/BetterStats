@@ -981,11 +981,22 @@ async def acquisition_channels_by_club(session: AsyncSession, club_by_id: dict) 
 
 async def trial_days_remaining_by_club(session: AsyncSession, club_by_id: dict) -> dict:
     """marketing_club_id -> {billable_module_key: days_remaining}, for every
-    club linked to an onboarded org with at least one currently-live module
-    trial — batched (no N+1). Powers both the CRM card's per-module trial
-    countdown and the "trial expiring between X and Y days" filter. A
-    prospect that's never been onboarded (no existing_org_id) has no tracked
-    trial_ends_at at all and is simply absent from the result."""
+    club linked to an onboarded org with at least one currently-tracked
+    module trial (status still ``trial`` — see module_subscriptions.
+    sweep_expired_trials, which leaves an expired trial's row/status alone
+    and just refreshes the held-modules cache) — batched (no N+1). Powers
+    the CRM card's per-module trial countdown, the "trial expiring between X
+    and Y days" filter, and the expired-trial badge. A prospect that's never
+    been onboarded (no existing_org_id) has no tracked trial_ends_at at all
+    and is simply absent from the result.
+
+    ``days_remaining`` is SIGNED and NOT clamped at 0 — negative means the
+    trial's end date has already passed (e.g. -3 = expired 3 days ago),
+    which is the whole point: a caller needs to tell "expires today" (0)
+    apart from "already expired" (< 0) to render an EXPIRED badge instead of
+    a countdown. Do not clamp this back to 0 in a new caller — that's the
+    exact bug this fixed (every already-expired trial used to read
+    identically to one expiring today)."""
     from app.auth.modules import STATUS_TRIAL, billing_key_for
     org_to_club = {c.existing_org_id: cid for cid, c in club_by_id.items() if c.existing_org_id}
     if not org_to_club:
@@ -1003,7 +1014,7 @@ async def trial_days_remaining_by_club(session: AsyncSession, club_by_id: dict) 
         cid = org_to_club.get(org_id)
         if cid is None:
             continue
-        days = max(0, (ends_at - now).days)
+        days = (ends_at - now).days
         out.setdefault(cid, {})[billing_key_for(module_key)] = days
     return out
 

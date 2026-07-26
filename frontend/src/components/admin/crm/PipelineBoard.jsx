@@ -186,9 +186,15 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                       {sortModuleKeys(deal.module_keys).map(k => {
                         const isSubscribed = (deal.subscribed_modules || []).includes(k)
                         const days = deal.trial_days_remaining?.[k]
+                        // days is signed (see crm.trial_days_remaining_by_club) —
+                        // negative means the trial's end date has already
+                        // passed, not just "due today" (0).
+                        const expired = !isSubscribed && days != null && days < 0
                         return (
-                          <Pill key={k} tone={isSubscribed ? 'faint' : 'accent'}>
-                            {moduleLabel(k)}{!isSubscribed && days != null ? ` (${days})` : ''}
+                          <Pill key={k} tone={expired ? 'red' : isSubscribed ? 'faint' : 'accent'}
+                            title={expired ? `${moduleLabel(k)} trial expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago` : undefined}>
+                            {moduleLabel(k)}
+                            {expired ? ' · EXPIRED' : (!isSubscribed && days != null ? ` (${days})` : '')}
                           </Pill>
                         )
                       })}

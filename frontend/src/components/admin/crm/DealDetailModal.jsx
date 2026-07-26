@@ -447,13 +447,20 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   {moduleOptions.map(m => {
                     const on = heldKeys.includes(m.key)
                     const days = trialDays[m.key]
+                    // days is signed — negative means the trial's end date
+                    // has already passed, not just "due today" (0).
+                    const expired = days != null && days < 0
                     return (
                       <button key={m.key} type="button" onClick={() => toggleModule(m.key)}
+                        title={expired ? `Trial expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago` : undefined}
                         className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
-                          on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                          expired ? 'bg-pb-red/12 border-pb-red/40 text-pb-red'
+                          : on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
                              : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
                         {moduleLabel(m.key)}
-                        {days != null && (
+                        {expired ? (
+                          <span className="ml-1 font-bold">EXPIRED</span>
+                        ) : days != null && (
                           <span className={days === minDays ? 'font-bold ml-1' : 'ml-1 opacity-80'}>({days})</span>
                         )}
                       </button>
