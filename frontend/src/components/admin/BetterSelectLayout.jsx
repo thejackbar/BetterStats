@@ -27,15 +27,15 @@ function loadClubBranding() {
 
 // BetterSelect runs as its own module surface — a focused nav with just the
 // availability/selection tools, separate from the main admin "noise".
-const NAV = [
+export const NAV = [
   { to: '/admin/betterselect', label: 'Overview', icon: 'overview', cap: null, exact: true },
-  { to: '/admin/betterselect/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS },
-  { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES },
-  { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS },
+  { to: '/admin/betterselect/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS, desc: 'Your BetterSelect player pool.' },
+  { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES, desc: 'Upcoming games and results.' },
+  { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS, desc: 'Set up your teams and squads.' },
+  { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },
+  { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Pick and share your XI.' },
+  { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS, desc: 'Training and net sessions.' },
+  { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS, desc: 'Competition ladders.' },
 ]
 
 export default function BetterSelectLayout({ children, title, actions, headerLeft }) {

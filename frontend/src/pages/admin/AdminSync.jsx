@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import LoadingBar, { ProgressBar } from '../../components/ProgressBar'
 import { useToast } from '../../contexts/ToastContext'
 import SyncRunCard, { syncProgressLabel } from '../../components/admin/SyncRunCard'
@@ -176,7 +176,7 @@ export default function AdminSync() {
   const runningLog = logs.find(l => l.status === 'running')
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-3xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-6">Data Sync</h1>
 
@@ -451,6 +451,6 @@ export default function AdminSync() {
           )}
         </div>
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

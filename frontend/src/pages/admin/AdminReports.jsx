@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 
@@ -74,15 +74,15 @@ export default function AdminReports() {
 
   if (!canManage) {
     return (
-      <AdminLayout>
+      <BetterStatsLayout>
         <h1 className="text-2xl font-bold mb-2">Saved Reports</h1>
         <p className="text-pb-faint">You don't have permission to manage saved reports.</p>
-      </AdminLayout>
+      </BetterStatsLayout>
     )
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-4xl">
         <div className="flex items-baseline justify-between mb-6">
           <div>
@@ -177,6 +177,6 @@ export default function AdminReports() {
           )}
         </div>
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

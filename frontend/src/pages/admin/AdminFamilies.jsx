@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import Dropdown from '../../components/Dropdown'
 
 const RELATIONSHIP_OPTIONS = [
@@ -791,13 +791,13 @@ export default function AdminFamilies() {
   }
 
   if (!orgId) return (
-    <AdminLayout>
+    <BetterClubManagerLayout>
       <div className="font-mono text-[11px] text-pb-faint">Loading…</div>
-    </AdminLayout>
+    </BetterClubManagerLayout>
   )
 
   return (
-    <AdminLayout>
+    <BetterClubManagerLayout>
       <div className="max-w-4xl">
         <div className="flex flex-wrap items-end justify-between gap-3 mb-1">
           <h1 className="font-display text-2xl font-bold text-pb-text">Families</h1>
@@ -921,6 +921,6 @@ export default function AdminFamilies() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </BetterClubManagerLayout>
   )
 }

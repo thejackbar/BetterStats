@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { nameMatchesSearch, formatPlayerName, joinDisplayName, nameSortKey } from '../../lib/nameFormat'
 import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../lib/playerAlphabet'
 import { useAuth } from '../../contexts/AuthContext'
@@ -318,7 +318,7 @@ export default function AdminPlayers() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       {editingId && (
         <ProfileModal
           playerId={editingId}
@@ -479,6 +479,6 @@ export default function AdminPlayers() {
           )}
         </div>
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

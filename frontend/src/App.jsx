@@ -65,6 +65,8 @@ import Login from './pages/Login'
 
 // Admin — lazy loaded (behind auth, not needed on first paint)
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
+const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
+const BetterClubManagerHome = lazy(() => import('./pages/admin/BetterClubManagerHome'))
 const SetupWizard = lazy(() => import('./pages/admin/setup/SetupWizard'))
 const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
@@ -123,6 +125,7 @@ const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
 const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail'))
 const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
+const SuperHub = lazy(() => import('./pages/admin/SuperHub'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperClubMerge = lazy(() => import('./pages/admin/SuperClubMerge'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
@@ -280,6 +283,10 @@ export default function App() {
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/betterstats" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterstats/:group" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/:group" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
@@ -346,6 +353,7 @@ export default function App() {
           <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
           <Route path="/admin/super" element={<ProtectedRoute requireRole="super_admin"><SuperOverview /></ProtectedRoute>} />
+          <Route path="/admin/super/hub/:sectionKey" element={<ProtectedRoute requireRole="super_admin"><SuperHub /></ProtectedRoute>} />
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
           <Route path="/admin/super/merge-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubMerge /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />

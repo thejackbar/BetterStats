@@ -4,7 +4,6 @@ import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { dashboardTiles } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
-import ModuleLockup from '../ModuleLockup'
 import BookmarkButton from './BookmarkButton'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
@@ -13,6 +12,7 @@ import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import BrandLogo from '../BrandLogo'
+import { SUPER_OVERVIEW, SUPER_SECTIONS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -32,6 +32,11 @@ function compareVersions(a, b) {
 // Items within each headed section are kept in ALPHABETICAL order (by label)
 // — keep it that way when adding links. Dashboard and the Setup Wizard sit in
 // the unheaded top section as the two standing entry points.
+// The BetterStats data tools (Cricket Data / Content / Tools) and the club
+// back-office tools (Club Admin) now live in their own module surfaces
+// (BetterStatsLayout / BetterClubManagerLayout), reached from their dashboard
+// cards — so the main admin sidebar is just the app chrome: the two standing
+// entry points, then Account. Everything a super admin needs sits in Better HQ.
 const NAV_SECTIONS = [
   {
     items: [
@@ -40,54 +45,9 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    heading: 'Cricket Data',
-    items: [
-      { to: '/admin/players/import', label: 'Import Players', cap: CAP.MANAGE_PLAYERS },
-      { to: '/admin/games', label: 'Matches', cap: null },
-      { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
-      { to: '/admin/seasons', label: 'Seasons', cap: null },
-    ],
-  },
-  {
-    heading: 'Content',
-    items: [
-      { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
-      { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
-    ],
-  },
-  {
-    heading: 'Club Admin',
-    items: [
-      { to: '/admin/assets', label: 'Assets & Facilities', cap: CAP.MANAGE_ASSETS },
-      { to: '/admin/club-diary', label: 'Club Diary', cap: CAP.MANAGE_CLUB_DIARY },
-      { to: '/admin/committee', label: 'Committee', cap: CAP.MANAGE_COMMITTEE },
-      { to: '/admin/events', label: 'Events', cap: CAP.MANAGE_COMMITTEE },
-      { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
-      { to: '/admin/member-portal', label: 'Member Portal', cap: CAP.MANAGE_FEES, flag: 'memberPortal' },
-      { to: '/admin/qualifications', label: 'Qualifications', cap: CAP.MANAGE_QUALIFICATIONS },
-      { to: '/admin/volunteers', label: 'Volunteers', cap: CAP.MANAGE_VOLUNTEERS },
-    ],
-  },
-  {
-    heading: 'Tools',
-    items: [
-      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
-      { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
-      { to: '/admin/import', label: 'Import Stats', cap: CAP.MANAGE_MANUAL_ENTRIES },
-      { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
-      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
-      { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
-      { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
-      { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/reports', label: 'Saved Reports', cap: CAP.MANAGE_REPORTS },
-      { to: '/admin/upload-scorecard', label: 'Upload Scorecard', cap: CAP.MANAGE_MANUAL_ENTRIES },
-    ],
-  },
-  {
     heading: 'Account',
     items: [
+      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
       { to: '/admin/account', label: 'Plan & Billing', cap: null },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
@@ -95,32 +55,9 @@ const NAV_SECTIONS = [
   },
 ]
 
-// Platform Overview (Better HQ's own dashboard) stays first; the rest are
-// kept in ALPHABETICAL order by label — keep it that way when adding links.
-const SUPER_LINKS = [
-  { to: '/admin/super', label: 'Platform Overview', exact: true },
-  { to: '/admin/super/clubs', label: 'All Clubs' },
-  { to: '/admin/super/backups', label: 'Backups' },
-  { to: '/admin/super/comms-limits', label: 'BetterComms Limits', badge: 'commsRequests' },
-  { to: '/admin/changelog', label: 'Changelog' },
-  { to: '/admin/super/announce', label: 'Club Announcements' },
-  { to: '/admin/super/marketing', label: 'Club Directory' },
-  { to: '/admin/super/coupons', label: 'Discount Coupons' },
-  { to: '/admin/super/discount-report', label: 'Discount Report' },
-  { to: '/admin/super/migration', label: 'KlubPro Migration' },
-  { to: '/admin/super/login-attempts', label: 'Login Attempts' },
-  { to: '/admin/super/merge-clubs', label: 'Merge Clubs' },
-  { to: '/admin/super/meta-ads', label: 'Meta Ads' },
-  { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
-  { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
-  { to: '/admin/super/crm/automation', label: 'Sales Automation (CRM)' },
-  { to: '/admin/super/crm', label: 'Sales Pipeline (CRM)' },
-  { to: '/admin/super/crm/targets', label: 'Sales Targets (CRM)' },
-  { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
-  { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics' },
-  { to: '/admin/usage', label: 'Usage' },
-  { to: '/admin/super/users', label: 'Users' },
-]
+// Better HQ nav (Platform Overview + grouped sections) lives in
+// ../../lib/superNav so the sidebar and the section hub pages share one source
+// of truth.
 
 export default function AdminLayout({ children }) {
   const { user, logout, switchClub, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
@@ -181,11 +118,20 @@ export default function AdminLayout({ children }) {
       (i.flag !== 'memberPortal' || memberPortalVisible)),
   })).filter(s => s.items.length > 0)
 
-  // Flag-gated Better HQ links (currently just self-serve registration) — hidden
-  // until a super admin turns the platform flag on, same reasoning as the cap
-  // filter above.
-  const visibleSuperLinks = SUPER_LINKS.filter(l =>
-    l.flag !== 'selfServeRegistration' || selfServeEnabled)
+  // Better HQ sidebar entries — each section resolves to whichever of its items
+  // are visible (the self-serve trial page is hidden until its platform flag is
+  // on). An empty section is dropped; a single-item section renders as a direct
+  // link to that item; a multi-item section renders as a hub button. Badge
+  // counts are summed onto the section button.
+  const visibleSuperSections = SUPER_SECTIONS.map(section => {
+    const items = visibleSectionItems(section, { selfServeEnabled })
+    return {
+      ...section,
+      items,
+      hubTo: `/admin/super/hub/${section.key}`,
+      badge: sectionBadgeCount(section, { moduleReqCount, commsReqCount }),
+    }
+  }).filter(s => s.items.length > 0)
 
   // Give a bookmarked page a sensible name. Known nav routes carry their own
   // label; anything else (a deep/dynamic page) falls back to a tidied-up last
@@ -193,7 +139,11 @@ export default function AdminLayout({ children }) {
   const labelForPath = useMemo(() => {
     const map = {}
     NAV_SECTIONS.forEach(s => s.items.forEach(i => { map[i.to] = i.label }))
-    SUPER_LINKS.forEach(l => { map[l.to] = l.label })
+    map[SUPER_OVERVIEW.to] = SUPER_OVERVIEW.label
+    SUPER_SECTIONS.forEach(s => {
+      map[`/admin/super/hub/${s.key}`] = s.label
+      s.items.forEach(i => { map[i.to] = i.label })
+    })
     dashboardTiles().forEach(m => { if (m.to) map[m.to] = m.name })
     return (path) => {
       if (map[path]) return map[path]
@@ -489,22 +439,20 @@ export default function AdminLayout({ children }) {
               </div>
             </div>
 
-            {/* The core surface is BetterStats — its lockup sits at the top of
-                the main admin sidebar, mirroring how each module surface shows
-                its own lockup. The "Stats" suffix stays the fixed brand green
-                (--pb-brand), never the club's white-label accent. */}
+            {/* This lockup links to /admin — the whole-platform dashboard (every
+                module), not the BetterStats surface (that's its own card now). So
+                it wears the BetterCricket house brand, not a module mark. The
+                "Cricket" suffix stays the fixed brand green (--pb-brand), never
+                the club's white-label accent. */}
             <Link
               to="/admin"
               onClick={() => setMobileOpen(false)}
-              className="block px-2 py-2 mb-1 border-b pb-hairline-b"
+              className="flex items-center gap-2 px-2 py-2 mb-1 border-b pb-hairline-b"
             >
-              <ModuleLockup
-                name="BetterStats"
-                logo={moduleBrand('stats').logo}
-                accent="var(--pb-brand)"
-                size={24}
-                textClassName="font-display font-bold text-[14px] leading-none"
-              />
+              <BrandLogo className="w-6 h-6 object-contain shrink-0" />
+              <span className="font-display font-bold text-[14px] leading-none">
+                Better<span style={{ color: 'var(--pb-brand)' }}>Cricket</span>
+              </span>
             </Link>
 
             {/* Better HQ — staff-only platform tools. Pinned to the TOP because
@@ -518,31 +466,46 @@ export default function AdminLayout({ children }) {
                 <div className="pb-1 px-2 pt-1 font-mono text-[10px] tracking-wide3 uppercase" style={{ color: 'var(--pb-accent)' }}>
                   Better HQ
                 </div>
-                {visibleSuperLinks.map(link => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    onClick={() => setMobileOpen(false)}
-                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
-                      isActive(link.to, link.exact)
-                        ? 'bg-pb-surface2 text-pb-text'
-                        : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
-                    }`}
-                    style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
-                  >
-                    <span>{link.label.toUpperCase()}</span>
-                    {link.badge === 'moduleRequests' && moduleReqCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
-                        {moduleReqCount}
+                {/* Platform Overview stays a pinned standalone link; the rest of
+                    the tools are grouped into sections. A section with one visible
+                    item links straight to it; a multi-item section opens its hub
+                    page (a small chevron marks it as a group). */}
+                {(() => {
+                  const rows = [
+                    { to: SUPER_OVERVIEW.to, label: SUPER_OVERVIEW.label, active: isActive(SUPER_OVERVIEW.to, SUPER_OVERVIEW.exact) },
+                    ...visibleSuperSections.map(section => {
+                      if (section.items.length === 1) {
+                        const item = section.items[0]
+                        return { to: item.to, label: item.label, badge: section.badge, active: isActive(item.to, item.exact) }
+                      }
+                      const active = location.pathname === section.hubTo || section.items.some(i => isActive(i.to, i.exact))
+                      return { to: section.hubTo, label: section.label, badge: section.badge, group: true, active }
+                    }),
+                  ]
+                  return rows.map(row => (
+                    <Link
+                      key={row.to}
+                      to={row.to}
+                      onClick={() => setMobileOpen(false)}
+                      className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
+                        row.active
+                          ? 'bg-pb-surface2 text-pb-text'
+                          : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
+                      }`}
+                      style={row.active ? { color: 'var(--pb-accent)' } : {}}
+                    >
+                      <span>{row.label.toUpperCase()}</span>
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        {row.badge > 0 && (
+                          <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
+                            {row.badge}
+                          </span>
+                        )}
+                        {row.group && <span className="text-pb-faintest text-[13px] leading-none">›</span>}
                       </span>
-                    )}
-                    {link.badge === 'commsRequests' && commsReqCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
-                        {commsReqCount}
-                      </span>
-                    )}
-                  </Link>
-                ))}
+                    </Link>
+                  ))
+                })()}
               </div>
             )}
 

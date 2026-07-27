@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 
 function SeasonPicker({ seasons, value, onChange, placeholder, exclude }) {
   return (
@@ -180,7 +180,7 @@ export default function AdminSeasons() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-2xl">
         <div className="flex items-center justify-between mb-2">
           <h1 className="font-display font-bold text-2xl text-pb-text">Seasons</h1>
@@ -250,6 +250,6 @@ export default function AdminSeasons() {
         <MergeBuilder seasons={seasons} onMerged={refresh} />
         <MergeHistory refreshKey={mergeRefresh} onChanged={refresh} />
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

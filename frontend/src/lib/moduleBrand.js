@@ -10,6 +10,7 @@
 // matching its icon tile (betterfantasy.svg is a #22d3ee → #0891b2 gradient, so
 // the accent is the cyan-500 that sits in the middle of that ramp).
 import statsLogo from '../assets/modules/betterstats.svg'
+import clubManagerLogo from '../assets/modules/betterclubmanager.svg'
 import selectLogo from '../assets/modules/betterselect.svg'
 import socialsLogo from '../assets/modules/bettersocials.svg'
 import adminLogo from '../assets/modules/betteradmin.svg'
@@ -22,6 +23,7 @@ import fantasyLogo from '../assets/modules/betterfantasy.svg'
 // logo       — the module mark (a self-contained coloured tile)
 export const MODULE_BRAND = {
   stats:   { name: 'BetterStats',   accent: '#16C784', accentRgb: '22 199 132', logo: statsLogo },
+  clubmanager: { name: 'BetterClubManager', accent: '#6366F1', accentRgb: '99 102 241', logo: clubManagerLogo },
   select:  { name: 'BetterSelect',  accent: '#3B82F6', accentRgb: '59 130 246', logo: selectLogo },
   socials: { name: 'BetterSocials', accent: '#EC4899', accentRgb: '236 72 153', logo: socialsLogo },
   admin:   { name: 'BetterAdmin',   accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
@@ -33,6 +35,7 @@ export const MODULE_BRAND = {
 // dashboard-tile keys use the umbrella group names). Map them all onto one set.
 const ALIAS = {
   betterstats: 'stats', core: 'stats',
+  betterclubmanager: 'clubmanager', clubmanager: 'clubmanager', club: 'clubmanager',
   betterselect: 'select',
   bettersocials: 'socials', socials: 'socials',
   betteradmin: 'admin', fees: 'admin', comms: 'admin', merch: 'admin', crm: 'admin', bettercrm: 'admin',

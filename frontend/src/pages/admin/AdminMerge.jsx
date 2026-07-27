@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import MergeTools from '../MergeTools'
 
 export default function AdminMerge() {
@@ -17,14 +17,14 @@ export default function AdminMerge() {
   }, [user])
 
   if (!orgId) return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="font-mono text-[11px] text-pb-faint">Loading…</div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <MergeTools embeddedOrgId={orgId} />
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

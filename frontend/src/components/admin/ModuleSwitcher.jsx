@@ -14,7 +14,10 @@ import { moduleBrand } from '../../lib/moduleBrand'
 // colour whatever surface it sits in. Neutral tones use the shared theme vars so
 // it tracks light/dark and the club / IQ palettes.
 
-const CORE = { key: 'stats', name: 'BetterStats', to: '/admin', title: 'BetterStats — admin dashboard' }
+// The leading pill is the admin dashboard (/admin) itself — BetterStats is now
+// its own tile in the list, so this one is just "home". It keeps the Core green
+// mark as the house brand.
+const CORE = { key: 'stats', name: 'Dashboard', to: '/admin', title: 'Admin dashboard' }
 
 const suffixOf = name => (name.startsWith('Better') ? name.slice('Better'.length) : name)
 
@@ -70,7 +73,7 @@ export default function ModuleSwitcher({ className = '', wrap = false, onNavigat
   return (
     <div className={`items-center gap-1 ${wrap ? 'flex-wrap' : 'overflow-x-auto pb-no-scrollbar'} ${className}`}>
       <Pill to={CORE.to} brand={moduleBrand(CORE.key)} label={suffixOf(CORE.name)}
-        active={false} title={CORE.title} onNavigate={onNavigate} forceLabel={wrap} />
+        active={pathname === '/admin'} title={CORE.title} onNavigate={onNavigate} forceLabel={wrap} />
       {tiles.length > 0 && (
         <span aria-hidden className="shrink-0" style={{ width: 1, height: 18, margin: '0 3px', background: 'var(--pb-hairline2)' }} />
       )}
