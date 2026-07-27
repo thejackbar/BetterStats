@@ -285,8 +285,8 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/betterstats" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterstats/:group" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub/:group" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
@@ -296,14 +296,14 @@ export default function App() {
           <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
-          <Route path="/admin/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
-          <Route path="/admin/committee" element={<ProtectedRoute><AdminCommittee /></ProtectedRoute>} />
-          <Route path="/admin/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
-          <Route path="/admin/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
-          <Route path="/admin/events" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
-          <Route path="/admin/assets" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
-          <Route path="/admin/member-portal" element={<ProtectedRoute><AdminMemberPortal /></ProtectedRoute>} />
-          <Route path="/admin/club-diary" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />
+          <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
+          <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
+          <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
+          <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><AdminQualifications /></ProtectedRoute>} />
+          <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><AdminEvents /></ProtectedRoute>} />
+          <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
+          <Route path="/admin/member-portal" element={<ProtectedRoute requireRole="super_admin"><AdminMemberPortal /></ProtectedRoute>} />
+          <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><AdminClubDiary /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />

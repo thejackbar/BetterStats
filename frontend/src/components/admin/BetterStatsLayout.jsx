@@ -9,38 +9,38 @@ import ModuleLayout from './ModuleLayout'
 export const GROUPS = [
   {
     key: 'data',
-    label: 'Data',
+    label: 'Club Data',
     icon: 'fixtures',
-    desc: 'Browse and edit your matches, players and seasons.',
+    desc: 'Your matches, players and seasons, plus bringing player contacts in.',
     items: [
       { to: '/admin/games', label: 'Matches', icon: 'fixtures', cap: null, desc: 'Every game and its scorecard.' },
       { to: '/admin/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS, exact: true, desc: "The club's player register and profiles." },
+      { to: '/admin/players/import', label: 'Import Players', icon: 'plus', cap: CAP.MANAGE_PLAYERS, desc: 'Bring players in from PlayHQ with their emails, phone numbers and contact details.' },
       { to: '/admin/seasons', label: 'Seasons', icon: 'ladders', cap: null, desc: 'Seasons, grades and their setup.' },
     ],
   },
   {
     key: 'ingest',
-    label: 'Bring data in',
+    label: 'Data Import',
     icon: 'plus',
-    desc: 'Pull in, upload and hand-enter match data.',
+    desc: 'Pull in, upload and hand-enter your match data and records.',
     items: [
       { to: '/admin/sync', label: 'Data Sync', icon: 'reset', cap: CAP.RUN_SYNC, desc: 'Pull the latest games and stats from Cricket Australia.' },
-      { to: '/admin/players/import', label: 'Import Players', icon: 'plus', cap: CAP.MANAGE_PLAYERS, desc: 'Add players in bulk from a spreadsheet.' },
       { to: '/admin/import', label: 'Import Stats', icon: 'sheet', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Load historical stats from a file.' },
       { to: '/admin/upload-scorecard', label: 'Upload Scorecard', icon: 'sheet', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Read an old paper scorecard from a photo.' },
       { to: '/admin/manual-entries', label: 'Manual Entries', icon: 'list', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: "Hand-enter a game we can't sync." },
+      { to: '/admin/milestones', label: 'Milestones', icon: 'check', cap: CAP.MANAGE_MILESTONES, desc: 'Review and manage player milestones.' },
+      { to: '/admin/partnerships', label: 'Partnership Records', icon: 'teams', cap: CAP.MANAGE_AWARDS, desc: 'Check and fix partnership records.' },
     ],
   },
   {
     key: 'tidy',
-    label: 'Tidy & fix',
+    label: 'Clean Your Data',
     icon: 'grip',
-    desc: 'Clean up duplicates and keep records correct.',
+    desc: 'Merge duplicate players and grades.',
     items: [
       { to: '/admin/merge', label: 'Merge Players', icon: 'teams', cap: CAP.MANAGE_MERGES, desc: 'Combine duplicate player records into one.' },
       { to: '/admin/grades', label: 'Merge Grades', icon: 'grip', cap: CAP.MANAGE_MERGES, desc: 'Combine grades that are really the same competition.' },
-      { to: '/admin/milestones', label: 'Milestones', icon: 'check', cap: CAP.MANAGE_MILESTONES, desc: 'Review and manage player milestones.' },
-      { to: '/admin/partnerships', label: 'Partnership Records', icon: 'teams', cap: CAP.MANAGE_AWARDS, desc: 'Check and fix partnership records.' },
     ],
   },
   {

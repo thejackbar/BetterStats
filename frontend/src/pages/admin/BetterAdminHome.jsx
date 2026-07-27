@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { MODULE } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
+import HubCard from '../../components/admin/HubCard'
 
 const BRAND = moduleBrand('admin')
 
@@ -82,8 +83,15 @@ function IntegrationCard({ name, blurb, to, soon }) {
   )
 }
 
+// BetterClubManager — the club back office, still in the oven. Shown here as a
+// "Coming soon" teaser for everyone; only super admins can open the preview for
+// now (its surface is gated to super_admin). Blurb sells what's coming.
+const CLUB_MANAGER_BLURB =
+  'Run the whole club off the field from one place: committee and volunteers, member families, coaching and first-aid tickets, events, grounds and gear, and the running club diary.'
+
 export default function BetterAdminHome() {
-  const { hasModule } = useAuth()
+  const { hasModule, user } = useAuth()
+  const isSuper = user?.role === 'super_admin'
   const showSquare = hasModule(MODULE.FEES) || hasModule(MODULE.MERCH)
   const showXero = hasModule(MODULE.FEES)
   const showIntegrations = showSquare || showXero
@@ -109,6 +117,14 @@ export default function BetterAdminHome() {
           <SubCard
             name="BetterMerch" to="/admin/merch" built entitled={hasModule(MODULE.MERCH)}
             blurb="Track club stock — apparel, equipment and canteen — with low-stock alerts."
+          />
+          {/* Coming soon for everyone; super admins get the preview. */}
+          <HubCard
+            to="/admin/betterclub"
+            title="BetterClubManager"
+            desc={CLUB_MANAGER_BLURB}
+            badges={isSuper ? ['Coming soon', 'Preview'] : ['Coming soon']}
+            state={isSuper ? 'open' : 'soon'}
           />
         </div>
 

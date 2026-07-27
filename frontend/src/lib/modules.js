@@ -118,12 +118,16 @@ export const MODULE_GROUPS = {
   },
 }
 
-// Core surfaces (BetterStats + BetterClubManager) — always on for every club,
-// never gateable/billable, so they live OUTSIDE MODULE_INFO (which feeds the
-// entitlement/billing registries). They still render as dashboard cards and
-// sidebar tiles via dashboardTiles(): BetterStats leads (the club's data engine),
-// BetterClubManager trails (the back-office roster tools). `alwaysOpen` keeps
-// them entitled for every admin, exactly like the Core website under BetterSocials.
+// Core surfaces — always on for every club, never gateable/billable, so they
+// live OUTSIDE MODULE_INFO (which feeds the entitlement/billing registries).
+// BetterStats renders as a dashboard card + sidebar tile via dashboardTiles()
+// (it leads, as the club's data engine); `alwaysOpen` keeps it entitled for
+// every admin, like the Core website under BetterSocials.
+//
+// BetterClubManager is NOT here — it's an upcoming feature shown as a "Coming
+// soon" card under BetterAdmin (BetterAdminHome), accessible only to super
+// admins for now. Its surface still lives at /admin/betterclub
+// (BetterClubManagerLayout), just gated to super_admin and off the dashboard.
 export const CORE_TILES = [
   {
     key: 'stats',
@@ -135,23 +139,12 @@ export const CORE_TILES = [
     isGroup: false,
     core: true,
   },
-  {
-    key: 'clubmanager',
-    name: 'BetterClubManager',
-    blurb: 'Committee, volunteers, families, events and facilities — the club back office.',
-    to: '/admin/betterclub',
-    built: true,
-    alwaysOpen: true,
-    isGroup: false,
-    core: true,
-  },
 ]
 
 // What the dashboard + sidebar render: BetterStats first, then the bolt-on
 // modules (grouped modules collapse into a single umbrella tile with their
 // `members`, ungrouped modules pass through unchanged; order follows
-// MODULE_INFO, a group landing where its first member appears), then
-// BetterClubManager.
+// MODULE_INFO, a group landing where its first member appears).
 export function dashboardTiles() {
   const tiles = []
   const at = {}
@@ -168,7 +161,7 @@ export function dashboardTiles() {
       tiles.push({ ...mod, isGroup: false })
     }
   }
-  return [CORE_TILES[0], ...tiles, CORE_TILES[1]]
+  return [CORE_TILES[0], ...tiles]
 }
 
 // The modular toggles a super admin grants per club. BetterAdmin is the
