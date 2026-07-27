@@ -836,6 +836,7 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     intent_bonus = 0.0
     for flag, pts, label in (
         (eng.get("_onboardingRequested"), twenty_sync.BONUS_ONBOARDING, "Onboarding enquiry"),
+        (eng.get("_visitedContact"), twenty_sync.BONUS_CONTACT_PAGE, "Visited the contact page"),
         (req_trial, twenty_sync.BONUS_REQUESTED_TRIAL, "Requested a trial"),
         (in_trial, twenty_sync.BONUS_IN_TRIAL, "Currently in a trial"),
         (eng.get("_adSignup"), twenty_sync.BONUS_AD_SIGNUP, "Signed up from a paid ad"),

@@ -77,6 +77,10 @@ RECENCY_HALFLIFE_DAYS = 21.0
 BONUS_REQUESTED_TRIAL = 12
 BONUS_IN_TRIAL = 10
 BONUS_ONBOARDING = 20
+# A visit to the BetterCricket contact page — a real "get in touch" intent
+# signal, worth far more than plain browsing. This is the kind of action that
+# should earn HOT, so a club that only browsed (no contact page) stays cooler.
+BONUS_CONTACT_PAGE = 20
 # A club whose org was born from a Meta/paid ad (organisations.signup_source ==
 # 'self_serve_ad') converted a paid click all the way to a registration — score
 # that intent on top of the trial-depth registration credit it already earns.
@@ -409,7 +413,11 @@ async def _engagement(session, club: MarketingClub,
                END), 0.0)::float AS ad_decay_pts,
                -- All-time count of matched Meta/paid ad-click landings (for the
                -- diagnostic breakdown and the in-sales-cycle signal).
-               COUNT(*) FILTER (WHERE {_META_CLICK}) AS ad_clicks
+               COUNT(*) FILTER (WHERE {_META_CLICK}) AS ad_clicks,
+               -- Did an attributed visit hit the BetterCricket contact page? A
+               -- high-intent action ("I want to get in touch"), unlike plain
+               -- browsing — this is what should earn HOT, not page volume.
+               BOOL_OR(split_part(ue.path, '?', 1) ~* '^/contact(/|$)') AS visited_contact
         FROM usage_events ue
         WHERE (
                 -- Prospect marketing traffic: resolve EACH visit to the ONE club it
@@ -447,6 +455,7 @@ async def _engagement(session, club: MarketingClub,
     web_decay_pts = float(web[3] or 0.0) if web else 0.0
     ad_decay_pts = float(web[4] or 0.0) if web else 0.0
     ad_clicks = (web[5] or 0) if web else 0
+    visited_contact = bool(web[6]) if web else False
 
     # Email engagement (email_events opens/clicks) for this club's contact emails, or
     # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
@@ -539,6 +548,9 @@ async def _engagement(session, club: MarketingClub,
             score += BONUS_REQUESTED_TRIAL
         if (club.demo_status or "") == "in_trial":
             score += BONUS_IN_TRIAL
+        if visited_contact:
+            # Hit the contact page — a real "get in touch" signal, not just browsing.
+            score += BONUS_CONTACT_PAGE
         if ad_signup:
             # Converted a paid ad click all the way to a self-serve registration.
             score += BONUS_AD_SIGNUP
@@ -596,7 +608,7 @@ async def _engagement(session, club: MarketingClub,
     # long after its score has decayed back to Cold.
     in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
-        or onboarding_count or sessions or eng_30d or ad_signup
+        or onboarding_count or sessions or eng_30d or ad_signup or visited_contact
         or (trial_depth and trial_depth["score"] >= 70))
 
     fields = {
@@ -622,6 +634,7 @@ async def _engagement(session, club: MarketingClub,
         "_adDecayPts": round(ad_decay_pts, 1),
         "_adClicks": ad_clicks,
         "_adSignup": ad_signup,
+        "_visitedContact": visited_contact,
         "_freqPts": round(freq_pts, 1),
         "_directEnquiryHot": direct_enquiry_hot,
         "_trialDepth": trial_depth,
