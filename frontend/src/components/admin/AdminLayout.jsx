@@ -13,6 +13,7 @@ import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import BrandLogo from '../BrandLogo'
+import { SUPER_OVERVIEW, SUPER_SECTIONS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -95,32 +96,9 @@ const NAV_SECTIONS = [
   },
 ]
 
-// Platform Overview (Better HQ's own dashboard) stays first; the rest are
-// kept in ALPHABETICAL order by label — keep it that way when adding links.
-const SUPER_LINKS = [
-  { to: '/admin/super', label: 'Platform Overview', exact: true },
-  { to: '/admin/super/clubs', label: 'All Clubs' },
-  { to: '/admin/super/backups', label: 'Backups' },
-  { to: '/admin/super/comms-limits', label: 'BetterComms Limits', badge: 'commsRequests' },
-  { to: '/admin/changelog', label: 'Changelog' },
-  { to: '/admin/super/announce', label: 'Club Announcements' },
-  { to: '/admin/super/marketing', label: 'Club Directory' },
-  { to: '/admin/super/coupons', label: 'Discount Coupons' },
-  { to: '/admin/super/discount-report', label: 'Discount Report' },
-  { to: '/admin/super/migration', label: 'KlubPro Migration' },
-  { to: '/admin/super/login-attempts', label: 'Login Attempts' },
-  { to: '/admin/super/merge-clubs', label: 'Merge Clubs' },
-  { to: '/admin/super/meta-ads', label: 'Meta Ads' },
-  { to: '/admin/super/module-requests', label: 'Module Requests', badge: 'moduleRequests' },
-  { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
-  { to: '/admin/super/crm/automation', label: 'Sales Automation (CRM)' },
-  { to: '/admin/super/crm', label: 'Sales Pipeline (CRM)' },
-  { to: '/admin/super/crm/targets', label: 'Sales Targets (CRM)' },
-  { to: '/admin/super/self-serve', label: 'Self-Serve Trial (Internal)', flag: 'selfServeRegistration' },
-  { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics' },
-  { to: '/admin/usage', label: 'Usage' },
-  { to: '/admin/super/users', label: 'Users' },
-]
+// Better HQ nav (Platform Overview + grouped sections) lives in
+// ../../lib/superNav so the sidebar and the section hub pages share one source
+// of truth.
 
 export default function AdminLayout({ children }) {
   const { user, logout, switchClub, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
@@ -181,11 +159,20 @@ export default function AdminLayout({ children }) {
       (i.flag !== 'memberPortal' || memberPortalVisible)),
   })).filter(s => s.items.length > 0)
 
-  // Flag-gated Better HQ links (currently just self-serve registration) — hidden
-  // until a super admin turns the platform flag on, same reasoning as the cap
-  // filter above.
-  const visibleSuperLinks = SUPER_LINKS.filter(l =>
-    l.flag !== 'selfServeRegistration' || selfServeEnabled)
+  // Better HQ sidebar entries — each section resolves to whichever of its items
+  // are visible (the self-serve trial page is hidden until its platform flag is
+  // on). An empty section is dropped; a single-item section renders as a direct
+  // link to that item; a multi-item section renders as a hub button. Badge
+  // counts are summed onto the section button.
+  const visibleSuperSections = SUPER_SECTIONS.map(section => {
+    const items = visibleSectionItems(section, { selfServeEnabled })
+    return {
+      ...section,
+      items,
+      hubTo: `/admin/super/hub/${section.key}`,
+      badge: sectionBadgeCount(section, { moduleReqCount, commsReqCount }),
+    }
+  }).filter(s => s.items.length > 0)
 
   // Give a bookmarked page a sensible name. Known nav routes carry their own
   // label; anything else (a deep/dynamic page) falls back to a tidied-up last
@@ -193,7 +180,11 @@ export default function AdminLayout({ children }) {
   const labelForPath = useMemo(() => {
     const map = {}
     NAV_SECTIONS.forEach(s => s.items.forEach(i => { map[i.to] = i.label }))
-    SUPER_LINKS.forEach(l => { map[l.to] = l.label })
+    map[SUPER_OVERVIEW.to] = SUPER_OVERVIEW.label
+    SUPER_SECTIONS.forEach(s => {
+      map[`/admin/super/hub/${s.key}`] = s.label
+      s.items.forEach(i => { map[i.to] = i.label })
+    })
     dashboardTiles().forEach(m => { if (m.to) map[m.to] = m.name })
     return (path) => {
       if (map[path]) return map[path]
@@ -518,31 +509,46 @@ export default function AdminLayout({ children }) {
                 <div className="pb-1 px-2 pt-1 font-mono text-[10px] tracking-wide3 uppercase" style={{ color: 'var(--pb-accent)' }}>
                   Better HQ
                 </div>
-                {visibleSuperLinks.map(link => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    onClick={() => setMobileOpen(false)}
-                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
-                      isActive(link.to, link.exact)
-                        ? 'bg-pb-surface2 text-pb-text'
-                        : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
-                    }`}
-                    style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
-                  >
-                    <span>{link.label.toUpperCase()}</span>
-                    {link.badge === 'moduleRequests' && moduleReqCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
-                        {moduleReqCount}
+                {/* Platform Overview stays a pinned standalone link; the rest of
+                    the tools are grouped into sections. A section with one visible
+                    item links straight to it; a multi-item section opens its hub
+                    page (a small chevron marks it as a group). */}
+                {(() => {
+                  const rows = [
+                    { to: SUPER_OVERVIEW.to, label: SUPER_OVERVIEW.label, active: isActive(SUPER_OVERVIEW.to, SUPER_OVERVIEW.exact) },
+                    ...visibleSuperSections.map(section => {
+                      if (section.items.length === 1) {
+                        const item = section.items[0]
+                        return { to: item.to, label: item.label, badge: section.badge, active: isActive(item.to, item.exact) }
+                      }
+                      const active = location.pathname === section.hubTo || section.items.some(i => isActive(i.to, i.exact))
+                      return { to: section.hubTo, label: section.label, badge: section.badge, group: true, active }
+                    }),
+                  ]
+                  return rows.map(row => (
+                    <Link
+                      key={row.to}
+                      to={row.to}
+                      onClick={() => setMobileOpen(false)}
+                      className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
+                        row.active
+                          ? 'bg-pb-surface2 text-pb-text'
+                          : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
+                      }`}
+                      style={row.active ? { color: 'var(--pb-accent)' } : {}}
+                    >
+                      <span>{row.label.toUpperCase()}</span>
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        {row.badge > 0 && (
+                          <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
+                            {row.badge}
+                          </span>
+                        )}
+                        {row.group && <span className="text-pb-faintest text-[13px] leading-none">›</span>}
                       </span>
-                    )}
-                    {link.badge === 'commsRequests' && commsReqCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-semibold">
-                        {commsReqCount}
-                      </span>
-                    )}
-                  </Link>
-                ))}
+                    </Link>
+                  ))
+                })()}
               </div>
             )}
 
