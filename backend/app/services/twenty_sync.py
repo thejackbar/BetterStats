@@ -84,11 +84,12 @@ TIER_HOT_MIN = 60
 # the super-admin-configured window (platform_settings.get_direct_enquiry_hot_days).
 DIRECT_ENQUIRY_SCORE = 80
 
-# Meta / paid-click detection for a usage_events row: the client tags an fbclid
-# landing as click_source 'facebook' and an igshid landing as 'instagram'; the
-# path check is a fallback for rows captured before/without that tagging.
-_META_CLICK = ("(ue.click_source IN ('facebook','instagram') "
-               "OR ue.path ~* '(fbclid|igshid)=')")
+# Meta / paid-click detection for a usage_events row: a Meta ad click lands with
+# an fbclid (Facebook) or igshid (Instagram) in the URL, which record_event stores
+# verbatim in ``path`` (query string included). Detected off ``path`` alone —
+# usage_events has no dedicated click_source column in production, so the URL is
+# the reliable, always-present signal (the same one routers/usage.py reads).
+_META_CLICK = "(ue.path ~* '(fbclid|igshid)=')"
 
 
 def _tier_for(score: float) -> str:

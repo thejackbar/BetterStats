@@ -77,41 +77,51 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     processed = 0
 
     async with async_session_maker() as session:
-        q = select(MarketingClub).order_by(MarketingClub.id)  # stable lock order
+        # Pre-load a lightweight list of (id, name) as PLAIN values, not ORM
+        # instances. If a club's recompute errors, the failed transaction expires
+        # every attached ORM object, so touching one afterwards (even to read its
+        # id for a log line) fires a lazy reload — which, mid-failed-async-txn,
+        # raises MissingGreenlet and takes the whole sweep down. Plain tuples are
+        # immune, and re-fetching each club fresh inside the loop means a rollback
+        # fully resets the session before the next club.
+        idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
         if name:
-            q = q.where(func.lower(MarketingClub.name).like(f"%{name.lower()}%"))
-        # Load the full set up front rather than streaming: we commit in batches
-        # below, and a mid-stream commit would invalidate an async server-side
-        # cursor. Mirrors refresh_engagement's own .scalars().all() load.
-        clubs = (await session.execute(q)).scalars().all()
-        total = len(clubs)
+            idq = idq.where(func.lower(MarketingClub.name).like(f"%{name.lower()}%"))
+        rows = (await session.execute(idq)).all()
+        total = len(rows)
         print(f"Recomputing engagement for {total} club(s)"
               + (f" matching {name!r}" if name else "")
               + (" [DRY RUN — nothing will be saved]" if dry_run else "")
               + " ...")
 
-        for club in clubs:
+        batch = 0
+        for cid, cname in rows:
             try:
+                club = await session.get(MarketingClub, cid)
+                if club is None:
+                    continue
                 org = await _load_org(session, club.existing_org_id)
                 deal = await crm_service.sync_engagement_promotion(session, club, org)
                 tiers[club.engagement_tier or "UNKNOWN"] += 1
                 if deal is not None:
                     promoted += 1
                 processed += 1
-                if not dry_run and processed % COMMIT_EVERY == 0:
-                    await session.commit()
-                    print(f"  ... {processed}/{total} committed")
+                batch += 1
+                if batch >= COMMIT_EVERY:
+                    # Roll a dry run back so nothing persists; commit a real run.
+                    await (session.rollback() if dry_run else session.commit())
+                    batch = 0
+                    print(f"  ... {processed}/{total}")
             except Exception:  # noqa: BLE001 — one bad club must not abort the sweep
                 errors += 1
-                logger.exception("recalc failed for club id=%s name=%r",
-                                 getattr(club, "id", "?"), getattr(club, "name", "?"))
-                await session.rollback()
+                await session.rollback()   # reset the session BEFORE any logging
+                batch = 0
+                logger.exception("recalc failed for club id=%s name=%r", cid, cname)
 
+        # Flush the tail of the final partial batch.
+        await (session.rollback() if dry_run else session.commit())
         if dry_run:
-            await session.rollback()
             print("DRY RUN — rolled back, no changes saved.")
-        else:
-            await session.commit()
 
     print("\nDone.")
     print(f"  processed: {processed}")
