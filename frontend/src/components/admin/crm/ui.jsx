@@ -252,6 +252,7 @@ export function EngagementBreakdownPanel({ marketingClubId }) {
             <Pill tone={{ HOT: 'red', WARM: 'amber' }[data.tier] || 'faint'}>{(data.tier || '').replace(/_/g, ' ')}</Pill>
             {data.is_customer && <span className="text-pb-faint">linked club (onboarded/customer)</span>}
           </div>
+          {data.explanation && <p className="text-[11.5px] text-pb-faint italic">{data.explanation}</p>}
           {grouped.length ? (
             <div className="space-y-2">
               {grouped.map(({ cat, items }) => (

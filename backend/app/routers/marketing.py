@@ -793,60 +793,79 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
 
     await db.rollback()  # read-only: don't persist this recompute
 
-    # Itemised contributions, each tagged with a category so the UI can group
-    # them and hide the non-engagement ones:
-    #   engagement = real activity signals (web, email opens/clicks, ad clicks, recency)
-    #   intent     = buying-intent flags (enquiry, trial request/in-trial, ad signup)
-    #   setup      = onboarding/registration floor (registered, imported, merged, …)
-    # "just show me what moved the score via engagement" = filter to category=engagement.
-    contributions = []
-    def add(label, points, category, detail=""):
-        if points:
-            contributions.append({"label": label, "points": round(float(points), 1),
-                                  "category": category, "detail": detail})
+    # Itemised contributions that RECONCILE to the score. Frequency = reach +
+    # depth, both LINEAR, so each is shown at its real scaled point value:
+    #   reach = REACH_PER_VISITOR * distinct 30-day visitors   (usually the biggest term)
+    #   depth = DEPTH_SCALE * each per-event decay sum (web / email / ad)
+    # plus recency, plus the intent bonuses. The setup/registration score is a
+    # FLOOR (the score is the max of it and this activity tally), so it's only
+    # shown as the driver when it actually beats the tally.
+    from app.services.twenty_sync import REACH_PER_VISITOR as _RPV, DEPTH_SCALE as _DS
 
     recency = eng.get("_recencyPts") or 0
     web = eng.get("_webDecayPts") or 0
     ad = eng.get("_adDecayPts") or 0
     td = eng.get("_trialDepth") or None
+    sessions = eng.get("sessions30d", 0)
+    reach_pts = _RPV * sessions
+    web_c, opens_c, clicks_c, ad_c = _DS * web, _DS * open_pts, _DS * click_pts, _DS * ad
+
+    contributions = []
+    def add(label, points, category, detail=""):
+        if points and round(float(points), 1) != 0:
+            contributions.append({"label": label, "points": round(float(points), 1),
+                                  "category": category, "detail": detail})
+
+    # Engagement signals (the activity tally).
+    add("Distinct visitors (reach)", reach_pts, "engagement",
+        f"{sessions} distinct visitor(s) in 30 days x {_RPV} each. Counts visits to this "
+        f"club's own pages (org/slug) as well as outreach-link clicks — so this can be "
+        f"non-zero while the outreach-only 'Website analytics' below shows nothing.")
+    add("Web page-view volume", web_c, "engagement",
+        "Recent page views to this club's pages, age-weighted (older counts less).")
+    add("Email clicks", clicks_c, "engagement",
+        f"{clicks_all} click(s) all-time, {clicks_30d} in 30 days.")
+    add("Email opens", opens_c, "engagement",
+        f"{opens_all} open(s) all-time, {opens_30d} in 30 days"
+        + ("; email tracking may be off (0 = no data, not no engagement)." if not opens_all and not clicks_all else "."))
+    add("Meta ad clicks", ad_c, "engagement", f"{eng.get('_adClicks', 0)} ad-click landing(s).")
+    add("Recency of last activity", recency, "engagement",
+        "Most recent web/email/enquiry touch, decaying over time.")
+
+    # Intent flags.
+    intent_bonus = 0.0
+    for flag, pts, label in (
+        (eng.get("_onboardingRequested"), twenty_sync.BONUS_ONBOARDING, "Onboarding enquiry"),
+        (req_trial, twenty_sync.BONUS_REQUESTED_TRIAL, "Requested a trial"),
+        (in_trial, twenty_sync.BONUS_IN_TRIAL, "Currently in a trial"),
+        (eng.get("_adSignup"), twenty_sync.BONUS_AD_SIGNUP, "Signed up from a paid ad"),
+    ):
+        if flag:
+            add(label, pts, "intent")
+            intent_bonus += pts
+
+    activity_total = reach_pts + web_c + opens_c + clicks_c + ad_c + recency + intent_bonus
+    floor = float((td or {}).get("score") or 0)
 
     if eng.get("_directEnquiryHot"):
-        contributions.append({
-            "label": "Direct 'onboard my club' enquiry (recent)", "category": "intent",
-            "points": eng.get("engagementScore"),
-            "detail": "Pinned to a flat Hot score for a set window after the enquiry — overrides the tally below."})
+        explanation = (f"A recent 'onboard my club' enquiry pins the score to "
+                       f"{eng.get('engagementScore')} for a set window — it overrides the tally.")
+    elif floor > activity_total + 0.5:
+        # The registration/setup floor beat the activity tally — it's the driver.
+        explanation = (f"This club is registered/onboarded, which sets a floor of {round(floor)}. "
+                       f"That's higher than its ~{round(activity_total)} activity tally, so the floor is the score.")
+        staff = "" if (td or {}).get("hasPrimaryAdmin") else " (staff-performed, discounted)"
+        add("Registered in BetterStats", td.get("_registrationPts"), "setup",
+            "Onboarded/set up as a club" + staff + ". A floor, not activity.")
+        add("Imported historical stats", td.get("_importStatsPts"), "setup")
+        add("Merged players/grades", td.get("_mergePts"), "setup")
+        add("Set up paid-module features", td.get("_modulePts"), "setup")
+        add("Admin polish (branding/sponsors)", td.get("_polishPts"), "setup")
     else:
-        # Engagement signals.
-        add("Web page views", web, "engagement",
-            f"{eng.get('sessions30d', 0)} distinct visitor(s) in 30 days.")
-        add("Email clicks", click_pts, "engagement",
-            f"{clicks_all} click(s) all-time, {clicks_30d} in 30 days.")
-        add("Email opens", open_pts, "engagement",
-            f"{opens_all} open(s) all-time, {opens_30d} in 30 days"
-            + (". Note: email tracking may be off — 0 means no data, not no engagement." if not opens_all and not clicks_all else "."))
-        add("Meta ad clicks", ad, "engagement", f"{eng.get('_adClicks', 0)} ad-click landing(s).")
-        add("Recency of last activity", recency, "engagement",
-            "Most recent web/email/enquiry touch, decaying over time.")
-        # Intent flags.
-        if eng.get("_onboardingRequested"):
-            add("Onboarding enquiry", twenty_sync.BONUS_ONBOARDING, "intent")
-        if req_trial:
-            add("Requested a trial", twenty_sync.BONUS_REQUESTED_TRIAL, "intent")
-        if in_trial:
-            add("Currently in a trial", twenty_sync.BONUS_IN_TRIAL, "intent")
-        if eng.get("_adSignup"):
-            add("Signed up from a paid ad", twenty_sync.BONUS_AD_SIGNUP, "intent")
-        # Setup / registration floor (the non-engagement part), itemised from the
-        # trial-depth sub-scores so "registered = +70" reads plainly. This floors
-        # the score (takes the max) rather than adding, so it's flagged as such.
-        if td and td.get("score"):
-            staff = "" if td.get("hasPrimaryAdmin") else " (staff-performed, discounted)"
-            add("Registered in BetterStats", td.get("_registrationPts"), "setup",
-                "Onboarded/set up as a club" + staff + ". A floor, not activity.")
-            add("Imported historical stats", td.get("_importStatsPts"), "setup")
-            add("Merged players/grades", td.get("_mergePts"), "setup")
-            add("Set up paid-module features", td.get("_modulePts"), "setup")
-            add("Admin polish (branding/sponsors)", td.get("_polishPts"), "setup")
+        explanation = f"The activity signals above total about {round(activity_total)} — that's the score."
+        if floor:
+            explanation += (f" (A registration floor of {round(floor)} also applies, but the club's "
+                            f"activity is already at or above it.)")
 
     return {
         "score": eng.get("engagementScore"),
@@ -867,6 +886,7 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
             "freq_pts": eng.get("_freqPts", 0),
         },
         "trial_depth": td,
+        "explanation": explanation,
         "contributions": contributions,
         "last_web_visit_at": eng.get("lastWebVisitAt"),
         "last_email_at": eng.get("lastEmailAt"),
