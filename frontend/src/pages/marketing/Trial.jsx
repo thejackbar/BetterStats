@@ -298,7 +298,7 @@ export default function Trial() {
                                 onClick={() => setInfoClubId(club.id)}
                                 className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
                               >
-                                Just want more info
+                                Request Access
                               </button>
                             </div>
                           )}
