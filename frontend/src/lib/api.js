@@ -851,6 +851,11 @@ export const api = {
     const qs = mktQS(params)
     return request(`/club-admin/marketing/clubs${qs ? `?${qs}` : ''}`)
   },
+  // Cheap name-only typeahead for the CRM New Deal club search — NOT mktClubs
+  // (the full directory list), which also computes a COUNT(*) and scans all
+  // usage_events for visit/login-intent stats the New Deal modal never shows.
+  mktQuickSearchClubs: (q, limit = 8) =>
+    request(`/club-admin/marketing/clubs/quick-search?q=${encodeURIComponent(q)}&limit=${limit}`),
   mktAssociations: () => request('/club-admin/marketing/associations'),
   mktCountries: () => request('/club-admin/marketing/countries'),
   mktResolveAssociation: (id, name) =>
@@ -1317,6 +1322,11 @@ export const api = {
   metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   metaAdsRegistrationFunnel: (days = 30) => request(`/club-admin/meta-ads/registration-funnel?days=${days}`),
   metaAdsSelectedClubs: (days = 30) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
+  // Campaign picker — list the ad account's campaigns + which one the dashboard
+  // is scoped to, and switch it (stored in the DB, no .env edit / redeploy).
+  metaAdsCampaigns: () => request('/club-admin/meta-ads/campaigns'),
+  metaAdsSetCampaign: (campaignId) =>
+    request('/club-admin/meta-ads/campaign', { method: 'POST', body: JSON.stringify({ campaign_id: campaignId }) }),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>

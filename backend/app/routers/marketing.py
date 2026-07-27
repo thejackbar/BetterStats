@@ -140,6 +140,66 @@ async def resolve_association(body: ResolveAssocBody, background: BackgroundTask
     return {"started": True, "association": body.name}
 
 
+@router.get("/clubs/quick-search")
+async def quick_search_clubs(
+    q: str,
+    limit: int = Query(8, ge=1, le=20),
+    kind: Optional[str] = "club",
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_super_admin),
+):
+    """Cheap club-name typeahead — deliberately NOT ``list_clubs`` below.
+
+    The CRM's New Deal club search was reusing ``GET /clubs`` (this file's
+    full directory list) for live-as-you-type search, and it was unacceptably
+    slow next to the public self-serve trial registration's own club search
+    (which just hits PlayHQ's external org-search API, no local aggregation
+    at all). The actual cost wasn't the name match itself (a plain LIKE over
+    marketing_clubs, a few thousand rows) — it was that ``list_clubs`` ALSO
+    always computes a ``COUNT(*)`` over the filtered set and calls
+    ``club_visit_stats``/``club_login_intent_stats`` for the returned page,
+    both of which resolve EVERY ``usage_events`` page_view row through
+    ``_RESOLVED_VISITS``'s per-row COALESCE of correlated subqueries before
+    filtering down to the requested club ids — an O(all page views ever
+    recorded) scan on every keystroke, for data the New Deal modal doesn't
+    even display (per-club website analytics are fetched separately, one
+    club at a time, only once a club is actually selected — see
+    ``GET /clubs/{id}/visits``). This endpoint only ever does a name match +
+    a contacts batch for the handful of returned rows, nothing else."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"clubs": []}
+    stmt = select(MarketingClub).where(
+        MarketingClub.detail_fetched_at.isnot(None),
+        func.lower(MarketingClub.name).like(f"%{q.lower()}%"),
+    )
+    if kind:
+        stmt = stmt.where(MarketingClub.kind == kind)
+    stmt = stmt.order_by(func.lower(MarketingClub.name)).limit(limit)
+    clubs = (await db.execute(stmt)).scalars().all()
+
+    club_ids = [c.id for c in clubs]
+    contacts_by_club: dict = {}
+    if club_ids:
+        rows = (await db.execute(
+            select(MarketingClubContact)
+            .where(MarketingClubContact.marketing_club_id.in_(club_ids))
+            .order_by(MarketingClubContact.role_rank.asc())
+        )).scalars().all()
+        for ct in rows:
+            contacts_by_club.setdefault(ct.marketing_club_id, []).append(ct)
+
+    return {"clubs": [{
+        "id": str(c.id), "name": c.name,
+        "suburb": c.suburb, "state": c.state, "postcode": c.postcode, "address_line1": c.address_line1,
+        "is_customer": c.existing_org_id is not None,
+        "contacts": [{
+            "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
+            "email": ct.email, "mobile": ct.mobile,
+        } for ct in contacts_by_club.get(c.id, [])],
+    } for c in clubs]}
+
+
 @router.get("/clubs")
 async def list_clubs(
     q: Optional[str] = None,

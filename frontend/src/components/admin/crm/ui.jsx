@@ -3,7 +3,9 @@
 // (pages/admin/SuperCrm.jsx), so a single Kanban/detail implementation serves
 // the internal sales pipeline and the club's own CRM. Mirrors the
 // self-contained bettermerch/ui.jsx pattern.
+import { useState, useEffect } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
+import { api } from '../../../lib/api'
 
 // Dollar values everywhere here are cents (matches the backend's value_cents).
 export const money = (cents) =>
@@ -143,5 +145,61 @@ export const LEAD_SOURCE_OPTIONS = [
   { value: 'ai_search_assistants', label: 'AI / Search Assistants' },
   { value: 'other', label: 'Other' },
 ]
+
+// Website Analytics — only meaningful for a platform deal/candidate linked to
+// a Marketing Directory club (a marketing_club_id, whether or not a CrmDeal
+// row exists yet — the New Deal modal's club-search step uses this the same
+// way DealDetailModal does, before any deal is created). Reuses the SAME
+// super-admin endpoint the Club Directory's own "visited the site" panel
+// calls (services/club_directory.club_visit_detail).
+export function WebsiteAnalyticsPanel({ marketingClubId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    if (!marketingClubId) return
+    let alive = true
+    setLoading(true)
+    api.mktClubVisits(marketingClubId).then(d => { if (alive) setData(d) }).catch(() => {}).finally(() => alive && setLoading(false))
+    return () => { alive = false }
+  }, [marketingClubId])
+
+  if (!marketingClubId) return null
+  return (
+    <div>
+      <h3 className="font-display font-bold text-[13px] mb-2">Website analytics</h3>
+      {loading ? <p className="text-[12px] text-pb-faintest">Loading…</p> : !data?.views ? (
+        <p className="text-[12px] text-pb-faintest">No tracked site visits for this club yet.</p>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
+          <div className="pb-card px-2.5 py-2">
+            <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Page views</div>
+            <div className="font-display font-bold text-[15px]">{data.views}</div>
+          </div>
+          <div className="pb-card px-2.5 py-2">
+            <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Days visited</div>
+            <div className="font-display font-bold text-[15px]">{data.distinct_days}</div>
+          </div>
+          <div className="pb-card px-2.5 py-2">
+            <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Unique IPs</div>
+            <div className="font-display font-bold text-[15px]">{data.unique_ips}</div>
+            {data.visits_per_ip != null && <div className="text-pb-faintest text-[10.5px]">{data.visits_per_ip}/IP avg</div>}
+          </div>
+          <div className="pb-card px-2.5 py-2">
+            <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Contact page</div>
+            <div className="font-display font-bold text-[15px]">{data.contact_page_visited ? 'Visited' : 'No'}</div>
+          </div>
+          {data.inferred_modules?.length > 0 && (
+            <div className="col-span-2 sm:col-span-4 pb-card px-2.5 py-2">
+              <div className="text-pb-faint text-[10.5px] uppercase tracking-wide mb-1">Analytics-derived product interest</div>
+              <div className="flex flex-wrap gap-1">
+                {data.inferred_modules.map(k => <Pill key={k} tone="accent">{moduleLabel(k)}</Pill>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export { Icon }

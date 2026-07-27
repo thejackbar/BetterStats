@@ -180,6 +180,33 @@ async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
         return DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
 
 
+async def get_active_meta_campaign_id(db: AsyncSession) -> str:
+    """The super-admin-selected active Meta campaign id for the Meta Ads HQ
+    dashboard, falling back to the env seed default (settings.meta_campaign_id)
+    when unset — so switching which campaign the dashboard tracks is a dropdown
+    in the UI, not a .env edit plus a redeploy."""
+    settings = await get_settings(db)
+    cid = str(settings.get("meta_campaign_id") or "").strip()
+    return cid or app_settings.meta_campaign_id
+
+
+async def set_active_meta_campaign_id(db: AsyncSession, campaign_id: str) -> str:
+    """Set the active Meta campaign id (a numeric Meta campaign id). Commits.
+    Returns the stored id. Raises ValueError on a malformed id."""
+    cid = str(campaign_id or "").strip()
+    if not cid.isdigit():
+        raise ValueError("campaign_id must be a numeric Meta campaign id")
+    current = await get_settings(db)
+    out = dict(current)
+    out["meta_campaign_id"] = cid
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(out)},
+    )
+    await db.commit()
+    return cid
+
+
 async def update_settings(db: AsyncSession, patch: dict) -> dict:
     """Merge ``patch`` into the settings blob. Validates known keys; ignores unknown
     ones. Returns the full updated blob. Commits."""

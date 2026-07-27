@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -9,13 +9,16 @@ import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
+import { getVisitorId } from '../../lib/visitor'
+import { getMetaEventContext } from '../../lib/metaPixel'
 
-// The ad-campaign landing page: one job, one CTA. Paid traffic lands here and
-// either starts the self-serve trial wizard (SelfServeTrialModal in
-// publicMode) or leaves — so unlike the other marketing pages there's no
-// second pitch, no pricing calculator, no competing links above the fold.
-// The nav and footer stay: Terms/Privacy/Contact one click away is a trust
-// signal when the ask is "give us your email", not clutter.
+// The ad-campaign landing page. Search-first: the visitor looks up their club
+// and CLICKS it (a real selection signal we can record, unlike a half-typed
+// query they abandon). Clicking either takes them to their existing page (if
+// already on BetterCricket) or opens a modal to Set Up Club or Request Access.
+// The "request access" path feeds the same onboarding pipeline as the Contact
+// form. A product screenshot sits above the search so the offer is concrete,
+// with the search box kept within reach on every device.
 
 const TRIAL_JSONLD = {
   '@context': 'https://schema.org',
@@ -23,9 +26,8 @@ const TRIAL_JSONLD = {
   name: 'Start your club’s free trial | BetterCricket',
   url: 'https://betterat.cricket/trial',
   description:
-    'Register your cricket club yourself and start a free trial of every '
-    + 'BetterCricket module. No credit card and no sales call. Pick your club '
-    + 'from the Cricket Australia register and you’re in.',
+    'Search for your cricket club to see if it’s on BetterCricket. If not, start '
+    + 'a free trial of every module, or request access. No credit card and no sales call.',
 }
 
 const STEPS = [
@@ -42,20 +44,200 @@ const FAQS = [
   ['Who should register the club?', 'Someone with the authority to evaluate software for the club, typically a committee member, secretary or captain. You’ll confirm that during signup.'],
 ]
 
+const FIELD_CLS = 'w-full bg-pb-surface2 text-pb-text border pb-hairline rounded-lg px-4 py-3 text-base outline-none focus:border-pb-accent'
+const orgName = (o) => o.name || o.shortName || o.organisationName || o.id || ''
+
+// Club logo, same idea as elsewhere in BetterCricket: show the club's crest
+// when we have one (PlayHQ search results carry it for many clubs), and fall
+// back to an initials badge otherwise — never a broken image.
+function ClubLogo({ club, size = 'w-9 h-9' }) {
+  const [ok, setOk] = useState(true)
+  const src = club.logoUrl
+    || (typeof club.logo === 'string' ? club.logo : club.logo?.url)
+    || club.imageUrl || club.logo_url
+  const initials = orgName(club).split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
+  if (src && ok) {
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setOk(false)}
+        className={`${size} rounded-lg object-contain bg-pb-surface2 shrink-0`}
+      />
+    )
+  }
+  return (
+    <span className={`${size} rounded-lg bg-pb-surface2 border pb-hairline shrink-0 flex items-center justify-center font-display font-bold text-[11px] text-pb-dim`}>
+      {initials || '\u{1F3CF}'}
+    </span>
+  )
+}
+
+// The pre-filled "request access" form — club name is already known from the
+// search, so it only asks for a name and email, then posts into the same
+// onboarding-request pipeline the Contact form uses (super-admin Onboarding
+// list + a Hot lead into the CRM).
+function RequestInfoForm({ club, onDone }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!name.trim() || !email.trim()) { setError('Add your name and email.'); return }
+    setSubmitting(true)
+    setError('')
+    try {
+      const meta = getMetaEventContext()
+      await api.submitOnboarding({
+        club: orgName(club),
+        name: name.trim(),
+        email: email.trim(),
+        source: 'trial_search_request',
+        visitorId: getVisitorId(),
+        meta,
+      })
+      if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+        window.fbq('track', 'Lead', {
+          content_name: 'Trial info request',
+          content_category: 'self_serve_trial',
+        }, { eventID: meta?.eventId })
+      }
+      onDone()
+    } catch (err) {
+      setError(err?.message || 'Could not send that just now. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-2 space-y-2">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Your name"
+        className={FIELD_CLS}
+      />
+      <input
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        type="email"
+        placeholder="Your email"
+        className={FIELD_CLS}
+      />
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <button
+        type="submit"
+        disabled={submitting}
+        className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90 disabled:opacity-50"
+        style={{ background: 'var(--pb-accent)' }}
+      >
+        {submitting ? 'Sending…' : 'Send my request'}
+      </button>
+    </form>
+  )
+}
+
+// Shown when a not-yet-registered club is clicked: choose Set Up Club (the
+// self-serve trial wizard, pre-seeded) or Request Access (the enquiry form).
+function ClubActionModal({ club, onSetUp, onClose }) {
+  const [mode, setMode] = useState('choose')   // choose | request | done
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70" onClick={onClose}>
+      <div className="w-full max-w-md pb-card p-6 relative bg-pb-bg" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-3 right-3 text-pb-faint hover:text-pb-text text-lg leading-none"
+        >
+          ✕
+        </button>
+        <div className="flex items-center gap-3 mb-4">
+          <ClubLogo club={club} size="w-11 h-11" />
+          <h3 className="font-display font-bold text-lg leading-tight">{orgName(club)}</h3>
+        </div>
+
+        {mode === 'done' ? (
+          <p className="font-mono text-[12px] text-emerald-300">
+            Thanks — we&rsquo;ve got your request and we&rsquo;ll be in touch shortly.
+          </p>
+        ) : mode === 'request' ? (
+          <>
+            <p className="text-sm text-pb-dim mb-1">
+              Request access and we&rsquo;ll help you get {orgName(club)} onto BetterCricket.
+            </p>
+            <RequestInfoForm club={club} onDone={() => setMode('done')} />
+            <button
+              onClick={() => setMode('choose')}
+              className="mt-3 font-mono text-[11px] text-pb-faint underline hover:text-pb-text"
+            >
+              ← Back
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-pb-dim mb-4">
+              Get {orgName(club)} onto BetterCricket. Set it up yourself with a free trial, or request
+              access and we&rsquo;ll help you get started.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => onSetUp(club)}
+                className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                Set Up Club
+              </button>
+              <button
+                onClick={() => setMode('request')}
+                className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
+              >
+                Request Access
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Trial() {
   usePageMeta({
     title: 'Start your club’s free trial | BetterCricket',
     description:
-      'Register your cricket club yourself and start a free trial of every '
-      + 'BetterCricket module. No credit card and no sales call. Pick your club '
-      + 'from the Cricket Australia register and you’re in.',
+      'Search for your cricket club to see if it’s on BetterCricket. If not, start '
+      + 'a free trial of every module, or request access. No credit card and no sales call.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/trial',
     jsonLd: TRIAL_JSONLD,
   })
 
+  const navigate = useNavigate()
+
   const [status, setStatus] = useState(null)   // null = loading, false = unavailable
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardClub, setWizardClub] = useState(null)
+  const [actionClub, setActionClub] = useState(null)   // club whose choose-modal is open
+
+  // Search-first hero state.
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [searched, setSearched] = useState(false)
+  const debounceRef = useRef(null)
 
   useEffect(() => {
     let alive = true
@@ -67,8 +249,7 @@ export default function Trial() {
 
   // A deeper intent signal than the global PageView: this pageview came from
   // someone the ads sent to the trial offer specifically. Ref-guarded so the
-  // event fires once per visit regardless of StrictMode's double-effects —
-  // ad metrics shouldn't depend on React dev/prod effect semantics.
+  // event fires once per visit regardless of StrictMode's double-effects.
   const viewTracked = useRef(false)
   useEffect(() => {
     if (viewTracked.current) return
@@ -81,19 +262,68 @@ export default function Trial() {
     }
   }, [])
 
-  const trialDays = status?.default_trial_days || 14
   const available = !!status?.enabled
 
+  // Debounced club search (min 2 chars), hitting the same public search the
+  // wizard uses — results carry `already_registered` + the existing club's
+  // public-page slug (and often a logo), which drive the click behaviour below.
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    const q = query.trim()
+    if (q.length < 2) {
+      setResults([])
+      setSearched(false)
+      setSearchError('')
+      return
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true)
+      setSearchError('')
+      try {
+        const data = await api.publicSelfServeSearch(q)
+        setResults(Array.isArray(data) ? data : [])
+        setSearched(true)
+      } catch (e) {
+        setResults([])
+        setSearchError(e?.message || 'Club search failed. Try again in a moment.')
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(debounceRef.current)
+  }, [query])
+
+  const trialDays = status?.default_trial_days || 14
+
   // While the self_serve_registration_enabled flag is off (the status call
-  // 404s), anyone landing here is redirected straight to the Contact page —
-  // the flag is the single switch, no in-between teaser state. Flipping it
-  // on makes the page AND the signup live with no deploy. Note: Meta's
-  // ad-review crawler hits this URL from its data centres whenever ads are
-  // created; the redirect handles those fine.
+  // 404s), anyone landing here is redirected to the Contact page — the flag is
+  // the single switch. Flipping it on makes the page AND signup live, no deploy.
   if (status === false) return <Navigate to="/contact" replace />
 
-  const openWizard = () => {
-    if (available) setWizardOpen(true)
+  // Clicking a club is a real, trackable selection (unlike a half-typed query
+  // someone abandons). An already-registered club goes straight to its page; a
+  // new one records the pick (so a prospect who then backs out of the modal is
+  // still captured) and opens the Set Up / Request Access choice.
+  const handleClubClick = (club) => {
+    if (club.already_registered && club.already_registered_slug) {
+      navigate(`/${club.already_registered_slug}`)
+      return
+    }
+    api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
+      name: orgName(club), org_id: club.id,
+    }).catch(() => {})
+    setActionClub(club)
+  }
+
+  const onSetUp = (club) => {
+    setActionClub(null)
+    setWizardClub(club)
+    setWizardOpen(true)
+  }
+  const openWizardBlank = () => {
+    if (!available) return
+    setWizardClub(null)
+    setWizardOpen(true)
   }
 
   return (
@@ -101,32 +331,102 @@ export default function Trial() {
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
 
-        {/* Hero — single CTA */}
-        <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
+        {/* Hero — screenshot + search, kept tight so the search box stays in
+            reach on phones (the image is capped in viewport height). */}
+        <section className="relative pt-24 pb-14 px-4 sm:px-6 lg:px-10 overflow-hidden">
           <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
-          <div className="max-w-[900px] mx-auto relative text-center">
-            <p className="pill mb-6 inline-flex"><span className="dot" />No credit card · No sales call</p>
-            <h1 className="font-display font-bold text-[42px] sm:text-[58px] lg:text-[72px] tracking-tight leading-[0.95] mb-6">
+          <div className="max-w-[760px] mx-auto relative text-center">
+            <p className="pill mb-4 inline-flex"><span className="dot" />No credit card · No sales call</p>
+            <h1 className="font-display font-bold text-[30px] sm:text-[42px] lg:text-[54px] tracking-tight leading-[0.98] mb-4">
               Your club&rsquo;s entire history, <span className="gradient-text">live in minutes.</span>
             </h1>
-            <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed mb-10">
-              Register your club yourself and start a {trialDays}-day free trial of the whole
-              BetterCricket platform: stats, selection, social media templates, admin and analytics.
-              Pick your club from the Cricket Australia register and you&rsquo;re in.
+            <p className="text-base sm:text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed mb-5">
+              Find your club to get started — free {trialDays}-day trial, no credit card.
             </p>
+
+            {/* A real set-up club, so the offer is concrete. Height-capped so the
+                search below never drops off the first screen on any device. */}
+            <div className="mb-6 mx-auto max-w-xl">
+              <img
+                src="/marketing/front-page-profile.jpg"
+                alt="A club’s player profile on BetterCricket"
+                loading="eager"
+                className="w-full rounded-xl border pb-hairline shadow-lg object-contain max-h-[26vh] sm:max-h-[32vh]"
+              />
+            </div>
+
             {status === null ? (
               <p className="font-mono text-xs text-pb-faint">Loading…</p>
             ) : available ? (
-              <button
-                type="button"
-                onClick={openWizard}
-                className="inline-flex items-center px-8 py-4 rounded-lg font-display font-bold text-lg text-pb-bg transition hover:opacity-90"
-                style={{ background: 'var(--pb-accent)' }}
-              >
-                Start your free trial
-              </button>
+              <div className="max-w-xl mx-auto text-left">
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search for your club…"
+                  aria-label="Search for your club"
+                  autoFocus
+                  className={FIELD_CLS}
+                />
+
+                <div className="mt-2 space-y-2">
+                  {searching && <p className="font-mono text-[11px] text-pb-faint px-1">Searching…</p>}
+                  {searchError && <p className="text-xs text-red-400 px-1">{searchError}</p>}
+
+                  {results.map((club) => (
+                    <button
+                      key={club.id || orgName(club)}
+                      type="button"
+                      onClick={() => handleClubClick(club)}
+                      className="w-full pb-card p-3 flex items-center gap-3 text-left hover:border-accent/40 transition"
+                    >
+                      <ClubLogo club={club} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-display font-semibold text-sm truncate">{orgName(club)}</span>
+                        {club.already_registered ? (
+                          <span className="block font-mono text-[10px] text-emerald-300 mt-0.5">✓ Already on BetterCricket — view page</span>
+                        ) : (
+                          <span className="block font-mono text-[10px] text-pb-faint mt-0.5">Set up or request access</span>
+                        )}
+                      </span>
+                      <span className="text-pb-faint shrink-0">→</span>
+                    </button>
+                  ))}
+
+                  {searched && !searching && results.length === 0 && !searchError && (
+                    <div className="pb-card p-4">
+                      <p className="text-sm text-pb-dim">
+                        No clubs matched &ldquo;{query.trim()}&rdquo;.
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <button
+                          type="button"
+                          onClick={openWizardBlank}
+                          className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
+                          style={{ background: 'var(--pb-accent)' }}
+                        >
+                          Start the full wizard
+                        </button>
+                        <a
+                          href={`mailto:${SUPPORT_EMAIL}`}
+                          className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
+                        >
+                          Email us
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <p className="font-mono text-[11px] text-pb-faintest mt-4 text-center">
+                  Prefer to just dive in?{' '}
+                  <button type="button" onClick={openWizardBlank} className="underline hover:text-pb-text">
+                    Start the free trial wizard
+                  </button>
+                </p>
+              </div>
             ) : null}
-            <p className="font-mono text-[11px] text-pb-faintest mt-5">
+
+            <p className="font-mono text-[11px] text-pb-faintest mt-6">
               Quick and Easy Setup · Every Module Included · No Obligation
             </p>
           </div>
@@ -197,11 +497,20 @@ export default function Trial() {
       </div>
       <MarketingFooter />
 
+      {actionClub && (
+        <ClubActionModal
+          club={actionClub}
+          onSetUp={onSetUp}
+          onClose={() => setActionClub(null)}
+        />
+      )}
+
       {wizardOpen && (
         <SelfServeTrialModal
           publicMode
           defaultTrialDays={trialDays}
-          onClose={() => setWizardOpen(false)}
+          initialClub={wizardClub}
+          onClose={() => { setWizardOpen(false); setWizardClub(null) }}
         />
       )}
     </div>
