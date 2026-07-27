@@ -1301,21 +1301,56 @@ async def maybe_promote_by_engagement_score(session: AsyncSession, club: Marketi
     return deal
 
 
+async def ensure_pipeline_entry(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
+    """As soon as a club has ANY engagement (cached engagement_score > 0), it
+    belongs on the pipeline: get-or-create its platform deal at Target. Per
+    direct instruction — a score above zero is itself the trigger to start
+    working the club, no enquiry or manual export required.
+
+    Guards:
+      - score <= 0 (or ``not_interested``, which forces the score to 0) never
+        enters — a bare directory row with no activity stays off the board.
+      - Never re-adds a club that ALREADY has a deal (open OR closed): a
+        won/lost club must not come back onto the board from a stray later
+        page view. It enters the pipeline exactly once.
+    Caller commits."""
+    if (club.engagement_score or 0) <= 0:
+        return None
+    pipeline = await ensure_platform_pipeline(session)
+    existing = (await session.execute(
+        select(CrmDeal.id).where(
+            CrmDeal.pipeline_id == pipeline.id,
+            CrmDeal.marketing_club_id == club.id,
+            CrmDeal.archived_at.is_(None),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if existing is not None:
+        return None
+    deal = await sync_platform_deal_for_club(
+        session, club, stage_key="target", source="engagement")
+    await log_activity(
+        session, deal_id=deal.id, type="system",
+        body=f"Auto-added to pipeline: engagement score {club.engagement_score}")
+    return deal
+
+
 async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
                                     org: Optional[Organisation] = None) -> Optional[CrmDeal]:
-    """Recompute one club's engagement score and immediately check the
-    score-based Target/Contacted -> Engaged promotion, right now, in the
-    caller's own session. ``twenty_sync._engagement`` is a pure local
-    read/compute over our own tables (usage_events/email_events/etc) — it
-    never calls out to Twenty — so this works whether or not Twenty is
-    configured, unlike routing through ``push_club_and_contacts``. A
-    single-club recompute is a handful of indexed queries, cheap enough to
-    run inline wherever a real signal event already has a session+club in
-    hand (an enquiry, a trial request/grant, a subscription change) rather
-    than waiting for a scheduled sweep. Caller commits."""
+    """Recompute one club's engagement score, ensure it's on the pipeline once
+    the score is above zero, and immediately check the score-based
+    Target/Contacted -> Engaged promotion, right now, in the caller's own
+    session. ``twenty_sync._engagement`` is a pure local read/compute over our
+    own tables (usage_events/email_events/etc) — it never calls out to Twenty —
+    so this works whether or not Twenty is configured, unlike routing through
+    ``push_club_and_contacts``. A single-club recompute is a handful of indexed
+    queries, cheap enough to run inline wherever a real signal event already has
+    a session+club in hand (an enquiry, a trial request/grant, a subscription
+    change) rather than waiting for a scheduled sweep. Caller commits."""
     from app.services.twenty_sync import _engagement
     await _engagement(session, club, org)
-    return await maybe_promote_by_engagement_score(session, club)
+    entered = await ensure_pipeline_entry(session, club)
+    promoted = await maybe_promote_by_engagement_score(session, club)
+    return promoted or entered
 
 
 async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=None,
@@ -1364,7 +1399,20 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
                 ).limit(1)
             )).scalar_one_or_none()
             if has_open is None:
-                return {"skipped": "no early-stage deal"}
+                # No early-stage deal to promote. But a club with NO deal at all
+                # should ENTER the pipeline the moment it has a score (> 0) — so
+                # fall through to the recompute only in that case. A club that
+                # already has a deal past the early stages (or closed) is left
+                # alone: web activity mustn't drag a won/lost club back on.
+                any_deal = (await session.execute(
+                    select(CrmDeal.id).where(
+                        CrmDeal.pipeline_id == pipeline.id,
+                        CrmDeal.marketing_club_id == club_id,
+                        CrmDeal.archived_at.is_(None),
+                    ).limit(1)
+                )).scalar_one_or_none()
+                if any_deal is not None:
+                    return {"skipped": "deal past early stage or closed"}
             club = await session.get(MarketingClub, club_id)
             if club is None:
                 return {"skipped": "no club row"}
