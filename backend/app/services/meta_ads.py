@@ -415,6 +415,28 @@ REGISTRATION_STEP_ORDER = [
 ]
 
 
+# A visitor counts as "Meta-driven" if any of their events in the window
+# carries a Meta signal — the same detection the Usage page uses for its FB/IG
+# split (a fb/ig/meta utm_source, an fbclid/igshid on the URL, or a resolved
+# facebook/instagram traffic_source). Keeps the wizard funnel and the
+# selected-clubs table to Meta traffic only, so an organic or EDM signup that
+# reached /trial some other way never shows on the Meta Ads dashboard.
+_META_VISITOR_SUBQUERY = """
+        visitor_id IN (
+            SELECT DISTINCT visitor_id FROM usage_events
+            WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
+              AND visitor_id IS NOT NULL
+              AND (
+                traffic_source IN ('facebook', 'instagram')
+                OR lower(COALESCE(NULLIF(utm_source, ''),
+                         substring(path from 'utm_source=([^&]+)')))
+                    IN ('fb', 'facebook', 'meta', 'ig', 'instagram')
+                OR path ~* 'fbclid=' OR path ~* 'igshid='
+              )
+        )
+"""
+
+
 async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> list[dict]:
     """In-app breakdown of WHERE within the registration wizard visitors drop
     off — the detail Meta's own reporting can't give us, since it only ever
@@ -424,12 +446,13 @@ async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LE
     SelfServeTrialModal.jsx's trackFunnelStep calls), same
     key/label/value/pct_of_top/pct_of_prev shape as compute_funnel() so the
     frontend can reuse the same FunnelChart component."""
-    rows = (await db.execute(text("""
+    rows = (await db.execute(text(f"""
         SELECT route, COUNT(DISTINCT visitor_id) AS n
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND visitor_id IS NOT NULL
+          AND {_META_VISITOR_SUBQUERY}
         GROUP BY route
     """), {"days": days})).mappings().all()
     counts = {r["route"]: int(r["n"]) for r in rows}
@@ -478,10 +501,15 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     the Terms step are unidentifiable; those are returned only as an
     `anonymous` count so the total still reconciles with the funnel."""
     window = {"days": days}
+    # Only Meta-attributed activity belongs on the Meta Ads dashboard: completed
+    # registrations are scoped by utm_content (same as the ad-signups table and
+    # the KPI card's registration count), wizard-step/beacon rows by the
+    # Meta-visitor signal. An organic or EDM self-serve signup never shows here.
+    utm_contents = list(_current_campaign_utm_contents())
 
     # (1) Beacon rows that carry a club name (going forward). Plus a count of
     # the ones that don't — selections we genuinely can't attribute.
-    beacon_rows = (await db.execute(text("""
+    beacon_rows = (await db.execute(text(f"""
         SELECT metadata->>'club_name'   AS club_name,
                metadata->>'club_org_id' AS org_id,
                MIN(created_at)          AS first_at,
@@ -492,10 +520,11 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
           AND route = 'club_prepared'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
+          AND {_META_VISITOR_SUBQUERY}
         GROUP BY 1, 2
     """), window)).mappings().all()
 
-    anon = (await db.execute(text("""
+    anon = (await db.execute(text(f"""
         SELECT COUNT(DISTINCT visitor_id) AS n
         FROM usage_events
         WHERE event_type = 'self_serve_step'
@@ -503,6 +532,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND visitor_id IS NOT NULL
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NULL
+          AND {_META_VISITOR_SUBQUERY}
     """), window)).scalar() or 0
 
     # (2) Terms-step acknowledgements — carry the club name and an email.
@@ -516,15 +546,21 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
 
     # (3) Completed self-serve registrations — the org plus when it was created
     # (orgs carry no created_at; the idempotency key holds the timestamp).
-    done_rows = (await db.execute(text("""
-        SELECT o.name AS club_name, o.slug, o.id::text AS org_id,
-               MIN(k.created_at) AS at
-        FROM organisations o
-        JOIN self_serve_idempotency_keys k ON k.org_id = o.id
-        WHERE o.signup_source IS NOT NULL
-          AND k.created_at >= NOW() - (:days * INTERVAL '1 day')
-        GROUP BY o.name, o.slug, o.id
-    """), window)).mappings().all()
+    # Scoped to THIS campaign's Meta ads by utm_content, matching ad-signups —
+    # a non-Meta signup (organic, EDM, super-admin onboarded) never appears.
+    done_rows = []
+    if utm_contents:
+        done_rows = (await db.execute(text("""
+            SELECT o.name AS club_name, o.slug, o.id::text AS org_id,
+                   MIN(k.created_at) AS at
+            FROM organisations o
+            JOIN self_serve_idempotency_keys k ON k.org_id = o.id
+            WHERE o.signup_source IS NOT NULL
+              AND o.archived_at IS NULL
+              AND o.signup_attribution->>'utm_content' = ANY(:utm_contents)
+              AND k.created_at >= NOW() - (:days * INTERVAL '1 day')
+            GROUP BY o.name, o.slug, o.id
+        """), {"days": days, "utm_contents": utm_contents})).mappings().all()
 
     clubs: dict[str, dict] = {}
 
@@ -558,12 +594,16 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         _upsert(r["club_name"], _SELECTED_STEP_RANK["selected"],
                 first_at=r["first_at"], last_at=r["last_at"],
                 org_id=r["org_id"], visitors=int(r["visitors"] or 0))
-    for r in ack_rows:
-        _upsert(r["club_name"], _SELECTED_STEP_RANK["terms"],
-                first_at=r["first_at"], last_at=r["last_at"], email=r["email"])
     for r in done_rows:
         _upsert(r["club_name"], _SELECTED_STEP_RANK["completed"],
                 first_at=r["at"], last_at=r["at"], org_id=r["org_id"], slug=r["slug"])
+    # Terms-step acknowledgements aren't Meta-attributable on their own (no
+    # visitor/utm on the row), so they only ENRICH the furthest step of a club
+    # already identified from a Meta source above — never introduce a new one.
+    for r in ack_rows:
+        if (r["club_name"] or "").strip().lower() in clubs:
+            _upsert(r["club_name"], _SELECTED_STEP_RANK["terms"],
+                    first_at=r["first_at"], last_at=r["last_at"], email=r["email"])
 
     # Newest selection first; a club with no timestamp (shouldn't happen — every
     # source supplies one) sinks to the bottom without tripping the aware/naive
