@@ -40,8 +40,9 @@ from sqlalchemy.orm import selectinload
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_client import client
 from app.services.twenty_sync import (
-    OPPORTUNITY_AUTO_THRESHOLD, _all_contacts_unsubscribed, _billing_modules, _engagement,
-    _lifecycle, _link_get, _link_put, _module_split, _raise_task, _twenty_modules, _upsert,
+    OPPORTUNITY_AUTO_THRESHOLD, TIER_HOT_MIN, _all_contacts_unsubscribed, _billing_modules,
+    _engagement, _lifecycle, _link_get, _link_put, _module_split, _raise_task, _twenty_modules,
+    _upsert,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,14 +68,14 @@ def _lead_signal(club: MarketingClub, org: "Optional[Organisation]", eng: dict,
     trigger table: requested a trial, in a trial, in the engagement sales cycle,
     synced (an organisations row exists but the club isn't paying yet), a direct
     "onboard my club" website enquiry, or the engagement score has crossed into Hot
-    territory (score >= 45)."""
+    territory (score >= TIER_HOT_MIN)."""
     if getattr(club, "not_interested", False):
         return None
     interested = _billing_modules(club.requested_trial_modules or [])
     trial_mods = _billing_modules(club.trial_modules or [])
     trialing = (club.demo_status or "") == "in_trial" or bool(trial_mods)
     in_cycle = bool(eng.get("inSalesCycle"))
-    hot_score = (eng.get("engagementScore") or 0) >= 45
+    hot_score = (eng.get("engagementScore") or 0) >= TIER_HOT_MIN
     onboarding_requested = bool(eng.get("_onboardingRequested"))
     if not (interested or trialing or in_cycle or synced or hot_score or onboarding_requested):
         return None

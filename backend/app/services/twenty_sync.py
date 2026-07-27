@@ -39,6 +39,63 @@ from app.services.twenty_client import (TwentyApiError, client, currency, emails
 # waiting on a human to flip Twenty's own createOpportunity cascade field.
 OPPORTUNITY_AUTO_THRESHOLD = 90
 
+# --- Engagement scoring weights -------------------------------------------------
+# One place to tune every number in _engagement(). Mirrors the engagement-scoring
+# workbook shared with the team; see docs there for the rationale behind each.
+#
+# Per-event decay: each web/email event is scored by ITS OWN age and the scores
+# are summed. Ages beyond the last tier here score 0 — the ``d90`` tier plus the
+# ``ELSE 0`` gives every sum an outer 90-day window, so a club's years of history
+# can't quietly peg the depth curve (the sum is otherwise unbounded in age).
+WEB_DECAY = {"d7": 2.0, "d14": 1.5, "d21": 1.0, "d28": 0.5, "d90": 0.25}
+# A Meta / paid ad-click landing is a higher-intent arrival than an organic page
+# view, so it gets its own richer curve instead of the flat WEB_DECAY rate.
+AD_DECAY = {"d7": 5.0, "d14": 3.5, "d21": 2.0, "d28": 1.0, "d90": 0.5}
+EMAIL_CLICK_DECAY = {"d7": 10.0, "d14": 7.5, "d21": 5.0, "d28": 2.0, "d90": 1.0}
+EMAIL_OPEN_DECAY = {"d7": 4.0, "d14": 3.0, "d21": 2.0, "d28": 1.0, "d90": 1.0}
+
+# Reach (distinct visitors) and depth (the decay sums) each pass through a
+# saturating curve cap*raw/(raw+half) — asymptotic to the cap, never reaching it.
+REACH_MULT, REACH_CAP, REACH_HALF = 6.0, 24.0, 24.0
+DEPTH_CAP, DEPTH_HALF = 40.0, 40.0
+
+# Recency of the single most-recent touch of any kind (web / email / enquiry).
+RECENCY = {"d7": 10, "d30": 7, "d90": 4, "older": 2}  # "never" is 0
+
+# Prospect intent bonuses, added on top of recency + frequency.
+BONUS_REQUESTED_TRIAL = 12
+BONUS_IN_TRIAL = 10
+BONUS_ONBOARDING = 20
+# A club whose org was born from a Meta/paid ad (organisations.signup_source ==
+# 'self_serve_ad') converted a paid click all the way to a registration — score
+# that intent on top of the trial-depth registration credit it already earns.
+BONUS_AD_SIGNUP = 10
+
+# Customer account-health branch (floored, never Cold).
+CUSTOMER_BASE = 60
+CUSTOMER_UPSELL_BONUS = 15
+CUSTOMER_ONBOARDING_BONUS = 10
+
+# Tier bands: COLD < WARM_MIN, WARM up to < HOT_MIN, HOT at/above HOT_MIN.
+TIER_WARM_MIN = 30
+TIER_HOT_MIN = 60
+
+# A direct "onboard my club" enquiry pins a prospect to this flat score/HOT for
+# the super-admin-configured window (platform_settings.get_direct_enquiry_hot_days).
+DIRECT_ENQUIRY_SCORE = 80
+
+# Meta / paid-click detection for a usage_events row: the client tags an fbclid
+# landing as click_source 'facebook' and an igshid landing as 'instagram'; the
+# path check is a fallback for rows captured before/without that tagging.
+_META_CLICK = ("(ue.click_source IN ('facebook','instagram') "
+               "OR ue.path ~* '(fbclid|igshid)=')")
+
+
+def _tier_for(score: float) -> str:
+    return ("COLD" if score < TIER_WARM_MIN
+            else "WARM" if score < TIER_HOT_MIN else "HOT")
+
+
 logger = logging.getLogger(__name__)
 
 _ROLE_MAP = [
@@ -186,26 +243,21 @@ def _arr(module_keys) -> float:
     return total - {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}.get(priced, 146)
 
 
-def _recency_pts(last, full=20):
-    """Recency points from a last-touch timestamp: decays with age, a small floor
-    for any touch ever, 0 if never.
-
-    ``full`` was 40 — sitting almost exactly on the Hot cutoff (45) on its own, so
-    a single page view this week already read Hot regardless of depth. Halved to
-    20 so recency alone can't cross into Hot; real frequency (repeat visits, more
-    than a couple of page views) or an explicit intent signal (trial request,
-    contact form) has to contribute too. A few pages read this week now lands
-    Warm, not Hot — sustained/repeat browsing still gets there via freq_pts."""
+def _recency_pts(last):
+    """Recency points from a last-touch timestamp, per the RECENCY tier table:
+    a small floor for any touch ever, 0 if never. Deliberately modest so recency
+    alone can't reach HOT — real frequency (repeat visits) or an explicit intent
+    signal (trial request, contact form) has to carry a club over the line."""
     if not last:
         return 0
     days = (datetime.datetime.now(datetime.timezone.utc) - last).days
     if days <= 7:
-        return full
+        return RECENCY["d7"]
     if days <= 30:
-        return int(full * 0.7)
+        return RECENCY["d30"]
     if days <= 90:
-        return int(full * 0.35)
-    return int(full * 0.1)
+        return RECENCY["d90"]
+    return RECENCY["older"]
 
 
 async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
@@ -319,13 +371,30 @@ async def _engagement(session, club: MarketingClub,
                COUNT(DISTINCT ue.visitor_id)
                  FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
                COUNT(*) FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS events_30d,
+               -- Organic page views / API calls (everything that is NOT a paid
+               -- ad-click landing), age-decayed and summed, bounded to 90 days.
                COALESCE(SUM(CASE
-                   WHEN ue.created_at > NOW() - INTERVAL '7 days' THEN 3.0
-                   WHEN ue.created_at > NOW() - INTERVAL '14 days' THEN 2.0
-                   WHEN ue.created_at > NOW() - INTERVAL '21 days' THEN 1.0
-                   WHEN ue.created_at > NOW() - INTERVAL '28 days' THEN 0.5
+                   WHEN {_META_CLICK} THEN 0.0
+                   WHEN ue.created_at > NOW() - INTERVAL '7 days' THEN {WEB_DECAY['d7']}
+                   WHEN ue.created_at > NOW() - INTERVAL '14 days' THEN {WEB_DECAY['d14']}
+                   WHEN ue.created_at > NOW() - INTERVAL '21 days' THEN {WEB_DECAY['d21']}
+                   WHEN ue.created_at > NOW() - INTERVAL '28 days' THEN {WEB_DECAY['d28']}
+                   WHEN ue.created_at > NOW() - INTERVAL '90 days' THEN {WEB_DECAY['d90']}
                    ELSE 0.0
-               END), 0.0)::float AS web_decay_pts
+               END), 0.0)::float AS web_decay_pts,
+               -- Meta / paid ad-click landings, on the richer AD_DECAY curve.
+               COALESCE(SUM(CASE
+                   WHEN NOT {_META_CLICK} THEN 0.0
+                   WHEN ue.created_at > NOW() - INTERVAL '7 days' THEN {AD_DECAY['d7']}
+                   WHEN ue.created_at > NOW() - INTERVAL '14 days' THEN {AD_DECAY['d14']}
+                   WHEN ue.created_at > NOW() - INTERVAL '21 days' THEN {AD_DECAY['d21']}
+                   WHEN ue.created_at > NOW() - INTERVAL '28 days' THEN {AD_DECAY['d28']}
+                   WHEN ue.created_at > NOW() - INTERVAL '90 days' THEN {AD_DECAY['d90']}
+                   ELSE 0.0
+               END), 0.0)::float AS ad_decay_pts,
+               -- All-time count of matched Meta/paid ad-click landings (for the
+               -- diagnostic breakdown and the in-sales-cycle signal).
+               COUNT(*) FILTER (WHERE {_META_CLICK}) AS ad_clicks
         FROM usage_events ue
         WHERE (
                 -- UTM-based attribution is for anonymous/prospect marketing traffic
@@ -359,6 +428,8 @@ async def _engagement(session, club: MarketingClub,
     sessions = (web[1] or 0) if web else 0
     events_30d = (web[2] or 0) if web else 0
     web_decay_pts = float(web[3] or 0.0) if web else 0.0
+    ad_decay_pts = float(web[4] or 0.0) if web else 0.0
+    ad_clicks = (web[5] or 0) if web else 0
 
     # Email engagement (email_events opens/clicks) for this club's contact emails, or
     # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
@@ -372,19 +443,21 @@ async def _engagement(session, club: MarketingClub,
     # "Open and click tracking" enabled on the configuration set — if that's off,
     # email_events never gets open/click rows and this is always 0 (see
     # app/scripts/email_opens.py to check).
-    em = (await session.execute(text("""
+    em = (await session.execute(text(f"""
         SELECT MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
                                 AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
                COALESCE(SUM(CASE
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN 16.0
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN 12.0
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN 8.0
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN 4.0
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN 8.0
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN 6.0
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN 4.0
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN 2.0
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_CLICK_DECAY['d7']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_CLICK_DECAY['d14']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_CLICK_DECAY['d21']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_CLICK_DECAY['d28']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_CLICK_DECAY['d90']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_OPEN_DECAY['d7']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_OPEN_DECAY['d14']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_OPEN_DECAY['d21']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_OPEN_DECAY['d28']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_OPEN_DECAY['d90']}
                    ELSE 0.0
                END), 0.0)::float AS email_decay_pts
         FROM email_events
@@ -436,36 +509,47 @@ async def _engagement(session, club: MarketingClub,
     def _saturate(raw: float, cap: float, half: float) -> float:
         return cap * raw / (raw + half) if raw > 0 else 0.0
 
-    reach_pts = _saturate(sessions * 6, cap=24, half=24)
-    depth_pts = _saturate(email_decay_pts + web_decay_pts, cap=40, half=40)
+    reach_pts = _saturate(sessions * REACH_MULT, cap=REACH_CAP, half=REACH_HALF)
+    # Depth folds all three per-event decay sums together: organic web views,
+    # email opens/clicks, and (weighted richer) Meta/paid ad-click landings.
+    depth_pts = _saturate(email_decay_pts + web_decay_pts + ad_decay_pts,
+                          cap=DEPTH_CAP, half=DEPTH_HALF)
     freq_pts = reach_pts + depth_pts
     recency = _recency_pts(last_touch)
 
-    # Tier bands: Cold < 30, Warm 30-45, Hot > 45 (open-ended at the top).
+    # A prospect whose org was born from a paid ad (self_serve_ad). Only meaningful
+    # for a linked org; a bare directory row has no signup_source.
+    ad_signup = (not is_customer and org is not None
+                 and getattr(org, "signup_source", None) == "self_serve_ad")
+
+    # Tier bands: see TIER_WARM_MIN / TIER_HOT_MIN.
     trial_depth = None
     if is_customer:
         # Account health + expansion. A paying account starts engaged, gains for
         # recent product use, and for an active expansion opportunity; floored at Warm.
-        score = 45 + int(recency * 0.5) + min(int(freq_pts * 0.5), 20)
+        score = CUSTOMER_BASE + int(recency * 0.5) + min(int(freq_pts * 0.5), 20)
         if upsell:
-            score += 15
+            score += CUSTOMER_UPSELL_BONUS
         if onboarding_count:
-            score += 10   # e.g. asking to onboard a second team/ground
+            score += CUSTOMER_ONBOARDING_BONUS   # e.g. asking to onboard a second team/ground
         score = min(score, 100)
-        tier = "HOT" if (score > 45 or upsell) else "WARM"
+        tier = "HOT" if (score > TIER_HOT_MIN or upsell) else "WARM"
     else:
         # Prospect lead heat: recency + frequency of any touch + buying intent.
         score = recency + freq_pts
         if club.requested_trial_modules:
-            score += 12
+            score += BONUS_REQUESTED_TRIAL
         if (club.demo_status or "") == "in_trial":
-            score += 8
+            score += BONUS_IN_TRIAL
+        if ad_signup:
+            # Converted a paid ad click all the way to a self-serve registration.
+            score += BONUS_AD_SIGNUP
         if onboarding_count:
             # A direct "onboard my club" enquiry is the strongest signal a prospect
             # can give — heavier than the admin-set requested_trial_modules flag.
-            score += 20
+            score += BONUS_ONBOARDING
         score = min(score, 100)
-        tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
+        tier = _tier_for(score)
 
         # Trial-depth floor: a self-serve/onboarded prospect's own product-setup
         # effort (registration, historical import, merges, module trial usage —
@@ -479,7 +563,7 @@ async def _engagement(session, club: MarketingClub,
             trial_depth = await trial_engagement.trial_depth_score(session, org)
             if trial_depth["score"] > score:
                 score = trial_depth["score"]
-                tier = "COLD" if score < 30 else "WARM" if score <= 45 else "HOT"
+                tier = _tier_for(score)
 
     # freq_pts sums fractional per-event decay points (the 21-28 day web-view tier
     # is worth 0.5), so score can come out fractional here — round once, at the
@@ -488,8 +572,9 @@ async def _engagement(session, club: MarketingClub,
     score = int(round(score))
 
     # A direct "onboard my club" enquiry (Contact page or the quick CTA modal)
-    # holds a prospect at a flat Hot 100 for a super-admin-configured number of
-    # days (Club Directory > General Settings > Marketing) — not just the
+    # holds a prospect at a flat Hot DIRECT_ENQUIRY_SCORE for a super-admin-
+    # configured number of days (Club Directory > General Settings > Marketing)
+    # — not just the
     # one-off push push_onboarding_enquiry() makes the moment the enquiry
     # lands, but on every later recompute too (the nightly refresh, a
     # BetterComms send, a manual "Refresh Twenty scores"), so it doesn't quietly
@@ -504,7 +589,7 @@ async def _engagement(session, club: MarketingClub,
         and (datetime.datetime.now(datetime.timezone.utc) - onboarding_last).days <= hot_days
     )
     if direct_enquiry_hot:
-        score, tier = 100, "HOT"
+        score, tier = DIRECT_ENQUIRY_SCORE, "HOT"
 
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # RECENT engagement (so it's a deal to work, not just a name on a list). Uses
@@ -513,7 +598,7 @@ async def _engagement(session, club: MarketingClub,
     # long after its score has decayed back to Cold.
     in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
-        or onboarding_count or sessions or eng_30d
+        or onboarding_count or sessions or eng_30d or ad_signup
         or (trial_depth and trial_depth["score"] >= 70))
 
     fields = {
@@ -536,6 +621,9 @@ async def _engagement(session, club: MarketingClub,
         "_recencyPts": recency,
         "_emailDecayPts": round(email_decay_pts, 1),
         "_webDecayPts": round(web_decay_pts, 1),
+        "_adDecayPts": round(ad_decay_pts, 1),
+        "_adClicks": ad_clicks,
+        "_adSignup": ad_signup,
         "_freqPts": round(freq_pts, 1),
         "_directEnquiryHot": direct_enquiry_hot,
         "_trialDepth": trial_depth,

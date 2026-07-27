@@ -45,12 +45,12 @@ from app.models.db import ClubMembership, OnboardingWizardState, Organisation
 SUPER_ADMIN_ACTOR_FRACTION = 0.3
 
 REGISTRATION_CLUB_ADMIN = 70
-REGISTRATION_SUPER_ADMIN = 55
-MERGE_BONUS = 20
-IMPORT_STATS_BONUS = 30
-MODULE_GROUP_BONUS = 5
+REGISTRATION_SUPER_ADMIN = 40
+MERGE_BONUS = 10
+IMPORT_STATS_BONUS = 15
+MODULE_GROUP_BONUS = 2
 MODULE_GROUP_CAP = 15
-ADMIN_POLISH_BONUS = 5
+ADMIN_POLISH_BONUS = 2
 
 # onboarding_wizard.py GROUPS step keys, grouped the same way the wizard
 # itself groups them, for the "actively used a paid module during trial"

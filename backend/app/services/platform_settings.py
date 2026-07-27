@@ -46,7 +46,7 @@ _BOOL_KEYS = {
 # twenty_sync._engagement. A plain in-repo default (not an env var): this is a
 # commercial/marketing parameter a super admin tunes from General Settings, not
 # server configuration.
-DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 30
+DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 60
 
 # ─── SES send-rate settings (super-admin managed, migration 120 blob) ─────────
 # Two live values a super admin controls from the BetterComms limits page:
