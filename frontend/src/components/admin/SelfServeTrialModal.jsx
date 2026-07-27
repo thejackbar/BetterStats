@@ -68,7 +68,7 @@ function DuplicateClubNotice({ name, slug, adminLabel }) {
  * Controlled — render only while open:
  *   {open && <SelfServeTrialModal defaultTrialDays={14} onClose={() => setOpen(false)} />}
  */
-export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicMode = false }) {
+export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicMode = false, initialClub = null }) {
   const closeBtnRef = useRef(null)
   const previouslyFocused = useRef(null)
   const [step, setStep] = useState('club')
@@ -225,6 +225,18 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     setQuery('')
     setResults([])
   }
+
+  // Pre-seed the club when the caller (the /trial search-first hero) already
+  // picked one, so the visitor doesn't re-search inside the wizard. Only
+  // not-yet-registered clubs are ever passed in, so this goes straight to the
+  // prepare/preview path. Runs once on mount.
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (seededRef.current || !initialClub) return
+    seededRef.current = true
+    selectClub(initialClub)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ─── Step 2: Primary Club Admin details (Phase 4) ───────────────────────
   // Password isn't collected here — deliberately deferred to immediately
