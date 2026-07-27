@@ -46,7 +46,9 @@ const orgName = (o) => o.name || o.shortName || o.organisationName || o.id || ''
 // back to an initials badge otherwise — never a broken image.
 function ClubLogo({ club, size = 'w-10 h-10' }) {
   const [ok, setOk] = useState(true)
-  const src = club.logoUrl
+  // Grassroots club search returns the crest under `logoURL` (capital URL);
+  // keep the other casings as fallbacks for any other result shape.
+  const src = club.logoURL || club.logoUrl
     || (typeof club.logo === 'string' ? club.logo : club.logo?.url)
     || club.imageUrl || club.logo_url
   const initials = orgName(club).split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
