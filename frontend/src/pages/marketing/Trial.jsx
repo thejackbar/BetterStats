@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -12,12 +12,13 @@ import { ModuleWordmark } from '../../components/ModuleLockup'
 import { getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
 
-// The ad-campaign landing page. Search-first: the visitor looks up their club,
-// and one of three things happens — it's already on BetterCricket (link to the
-// page), it's not (start the self-serve trial pre-seeded with that club), or
-// they'd rather we get in touch (a pre-filled enquiry into the same onboarding
-// pipeline as the Contact form). A search box converts better than a cold
-// "start trial" button, and even a request-for-info is a strong interest signal.
+// The ad-campaign landing page. Search-first: the visitor looks up their club
+// and CLICKS it (a real selection signal we can record, unlike a half-typed
+// query they abandon). Clicking either takes them to their existing page (if
+// already on BetterCricket) or opens a modal to Set Up Club or Request Access.
+// The "request access" path feeds the same onboarding pipeline as the Contact
+// form. A product screenshot sits above the search so the offer is concrete,
+// with the search box kept within reach on every device.
 
 const TRIAL_JSONLD = {
   '@context': 'https://schema.org',
@@ -26,8 +27,7 @@ const TRIAL_JSONLD = {
   url: 'https://betterat.cricket/trial',
   description:
     'Search for your cricket club to see if it’s on BetterCricket. If not, start '
-    + 'a free trial of every module, or ask us for more information. No credit '
-    + 'card and no sales call.',
+    + 'a free trial of every module, or request access. No credit card and no sales call.',
 }
 
 const STEPS = [
@@ -47,7 +47,33 @@ const FAQS = [
 const FIELD_CLS = 'w-full bg-pb-surface2 text-pb-text border pb-hairline rounded-lg px-4 py-3 text-base outline-none focus:border-pb-accent'
 const orgName = (o) => o.name || o.shortName || o.organisationName || o.id || ''
 
-// The pre-filled "just want info" form — club name is already known from the
+// Club logo, same idea as elsewhere in BetterCricket: show the club's crest
+// when we have one (PlayHQ search results carry it for many clubs), and fall
+// back to an initials badge otherwise — never a broken image.
+function ClubLogo({ club, size = 'w-9 h-9' }) {
+  const [ok, setOk] = useState(true)
+  const src = club.logoUrl
+    || (typeof club.logo === 'string' ? club.logo : club.logo?.url)
+    || club.imageUrl || club.logo_url
+  const initials = orgName(club).split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
+  if (src && ok) {
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setOk(false)}
+        className={`${size} rounded-lg object-contain bg-pb-surface2 shrink-0`}
+      />
+    )
+  }
+  return (
+    <span className={`${size} rounded-lg bg-pb-surface2 border pb-hairline shrink-0 flex items-center justify-center font-display font-bold text-[11px] text-pb-dim`}>
+      {initials || '\u{1F3CF}'}
+    </span>
+  )
+}
+
+// The pre-filled "request access" form — club name is already known from the
 // search, so it only asks for a name and email, then posts into the same
 // onboarding-request pipeline the Contact form uses (super-admin Onboarding
 // list + a Hot lead into the CRM).
@@ -72,8 +98,6 @@ function RequestInfoForm({ club, onDone }) {
         visitorId: getVisitorId(),
         meta,
       })
-      // Browser-side Lead, deduped with the server-side one /public/contact
-      // fires (shared eventId) — same pattern as the Contact form.
       if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
         window.fbq('track', 'Lead', {
           content_name: 'Trial info request',
@@ -89,10 +113,7 @@ function RequestInfoForm({ club, onDone }) {
   }
 
   return (
-    <form onSubmit={submit} className="mt-3 space-y-2">
-      <p className="font-mono text-[11px] text-pb-faint">
-        We’ll fill in {orgName(club)} — just add your details and we’ll be in touch.
-      </p>
+    <form onSubmit={submit} className="mt-2 space-y-2">
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -119,21 +140,96 @@ function RequestInfoForm({ club, onDone }) {
   )
 }
 
+// Shown when a not-yet-registered club is clicked: choose Set Up Club (the
+// self-serve trial wizard, pre-seeded) or Request Access (the enquiry form).
+function ClubActionModal({ club, onSetUp, onClose }) {
+  const [mode, setMode] = useState('choose')   // choose | request | done
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70" onClick={onClose}>
+      <div className="w-full max-w-md pb-card p-6 relative bg-pb-bg" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-3 right-3 text-pb-faint hover:text-pb-text text-lg leading-none"
+        >
+          ✕
+        </button>
+        <div className="flex items-center gap-3 mb-4">
+          <ClubLogo club={club} size="w-11 h-11" />
+          <h3 className="font-display font-bold text-lg leading-tight">{orgName(club)}</h3>
+        </div>
+
+        {mode === 'done' ? (
+          <p className="font-mono text-[12px] text-emerald-300">
+            Thanks — we&rsquo;ve got your request and we&rsquo;ll be in touch shortly.
+          </p>
+        ) : mode === 'request' ? (
+          <>
+            <p className="text-sm text-pb-dim mb-1">
+              Request access and we&rsquo;ll help you get {orgName(club)} onto BetterCricket.
+            </p>
+            <RequestInfoForm club={club} onDone={() => setMode('done')} />
+            <button
+              onClick={() => setMode('choose')}
+              className="mt-3 font-mono text-[11px] text-pb-faint underline hover:text-pb-text"
+            >
+              ← Back
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-pb-dim mb-4">
+              Get {orgName(club)} onto BetterCricket. Set it up yourself with a free trial, or request
+              access and we&rsquo;ll help you get started.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => onSetUp(club)}
+                className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                Set Up Club
+              </button>
+              <button
+                onClick={() => setMode('request')}
+                className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
+              >
+                Request Access
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Trial() {
   usePageMeta({
     title: 'Start your club’s free trial | BetterCricket',
     description:
       'Search for your cricket club to see if it’s on BetterCricket. If not, start '
-      + 'a free trial of every module, or ask us for more information. No credit '
-      + 'card and no sales call.',
+      + 'a free trial of every module, or request access. No credit card and no sales call.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/trial',
     jsonLd: TRIAL_JSONLD,
   })
 
+  const navigate = useNavigate()
+
   const [status, setStatus] = useState(null)   // null = loading, false = unavailable
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardClub, setWizardClub] = useState(null)
+  const [actionClub, setActionClub] = useState(null)   // club whose choose-modal is open
 
   // Search-first hero state.
   const [query, setQuery] = useState('')
@@ -141,8 +237,6 @@ export default function Trial() {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [searched, setSearched] = useState(false)
-  const [infoClubId, setInfoClubId] = useState(null)   // which result's info form is open
-  const [doneClubId, setDoneClubId] = useState(null)   // which result's request was sent
   const debounceRef = useRef(null)
 
   useEffect(() => {
@@ -172,7 +266,7 @@ export default function Trial() {
 
   // Debounced club search (min 2 chars), hitting the same public search the
   // wizard uses — results carry `already_registered` + the existing club's
-  // public-page slug, which is what drives the three outcomes below.
+  // public-page slug (and often a logo), which drive the click behaviour below.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const q = query.trim()
@@ -206,7 +300,23 @@ export default function Trial() {
   // the single switch. Flipping it on makes the page AND signup live, no deploy.
   if (status === false) return <Navigate to="/contact" replace />
 
-  const setUpClub = (club) => {
+  // Clicking a club is a real, trackable selection (unlike a half-typed query
+  // someone abandons). An already-registered club goes straight to its page; a
+  // new one records the pick (so a prospect who then backs out of the modal is
+  // still captured) and opens the Set Up / Request Access choice.
+  const handleClubClick = (club) => {
+    if (club.already_registered && club.already_registered_slug) {
+      navigate(`/${club.already_registered_slug}`)
+      return
+    }
+    api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
+      name: orgName(club), org_id: club.id,
+    }).catch(() => {})
+    setActionClub(club)
+  }
+
+  const onSetUp = (club) => {
+    setActionClub(null)
     setWizardClub(club)
     setWizardOpen(true)
   }
@@ -221,19 +331,29 @@ export default function Trial() {
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
 
-        {/* Hero — search-first */}
-        <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
+        {/* Hero — screenshot + search, kept tight so the search box stays in
+            reach on phones (the image is capped in viewport height). */}
+        <section className="relative pt-24 pb-14 px-4 sm:px-6 lg:px-10 overflow-hidden">
           <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
           <div className="max-w-[760px] mx-auto relative text-center">
-            <p className="pill mb-6 inline-flex"><span className="dot" />No credit card · No sales call</p>
-            <h1 className="font-display font-bold text-[40px] sm:text-[56px] lg:text-[68px] tracking-tight leading-[0.95] mb-6">
+            <p className="pill mb-4 inline-flex"><span className="dot" />No credit card · No sales call</p>
+            <h1 className="font-display font-bold text-[30px] sm:text-[42px] lg:text-[54px] tracking-tight leading-[0.98] mb-4">
               Your club&rsquo;s entire history, <span className="gradient-text">live in minutes.</span>
             </h1>
-            <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed mb-8">
-              Search for your club to get started. If it&rsquo;s already on BetterCricket we&rsquo;ll
-              take you there. If not, set up your {trialDays}-day free trial in a few minutes, or ask
-              us for more information.
+            <p className="text-base sm:text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed mb-5">
+              Find your club to get started — free {trialDays}-day trial, no credit card.
             </p>
+
+            {/* A real set-up club, so the offer is concrete. Height-capped so the
+                search below never drops off the first screen on any device. */}
+            <div className="mb-6 mx-auto max-w-xl">
+              <img
+                src="/marketing/front-page-profile.jpg"
+                alt="A club’s player profile on BetterCricket"
+                loading="eager"
+                className="w-full rounded-xl border pb-hairline shadow-lg object-contain max-h-[26vh] sm:max-h-[32vh]"
+              />
+            </div>
 
             {status === null ? (
               <p className="font-mono text-xs text-pb-faint">Loading…</p>
@@ -241,7 +361,7 @@ export default function Trial() {
               <div className="max-w-xl mx-auto text-left">
                 <input
                   value={query}
-                  onChange={(e) => { setQuery(e.target.value); setInfoClubId(null); setDoneClubId(null) }}
+                  onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search for your club…"
                   aria-label="Search for your club"
                   autoFocus
@@ -253,58 +373,23 @@ export default function Trial() {
                   {searchError && <p className="text-xs text-red-400 px-1">{searchError}</p>}
 
                   {results.map((club) => (
-                    <div key={club.id || orgName(club)} className="pb-card p-4">
-                      {club.already_registered ? (
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div>
-                            <p className="font-display font-semibold text-sm">{orgName(club)}</p>
-                            <p className="font-mono text-[11px] text-emerald-300 mt-0.5">✓ Already on BetterCricket</p>
-                          </div>
-                          {club.already_registered_slug ? (
-                            <a
-                              href={`/${club.already_registered_slug}`}
-                              className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm border border-pb-accent text-pb-text hover:bg-pb-accent/10 transition"
-                            >
-                              View club page →
-                            </a>
-                          ) : (
-                            <span className="font-mono text-[11px] text-pb-faint">Contact your club admin to get access</span>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          <p className="font-display font-semibold text-sm">{orgName(club)}</p>
-                          {doneClubId === club.id ? (
-                            <p className="font-mono text-[11px] text-emerald-300 mt-1">
-                              Thanks — we&rsquo;ve got your request and we&rsquo;ll be in touch shortly.
-                            </p>
-                          ) : infoClubId === club.id ? (
-                            <RequestInfoForm
-                              club={club}
-                              onDone={() => { setDoneClubId(club.id); setInfoClubId(null) }}
-                            />
-                          ) : (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              <button
-                                type="button"
-                                onClick={() => setUpClub(club)}
-                                className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
-                                style={{ background: 'var(--pb-accent)' }}
-                              >
-                                Set up this club
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setInfoClubId(club.id)}
-                                className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
-                              >
-                                Request Access
-                              </button>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    <button
+                      key={club.id || orgName(club)}
+                      type="button"
+                      onClick={() => handleClubClick(club)}
+                      className="w-full pb-card p-3 flex items-center gap-3 text-left hover:border-accent/40 transition"
+                    >
+                      <ClubLogo club={club} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-display font-semibold text-sm truncate">{orgName(club)}</span>
+                        {club.already_registered ? (
+                          <span className="block font-mono text-[10px] text-emerald-300 mt-0.5">✓ Already on BetterCricket — view page</span>
+                        ) : (
+                          <span className="block font-mono text-[10px] text-pb-faint mt-0.5">Set up or request access</span>
+                        )}
+                      </span>
+                      <span className="text-pb-faint shrink-0">→</span>
+                    </button>
                   ))}
 
                   {searched && !searching && results.length === 0 && !searchError && (
@@ -411,6 +496,14 @@ export default function Trial() {
         </section>
       </div>
       <MarketingFooter />
+
+      {actionClub && (
+        <ClubActionModal
+          club={actionClub}
+          onSetUp={onSetUp}
+          onClose={() => setActionClub(null)}
+        />
+      )}
 
       {wizardOpen && (
         <SelfServeTrialModal
