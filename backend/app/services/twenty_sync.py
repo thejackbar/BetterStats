@@ -376,7 +376,14 @@ async def _engagement(session, club: MarketingClub,
     # (many genuinely-different clubs were converging on the same capped value).
     web = (await session.execute(text(f"""
         SELECT MAX(ue.created_at) AS last_seen,
-               COUNT(DISTINCT ue.visitor_id)
+               -- Distinct visitors deduped by IP FIRST, then visitor_id. The
+               -- client-side visitor_id can churn (a bot/crawler or a privacy
+               -- browser gets a fresh id per page view), so counting raw
+               -- visitor_id inflated reach — e.g. 18 "visitors" from 2 IPs.
+               -- ip_hash is the robust unit and matches the Website analytics
+               -- panel's "unique IPs"; visitor_id is only the fallback when a
+               -- row has no ip_hash.
+               COUNT(DISTINCT COALESCE(ue.ip_hash, ue.visitor_id::text))
                  FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
                COUNT(*) FILTER (WHERE ue.created_at > NOW() - INTERVAL '30 days') AS events_30d,
                -- Organic page views / API calls (everything that is NOT a paid

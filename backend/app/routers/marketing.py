@@ -818,9 +818,9 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
 
     # Engagement signals (the activity tally).
     add("Distinct visitors (reach)", reach_pts, "engagement",
-        f"{sessions} distinct visitor(s) in 30 days x {_RPV} each. Counts visits to this "
-        f"club's own pages (org/slug) as well as outreach-link clicks — so this can be "
-        f"non-zero while the outreach-only 'Website analytics' below shows nothing.")
+        f"{sessions} distinct visitor(s) in 30 days (deduped by IP, matching 'unique IPs' "
+        f"below) x {_RPV} each. Resolves each visit to this one club, and counts its own "
+        f"pages (org/slug) as well as outreach-link clicks.")
     add("Web page-view volume", web_c, "engagement",
         "Recent page views to this club's pages, age-weighted (older counts less).")
     add("Email clicks", clicks_c, "engagement",
