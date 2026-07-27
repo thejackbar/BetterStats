@@ -95,23 +95,30 @@ TRIGGERS: dict = {
 # configurable, so turning this feature on changes nothing until a super
 # admin actually edits a rule. Only ever applied once (see seed_defaults) —
 # a super admin's later edits/deletes are never overwritten by a redeploy.
+# Stage-movement policy (per direct instruction):
+#   - Target is where a club AUTO-ENTERS the moment its engagement score > 0
+#     (crm.ensure_pipeline_entry) — that's a stage ENTRY, not a rule here.
+#   - The score NEVER auto-advances a deal's stage — there is deliberately no
+#     ``engagement_score`` rule. A club sits at Target until a real event or a
+#     super admin moves it.
+#   - Contacted and Engaged are reached by a super admin BY HAND, after an
+#     actual conversation — so no rule targets them.
+#   - The only automatic FORWARD move is to Trial, and only from a genuine
+#     "starting" signal: a contact-form enquiry, a club requesting a trial, a
+#     super admin starting one, or a self-serve signup.
 SEED_RULES = [
-    {"trigger": "enquiry_count", "label": "First Contact-Us enquiry",
-     "params": {"count": 1}, "target_stage_key": "contacted", "force": False},
-    {"trigger": "enquiry_count", "label": "Second Contact-Us enquiry",
-     "params": {"count": 2}, "target_stage_key": "engaged", "force": False},
-    {"trigger": "engagement_score", "label": "Engagement score over 70",
-     "params": {"threshold": 70}, "target_stage_key": "engaged", "force": False},
+    {"trigger": "enquiry_count", "label": "Contact-Us enquiry",
+     "params": {"count": 1}, "target_stage_key": "trial", "force": False},
     {"trigger": "trial_requested", "label": "Trial requested",
      "params": {}, "target_stage_key": "trial", "force": False},
     {"trigger": "trial_started", "label": "Trial started",
      "params": {}, "target_stage_key": "trial", "force": False},
+    {"trigger": "self_serve_signup", "label": "Self-serve trial signup",
+     "params": {}, "target_stage_key": "trial", "force": True},
     {"trigger": "subscription_won", "label": "Subscription won",
      "params": {}, "target_stage_key": "won", "force": False},
     {"trigger": "subscription_cancelled", "label": "Subscription cancelled",
      "params": {}, "target_stage_key": "lost_dormant", "force": False},
-    {"trigger": "self_serve_signup", "label": "Self-serve trial signup",
-     "params": {}, "target_stage_key": "trial", "force": True},
 ]
 
 
