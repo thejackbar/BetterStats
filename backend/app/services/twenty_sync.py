@@ -405,7 +405,12 @@ async def _engagement(session, club: MarketingClub,
                 -- otherwise inflate its score. The org_id/org_slug branches below
                 -- are deliberately NOT guarded the same way: for an actual
                 -- customer, their own staff logging into their own club's admin
-                -- IS the "product use" signal this score means to capture.
+                -- IS the "product use" signal this score means to capture (an
+                -- admin doing work in the backend is real engagement, scored at
+                -- the ordinary organic page-view rate). BetterCricket Super Admins
+                -- are the exception — a staff member "acting as" a club is not the
+                -- club's own interest — so they're excluded below regardless of
+                -- which branch matched.
                 (CAST(:utm AS text) IS NOT NULL
                  AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
                       OR {_PATH_CODE} = CAST(:utm AS text))
@@ -423,6 +428,15 @@ async def _engagement(session, club: MarketingClub,
                      AND split_part(ue.path, '?', 1) !~* '^/admin'
                 )
               )
+          -- Never credit a BetterCricket Super Admin's activity to a club (a
+          -- staff member acting-as inflates the club's own engagement). A
+          -- super admin's home membership role stays 'super_admin' regardless
+          -- of which club they're currently acting as. Anonymous rows
+          -- (user_id NULL) find no match here and are kept.
+          AND NOT EXISTS (
+                SELECT 1 FROM club_memberships cm
+                WHERE cm.user_id = ue.user_id AND cm.role = 'super_admin'
+          )
     """), {"utm": utm, "org": org_id, "org_slug": org_slug, "cid": str(club.id)})).first()
     last_web = web[0] if web else None
     sessions = (web[1] or 0) if web else 0
