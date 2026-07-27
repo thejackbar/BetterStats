@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
@@ -48,6 +48,28 @@ function CrmDashboard({ deals, stages }) {
     return sortModuleKeys(Object.keys(counts)).map(k => ({ name: moduleLabel(k), count: counts[k] }))
   }, [deals])
 
+  // Engagement-score distribution across the loaded deals, in bins of 10. HOT
+  // starts at 60 (twenty_sync.TIER_HOT_MIN), so bars from that bin up are tinted
+  // the accent and the rest muted — makes "how many are genuinely hot vs bunched
+  // in the middle" readable at a glance (the whole reason this chart exists).
+  const HOT_MIN = 60
+  const engagementData = useMemo(() => {
+    const bins = Array.from({ length: 10 }, (_, i) => ({
+      name: i === 9 ? '90-100' : `${i * 10}-${i * 10 + 9}`, lo: i * 10, count: 0,
+    }))
+    let scored = 0
+    for (const d of deals) {
+      const s = d.engagement_score
+      if (s == null) continue
+      scored++
+      let idx = Math.floor(s / 10)
+      if (idx > 9) idx = 9
+      if (idx < 0) idx = 0
+      bins[idx].count++
+    }
+    return { bins, scored }
+  }, [deals])
+
   const trialStats = useMemo(() => {
     const trialOnboarded = deals.filter(d => ['self_serve_trial', 'super_admin_trial'].includes(d.onboarding_method))
     const won = trialOnboarded.filter(d => d.status === 'won')
@@ -61,6 +83,27 @@ function CrmDashboard({ deals, stages }) {
 
   return (
     <div className="space-y-5">
+      <div className="pb-card px-4 py-3">
+        <h3 className="font-display font-bold text-[13px] mb-2">Engagement score distribution</h3>
+        <p className="text-[12px] text-pb-faint mb-2">
+          How the {engagementData.scored} scored deal{engagementData.scored === 1 ? '' : 's'} spread across 0-100,
+          in bins of 10. Bars at {HOT_MIN}+ (tinted) are HOT; the rest are COLD/WARM.
+        </p>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={engagementData.bins}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+            <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={48} />
+            <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+            <Bar dataKey="count" name="Deals" radius={[4, 4, 0, 0]}>
+              {engagementData.bins.map((b) => (
+                <Cell key={b.name} fill={b.lo >= HOT_MIN ? 'var(--pb-accent, #16c784)' : 'var(--pb-faint, #64748b)'} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
       <div className="pb-card px-4 py-3">
         <h3 className="font-display font-bold text-[13px] mb-2">Clubs by stage</h3>
         <ResponsiveContainer width="100%" height={220}>
