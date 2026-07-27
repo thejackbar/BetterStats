@@ -872,6 +872,8 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ utm }) }),
   mktClubVisits: (clubId) =>
     request(`/club-admin/marketing/clubs/${clubId}/visits`),
+  mktClubEngagement: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/engagement-breakdown`),
   mktClubLoginIntent: (clubId) =>
     request(`/club-admin/marketing/clubs/${clubId}/login-intent`),
   mktClubBoundary: (clubId) =>

@@ -732,6 +732,87 @@ async def club_visits(club_id: str, db: AsyncSession = Depends(get_db),
     return await cd.club_visit_detail(db, club.id)
 
 
+@router.get("/clubs/{club_id}/engagement-breakdown")
+async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get_db),
+                                    _=Depends(require_super_admin)):
+    """Explain a club's engagement score: which signals produced it (recency,
+    web page views, email opens vs clicks, Meta ad clicks) and which flags fired
+    (a direct enquiry, a trial request/in-trial, an ad-sourced signup, product
+    setup depth). Recomputes _engagement live for the breakdown fields, then rolls
+    back — read-only, nothing is persisted. Powers the deal-detail panel so a
+    score like 70 with no web activity is self-explaining (e.g. the trial-depth
+    registration floor) instead of a mystery number."""
+    from sqlalchemy.orm import selectinload
+    from app.models.db import Organisation
+
+    club = await db.get(MarketingClub, club_id)
+    if club is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    org = None
+    if club.existing_org_id:
+        org = await db.get(Organisation, club.existing_org_id,
+                           options=[selectinload(Organisation.module_subscriptions)])
+    eng = await twenty_sync._engagement(db, club, org)
+    await db.rollback()  # read-only: don't persist this recompute
+
+    # Build a plain-English list of contributions, biggest first, so the panel
+    # can just render them in order.
+    contributions = []
+    def add(label, points, detail=""):
+        if points:
+            contributions.append({"label": label, "points": round(float(points), 1), "detail": detail})
+
+    recency = eng.get("_recencyPts") or 0
+    web = eng.get("_webDecayPts") or 0
+    email = eng.get("_emailDecayPts") or 0
+    ad = eng.get("_adDecayPts") or 0
+    td = eng.get("_trialDepth") or None
+    is_linked = bool(club.existing_org_id)
+
+    if eng.get("_directEnquiryHot"):
+        contributions.append({"label": "Direct 'onboard my club' enquiry (recent)",
+                              "points": eng.get("engagementScore"),
+                              "detail": "Pinned to a flat Hot score for a set window after the enquiry."})
+    else:
+        add("Recency of last activity", recency, "Most recent web/email/enquiry touch, decaying over time.")
+        add("Web page views", web, f"{eng.get('sessions30d', 0)} distinct visitor(s) in 30 days.")
+        add("Email opens & clicks", email, f"{eng.get('emailEngaged30d', 0)} open/click(s) in 30 days.")
+        add("Meta ad clicks", ad, f"{eng.get('_adClicks', 0)} ad-click landing(s).")
+        if eng.get("_onboardingRequested"):
+            add("Onboarding enquiry bonus", twenty_sync.BONUS_ONBOARDING)
+        if club.requested_trial_modules:
+            add("Requested a trial", twenty_sync.BONUS_REQUESTED_TRIAL)
+        if (club.demo_status or "") == "in_trial":
+            add("Currently in a trial", twenty_sync.BONUS_IN_TRIAL)
+        if eng.get("_adSignup"):
+            add("Signed up from a paid ad", twenty_sync.BONUS_AD_SIGNUP)
+        if td and td.get("score"):
+            add("Product setup depth (registered/imported/merged)", td.get("score"),
+                "Onboarded club: floors the score on real setup effort, not web activity."
+                + ("" if td.get("hasPrimaryAdmin") else " Staff-performed, so discounted."))
+
+    return {
+        "score": eng.get("engagementScore"),
+        "tier": eng.get("engagementTier"),
+        "is_customer": is_linked,
+        "in_sales_cycle": eng.get("inSalesCycle"),
+        "signals": {
+            "sessions_30d": eng.get("sessions30d", 0),
+            "email_engaged_30d": eng.get("emailEngaged30d", 0),
+            "ad_clicks": eng.get("_adClicks", 0),
+            "recency_pts": round(float(recency), 1),
+            "web_pts": round(float(web), 1),
+            "email_pts": round(float(email), 1),
+            "ad_pts": round(float(ad), 1),
+            "freq_pts": eng.get("_freqPts", 0),
+        },
+        "trial_depth": td,
+        "contributions": contributions,
+        "last_web_visit_at": eng.get("lastWebVisitAt"),
+        "last_email_at": eng.get("lastEmailAt"),
+    }
+
+
 @router.get("/clubs/{club_id}/login-intent")
 async def club_login_intent(club_id: str, db: AsyncSession = Depends(get_db),
                              _=Depends(require_super_admin)):

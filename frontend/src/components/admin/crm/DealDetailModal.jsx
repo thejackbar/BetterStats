@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import {
   Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput,
   DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_OPTIONS, LEAD_SOURCE_OPTIONS,
-  WebsiteAnalyticsPanel,
+  WebsiteAnalyticsPanel, EngagementBreakdownPanel,
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
 
@@ -473,6 +473,8 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               <Btn type="submit" variant="ghost" sm>Add</Btn>
             </form>
           </div>
+
+          <EngagementBreakdownPanel marketingClubId={deal.marketing_club_id} />
 
           <WebsiteAnalyticsPanel marketingClubId={deal.marketing_club_id} />
 

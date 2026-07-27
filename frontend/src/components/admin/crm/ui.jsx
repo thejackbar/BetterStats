@@ -202,4 +202,70 @@ export function WebsiteAnalyticsPanel({ marketingClubId }) {
   )
 }
 
+// Explains WHERE a club's engagement score comes from — recency, web views,
+// email opens/clicks, Meta ad clicks, and the flags/floors (enquiry, trial,
+// setup depth). So a score like 70 with no site visits reads as "trial-depth
+// registration floor" instead of an unexplained number.
+export function EngagementBreakdownPanel({ marketingClubId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    if (!marketingClubId) return
+    let alive = true
+    setLoading(true)
+    api.mktClubEngagement(marketingClubId).then(d => { if (alive) setData(d) }).catch(() => {}).finally(() => alive && setLoading(false))
+    return () => { alive = false }
+  }, [marketingClubId])
+
+  if (!marketingClubId) return null
+  const s = data?.signals
+  return (
+    <div>
+      <h3 className="font-display font-bold text-[13px] mb-2">What's driving this score</h3>
+      {loading ? <p className="text-[12px] text-pb-faintest">Loading…</p> : data == null ? (
+        <p className="text-[12px] text-pb-faintest">No score yet for this club.</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-[12px]">
+            <span className="font-display font-bold text-[16px]">{data.score}</span>
+            <Pill tone={{ HOT: 'red', WARM: 'amber' }[data.tier] || 'faint'}>{(data.tier || '').replace(/_/g, ' ')}</Pill>
+            {data.is_customer && <span className="text-pb-faint">linked club (onboarded/customer)</span>}
+          </div>
+          {data.contributions?.length ? (
+            <div className="space-y-1">
+              {data.contributions.map((c, i) => (
+                <div key={i} className="flex items-baseline justify-between gap-2 text-[12px] border-b border-pb-hairline/50 pb-1">
+                  <div>
+                    <span className="text-pb-text">{c.label}</span>
+                    {c.detail && <div className="text-pb-faintest text-[10.5px]">{c.detail}</div>}
+                  </div>
+                  <span className="font-display font-bold text-emerald-300 whitespace-nowrap">+{c.points}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[12px] text-pb-faintest">No engagement signals — this club has had no tracked activity.</p>
+          )}
+          {s && (
+            <div className="grid grid-cols-3 gap-2 text-[12px] pt-1">
+              <div className="pb-card px-2.5 py-2">
+                <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Sessions 30d</div>
+                <div className="font-display font-bold text-[15px]">{s.sessions_30d}</div>
+              </div>
+              <div className="pb-card px-2.5 py-2">
+                <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Email opens/clicks 30d</div>
+                <div className="font-display font-bold text-[15px]">{s.email_engaged_30d}</div>
+              </div>
+              <div className="pb-card px-2.5 py-2">
+                <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Ad clicks</div>
+                <div className="font-display font-bold text-[15px]">{s.ad_clicks}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export { Icon }
