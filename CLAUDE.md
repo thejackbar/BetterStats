@@ -26,6 +26,15 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
   `lib/modules.js` — deliberately OUTSIDE `MODULE_INFO` (which feeds
   entitlement/billing). `dashboardTiles()` returns `[BetterStats, …paid modules…,
   BetterClubManager]`; `alwaysOpen` keeps them entitled for every admin.
+- **Two-level home, one config.** Each layout exports a `GROUPS` array (key,
+  label, icon, `desc`, and `items` each with `to`/`label`/`icon`/`cap`/`desc`).
+  It drives all three views so nothing drifts: the surface home
+  (`/admin/betterstats`) shows one card per group; a group card opens
+  `/admin/betterstats/:group` (one card per tool, with descriptions); and the
+  sidebar flattens `GROUPS` into headed sections. `components/admin/ModuleHub`
+  renders the home + group pages from `GROUPS`; the `Home` page components pass
+  `groupKey` from the `:group` route param. BetterClubManager's Member Portal is
+  inserted into its People group only when the flag is on (`withPortal`).
 - **URLs are unchanged** — the tool pages kept their existing routes
   (`/admin/players`, `/admin/committee`, …); only the layout wrapper each page
   renders changed (`AdminLayout` → the module layout). So bookmarks/links still
@@ -33,9 +42,10 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
 - `ModuleLayout`'s `nav` now supports `{ heading }` separators (grouped sidebar);
   a heading with no visible items under it after cap-filtering is dropped.
 - **Adding a Core tool**: put the page under the right module layout wrapper and
-  add it to that layout's `NAV` (exported, and reused by the surface's Home via
-  `ModuleOverviewGrid`). Don't add Core tools back into `AdminLayout`'s
-  `NAV_SECTIONS` — that's chrome-only now.
+  add it to the correct group's `items` in that layout's `GROUPS` (that's all —
+  the sidebar nav, the group page and the overview count all derive from it).
+  Don't add Core tools back into `AdminLayout`'s `NAV_SECTIONS` — that's
+  chrome-only now.
 - **Yearbooks** (`/admin/yearbook`, `AdminYearbook`) is still a standalone
   full-page editor with no surrounding sidebar (it always was); the BetterStats
   nav links to it but the page itself doesn't wrap in `BetterStatsLayout`.

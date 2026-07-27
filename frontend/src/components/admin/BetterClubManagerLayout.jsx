@@ -3,27 +3,58 @@ import { CAP } from '../../lib/capabilities'
 import { api } from '../../lib/api'
 import ModuleLayout from './ModuleLayout'
 
-// BetterClubManager — the club back office as its own Core surface: committee,
-// volunteers, families, member portal, qualifications, events, facilities and
-// the club diary. (Provisional name; these tools will grow under this banner.)
-// Pulled out of the shared admin sidebar alongside BetterStats.
-export const NAV = [
-  { to: '/admin/betterclub', label: 'Overview', icon: 'overview', cap: null, exact: true },
-
-  { heading: 'People' },
-  { to: '/admin/committee', label: 'Committee', icon: 'teams', cap: CAP.MANAGE_COMMITTEE },
-  { to: '/admin/volunteers', label: 'Volunteers', icon: 'player', cap: CAP.MANAGE_VOLUNTEERS },
-  { to: '/admin/families', label: 'Families', icon: 'teams', cap: CAP.MANAGE_FAMILIES },
-  { to: '/admin/qualifications', label: 'Qualifications', icon: 'check', cap: CAP.MANAGE_QUALIFICATIONS },
-  // Member Portal is inserted here only when its platform flag is on (below).
-
-  { heading: 'Club' },
-  { to: '/admin/events', label: 'Events', icon: 'timer', cap: CAP.MANAGE_COMMITTEE },
-  { to: '/admin/assets', label: 'Assets & Facilities', icon: 'settings', cap: CAP.MANAGE_ASSETS },
-  { to: '/admin/club-diary', label: 'Club Diary', icon: 'list', cap: CAP.MANAGE_CLUB_DIARY },
+// BetterClubManager — the club back office as its own Core surface (provisional
+// name). Same GROUPS model as BetterStats: home shows one card per group, each
+// group card opens a page of tools, the sidebar flattens the groups. Member
+// Portal is inserted into the People group only when its platform flag is on.
+export const GROUPS = [
+  {
+    key: 'people',
+    label: 'People',
+    icon: 'teams',
+    desc: 'Your committee, volunteers, families and members.',
+    items: [
+      { to: '/admin/committee', label: 'Committee', icon: 'teams', cap: CAP.MANAGE_COMMITTEE, desc: 'Committee roles and members.' },
+      { to: '/admin/volunteers', label: 'Volunteers', icon: 'player', cap: CAP.MANAGE_VOLUNTEERS, desc: 'Volunteer roster and roles.' },
+      { to: '/admin/families', label: 'Families', icon: 'teams', cap: CAP.MANAGE_FAMILIES, desc: 'Link players into family groups.' },
+      { to: '/admin/qualifications', label: 'Qualifications', icon: 'check', cap: CAP.MANAGE_QUALIFICATIONS, desc: 'Track coaching and first-aid tickets.' },
+    ],
+  },
+  {
+    key: 'club',
+    label: 'Club',
+    icon: 'settings',
+    desc: 'Events, facilities and the running club diary.',
+    items: [
+      { to: '/admin/events', label: 'Events', icon: 'timer', cap: CAP.MANAGE_COMMITTEE, desc: 'Club events and the calendar.' },
+      { to: '/admin/assets', label: 'Assets & Facilities', icon: 'settings', cap: CAP.MANAGE_ASSETS, desc: 'Grounds, nets and club gear.' },
+      { to: '/admin/club-diary', label: 'Club Diary', icon: 'list', cap: CAP.MANAGE_CLUB_DIARY, desc: 'The running club diary.' },
+    ],
+  },
 ]
 
-export const MEMBER_PORTAL_ITEM = { to: '/admin/member-portal', label: 'Member Portal', icon: 'share', cap: CAP.MANAGE_FEES }
+export const MEMBER_PORTAL_ITEM = {
+  to: '/admin/member-portal', label: 'Member Portal', icon: 'share', cap: CAP.MANAGE_FEES,
+  desc: 'The self-service portal for members.',
+}
+
+// Slot Member Portal into the People group when its platform flag is on.
+export function withPortal(enabled) {
+  if (!enabled) return GROUPS
+  return GROUPS.map(g => g.key === 'people' ? { ...g, items: [...g.items, MEMBER_PORTAL_ITEM] } : g)
+}
+
+// Flatten groups into the sidebar nav (Overview, then heading + tools per group).
+export function navFromGroups(groups) {
+  return [
+    // Non-exact so Overview stays highlighted on the group pages too.
+    { to: '/admin/betterclub', label: 'Overview', icon: 'overview', cap: null },
+    ...groups.flatMap(g => [
+      { heading: g.label },
+      ...g.items.map(({ to, label, icon, cap, exact }) => ({ to, label, icon, cap, exact })),
+    ]),
+  ]
+}
 
 export default function BetterClubManagerLayout({ children, title, actions }) {
   // Member Portal is gated by a platform flag (per club / globally), same as it
@@ -37,13 +68,7 @@ export default function BetterClubManagerLayout({ children, title, actions }) {
     return () => { alive = false }
   }, [])
 
-  // Slot Member Portal in after Qualifications (end of the People group) when on.
-  const nav = memberPortalVisible
-    ? (() => {
-        const i = NAV.findIndex(n => n.heading === 'Club')
-        return [...NAV.slice(0, i), MEMBER_PORTAL_ITEM, ...NAV.slice(i)]
-      })()
-    : NAV
+  const nav = navFromGroups(withPortal(memberPortalVisible))
 
   return (
     <ModuleLayout moduleName="ClubManager" nav={nav} title={title} actions={actions}>

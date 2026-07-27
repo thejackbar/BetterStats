@@ -284,7 +284,9 @@ export default function App() {
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/betterstats" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterstats/:group" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/:group" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
