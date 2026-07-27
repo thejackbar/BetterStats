@@ -5,7 +5,7 @@
 // defensive about every shape so the landing page degrades rather than breaks.
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
+import BetterSelectLayout, { NAV } from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
@@ -233,6 +233,35 @@ export default function BetterSelectHome() {
           </div>
         </div>
       )}
+
+      {/* All BetterSelect tools — the next steps, always visible as cards
+          (mirrors how BetterAdmin lays out its sub-tools) beneath the
+          this-weekend dashboard above. */}
+      <div className="mt-6">
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">BetterSelect tools</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {NAV.filter(t => t.label !== 'Overview' && (t.cap == null || hasCapability(t.cap))).map(t => (
+            <Link
+              key={t.to}
+              to={t.to}
+              className="flex items-start gap-3 pb-card p-4 border-pb-accent/25 hover:border-pb-accent/50 transition-colors group"
+              style={{ background: 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' }}
+            >
+              <span
+                className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center mt-0.5"
+                style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}
+              >
+                <Icon name={t.icon} size={18} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-display font-bold text-sm text-pb-text">{t.label}</span>
+                {t.desc && <span className="block text-pb-faint text-[12.5px] leading-snug mt-0.5">{t.desc}</span>}
+              </span>
+              <span className="shrink-0 text-lg group-hover:translate-x-0.5 transition-transform self-center" style={{ color: 'var(--pb-accent)' }}>→</span>
+            </Link>
+          ))}
+        </div>
+      </div>
     </BetterSelectLayout>
   )
 }

@@ -4,7 +4,6 @@ import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { dashboardTiles } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
-import ModuleLockup from '../ModuleLockup'
 import BookmarkButton from './BookmarkButton'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
@@ -440,22 +439,20 @@ export default function AdminLayout({ children }) {
               </div>
             </div>
 
-            {/* The core surface is BetterStats — its lockup sits at the top of
-                the main admin sidebar, mirroring how each module surface shows
-                its own lockup. The "Stats" suffix stays the fixed brand green
-                (--pb-brand), never the club's white-label accent. */}
+            {/* This lockup links to /admin — the whole-platform dashboard (every
+                module), not the BetterStats surface (that's its own card now). So
+                it wears the BetterCricket house brand, not a module mark. The
+                "Cricket" suffix stays the fixed brand green (--pb-brand), never
+                the club's white-label accent. */}
             <Link
               to="/admin"
               onClick={() => setMobileOpen(false)}
-              className="block px-2 py-2 mb-1 border-b pb-hairline-b"
+              className="flex items-center gap-2 px-2 py-2 mb-1 border-b pb-hairline-b"
             >
-              <ModuleLockup
-                name="BetterStats"
-                logo={moduleBrand('stats').logo}
-                accent="var(--pb-brand)"
-                size={24}
-                textClassName="font-display font-bold text-[14px] leading-none"
-              />
+              <BrandLogo className="w-6 h-6 object-contain shrink-0" />
+              <span className="font-display font-bold text-[14px] leading-none">
+                Better<span style={{ color: 'var(--pb-brand)' }}>Cricket</span>
+              </span>
             </Link>
 
             {/* Better HQ — staff-only platform tools. Pinned to the TOP because
