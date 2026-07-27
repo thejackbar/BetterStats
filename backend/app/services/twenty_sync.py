@@ -54,13 +54,24 @@ AD_DECAY = {"d7": 5.0, "d14": 3.5, "d21": 2.0, "d28": 1.0, "d90": 0.5}
 EMAIL_CLICK_DECAY = {"d7": 10.0, "d14": 7.5, "d21": 5.0, "d28": 2.0, "d90": 1.0}
 EMAIL_OPEN_DECAY = {"d7": 4.0, "d14": 3.0, "d21": 2.0, "d28": 1.0, "d90": 1.0}
 
-# Reach (distinct visitors) and depth (the decay sums) each pass through a
-# saturating curve cap*raw/(raw+half) — asymptotic to the cap, never reaching it.
-REACH_MULT, REACH_CAP, REACH_HALF = 6.0, 24.0, 24.0
-DEPTH_CAP, DEPTH_HALF = 40.0, 40.0
+# Frequency = reach (distinct visitors) + depth (the summed per-event decay
+# points), each a LINEAR function of real activity. The old saturating caps
+# existed to stop a bot/crawler running the score away; outreach goes straight
+# to real clubs, so there's no bot traffic to defend against, and the caps were
+# the main thing compressing genuine clubs into a lump and creating the cliff.
+# The only ceiling now is the final min(100) clamp. These two scale factors are
+# the knobs to tune against the distribution (recalc_engagement prints a
+# histogram): points per distinct 30-day visitor, and a multiplier on the summed
+# per-event decay points.
+REACH_PER_VISITOR = 3.0
+DEPTH_SCALE = 1.0
 
-# Recency of the single most-recent touch of any kind (web / email / enquiry).
-RECENCY = {"d7": 10, "d30": 7, "d90": 4, "older": 2}  # "never" is 0
+# Recency of the single most-recent touch of any kind (web / email / enquiry),
+# a SMOOTH exponential decay rather than hard day-buckets — so two clubs a day
+# either side of a boundary don't sit points apart for no real difference.
+# RECENCY_FULL at 0 days old, halving every RECENCY_HALFLIFE_DAYS; 0 if never.
+RECENCY_FULL = 10.0
+RECENCY_HALFLIFE_DAYS = 21.0
 
 # Prospect intent bonuses, added on top of recency + frequency.
 BONUS_REQUESTED_TRIAL = 12
@@ -245,20 +256,16 @@ def _arr(module_keys) -> float:
 
 
 def _recency_pts(last):
-    """Recency points from a last-touch timestamp, per the RECENCY tier table:
-    a small floor for any touch ever, 0 if never. Deliberately modest so recency
-    alone can't reach HOT — real frequency (repeat visits) or an explicit intent
-    signal (trial request, contact form) has to carry a club over the line."""
+    """Recency points from a last-touch timestamp: a smooth exponential decay
+    (RECENCY_FULL at 0 days, halving every RECENCY_HALFLIFE_DAYS), 0 if never.
+    Continuous, so there are no step jumps at day boundaries. Deliberately modest
+    so recency alone can't reach HOT — real frequency (repeat visits) or an
+    explicit intent signal (trial request, contact form) has to carry a club
+    over the line."""
     if not last:
-        return 0
-    days = (datetime.datetime.now(datetime.timezone.utc) - last).days
-    if days <= 7:
-        return RECENCY["d7"]
-    if days <= 30:
-        return RECENCY["d30"]
-    if days <= 90:
-        return RECENCY["d90"]
-    return RECENCY["older"]
+        return 0.0
+    days = max(0, (datetime.datetime.now(datetime.timezone.utc) - last).days)
+    return RECENCY_FULL * (0.5 ** (days / RECENCY_HALFLIFE_DAYS))
 
 
 async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
@@ -501,34 +508,15 @@ async def _engagement(session, club: MarketingClub,
               | _billing_modules(trial_mods))
     upsell = sorted(wanted - paid_keys)
 
-    # Reach (distinct visitors) and depth (the two per-event age-decayed sums) are
-    # each squashed through a saturating curve (cap*raw/(raw+half)) — asymptotic
-    # towards the cap but NEVER reaching it, so two different raw values can never
-    # tie. A hard min(raw, cap) was tried first and genuinely broke on real data:
-    # Tasmania Police CC (54 distinct visitors, 71 views) and Yarnteen CC (12
-    # visitors, 20 views) both blew straight past a 24-point reach cap (hit at just
-    # 4 sessions) and a 40-point depth cap (hit at ~14 recent page views), landing
-    # on the exact same clipped freq_pts and the same final score (84) despite one
-    # club having ~4x the other's real traffic. With a hard clip it doesn't matter
-    # how far past the cap a club is — 10% over and 1000% over land on the same
-    # number.
-    # The curve keeps *some* headroom between any two real values all the way up
-    # (diminishing returns, not a flat wall), while still bounding a crawler/bot's
-    # score the same way a hard cap did. ``half`` (the raw value giving exactly
-    # half the cap) is set equal to the cap itself — verified against real and
-    # synthetic data to sit closest to the OLD hard-clip calibration for
-    # low/typical volumes (a lone visitor's score barely moves) while still
-    # clearly separating genuinely different high-volume clubs (Tasmania
-    # Police's real 54-visitor/71-view case scores 76 vs Yarnteen's real
-    # 12-visitor/20-view case at 62 — both previously clipped to an identical 84).
-    def _saturate(raw: float, cap: float, half: float) -> float:
-        return cap * raw / (raw + half) if raw > 0 else 0.0
-
-    reach_pts = _saturate(sessions * REACH_MULT, cap=REACH_CAP, half=REACH_HALF)
-    # Depth folds all three per-event decay sums together: organic web views,
-    # email opens/clicks, and (weighted richer) Meta/paid ad-click landings.
-    depth_pts = _saturate(email_decay_pts + web_decay_pts + ad_decay_pts,
-                          cap=DEPTH_CAP, half=DEPTH_HALF)
+    # Frequency = reach + depth, both LINEAR in real activity (no saturating cap;
+    # see the constants block for why the caps were removed). Reach rewards how
+    # many distinct people visited in 30 days; depth folds together the three
+    # per-event age-decayed sums (organic web views, email opens/clicks, and the
+    # richer-weighted Meta/paid ad-click landings). The only ceiling is the final
+    # min(100) clamp below, so genuinely busy clubs now climb the whole range
+    # instead of bunching under an artificial wall.
+    reach_pts = REACH_PER_VISITOR * sessions
+    depth_pts = DEPTH_SCALE * (email_decay_pts + web_decay_pts + ad_decay_pts)
     freq_pts = reach_pts + depth_pts
     recency = _recency_pts(last_touch)
 

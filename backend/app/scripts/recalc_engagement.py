@@ -70,8 +70,44 @@ async def _load_org(session, org_id):
     )
 
 
+def _percentile(sorted_vals, pct):
+    if not sorted_vals:
+        return 0
+    k = (len(sorted_vals) - 1) * (pct / 100.0)
+    lo = int(k)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    frac = k - lo
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * frac
+
+
+def _print_histogram(scores: list) -> None:
+    """A text histogram + percentiles of the score spread, so the distribution
+    can be eyeballed straight from the run without a dashboard."""
+    if not scores:
+        print("  (no scores)")
+        return
+    s = sorted(scores)
+    n = len(s)
+    print("\n  score distribution (bins of 5):")
+    peak = 0
+    counts = []
+    for lo in range(0, 100, 5):
+        hi = lo + 5
+        # Top bin is inclusive of 100.
+        c = sum(1 for v in s if (lo <= v < hi) or (hi == 100 and v == 100))
+        counts.append((lo, hi, c))
+        peak = max(peak, c)
+    for lo, hi, c in counts:
+        bar = "#" * int(round(40 * c / peak)) if peak else ""
+        print(f"    {lo:3d}-{hi:<3d} {c:5d}  {bar}")
+    print(f"\n  n={n}  min={s[0]:.0f}  p25={_percentile(s,25):.0f}  "
+          f"median={_percentile(s,50):.0f}  p75={_percentile(s,75):.0f}  "
+          f"p90={_percentile(s,90):.0f}  max={s[-1]:.0f}  mean={sum(s)/n:.1f}")
+
+
 async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     tiers: Counter = Counter()
+    scores: list = []
     promoted = 0
     errors = 0
     processed = 0
@@ -103,6 +139,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
                 org = await _load_org(session, club.existing_org_id)
                 deal = await crm_service.sync_engagement_promotion(session, club, org)
                 tiers[club.engagement_tier or "UNKNOWN"] += 1
+                if club.engagement_score is not None:
+                    scores.append(club.engagement_score)
                 if deal is not None:
                     promoted += 1
                 processed += 1
@@ -131,6 +169,7 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     print("  tier distribution:")
     for tier, n in sorted(tiers.items(), key=lambda kv: -kv[1]):
         print(f"    {tier:16} {n}")
+    _print_histogram(scores)
     return {"processed": processed, "promoted": promoted, "errors": errors,
             "tiers": dict(tiers)}
 
