@@ -71,6 +71,45 @@ async def refresh(db: AsyncSession = Depends(get_db), _: User = Depends(require_
     return data
 
 
+@router.get("/campaigns")
+async def campaigns(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
+    """List the ad account's campaigns for the picker, plus which one is active.
+    The whole dashboard scopes to `active_campaign_id`; a super admin switches it
+    via POST /campaign — stored in platform_settings, no .env edit or redeploy."""
+    from app.services import platform_settings
+    active = await platform_settings.get_active_meta_campaign_id(db)
+    if not settings.meta_ads_configured:
+        return {"campaigns": [], "active_campaign_id": active, "token_configured": False}
+    try:
+        camps = await meta_ads.list_campaigns()
+    except MetaAdsError as e:
+        return {"error": {"kind": e.kind, "message": e.message},
+                "campaigns": [], "active_campaign_id": active, "token_configured": True}
+    return {"campaigns": camps, "active_campaign_id": active, "token_configured": True}
+
+
+class ActiveCampaignIn(BaseModel):
+    campaign_id: str
+
+
+@router.post("/campaign")
+async def set_active_campaign(
+    body: ActiveCampaignIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Point the dashboard at a different campaign. Stores the choice in
+    platform_settings and returns the fresh summary for the newly-selected one."""
+    from app.services import platform_settings
+    try:
+        await platform_settings.set_active_meta_campaign_id(db, body.campaign_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    data = await meta_ads.get_latest_summary(db)
+    data["token_configured"] = settings.meta_ads_configured
+    return data
+
+
 @router.post("/leads/adjust")
 async def adjust_leads(
     body: LeadAdjustmentIn,
@@ -149,6 +188,7 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     and this report exists to show real prospects, not test data."""
     from app.services.twenty_sync import _module_split
 
+    await meta_ads._use_active_campaign(db)
     utm_contents = meta_ads._current_campaign_utm_contents()
 
     orgs = (await db.execute(

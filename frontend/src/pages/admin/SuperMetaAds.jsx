@@ -282,6 +282,10 @@ export default function SuperMetaAds() {
   const [selectedAdId, setSelectedAdId] = useState(null)
   const [showAllInsights, setShowAllInsights] = useState(false)
 
+  const [campaigns, setCampaigns] = useState([])
+  const [activeCampaignId, setActiveCampaignId] = useState('')
+  const [switchingCampaign, setSwitchingCampaign] = useState(false)
+
   const load = useCallback(() => {
     setLoading(true)
     api.metaAdsSummary()
@@ -293,6 +297,9 @@ export default function SuperMetaAds() {
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
     api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
     api.metaAdsSelectedClubs().then(setSelectedClubs).catch(() => {})
+    api.metaAdsCampaigns()
+      .then((d) => { setCampaigns(d.campaigns || []); setActiveCampaignId(d.active_campaign_id || '') })
+      .catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -340,6 +347,21 @@ export default function SuperMetaAds() {
     }
   }
 
+  const changeCampaign = async (cid) => {
+    if (!cid || cid === activeCampaignId) return
+    setSwitchingCampaign(true)
+    setError('')
+    try {
+      await api.metaAdsSetCampaign(cid)
+      setActiveCampaignId(cid)
+      load()  // re-pull every panel for the newly-selected campaign
+    } catch (e) {
+      setError(e.message || 'Could not switch campaign.')
+    } finally {
+      setSwitchingCampaign(false)
+    }
+  }
+
   const budget = summary?.campaign_budget ?? DEFAULT_BUDGET
   const lengthDays = summary?.campaign_length_days ?? DEFAULT_LENGTH_DAYS
 
@@ -347,7 +369,31 @@ export default function SuperMetaAds() {
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Trials Campaign</h1>
-        <p className="text-sm text-pb-dim mt-1">BC_AU_Trials_CBO_Aug2026 &middot; ~{lengthDays} days from launch</p>
+        <div className="flex flex-wrap items-center gap-2 mt-1">
+          {campaigns.length > 0 ? (
+            <select
+              value={activeCampaignId}
+              onChange={(e) => changeCampaign(e.target.value)}
+              disabled={switchingCampaign}
+              title="Which campaign the dashboard tracks (saved to the platform — no redeploy)"
+              className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-sm text-pb-text max-w-[340px] disabled:opacity-50"
+            >
+              {!campaigns.some((c) => c.id === activeCampaignId) && activeCampaignId && (
+                <option value={activeCampaignId}>{activeCampaignId} (current)</option>
+              )}
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.effective_status && c.effective_status !== 'ACTIVE'
+                    ? ` — ${c.effective_status.toLowerCase().replace(/_/g, ' ')}` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-sm text-pb-dim">{activeCampaignId || 'campaign'}</span>
+          )}
+          <span className="text-sm text-pb-dim">&middot; ~{lengthDays} days from launch</span>
+          {switchingCampaign && <span className="font-mono text-[10px] text-pb-faint">switching&hellip;</span>}
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <span className="font-mono text-[10px] text-pb-faint">

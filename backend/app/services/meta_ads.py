@@ -9,6 +9,7 @@ outage surfaces as a typed error on the HQ page instead of a 500.
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,30 @@ from app.config.settings import settings
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 20.0
+
+
+# The active Meta campaign the dashboard is scoped to. A super admin selects it
+# from the HQ page and it's stored in platform_settings; this ContextVar carries
+# the resolved id for the current request so the many no-`db` fetch/helper
+# functions below don't each need it threaded in. Defaults to the env seed
+# (settings.meta_campaign_id) until a request resolves one, so a background call
+# that never resolved one is still correct rather than empty.
+_active_campaign: "contextvars.ContextVar[str | None]" = contextvars.ContextVar(
+    "meta_active_campaign", default=None)
+
+
+def _campaign_id() -> str:
+    return _active_campaign.get() or settings.meta_campaign_id
+
+
+async def _use_active_campaign(db: "AsyncSession") -> str:
+    """Resolve the super-admin-selected active campaign from platform_settings
+    and pin it for the current request. Call at the top of every public entry
+    point that scopes by campaign. Lazy import dodges a services import cycle."""
+    from app.services import platform_settings
+    cid = await platform_settings.get_active_meta_campaign_id(db)
+    _active_campaign.set(cid)
+    return cid
 
 # Ad -> destination map (§1 of the spec). Stable IDs; the live API response's
 # ad_name/ad_id are preferred where available, this is the fallback label.
@@ -171,7 +196,7 @@ async def fetch_campaign_totals() -> dict:
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "campaign",
         "fields": "spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
-        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
         "date_preset": "maximum",
     })
     data = body.get("data") or []
@@ -191,7 +216,7 @@ async def fetch_ad_delivery_statuses() -> dict[str, str]:
     try:
         body = await _get(f"/act_{settings.meta_ad_account_id}/ads", {
             "fields": "id,effective_status",
-            "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+            "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
             "limit": 200,
         })
     except MetaAdsError:
@@ -205,7 +230,7 @@ async def fetch_per_ad() -> list[dict]:
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "ad",
         "fields": "ad_id,ad_name,spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
-        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
         "date_preset": "maximum",
     })
     rows = [_parse_row(r) for r in (body.get("data") or [])]
@@ -224,7 +249,7 @@ async def fetch_daily_trend(days: int = 14) -> list[dict]:
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "campaign",
         "fields": "spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
-        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
         "date_preset": "maximum",
         "time_increment": 1,
     })
@@ -242,7 +267,7 @@ async def fetch_ad_daily_trend(days: int = 30) -> list[dict]:
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "ad",
         "fields": "ad_id,ad_name,spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
-        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{settings.meta_campaign_id}"]}}]',
+        "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
         "date_preset": "maximum",
         "time_increment": 1,
     })
@@ -252,6 +277,26 @@ async def fetch_ad_daily_trend(days: int = 30) -> list[dict]:
         keep_dates = set(sorted({r.get("date_start") for r in rows if r.get("date_start")})[-days:])
         rows = [r for r in rows if r.get("date_start") in keep_dates]
     return rows
+
+
+async def list_campaigns() -> list[dict]:
+    """All campaigns in the ad account (id, name, status, created_time), newest
+    first — powers the HQ campaign picker so a super admin switches which
+    campaign the dashboard tracks without a .env edit. Raises MetaAdsError on a
+    Meta failure, like the other fetches."""
+    body = await _get(f"/act_{settings.meta_ad_account_id}/campaigns", {
+        "fields": "id,name,status,effective_status,created_time",
+        "limit": 200,
+    })
+    rows = body.get("data") or []
+    rows.sort(key=lambda r: r.get("created_time") or "", reverse=True)
+    return [{
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "status": r.get("status"),
+        "effective_status": r.get("effective_status"),
+        "created_time": r.get("created_time"),
+    } for r in rows if r.get("id")]
 
 
 def _parse_insights_date(value: str | None) -> date | None:
@@ -508,6 +553,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # whether any of the club's visitors carried a Meta signal. The COUNTED "Meta
     # leads" numbers stay Meta-scoped elsewhere; this list is deliberately
     # all-source so no lead is lost.
+    await _use_active_campaign(db)
     utm_contents = set(_current_campaign_utm_contents())
     _META_SOURCES = {"fb", "facebook", "meta", "ig", "instagram"}
 
@@ -752,7 +798,7 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
         "level": level,
         "ad_id": row.get("ad_id"),
         "ad_name": row.get("ad_name") or row.get("name"),
-        "campaign_id": settings.meta_campaign_id,
+        "campaign_id": _campaign_id(),
         "spend": row.get("spend") or 0,
         "impressions": row.get("impressions") or 0,
         "link_clicks": row.get("link_clicks") or 0,
@@ -770,6 +816,7 @@ async def run_snapshot(db: AsyncSession) -> dict:
     """Pull current totals from Meta, compute the recommendation, upsert today's
     snapshot rows (campaign + each ad). Raises MetaAdsError on failure — callers
     decide whether to log-and-skip (scheduled job) or surface it (manual refresh)."""
+    await _use_active_campaign(db)
     campaign = await fetch_campaign_totals()
     ads = await fetch_per_ad()
     status, reason = compute_recommendation(campaign)
@@ -812,9 +859,10 @@ async def get_leads_adjustment_total(db: AsyncSession) -> int:
     CURRENT campaign (settings.meta_campaign_id) — scoped since migration 162
     so a correction made against a previous campaign can't keep inflating or
     deflating a later one's numbers forever."""
+    await _use_active_campaign(db)
     total = (await db.execute(text(
         "SELECT COALESCE(SUM(delta), 0) FROM meta_lead_adjustments WHERE campaign_id = :campaign_id"
-    ), {"campaign_id": settings.meta_campaign_id})).scalar()
+    ), {"campaign_id": _campaign_id()})).scalar()
     return int(total or 0)
 
 
@@ -823,11 +871,12 @@ async def add_lead_adjustment(db: AsyncSession, delta: int, note: str | None, cr
     to the current campaign. Returns the new running total (does not touch
     ``meta_ad_snapshots.leads`` itself, so the next snapshot pull can't
     silently wipe the correction)."""
+    await _use_active_campaign(db)
     await db.execute(text("""
         INSERT INTO meta_lead_adjustments (delta, note, created_by_email, campaign_id)
         VALUES (:delta, :note, :created_by_email, :campaign_id)
     """), {"delta": delta, "note": (note or None), "created_by_email": created_by_email,
-           "campaign_id": settings.meta_campaign_id})
+           "campaign_id": _campaign_id()})
     await db.commit()
     return await get_leads_adjustment_total(db)
 
@@ -835,13 +884,14 @@ async def add_lead_adjustment(db: AsyncSession, delta: int, note: str | None, cr
 async def get_lead_adjustments(db: AsyncSession, limit: int = 20) -> list[dict]:
     """Recent manual reconciliation entries for the CURRENT campaign, newest
     first — the audit trail behind the effective lead count."""
+    await _use_active_campaign(db)
     rows = (await db.execute(text("""
         SELECT delta, note, created_by_email, created_at
         FROM meta_lead_adjustments
         WHERE campaign_id = :campaign_id
         ORDER BY created_at DESC
         LIMIT :limit
-    """), {"campaign_id": settings.meta_campaign_id, "limit": limit})).mappings().all()
+    """), {"campaign_id": _campaign_id(), "limit": limit})).mappings().all()
     return [
         {
             "delta": int(r["delta"]),
@@ -862,7 +912,7 @@ def _current_campaign_utm_contents() -> set[str]:
     return {
         meta["utm_content"]
         for meta in AD_DESTINATIONS.values()
-        if meta.get("campaign_id") == settings.meta_campaign_id and meta.get("utm_content")
+        if meta.get("campaign_id") == _campaign_id() and meta.get("utm_content")
     }
 
 
@@ -880,6 +930,7 @@ async def get_registration_count(db: AsyncSession) -> int:
     if its own signup_attribution.utm_content matches one of THIS campaign's
     ads, archived test signups are excluded (same default as the ad-signups
     report and the main Club Directory)."""
+    await _use_active_campaign(db)
     utm_contents = _current_campaign_utm_contents()
     if not utm_contents:
         return 0
@@ -899,12 +950,13 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     recent row could belong to a previous campaign's last snapshot before it
     was switched off, or (worse) a stale row for today under the old
     campaign could shadow the new one's."""
+    await _use_active_campaign(db)
     campaign_row = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
         WHERE level = 'campaign' AND campaign_id = :campaign_id
         ORDER BY snapshot_date DESC, created_at DESC
         LIMIT 1
-    """), {"campaign_id": settings.meta_campaign_id})).mappings().first()
+    """), {"campaign_id": _campaign_id()})).mappings().first()
 
     adjustment = await get_leads_adjustment_total(db)
 
@@ -919,7 +971,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         SELECT * FROM meta_ad_snapshots
         WHERE level = 'ad' AND campaign_id = :campaign_id AND snapshot_date = :d
         ORDER BY spend DESC
-    """), {"campaign_id": settings.meta_campaign_id, "d": latest_date})).mappings().all()
+    """), {"campaign_id": _campaign_id(), "d": latest_date})).mappings().all()
 
     def _row_to_dict(r) -> dict:
         return {
@@ -984,12 +1036,13 @@ async def get_history(db: AsyncSession, days: int = 14) -> list[dict]:
     time_increment=1 breakdown — NOT the level='campaign' rows, which are
     cumulative-to-date totals as of that day's snapshot pull and would plot
     as an ever-rising curve mislabeled as "per day" if used here."""
+    await _use_active_campaign(db)
     since = date.today() - timedelta(days=days)
     rows = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
         WHERE level = 'campaign_daily' AND campaign_id = :campaign_id AND snapshot_date >= :since
         ORDER BY snapshot_date ASC
-    """), {"campaign_id": settings.meta_campaign_id, "since": since})).mappings().all()
+    """), {"campaign_id": _campaign_id(), "since": since})).mappings().all()
     return [
         {
             "date": r["snapshot_date"].isoformat(),
@@ -1008,12 +1061,13 @@ async def get_history(db: AsyncSession, days: int = 14) -> list[dict]:
 async def get_ad_history(db: AsyncSession, ad_id: str, days: int = 30) -> list[dict]:
     """TRUE daily per-ad series (level='ad_daily') for the drill-down trend
     chart when a super admin clicks into one ad — same shape as get_history."""
+    await _use_active_campaign(db)
     since = date.today() - timedelta(days=days)
     rows = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
         WHERE level = 'ad_daily' AND campaign_id = :campaign_id AND ad_id = :ad_id AND snapshot_date >= :since
         ORDER BY snapshot_date ASC
-    """), {"campaign_id": settings.meta_campaign_id, "ad_id": ad_id, "since": since})).mappings().all()
+    """), {"campaign_id": _campaign_id(), "ad_id": ad_id, "since": since})).mappings().all()
     return [
         {
             "date": r["snapshot_date"].isoformat(),
