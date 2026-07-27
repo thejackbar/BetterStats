@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
@@ -48,14 +48,15 @@ function CrmDashboard({ deals, stages }) {
     return sortModuleKeys(Object.keys(counts)).map(k => ({ name: moduleLabel(k), count: counts[k] }))
   }, [deals])
 
-  // Engagement-score distribution across the loaded deals, in bins of 10. HOT
-  // starts at 60 (twenty_sync.TIER_HOT_MIN), so bars from that bin up are tinted
-  // the accent and the rest muted — makes "how many are genuinely hot vs bunched
-  // in the middle" readable at a glance (the whole reason this chart exists).
+  // Engagement-score distribution across the loaded deals, in bins of 10, split
+  // into directory-only prospects vs linked clubs (onboarded trials/customers,
+  // deal.is_customer = has an org). The account-health / trial-depth floors push
+  // linked clubs high, so stacking the two shows how much of the top is real
+  // lead heat vs the customer base sitting where it should. HOT starts at 60.
   const HOT_MIN = 60
   const engagementData = useMemo(() => {
     const bins = Array.from({ length: 10 }, (_, i) => ({
-      name: i === 9 ? '90-100' : `${i * 10}-${i * 10 + 9}`, lo: i * 10, count: 0,
+      name: i === 9 ? '90-100' : `${i * 10}-${i * 10 + 9}`, lo: i * 10, prospect: 0, linked: 0,
     }))
     let scored = 0
     for (const d of deals) {
@@ -65,7 +66,8 @@ function CrmDashboard({ deals, stages }) {
       let idx = Math.floor(s / 10)
       if (idx > 9) idx = 9
       if (idx < 0) idx = 0
-      bins[idx].count++
+      if (d.is_customer) bins[idx].linked++
+      else bins[idx].prospect++
     }
     return { bins, scored }
   }, [deals])
@@ -87,19 +89,18 @@ function CrmDashboard({ deals, stages }) {
         <h3 className="font-display font-bold text-[13px] mb-2">Engagement score distribution</h3>
         <p className="text-[12px] text-pb-faint mb-2">
           How the {engagementData.scored} scored deal{engagementData.scored === 1 ? '' : 's'} spread across 0-100,
-          in bins of 10. Bars at {HOT_MIN}+ (tinted) are HOT; the rest are COLD/WARM.
+          in bins of 10, split into directory-only prospects and linked clubs (onboarded trials/customers).
+          HOT starts at {HOT_MIN}.
         </p>
-        <ResponsiveContainer width="100%" height={220}>
+        <ResponsiveContainer width="100%" height={230}>
           <BarChart data={engagementData.bins}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
             <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={48} />
             <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
             <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-            <Bar dataKey="count" name="Deals" radius={[4, 4, 0, 0]}>
-              {engagementData.bins.map((b) => (
-                <Cell key={b.name} fill={b.lo >= HOT_MIN ? 'var(--pb-accent, #16c784)' : 'var(--pb-faint, #64748b)'} />
-              ))}
-            </Bar>
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="prospect" stackId="a" name="Prospects" fill="var(--pb-accent, #16c784)" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="linked" stackId="a" name="Linked (trial/customer)" fill="var(--pb-amber, #f5a623)" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -107,10 +107,14 @@ def _print_histogram(scores: list) -> None:
 
 async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     tiers: Counter = Counter()
+    tiers_linked: Counter = Counter()   # clubs with a linked org (onboarded/customer)
+    tiers_prospect: Counter = Counter()  # directory-only prospects
     scores: list = []
+    scores_prospect: list = []
     promoted = 0
     errors = 0
     processed = 0
+    linked_count = 0
 
     async with async_session_maker() as session:
         # Pre-load a lightweight list of (id, name) as PLAIN values, not ORM
@@ -138,9 +142,24 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
                     continue
                 org = await _load_org(session, club.existing_org_id)
                 deal = await crm_service.sync_engagement_promotion(session, club, org)
-                tiers[club.engagement_tier or "UNKNOWN"] += 1
+                tier = club.engagement_tier or "UNKNOWN"
+                tiers[tier] += 1
+                # "Linked" = has an Organisation row (an onboarded club: a trial
+                # or a paying customer). These are the ones the account-health /
+                # trial-depth floors push high, vs a directory-only prospect
+                # scored purely on lead heat. Matches the CRM deal's is_customer
+                # flag (bool(existing_org_id)), so the split lines up with the
+                # dashboard chart.
+                is_linked = bool(club.existing_org_id)
+                if is_linked:
+                    linked_count += 1
+                    tiers_linked[tier] += 1
+                else:
+                    tiers_prospect[tier] += 1
                 if club.engagement_score is not None:
                     scores.append(club.engagement_score)
+                    if not is_linked:
+                        scores_prospect.append(club.engagement_score)
                 if deal is not None:
                     promoted += 1
                 processed += 1
@@ -166,12 +185,20 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     print(f"  deals promoted this run: {promoted}")
     if errors:
         print(f"  errors (skipped, see log): {errors}")
-    print("  tier distribution:")
-    for tier, n in sorted(tiers.items(), key=lambda kv: -kv[1]):
-        print(f"    {tier:16} {n}")
+    prospect_count = processed - linked_count
+    print(f"  makeup: {prospect_count} directory-only prospects, "
+          f"{linked_count} linked clubs (onboarded trials/customers)")
+    print(f"  tier distribution (total | prospect | linked):")
+    for tier in sorted(tiers, key=lambda t: -tiers[t]):
+        print(f"    {tier:16} {tiers[tier]:6}  |  {tiers_prospect.get(tier, 0):6}  |  "
+              f"{tiers_linked.get(tier, 0):6}")
+
+    print("\n=== ALL clubs ===")
     _print_histogram(scores)
+    print("\n=== PROSPECTS ONLY (directory-only, the true lead-heat view) ===")
+    _print_histogram(scores_prospect)
     return {"processed": processed, "promoted": promoted, "errors": errors,
-            "tiers": dict(tiers)}
+            "linked": linked_count, "prospects": prospect_count, "tiers": dict(tiers)}
 
 
 def main() -> None:

@@ -63,8 +63,8 @@ EMAIL_OPEN_DECAY = {"d7": 4.0, "d14": 3.0, "d21": 2.0, "d28": 1.0, "d90": 1.0}
 # the knobs to tune against the distribution (recalc_engagement prints a
 # histogram): points per distinct 30-day visitor, and a multiplier on the summed
 # per-event decay points.
-REACH_PER_VISITOR = 3.0
-DEPTH_SCALE = 1.0
+REACH_PER_VISITOR = 2.5
+DEPTH_SCALE = 0.6
 
 # Recency of the single most-recent touch of any kind (web / email / enquiry),
 # a SMOOTH exponential decay rather than hard day-buckets — so two clubs a day
