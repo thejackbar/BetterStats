@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { formatSeason } from '../../lib/cricketFormat'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
@@ -729,7 +729,7 @@ export default function AdminScorecardUpload() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="p-4 md:p-6 max-w-6xl">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-pb-text mb-1">Upload Historical Scorecard</h1>
@@ -1193,6 +1193,6 @@ export default function AdminScorecardUpload() {
           onCancel={() => setDeleteTarget(null)}
         />
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

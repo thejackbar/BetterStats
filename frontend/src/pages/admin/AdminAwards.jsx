@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import AchievementsAdmin from '../AchievementsAdmin'
 
 export default function AdminAwards() {
@@ -18,14 +18,14 @@ export default function AdminAwards() {
   }, [user])
 
   if (!orgId) return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="font-mono text-[11px] text-pb-faint">Loading…</div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <AchievementsAdmin embeddedOrgId={orgId} />
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

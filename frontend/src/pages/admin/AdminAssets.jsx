@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -357,7 +357,7 @@ export default function AdminAssets() {
   }, [toast, tab])
 
   return (
-    <AdminLayout>
+    <BetterClubManagerLayout>
       <div className="max-w-4xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Assets & Facilities</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
@@ -368,6 +368,6 @@ export default function AdminAssets() {
         {tab === 'bookings' && <BookingsTab facilities={facilities} />}
         {tab === 'assets' && <AssetsTab facilities={facilities} />}
       </div>
-    </AdminLayout>
+    </BetterClubManagerLayout>
   )
 }

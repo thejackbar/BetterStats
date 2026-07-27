@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -184,9 +184,9 @@ export default function AdminVolunteers() {
     } catch (e) { toast.error(e.message) }
   }
 
-  if (volunteers === null) return <AdminLayout><PbSpinner message="Loading volunteers…" /></AdminLayout>
+  if (volunteers === null) return <BetterClubManagerLayout><PbSpinner message="Loading volunteers…" /></BetterClubManagerLayout>
   return (
-    <AdminLayout>
+    <BetterClubManagerLayout>
       <div className="max-w-4xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Volunteers</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
@@ -226,6 +226,6 @@ export default function AdminVolunteers() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </BetterClubManagerLayout>
   )
 }

@@ -65,6 +65,8 @@ import Login from './pages/Login'
 
 // Admin — lazy loaded (behind auth, not needed on first paint)
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
+const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
+const BetterClubManagerHome = lazy(() => import('./pages/admin/BetterClubManagerHome'))
 const SetupWizard = lazy(() => import('./pages/admin/setup/SetupWizard'))
 const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
@@ -281,6 +283,8 @@ export default function App() {
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/betterstats" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub" element={<ProtectedRoute><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />

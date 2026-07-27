@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -1551,7 +1551,7 @@ export default function AdminManualEntries() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="p-4 md:p-6 max-w-6xl">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-pb-text mb-1">Manual stat entries</h1>
@@ -1593,6 +1593,6 @@ export default function AdminManualEntries() {
           onCancel={() => setPending(null)}
         />
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

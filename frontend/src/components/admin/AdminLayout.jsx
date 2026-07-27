@@ -33,6 +33,11 @@ function compareVersions(a, b) {
 // Items within each headed section are kept in ALPHABETICAL order (by label)
 // — keep it that way when adding links. Dashboard and the Setup Wizard sit in
 // the unheaded top section as the two standing entry points.
+// The BetterStats data tools (Cricket Data / Content / Tools) and the club
+// back-office tools (Club Admin) now live in their own module surfaces
+// (BetterStatsLayout / BetterClubManagerLayout), reached from their dashboard
+// cards — so the main admin sidebar is just the app chrome: the two standing
+// entry points, then Account. Everything a super admin needs sits in Better HQ.
 const NAV_SECTIONS = [
   {
     items: [
@@ -41,54 +46,9 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    heading: 'Cricket Data',
-    items: [
-      { to: '/admin/players/import', label: 'Import Players', cap: CAP.MANAGE_PLAYERS },
-      { to: '/admin/games', label: 'Matches', cap: null },
-      { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
-      { to: '/admin/seasons', label: 'Seasons', cap: null },
-    ],
-  },
-  {
-    heading: 'Content',
-    items: [
-      { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
-      { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
-    ],
-  },
-  {
-    heading: 'Club Admin',
-    items: [
-      { to: '/admin/assets', label: 'Assets & Facilities', cap: CAP.MANAGE_ASSETS },
-      { to: '/admin/club-diary', label: 'Club Diary', cap: CAP.MANAGE_CLUB_DIARY },
-      { to: '/admin/committee', label: 'Committee', cap: CAP.MANAGE_COMMITTEE },
-      { to: '/admin/events', label: 'Events', cap: CAP.MANAGE_COMMITTEE },
-      { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
-      { to: '/admin/member-portal', label: 'Member Portal', cap: CAP.MANAGE_FEES, flag: 'memberPortal' },
-      { to: '/admin/qualifications', label: 'Qualifications', cap: CAP.MANAGE_QUALIFICATIONS },
-      { to: '/admin/volunteers', label: 'Volunteers', cap: CAP.MANAGE_VOLUNTEERS },
-    ],
-  },
-  {
-    heading: 'Tools',
-    items: [
-      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
-      { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
-      { to: '/admin/import', label: 'Import Stats', cap: CAP.MANAGE_MANUAL_ENTRIES },
-      { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
-      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
-      { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
-      { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
-      { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/reports', label: 'Saved Reports', cap: CAP.MANAGE_REPORTS },
-      { to: '/admin/upload-scorecard', label: 'Upload Scorecard', cap: CAP.MANAGE_MANUAL_ENTRIES },
-    ],
-  },
-  {
     heading: 'Account',
     items: [
+      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
       { to: '/admin/account', label: 'Plan & Billing', cap: null },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },

@@ -1,5 +1,45 @@
 # BetterStats — Claude Session Notes
 
+## Admin navigation — module surfaces, and where the Core tools live (v8.82.0, Jul 2026)
+
+The admin app is organised as **module surfaces**: each Better product is a card
+on the admin dashboard that opens its own focused sidebar (`ModuleLayout`, a thin
+per-module wrapper: `BetterSelectLayout`, `BetterFeesLayout`, `IQLayout`, …). The
+shared `components/admin/AdminLayout` is now just the **app chrome** — Dashboard,
+Setup Wizard, the module cards/tiles, and the Account group (Activity Log, Plan &
+Billing, Settings, Users) — plus the **Better HQ** section for super admins
+(grouped via `lib/superNav.js`, see the Better HQ note if present).
+
+- **BetterStats (Core) is its own surface** now (it used to be a loose pile in the
+  shared sidebar). `BetterStatsLayout` (green, `moduleBrand('stats')`), home at
+  `/admin/betterstats` (`BetterStatsHome`). It holds Data (Matches, Players,
+  Seasons), Bring data in (Data Sync, Import Players, Import Stats, Upload
+  Scorecard, Manual Entries), Tidy & fix (Merge Players, Merge Grades, Milestones,
+  Partnership Records) and Records & content (Awards, Award Types, Yearbooks, Saved
+  Reports, Sponsors).
+- **BetterClubManager** is a second Core surface (provisional name) for the club
+  back office: `BetterClubManagerLayout` (indigo, `moduleBrand('clubmanager')`),
+  home at `/admin/betterclub` (`BetterClubManagerHome`). Committee, Volunteers,
+  Families, Qualifications, (Member Portal when its flag is on), Events, Assets &
+  Facilities, Club Diary.
+- Both are **Core** (always on, never billable), so they live in `CORE_TILES` in
+  `lib/modules.js` — deliberately OUTSIDE `MODULE_INFO` (which feeds
+  entitlement/billing). `dashboardTiles()` returns `[BetterStats, …paid modules…,
+  BetterClubManager]`; `alwaysOpen` keeps them entitled for every admin.
+- **URLs are unchanged** — the tool pages kept their existing routes
+  (`/admin/players`, `/admin/committee`, …); only the layout wrapper each page
+  renders changed (`AdminLayout` → the module layout). So bookmarks/links still
+  work and no route moved.
+- `ModuleLayout`'s `nav` now supports `{ heading }` separators (grouped sidebar);
+  a heading with no visible items under it after cap-filtering is dropped.
+- **Adding a Core tool**: put the page under the right module layout wrapper and
+  add it to that layout's `NAV` (exported, and reused by the surface's Home via
+  `ModuleOverviewGrid`). Don't add Core tools back into `AdminLayout`'s
+  `NAV_SECTIONS` — that's chrome-only now.
+- **Yearbooks** (`/admin/yearbook`, `AdminYearbook`) is still a standalone
+  full-page editor with no surrounding sidebar (it always was); the BetterStats
+  nav links to it but the page itself doesn't wrap in `BetterStatsLayout`.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI

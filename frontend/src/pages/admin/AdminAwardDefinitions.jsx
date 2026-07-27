@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const CATEGORIES = [
@@ -233,9 +233,9 @@ export default function AdminAwardDefinitions() {
   }
 
   if (!defs) return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <PbSpinner message="Loading award definitions…" />
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 
   const filtered = defs.filter(d => {
@@ -260,7 +260,7 @@ export default function AdminAwardDefinitions() {
   const orderedCats = CATEGORIES.filter(c => !filterCat ? grouped[c] : grouped[c])
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-5xl mx-auto">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -390,6 +390,6 @@ export default function AdminAwardDefinitions() {
           </p>
         )}
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

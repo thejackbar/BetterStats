@@ -40,17 +40,30 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette first…
 
-  const items = nav.filter(i => i.cap == null || hasCapability(i.cap))
+  // Nav may include `{ heading }` separators — kept regardless of cap (they
+  // carry no `to`/`cap`); ordinary items are filtered by capability. A heading
+  // left with no visible items under it (all cap-filtered away, or trailing) is
+  // dropped so a label never dangles.
+  const items = nav
+    .filter(i => i.heading || i.cap == null || hasCapability(i.cap))
+    .filter((i, idx, arr) => !i.heading || (arr[idx + 1] && !arr[idx + 1].heading))
 
   // Label stored when bookmarking the current page — module name + page so the
   // bookmark reads clearly alongside ones from other surfaces.
-  const activeNav = items.find(i => i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to))
+  const activeNav = items.find(i => i.to && (i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to)))
   const pageName = title || activeNav?.label
   const bookmarkLabel = `Better${moduleName}` + (pageName ? ` · ${pageName}` : '')
 
   const NavItems = ({ onNavigate }) => (
     <>
-      {items.map(item => {
+      {items.map((item, idx) => {
+        if (item.heading) {
+          return (
+            <div key={`h-${idx}`} className="px-4 pt-4 pb-1 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
+              {item.heading}
+            </div>
+          )
+        }
         const active = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
         return (
           <Link key={item.to} to={item.to} onClick={onNavigate}

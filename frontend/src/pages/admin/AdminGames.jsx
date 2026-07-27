@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { formatSeason } from '../../lib/cricketFormat'
 
 export default function AdminGames() {
@@ -27,7 +27,7 @@ export default function AdminGames() {
   }, [selectedSeason])
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-4xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-4">Matches</h1>
 
@@ -72,6 +72,6 @@ export default function AdminGames() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

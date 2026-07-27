@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useClub } from '../../hooks/useClub'
 import { normalizeGender } from '../../lib/playerAttributes'
 
@@ -102,7 +102,7 @@ export default function AdminMilestones() {
   const showAchieved = status === 'achieved' || status === 'all'
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-5xl">
         <div className="mb-6">
           <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Milestones</h1>
@@ -356,6 +356,6 @@ export default function AdminMilestones() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

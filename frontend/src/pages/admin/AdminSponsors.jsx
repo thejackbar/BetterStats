@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { validateImageFile } from '../../lib/validation'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { useToast } from '../../contexts/ToastContext'
@@ -167,7 +167,7 @@ export default function AdminSponsors() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-2xl">
         <div className="flex items-center justify-between mb-2">
           <h1 className="font-display font-bold text-2xl text-pb-text">Sponsors</h1>
@@ -398,6 +398,6 @@ export default function AdminSponsors() {
           }}
         />
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

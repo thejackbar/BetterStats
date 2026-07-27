@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 export default function AdminMemberPortal() {
@@ -45,9 +45,9 @@ export default function AdminMemberPortal() {
 
   const portalUrl = user?.club_slug ? `${window.location.origin}/portal/${user.club_slug}` : null
 
-  if (status === null) return <AdminLayout><PbSpinner message="Loading…" /></AdminLayout>
+  if (status === null) return <BetterClubManagerLayout><PbSpinner message="Loading…" /></BetterClubManagerLayout>
   return (
-    <AdminLayout>
+    <BetterClubManagerLayout>
       <div className="max-w-2xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Member Portal</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
@@ -128,6 +128,6 @@ export default function AdminMemberPortal() {
           )}
         </div>
       </div>
-    </AdminLayout>
+    </BetterClubManagerLayout>
   )
 }

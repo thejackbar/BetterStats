@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'rea
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
 import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
@@ -308,7 +308,7 @@ export default function AdminImport() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-6xl">
         <Link to="/admin" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← ADMIN</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Import historical stats</h1>
@@ -569,7 +569,7 @@ export default function AdminImport() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }
 

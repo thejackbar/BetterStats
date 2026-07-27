@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
@@ -734,7 +734,7 @@ export default function AdminPartnershipRecords() {
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-4xl">
         <div className="flex items-center justify-between mb-4">
           <h1 className="font-display font-bold text-2xl text-pb-text">Partnership Records</h1>
@@ -924,6 +924,6 @@ export default function AdminPartnershipRecords() {
           }}
         />
       )}
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }

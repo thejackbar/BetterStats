@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 function GradePicker({ grades, value, onChange, placeholder, exclude }) {
@@ -434,14 +434,14 @@ export default function AdminGrades() {
 
   if (!orgId || loading) {
     return (
-      <AdminLayout>
+      <BetterStatsLayout>
         <PbSpinner message="Loading grades…" />
-      </AdminLayout>
+      </BetterStatsLayout>
     )
   }
 
   return (
-    <AdminLayout>
+    <BetterStatsLayout>
       <div className="max-w-3xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades</h1>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
@@ -460,6 +460,6 @@ export default function AdminGrades() {
 
         <RenameGrades />
       </div>
-    </AdminLayout>
+    </BetterStatsLayout>
   )
 }
