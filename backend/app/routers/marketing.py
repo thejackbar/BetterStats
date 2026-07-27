@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db, async_session_maker, MarketingClub, MarketingClubContact
@@ -748,48 +748,105 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     club = await db.get(MarketingClub, club_id)
     if club is None:
         raise HTTPException(status_code=404, detail="Club not found")
+    # Capture everything we need off the ORM object BEFORE the read-only rollback
+    # below: rollback expires attached instances, so any later club.<attr> access
+    # would fire a lazy reload and raise MissingGreenlet in this async context.
+    is_linked = bool(club.existing_org_id)
+    req_trial = bool(club.requested_trial_modules)
+    in_trial = (club.demo_status or "") == "in_trial"
+    cid = str(club.id)
+    org_id = str(club.existing_org_id) if club.existing_org_id else None
     org = None
     if club.existing_org_id:
         org = await db.get(Organisation, club.existing_org_id,
                            options=[selectinload(Organisation.module_subscriptions)])
     eng = await twenty_sync._engagement(db, club, org)
+
+    # Split email engagement into opens vs clicks (with their own decay points),
+    # so the breakdown itemises them instead of lumping "email engagement". Uses
+    # the SAME per-event decay weights the score itself uses (twenty_sync), and
+    # the same attribution (this club's contact emails, or the linked org).
+    from app.services.twenty_sync import EMAIL_OPEN_DECAY as _OPEN, EMAIL_CLICK_DECAY as _CLICK
+
+    def _decay_case(kind, w):
+        return (f"COALESCE(SUM(CASE "
+                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '7 days' THEN {w['d7']} "
+                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '14 days' THEN {w['d14']} "
+                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '21 days' THEN {w['d21']} "
+                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '28 days' THEN {w['d28']} "
+                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '90 days' THEN {w['d90']} "
+                f"ELSE 0.0 END), 0.0)::float")
+    em = (await db.execute(text(f"""
+        SELECT COUNT(*) FILTER (WHERE event_type='open')  AS opens_all,
+               COUNT(*) FILTER (WHERE event_type='click') AS clicks_all,
+               COUNT(*) FILTER (WHERE event_type='open'  AND created_at > NOW() - INTERVAL '30 days') AS opens_30d,
+               COUNT(*) FILTER (WHERE event_type='click' AND created_at > NOW() - INTERVAL '30 days') AS clicks_30d,
+               {_decay_case('open', _OPEN)}  AS open_pts,
+               {_decay_case('click', _CLICK)} AS click_pts
+        FROM email_events
+        WHERE lower(email) IN (SELECT lower(email) FROM marketing_club_contacts
+                               WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> '')
+           OR (CAST(:org AS text) IS NOT NULL AND organisation_id::text = CAST(:org AS text))
+    """), {"cid": cid, "org": org_id})).first()
+    opens_all, clicks_all, opens_30d, clicks_30d = (em[0] or 0, em[1] or 0, em[2] or 0, em[3] or 0)
+    open_pts, click_pts = (float(em[4] or 0), float(em[5] or 0))
+
     await db.rollback()  # read-only: don't persist this recompute
 
-    # Build a plain-English list of contributions, biggest first, so the panel
-    # can just render them in order.
+    # Itemised contributions, each tagged with a category so the UI can group
+    # them and hide the non-engagement ones:
+    #   engagement = real activity signals (web, email opens/clicks, ad clicks, recency)
+    #   intent     = buying-intent flags (enquiry, trial request/in-trial, ad signup)
+    #   setup      = onboarding/registration floor (registered, imported, merged, …)
+    # "just show me what moved the score via engagement" = filter to category=engagement.
     contributions = []
-    def add(label, points, detail=""):
+    def add(label, points, category, detail=""):
         if points:
-            contributions.append({"label": label, "points": round(float(points), 1), "detail": detail})
+            contributions.append({"label": label, "points": round(float(points), 1),
+                                  "category": category, "detail": detail})
 
     recency = eng.get("_recencyPts") or 0
     web = eng.get("_webDecayPts") or 0
-    email = eng.get("_emailDecayPts") or 0
     ad = eng.get("_adDecayPts") or 0
     td = eng.get("_trialDepth") or None
-    is_linked = bool(club.existing_org_id)
 
     if eng.get("_directEnquiryHot"):
-        contributions.append({"label": "Direct 'onboard my club' enquiry (recent)",
-                              "points": eng.get("engagementScore"),
-                              "detail": "Pinned to a flat Hot score for a set window after the enquiry."})
+        contributions.append({
+            "label": "Direct 'onboard my club' enquiry (recent)", "category": "intent",
+            "points": eng.get("engagementScore"),
+            "detail": "Pinned to a flat Hot score for a set window after the enquiry — overrides the tally below."})
     else:
-        add("Recency of last activity", recency, "Most recent web/email/enquiry touch, decaying over time.")
-        add("Web page views", web, f"{eng.get('sessions30d', 0)} distinct visitor(s) in 30 days.")
-        add("Email opens & clicks", email, f"{eng.get('emailEngaged30d', 0)} open/click(s) in 30 days.")
-        add("Meta ad clicks", ad, f"{eng.get('_adClicks', 0)} ad-click landing(s).")
+        # Engagement signals.
+        add("Web page views", web, "engagement",
+            f"{eng.get('sessions30d', 0)} distinct visitor(s) in 30 days.")
+        add("Email clicks", click_pts, "engagement",
+            f"{clicks_all} click(s) all-time, {clicks_30d} in 30 days.")
+        add("Email opens", open_pts, "engagement",
+            f"{opens_all} open(s) all-time, {opens_30d} in 30 days"
+            + (". Note: email tracking may be off — 0 means no data, not no engagement." if not opens_all and not clicks_all else "."))
+        add("Meta ad clicks", ad, "engagement", f"{eng.get('_adClicks', 0)} ad-click landing(s).")
+        add("Recency of last activity", recency, "engagement",
+            "Most recent web/email/enquiry touch, decaying over time.")
+        # Intent flags.
         if eng.get("_onboardingRequested"):
-            add("Onboarding enquiry bonus", twenty_sync.BONUS_ONBOARDING)
-        if club.requested_trial_modules:
-            add("Requested a trial", twenty_sync.BONUS_REQUESTED_TRIAL)
-        if (club.demo_status or "") == "in_trial":
-            add("Currently in a trial", twenty_sync.BONUS_IN_TRIAL)
+            add("Onboarding enquiry", twenty_sync.BONUS_ONBOARDING, "intent")
+        if req_trial:
+            add("Requested a trial", twenty_sync.BONUS_REQUESTED_TRIAL, "intent")
+        if in_trial:
+            add("Currently in a trial", twenty_sync.BONUS_IN_TRIAL, "intent")
         if eng.get("_adSignup"):
-            add("Signed up from a paid ad", twenty_sync.BONUS_AD_SIGNUP)
+            add("Signed up from a paid ad", twenty_sync.BONUS_AD_SIGNUP, "intent")
+        # Setup / registration floor (the non-engagement part), itemised from the
+        # trial-depth sub-scores so "registered = +70" reads plainly. This floors
+        # the score (takes the max) rather than adding, so it's flagged as such.
         if td and td.get("score"):
-            add("Product setup depth (registered/imported/merged)", td.get("score"),
-                "Onboarded club: floors the score on real setup effort, not web activity."
-                + ("" if td.get("hasPrimaryAdmin") else " Staff-performed, so discounted."))
+            staff = "" if td.get("hasPrimaryAdmin") else " (staff-performed, discounted)"
+            add("Registered in BetterStats", td.get("_registrationPts"), "setup",
+                "Onboarded/set up as a club" + staff + ". A floor, not activity.")
+            add("Imported historical stats", td.get("_importStatsPts"), "setup")
+            add("Merged players/grades", td.get("_mergePts"), "setup")
+            add("Set up paid-module features", td.get("_modulePts"), "setup")
+            add("Admin polish (branding/sponsors)", td.get("_polishPts"), "setup")
 
     return {
         "score": eng.get("engagementScore"),
@@ -798,11 +855,14 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
         "in_sales_cycle": eng.get("inSalesCycle"),
         "signals": {
             "sessions_30d": eng.get("sessions30d", 0),
-            "email_engaged_30d": eng.get("emailEngaged30d", 0),
+            "email_opens": opens_all,
+            "email_clicks": clicks_all,
+            "email_opens_30d": opens_30d,
+            "email_clicks_30d": clicks_30d,
             "ad_clicks": eng.get("_adClicks", 0),
             "recency_pts": round(float(recency), 1),
             "web_pts": round(float(web), 1),
-            "email_pts": round(float(email), 1),
+            "email_pts": round(float(open_pts + click_pts), 1),
             "ad_pts": round(float(ad), 1),
             "freq_pts": eng.get("_freqPts", 0),
         },
