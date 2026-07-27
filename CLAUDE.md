@@ -12,20 +12,28 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
 
 - **BetterStats (Core) is its own surface** now (it used to be a loose pile in the
   shared sidebar). `BetterStatsLayout` (green, `moduleBrand('stats')`), home at
-  `/admin/betterstats` (`BetterStatsHome`). It holds Data (Matches, Players,
-  Seasons), Bring data in (Data Sync, Import Players, Import Stats, Upload
-  Scorecard, Manual Entries), Tidy & fix (Merge Players, Merge Grades, Milestones,
-  Partnership Records) and Records & content (Awards, Award Types, Yearbooks, Saved
-  Reports, Sponsors).
-- **BetterClubManager** is a second Core surface (provisional name) for the club
-  back office: `BetterClubManagerLayout` (indigo, `moduleBrand('clubmanager')`),
-  home at `/admin/betterclub` (`BetterClubManagerHome`). Committee, Volunteers,
-  Families, Qualifications, (Member Portal when its flag is on), Events, Assets &
-  Facilities, Club Diary.
-- Both are **Core** (always on, never billable), so they live in `CORE_TILES` in
+  `/admin/betterstats` (`BetterStatsHome`). GROUPS: **Club Data** (Matches,
+  Players, Import Players, Seasons), **Data Import** (Data Sync, Import Stats,
+  Upload Scorecard, Manual Entries, Milestones, Partnership Records), **Clean Your
+  Data** (Merge Players, Merge Grades) and **Records & content** (Awards, Award
+  Types, Yearbooks, Saved Reports, Sponsors). Group `key`s (`data`/`ingest`/`tidy`/
+  `records`) are stable and drive the `:group` URLs, so the display labels can be
+  renamed without moving a route.
+- **BetterClubManager** (provisional name) is an **upcoming** back-office surface,
+  NOT a live Core tile. It shows as a **"Coming soon" card under BetterAdmin**
+  (`BetterAdminHome`) — greyed/non-clickable for everyone except **super admins**,
+  who get a live "Preview" link. Its surface (`BetterClubManagerLayout` indigo,
+  home `/admin/betterclub` `BetterClubManagerHome`) and every one of its tool
+  routes (`/admin/committee`, `/admin/volunteers`, `/admin/families`,
+  `/admin/qualifications`, `/admin/member-portal`, `/admin/events`, `/admin/assets`,
+  `/admin/club-diary`) are gated `requireRole="super_admin"` in `App.jsx`. So
+  ordinary club admins currently have **no access** to these tools — deliberate,
+  until BetterClubManager launches. It is therefore NOT in `CORE_TILES` /
+  `dashboardTiles()` (off the dashboard, sidebar and module switcher).
+- **The one Core surface tile** (BetterStats) lives in `CORE_TILES` in
   `lib/modules.js` — deliberately OUTSIDE `MODULE_INFO` (which feeds
-  entitlement/billing). `dashboardTiles()` returns `[BetterStats, …paid modules…,
-  BetterClubManager]`; `alwaysOpen` keeps them entitled for every admin.
+  entitlement/billing). `dashboardTiles()` returns `[BetterStats, …paid modules…]`;
+  `alwaysOpen` keeps it entitled for every admin.
 - **Two-level home, one config.** Each layout exports a `GROUPS` array (key,
   label, icon, `desc`, and `items` each with `to`/`label`/`icon`/`cap`/`desc`).
   It drives all three views so nothing drifts: the surface home
@@ -35,6 +43,13 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
   renders the home + group pages from `GROUPS`; the `Home` page components pass
   `groupKey` from the `:group` route param. BetterClubManager's Member Portal is
   inserted into its People group only when the flag is on (`withPortal`).
+- **`components/admin/HubCard`** is the one house-style menu card (matches
+  BetterAdmin's sub-cards): name (+ badges) and arrow on top, description below,
+  accent-tinted; `state: 'open'` is a link, `'soon'` is a greyed non-clickable
+  teaser. Used by `ModuleHub` (BetterStats overview + group pages), the
+  BetterSelect Overview tool grid, and the BetterClubManager "Coming soon" card.
+  A `title` starting with "Better" gets the coloured-suffix wordmark. **Use HubCard
+  for any new menu card** so the look stays consistent.
 - **URLs are unchanged** — the tool pages kept their existing routes
   (`/admin/players`, `/admin/committee`, …); only the layout wrapper each page
   renders changed (`AdminLayout` → the module layout). So bookmarks/links still

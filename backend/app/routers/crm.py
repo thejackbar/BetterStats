@@ -983,6 +983,7 @@ async def super_create_automation(body: AutomationRuleCreate, db: AsyncSession =
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    await db.refresh(rule)
     return crm_rules.rule_dict(rule)
 
 
@@ -996,6 +997,7 @@ async def super_update_automation(rule_id: str, body: AutomationRuleUpdate, db: 
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    await db.refresh(rule)
     return crm_rules.rule_dict(rule)
 
 
