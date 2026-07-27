@@ -62,22 +62,26 @@ async def run(*, top: int, prospects_only: bool, min_score: int | None) -> None:
         q = q.limit(top)
         ids = [r[0] for r in (await session.execute(q)).all()]
 
-        print(f"{'#':>3}  {'score':>5} {'tier':4} {'linked':6}  "
-              f"{'rec':>4} {'web':>6} {'email':>6} {'ad':>5} {'freq':>6}  "
-              f"{'sess':>4} {'em30':>4}  club  /  flags")
-        print("-" * 108)
+        header = (f"{'#':>3}  {'score':>5}  {'tier':<4}  {'sess':>4}  {'em30':>4}  "
+                  f"{'web':>6}  {'email':>6}  {'ad':>5}  {'freq':>6}  {'rec':>4}   club  [flags]")
+        print(header)
+        print("-" * len(header))
         for i, cid in enumerate(ids, 1):
             club = await session.get(MarketingClub, cid)
             org = await _load_org(session, club.existing_org_id)
             eng = await _engagement(session, club, org)
-            linked = "yes" if club.existing_org_id else ""
-            print(f"{i:>3}  {eng.get('engagementScore'):>5} "
-                  f"{(eng.get('engagementTier') or ''):4} {linked:6}  "
-                  f"{eng.get('_recencyPts', 0):>4} {eng.get('_webDecayPts', 0):>6} "
-                  f"{eng.get('_emailDecayPts', 0):>6} {eng.get('_adDecayPts', 0):>5} "
-                  f"{eng.get('_freqPts', 0):>6}  "
-                  f"{eng.get('sessions30d', 0):>4} {eng.get('emailEngaged30d', 0):>4}  "
-                  f"{(club.name or '?')[:34]}  /  {_flags(club, eng)}")
+            g = lambda k: float(eng.get(k) or 0)  # noqa: E731 — terse local formatter
+            mark = "*" if club.existing_org_id else " "   # * = linked (onboarded/customer)
+            flags = _flags(club, eng)
+            tail = (club.name or "?")[:32] + (f"  [{flags}]" if flags != "-" else "")
+            print(f"{i:>3}  {eng.get('engagementScore'):>5}  "
+                  f"{(eng.get('engagementTier') or ''):<4}  "
+                  f"{eng.get('sessions30d', 0):>4}  {eng.get('emailEngaged30d', 0):>4}  "
+                  f"{g('_webDecayPts'):>6.1f}  {g('_emailDecayPts'):>6.1f}  "
+                  f"{g('_adDecayPts'):>5.1f}  {g('_freqPts'):>6.1f}  "
+                  f"{g('_recencyPts'):>4.1f}   {mark}{tail}")
+        print("\n  * = linked (onboarded/customer). email/ad points are 0 when SES "
+              "open/click tracking is off. freq can exceed 100 (it's pre-clamp).")
         await session.rollback()  # read-only
 
 

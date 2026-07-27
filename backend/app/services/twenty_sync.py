@@ -621,7 +621,7 @@ async def _engagement(session, club: MarketingClub,
         # Internal-only score breakdown (underscore-prefixed, stripped by _public()
         # before anything reaches Twenty) — for diagnose_club_lead.py, so a score
         # can actually be explained rather than just observed.
-        "_recencyPts": recency,
+        "_recencyPts": round(recency, 1),
         "_emailDecayPts": round(email_decay_pts, 1),
         "_webDecayPts": round(web_decay_pts, 1),
         "_adDecayPts": round(ad_decay_pts, 1),
