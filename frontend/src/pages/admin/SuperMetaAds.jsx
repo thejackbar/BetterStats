@@ -565,6 +565,7 @@ export default function SuperMetaAds() {
                       <thead>
                         <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
                           <th className="px-2 py-2">Club</th>
+                          <th className="px-2 py-2">Source</th>
                           <th className="px-2 py-2">Furthest step</th>
                           <th className="px-2 py-2">Contact email</th>
                           <th className="px-2 py-2">Last seen</th>
@@ -575,6 +576,15 @@ export default function SuperMetaAds() {
                           <tr key={c.name + (c.org_id || '')} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
                             <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
                               {c.slug ? <a href={`/${c.slug}`} className="hover:underline">{c.name}</a> : c.name}
+                            </td>
+                            <td className="px-2 py-2">
+                              <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+                                c.via_meta
+                                  ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
+                                  : 'border-pb-hairline text-pb-faint'
+                              }`}>
+                                {c.via_meta ? 'Meta' : 'Other'}
+                              </span>
                             </td>
                             <td className="px-2 py-2">
                               <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
