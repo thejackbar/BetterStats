@@ -300,18 +300,20 @@ export default function Trial() {
   // the single switch. Flipping it on makes the page AND signup live, no deploy.
   if (status === false) return <Navigate to="/contact" replace />
 
-  // Clicking a club is a real, trackable selection (unlike a half-typed query
-  // someone abandons). An already-registered club goes straight to its page; a
-  // new one records the pick (so a prospect who then backs out of the modal is
-  // still captured) and opens the Set Up / Request Access choice.
+  // Every result row looks identical, so clicking one is a real "this is my
+  // club" signal — recorded for ALL clubs (live or not), not only when a
+  // prospect commits, so the interest data is captured properly. Then route by
+  // status: a live club opens its page, a new one opens the Set Up / Request
+  // Access choice. The beacon is fire-and-forget and survives the client-side
+  // navigate (no page unload), so the click is logged either way.
   const handleClubClick = (club) => {
+    api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
+      name: orgName(club), org_id: club.id,
+    }).catch(() => {})
     if (club.already_registered && club.already_registered_slug) {
       navigate(`/${club.already_registered_slug}`)
       return
     }
-    api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
-      name: orgName(club), org_id: club.id,
-    }).catch(() => {})
     setActionClub(club)
   }
 
@@ -380,14 +382,7 @@ export default function Trial() {
                       className="w-full pb-card p-3 flex items-center gap-3 text-left hover:border-accent/40 transition"
                     >
                       <ClubLogo club={club} />
-                      <span className="flex-1 min-w-0">
-                        <span className="block font-display font-semibold text-sm truncate">{orgName(club)}</span>
-                        {club.already_registered ? (
-                          <span className="block font-mono text-[10px] text-emerald-300 mt-0.5">✓ Already on BetterCricket — view page</span>
-                        ) : (
-                          <span className="block font-mono text-[10px] text-pb-faint mt-0.5">Set up or request access</span>
-                        )}
-                      </span>
+                      <span className="flex-1 min-w-0 font-display font-semibold text-sm truncate">{orgName(club)}</span>
                       <span className="text-pb-faint shrink-0">→</span>
                     </button>
                   ))}
