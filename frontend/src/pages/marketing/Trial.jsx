@@ -12,34 +12,28 @@ import { ModuleWordmark } from '../../components/ModuleLockup'
 import { getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
 
-// The ad-campaign landing page. Search-first: the visitor looks up their club
-// and CLICKS it (a real selection signal we can record, unlike a half-typed
-// query they abandon). Clicking either takes them to their existing page (if
-// already on BetterCricket) or opens a modal to Set Up Club or Request Access.
-// The "request access" path feeds the same onboarding pipeline as the Contact
-// form. A product screenshot sits above the search so the offer is concrete,
-// with the search box kept within reach on every device.
+// The ad-campaign landing page. Search-first, and nothing else in the way: the
+// giant search box sits directly under the header so the one thing we want a
+// visitor to do — look up their club — is unmissable. Clicking a result either
+// opens their existing club page (if already on BetterCricket) or a small
+// choose-modal that offers to set the club up now (free, no card) or have us
+// reach out. We deliberately keep any trial framing OFF the landing page — the
+// goal is to get people inputting their club with no thinking; the "it's a free
+// trial" reassurance only appears once they've picked a club that isn't set up.
 
 const TRIAL_JSONLD = {
   '@context': 'https://schema.org',
   '@type': 'WebPage',
-  name: 'Start your club’s free trial | BetterCricket',
+  name: 'Find your cricket club | BetterCricket',
   url: 'https://betterat.cricket/trial',
   description:
-    'Search for your cricket club to see if it’s on BetterCricket. If not, start '
-    + 'a free trial of every module, or request access. No credit card and no sales call.',
+    'Search for your cricket club and bring its entire history to life on '
+    + 'BetterCricket. If it’s not set up yet, get it going in minutes or ask us to reach out.',
 }
 
-const STEPS = [
-  ['Find Your Club', 'Simple search to ensure you sync the correct Australian cricket club.'],
-  ['Enter Your Details', 'Set up your admin profile.'],
-  ['Complete Setup Wizard', 'We take you through your initial set up step-by-step to customise BetterCricket to your club and clean up your data.'],
-]
-
 const FAQS = [
-  ['Do I need a credit card?', 'No. The trial needs your name, email and mobile number. Payment only comes up if you decide to subscribe after seeing your club’s data.'],
-  ['What’s included in the trial?', 'Everything. BetterStats plus every add-on module (BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasy), all on at once, so your committee can judge the whole platform.'],
-  ['What happens when the trial ends?', 'Your club’s page comes offline, but we don’t delete your stats. Everything stays safely stored, so you can come back online whenever your club is ready. Nothing is charged automatically.'],
+  ['Is it free to get started?', 'Yes. Setting your club up is free and we never ask for a credit card. Add your name, email and mobile and your club goes live.'],
+  ['What’s included?', 'Everything. BetterStats plus every add-on module (BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasy), all on at once, so your committee can judge the whole platform.'],
   ['How much history do you import?', 'Everything Cricket Australia holds for your club, imported automatically in the background. There’s no limit on how far back it goes. And if your club has old spreadsheets, we can bring those into BetterCricket too.'],
   ['Who should register the club?', 'Someone with the authority to evaluate software for the club, typically a committee member, secretary or captain. You’ll confirm that during signup.'],
 ]
@@ -50,7 +44,7 @@ const orgName = (o) => o.name || o.shortName || o.organisationName || o.id || ''
 // Club logo, same idea as elsewhere in BetterCricket: show the club's crest
 // when we have one (PlayHQ search results carry it for many clubs), and fall
 // back to an initials badge otherwise — never a broken image.
-function ClubLogo({ club, size = 'w-9 h-9' }) {
+function ClubLogo({ club, size = 'w-10 h-10' }) {
   const [ok, setOk] = useState(true)
   const src = club.logoUrl
     || (typeof club.logo === 'string' ? club.logo : club.logo?.url)
@@ -73,7 +67,16 @@ function ClubLogo({ club, size = 'w-9 h-9' }) {
   )
 }
 
-// The pre-filled "request access" form — club name is already known from the
+function SearchIcon({ className = 'w-6 h-6' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  )
+}
+
+// The pre-filled "reach out" form — club name is already known from the
 // search, so it only asks for a name and email, then posts into the same
 // onboarding-request pipeline the Contact form uses (super-admin Onboarding
 // list + a Hot lead into the CRM).
@@ -140,8 +143,9 @@ function RequestInfoForm({ club, onDone }) {
   )
 }
 
-// Shown when a not-yet-registered club is clicked: choose Set Up Club (the
-// self-serve trial wizard, pre-seeded) or Request Access (the enquiry form).
+// Shown when a not-yet-registered club is clicked. This is the one place trial
+// reassurance lives: set the club up now (free, no credit card) or ask us to
+// reach out (the enquiry form).
 function ClubActionModal({ club, onSetUp, onClose }) {
   const [mode, setMode] = useState('choose')   // choose | request | done
 
@@ -175,7 +179,7 @@ function ClubActionModal({ club, onSetUp, onClose }) {
         ) : mode === 'request' ? (
           <>
             <p className="text-sm text-pb-dim mb-1">
-              Request access and we&rsquo;ll help you get {orgName(club)} onto BetterCricket.
+              Leave your details and we&rsquo;ll help get {orgName(club)} onto BetterCricket.
             </p>
             <RequestInfoForm club={club} onDone={() => setMode('done')} />
             <button
@@ -188,8 +192,9 @@ function ClubActionModal({ club, onSetUp, onClose }) {
         ) : (
           <>
             <p className="text-sm text-pb-dim mb-4">
-              Get {orgName(club)} onto BetterCricket. Set it up yourself with a free trial, or request
-              access and we&rsquo;ll help you get started.
+              {orgName(club)} isn&rsquo;t on BetterCricket yet. Set it up yourself now — it&rsquo;s
+              free and we never ask for a credit card — or ask us to reach out and we&rsquo;ll help
+              get you started.
             </p>
             <div className="space-y-2">
               <button
@@ -197,13 +202,14 @@ function ClubActionModal({ club, onSetUp, onClose }) {
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
                 style={{ background: 'var(--pb-accent)' }}
               >
-                Set Up Club
+                Set up my club
               </button>
+              <p className="text-center font-mono text-[10px] text-pb-faintest">Free · No credit card</p>
               <button
                 onClick={() => setMode('request')}
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
               >
-                Request Access
+                Ask us to reach out
               </button>
             </div>
           </>
@@ -215,10 +221,10 @@ function ClubActionModal({ club, onSetUp, onClose }) {
 
 export default function Trial() {
   usePageMeta({
-    title: 'Start your club’s free trial | BetterCricket',
+    title: 'Find your cricket club | BetterCricket',
     description:
-      'Search for your cricket club to see if it’s on BetterCricket. If not, start '
-      + 'a free trial of every module, or request access. No credit card and no sales call.',
+      'Search for your cricket club and bring its entire history to life on '
+      + 'BetterCricket. If it’s not set up yet, get it going in minutes or ask us to reach out.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/trial',
     jsonLd: TRIAL_JSONLD,
@@ -303,9 +309,9 @@ export default function Trial() {
   // Every result row looks identical, so clicking one is a real "this is my
   // club" signal — recorded for ALL clubs (live or not), not only when a
   // prospect commits, so the interest data is captured properly. Then route by
-  // status: a live club opens its page, a new one opens the Set Up / Request
-  // Access choice. The beacon is fire-and-forget and survives the client-side
-  // navigate (no page unload), so the click is logged either way.
+  // status: a live club opens its page, a new one opens the Set Up / reach-out
+  // choice. The beacon is fire-and-forget and survives the client-side navigate
+  // (no page unload), so the click is logged either way.
   const handleClubClick = (club) => {
     api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
       name: orgName(club), org_id: club.id,
@@ -333,44 +339,38 @@ export default function Trial() {
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
 
-        {/* Hero — screenshot + search, kept tight so the search box stays in
-            reach on phones (the image is capped in viewport height). */}
-        <section className="relative pt-24 pb-14 px-4 sm:px-6 lg:px-10 overflow-hidden">
+        {/* Hero — the giant search sits right under the header so it's the first
+            and most obvious thing to do. No trial/credit-card framing here. */}
+        <section className="relative pt-24 pb-10 px-4 sm:px-6 lg:px-10 overflow-hidden">
           <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
-          <div className="max-w-[760px] mx-auto relative text-center">
-            <p className="pill mb-4 inline-flex"><span className="dot" />No credit card · No sales call</p>
-            <h1 className="font-display font-bold text-[30px] sm:text-[42px] lg:text-[54px] tracking-tight leading-[0.98] mb-4">
-              Your club&rsquo;s entire history, <span className="gradient-text">live in minutes.</span>
+          <div className="max-w-3xl mx-auto relative text-center">
+            <h1 className="font-display font-bold text-[28px] sm:text-[40px] lg:text-[50px] tracking-tight leading-[1.02] mb-3">
+              Find your club. See its <span className="gradient-text">entire history</span> come to life.
             </h1>
-            <p className="text-base sm:text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed mb-5">
-              Find your club to get started — free {trialDays}-day trial, no credit card.
+            <p className="text-base sm:text-lg text-pb-dim max-w-xl mx-auto leading-relaxed mb-7">
+              Every player, season and record your club has ever had — search for it below.
             </p>
-
-            {/* A real set-up club, so the offer is concrete. Height-capped so the
-                search below never drops off the first screen on any device. */}
-            <div className="mb-6 mx-auto max-w-xl">
-              <img
-                src="/marketing/front-page-profile.jpg"
-                alt="A club’s player profile on BetterCricket"
-                loading="eager"
-                className="w-full rounded-xl border pb-hairline shadow-lg object-contain max-h-[26vh] sm:max-h-[32vh]"
-              />
-            </div>
 
             {status === null ? (
               <p className="font-mono text-xs text-pb-faint">Loading…</p>
             ) : available ? (
-              <div className="max-w-xl mx-auto text-left">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search for your club…"
-                  aria-label="Search for your club"
-                  autoFocus
-                  className={FIELD_CLS}
-                />
+              <div className="max-w-2xl mx-auto text-left">
+                <div className="relative">
+                  <span className="absolute left-5 sm:left-6 top-1/2 -translate-y-1/2 text-pb-faint pointer-events-none">
+                    <SearchIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+                  </span>
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search for your club…"
+                    aria-label="Search for your club"
+                    autoFocus
+                    className="w-full bg-pb-surface2 text-pb-text rounded-2xl pl-14 sm:pl-16 pr-5 py-5 sm:py-6 text-lg sm:text-2xl font-display font-semibold outline-none shadow-xl border-2 transition focus:shadow-2xl"
+                    style={{ borderColor: 'var(--pb-accent)' }}
+                  />
+                </div>
 
-                <div className="mt-2 space-y-2">
+                <div className="mt-3 space-y-2">
                   {searching && <p className="font-mono text-[11px] text-pb-faint px-1">Searching…</p>}
                   {searchError && <p className="text-xs text-red-400 px-1">{searchError}</p>}
 
@@ -379,10 +379,10 @@ export default function Trial() {
                       key={club.id || orgName(club)}
                       type="button"
                       onClick={() => handleClubClick(club)}
-                      className="w-full pb-card p-3 flex items-center gap-3 text-left hover:border-accent/40 transition"
+                      className="w-full pb-card p-4 flex items-center gap-3 text-left hover:border-accent/40 transition"
                     >
                       <ClubLogo club={club} />
-                      <span className="flex-1 min-w-0 font-display font-semibold text-sm truncate">{orgName(club)}</span>
+                      <span className="flex-1 min-w-0 font-display font-semibold text-base truncate">{orgName(club)}</span>
                       <span className="text-pb-faint shrink-0">→</span>
                     </button>
                   ))}
@@ -399,7 +399,7 @@ export default function Trial() {
                           className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
                           style={{ background: 'var(--pb-accent)' }}
                         >
-                          Start the full wizard
+                          Set up your club anyway
                         </button>
                         <a
                           href={`mailto:${SUPPORT_EMAIL}`}
@@ -413,40 +413,38 @@ export default function Trial() {
                 </div>
 
                 <p className="font-mono text-[11px] text-pb-faintest mt-4 text-center">
-                  Prefer to just dive in?{' '}
+                  Can&rsquo;t find your club?{' '}
                   <button type="button" onClick={openWizardBlank} className="underline hover:text-pb-text">
-                    Start the free trial wizard
+                    Set it up yourself
                   </button>
                 </p>
               </div>
             ) : null}
+          </div>
+        </section>
 
-            <p className="font-mono text-[11px] text-pb-faintest mt-6">
-              Quick and Easy Setup · Every Module Included · No Obligation
+        {/* A real club home page, so the offer is concrete. Sits below the
+            search (the search stays the first thing a visitor sees). */}
+        <section className="px-4 sm:px-6 lg:px-10 pb-14">
+          <div className="max-w-4xl mx-auto">
+            <img
+              src="/marketing/club-home.png"
+              alt="A club’s home page on BetterCricket"
+              loading="lazy"
+              className="w-full rounded-xl border pb-hairline shadow-2xl"
+            />
+            <p className="text-center font-mono text-[11px] text-pb-faintest mt-3">
+              A real club, live on BetterCricket.
             </p>
           </div>
         </section>
 
-        {/* How it works */}
-        <section className="px-4 sm:px-6 lg:px-10 pb-16">
-          <div className="max-w-[1000px] mx-auto grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {STEPS.map(([title, body], i) => (
-              <Reveal key={title} delay={i * 80}>
-                <div className="pb-card p-6 h-full">
-                  <p className="font-mono text-[11px] tracking-wide3 text-pb-faint uppercase mb-2">Step {i + 1}</p>
-                  <h3 className="font-display font-bold text-lg mb-2">{title}</h3>
-                  <p className="text-sm text-pb-dim leading-relaxed">{body}</p>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </section>
-
-        {/* Modules — same cards as the homepage, each clicking through */}
+        {/* Modules — brought up so visitors can see everything BetterCricket
+            does. Same cards as the homepage, each clicking through. */}
         <section className="px-4 sm:px-6 lg:px-10 pb-16">
           <div className="max-w-[1200px] mx-auto">
             <h2 className="font-display font-bold text-2xl mb-6 text-center">
-              Then you&rsquo;re free to explore everything BetterCricket has to offer
+              Everything BetterCricket does for your club
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {MODULES_MARKETING.map((m, i) => (
@@ -463,7 +461,7 @@ export default function Trial() {
               ))}
             </div>
             <p className="font-mono text-[11px] text-pb-faintest mt-6 text-center">
-              After the trial, keep only what your club wants, from $399/yr for BetterStats.{' '}
+              Keep only the modules your club wants, from $399/yr for BetterStats.{' '}
               <Link to="/pricing" className="underline hover:text-pb-text">See pricing</Link>.
             </p>
           </div>
@@ -472,7 +470,7 @@ export default function Trial() {
         {/* Mini FAQ */}
         <section className="px-4 sm:px-6 lg:px-10 pb-20">
           <div className="max-w-[800px] mx-auto">
-            <h2 className="font-display font-bold text-2xl mb-6 text-center">Free Trial FAQs</h2>
+            <h2 className="font-display font-bold text-2xl mb-6 text-center">Questions</h2>
             <div className="space-y-3">
               {FAQS.map(([q, a]) => (
                 <details key={q} className="pb-card p-5 group">
