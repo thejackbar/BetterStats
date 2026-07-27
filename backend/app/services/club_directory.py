@@ -1639,8 +1639,14 @@ _PATH_CODE = "split_part(split_part(ue.path, '?', 1), '/', 2)"
 # not LEFT JOINs — marketing_clubs.utm_code isn't unique (the default formula can
 # collide), so a join could multiply the row and over-count visits. Subqueries
 # pick a single club per route and COALESCE applies the priority order.
-_RESOLVED_VISITS = (
-    "SELECT COALESCE("
+# The per-event single-club resolution, as a correlated scalar (references the
+# outer ``ue``). COALESCE applies the priority order; each subquery is LIMIT 1 so
+# a colliding ``utm_code`` can't multiply the row. Exposed on its own so the
+# engagement score (twenty_sync._engagement) attributes a visit the SAME way this
+# panel does — resolving each visit to ONE club rather than the old any-overlap
+# match that credited every club whose code merely collided with the path/UTM.
+_RESOLVED_CID = (
+    "COALESCE("
     "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
     "     WHERE a.utm_value = ue.utm_id AND a.marketing_club_id IS NOT NULL LIMIT 1), "
     "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
@@ -1653,7 +1659,10 @@ _RESOLVED_VISITS = (
     f"     AND {_PATH_CODE} <> '' LIMIT 1), "
     f"  (SELECT mc.id FROM marketing_clubs mc JOIN organisations o ON o.id = mc.existing_org_id "
     f"     WHERE o.slug = {_PATH_CODE} AND {_PATH_CODE} <> '' LIMIT 1)"
-    ")::text AS cid, "
+    ")::text"
+)
+_RESOLVED_VISITS = (
+    "SELECT " + _RESOLVED_CID + " AS cid, "
     "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, ue.ip_hash AS ip_hash, "
     "ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
     "FROM usage_events ue WHERE ue.event_type = 'page_view' "

@@ -29,7 +29,7 @@ from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
 from app.services import platform_settings, trial_engagement
-from app.services.club_directory import _PATH_CODE, club_filters
+from app.services.club_directory import _PATH_CODE, _RESOLVED_CID, club_filters
 from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
                                         full_name, link, phone)
 
@@ -405,36 +405,24 @@ async def _engagement(session, club: MarketingClub,
                COUNT(*) FILTER (WHERE {_META_CLICK}) AS ad_clicks
         FROM usage_events ue
         WHERE (
-                -- UTM-based attribution is for anonymous/prospect marketing traffic
-                -- only. A UTM captured once in a browser tab (visitor.js
-                -- getLinkCode()) keeps riding along on every later page view from
-                -- that tab, including a staff member's own authenticated admin
-                -- browsing — which has nothing to do with this club and would
-                -- otherwise inflate its score. The org_id/org_slug branches below
-                -- are deliberately NOT guarded the same way: for an actual
-                -- customer, their own staff logging into their own club's admin
-                -- IS the "product use" signal this score means to capture (an
-                -- admin doing work in the backend is real engagement, scored at
-                -- the ordinary organic page-view rate). BetterCricket Super Admins
-                -- are the exception — a staff member "acting as" a club is not the
-                -- club's own interest — so they're excluded below regardless of
-                -- which branch matched.
-                (CAST(:utm AS text) IS NOT NULL
-                 AND (ue.utm_id = CAST(:utm AS text) OR ue.utm_source = CAST(:utm AS text)
-                      OR {_PATH_CODE} = CAST(:utm AS text))
+                -- Prospect marketing traffic: resolve EACH visit to the ONE club it
+                -- belongs to (the same priority resolution the Website analytics
+                -- panel uses — _RESOLVED_CID: alias → utm_code in utm_id/utm_source
+                -- → utm_code = path → onboarded slug = path), and only count it here
+                -- if it resolves to THIS club. This replaces the old any-overlap
+                -- match, which credited a visit to every club whose utm_code merely
+                -- collided with the path/UTM — so a club with no page of its own
+                -- could inherit another same-named club's visitors. Anonymous +
+                -- non-/admin (a stale UTM riding a staff member's admin browsing
+                -- must not attribute).
+                (({_RESOLVED_CID}) = CAST(:cid AS text)
                  AND ue.user_id IS NULL
                  AND split_part(ue.path, '?', 1) !~* '^/admin')
+                -- A customer's own product use: their org's own traffic, keyed on
+                -- the precise org id (no collision possible). Deliberately NOT
+                -- guarded against logged-in use — an admin working in their own
+                -- club's backend IS the product-use signal for a real customer.
                 OR (CAST(:org AS text) IS NOT NULL AND ue.org_id::text = CAST(:org AS text))
-                OR (CAST(:org_slug AS text) IS NOT NULL AND {_PATH_CODE} = CAST(:org_slug AS text))
-                OR (
-                     EXISTS (
-                          SELECT 1 FROM marketing_utm_aliases a
-                          WHERE a.marketing_club_id = CAST(:cid AS uuid)
-                            AND a.utm_value IN (ue.utm_id, ue.utm_source, {_PATH_CODE})
-                     )
-                     AND ue.user_id IS NULL
-                     AND split_part(ue.path, '?', 1) !~* '^/admin'
-                )
               )
           -- Never credit a BetterCricket Super Admin's activity to a club (a
           -- staff member acting-as inflates the club's own engagement). A
@@ -445,7 +433,7 @@ async def _engagement(session, club: MarketingClub,
                 SELECT 1 FROM club_memberships cm
                 WHERE cm.user_id = ue.user_id AND cm.role = 'super_admin'
           )
-    """), {"utm": utm, "org": org_id, "org_slug": org_slug, "cid": str(club.id)})).first()
+    """), {"org": org_id, "cid": str(club.id)})).first()
     last_web = web[0] if web else None
     sessions = (web[1] or 0) if web else 0
     events_30d = (web[2] or 0) if web else 0
