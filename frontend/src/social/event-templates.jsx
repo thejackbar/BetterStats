@@ -19,7 +19,7 @@
 //       scrim at `opacity` so text stays legible (the headline feature).
 //     · icon — a bundled 3D "thiings" glyph used as a faded watermark when no
 //       photo is supplied (auto-picked per preset, override in the editor).
-import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
+import { AutoFitText, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
 import icoTrophy from '../assets/thiings/trophy.png'
@@ -84,11 +84,11 @@ function PhotoLayer({ motif, palette, height = '100%', scrimFrom = 0.04, label }
 function ClubLockup({ team, palette, color }) {
   const ink = color || palette.ink
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
       {team.logo
-        ? <ClubLogo src={team.logo} size={64} />
-        : <ClubLogo monogram={team.monogram} color={palette.accent} size={64} shape="shield" />}
-      <div style={{ fontFamily: SPORT, fontSize: 26, fontWeight: 600, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{team.name}</div>
+        ? <ClubLogo src={team.logo} size={100} />
+        : <ClubLogo monogram={team.monogram} color={palette.accent} size={100} shape="shield" />}
+      <div style={{ fontFamily: SPORT, fontSize: 36, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: ink, lineHeight: 0.95, maxWidth: 460 }}>{team.fullName || team.name}</div>
     </div>
   )
 }
@@ -164,8 +164,7 @@ export function EVT_Block({ team, event = {}, palette, motif }) {
         <div style={{ position: 'absolute', right: -220, top: -40, width: 560, height: 560, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,0.18), transparent 66%)' }} />
 
         <div style={{ position: 'absolute', top: 60, left: 64, right: 64, display: 'flex', alignItems: 'center', gap: 16 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={60} /> : <ClubLogo monogram={team.monogram} color="#fff" size={60} shape="shield" />}
-          <div style={{ fontFamily: SPORT, fontSize: 26, fontWeight: 600, letterSpacing: 5, textTransform: 'uppercase', color: '#fff' }}>{team.name}</div>
+          <BrandLockup team={team} palette={P} size={96} nameColor="#fff" nameSize={32} />
           <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: '#fff', border: '1.5px solid rgba(255,255,255,0.55)', borderRadius: 999, padding: '9px 18px' }}>Club Event</div>
         </div>
 
@@ -224,10 +223,13 @@ export function EVT_Ticket({ team, event = {}, palette, motif }) {
       ) : null}
 
       <div style={{ position: 'absolute', inset: '96px 100px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 8 }}>
-          <div style={{ width: 60, height: 1, background: line }} />
-          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: a(ink, 0.66) }}>{team.fullName || team.name}</div>
-          <div style={{ width: 60, height: 1, background: line }} />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, marginTop: 8 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={100} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={100} shape="shield" />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+            <div style={{ width: 60, height: 1, background: line }} />
+            <div style={{ fontFamily: SPORT, fontSize: 32, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: ink, lineHeight: 0.95 }}>{team.fullName || team.name}</div>
+            <div style={{ width: 60, height: 1, background: line }} />
+          </div>
         </div>
 
         <div style={{ marginTop: 'auto' }}>
@@ -273,9 +275,8 @@ export function EVT_Scoreboard({ team, event = {}, palette, motif }) {
       <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.16)}, transparent 68%)` }} />
       <img src={motif?.icon || icoBat} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
 
-      <div style={{ position: 'absolute', top: 60, left: 64, right: 64, display: 'flex', alignItems: 'center', gap: 16 }}>
-        {team.logo ? <ClubLogo src={team.logo} size={60} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={60} shape="shield" />}
-        <div style={{ fontFamily: SPORT, fontSize: 26, fontWeight: 700, letterSpacing: 5, textTransform: 'uppercase', color: '#fff' }}>{team.name}</div>
+      <div style={{ position: 'absolute', top: 60, left: 64, right: 230, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <BrandLockup team={team} palette={P} size={96} nameColor="#fff" nameSize={32} />
       </div>
 
       <div style={{ position: 'absolute', left: 64, right: 64, top: 240 }}>
@@ -333,8 +334,9 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
         </div>
-        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: '18px 0 14px', textAlign: 'center' }}>
-          <div style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 78, lineHeight: 0.95, color: ink, letterSpacing: 0.5 }}>{team.fullName || team.name}</div>
+        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: '18px 0 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={96} /> : <ClubLogo monogram={team.monogram} color={ink} size={88} shape="shield" />}
+          <div style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 78, lineHeight: 0.95, color: ink, letterSpacing: 0.5, textAlign: 'center' }}>{team.fullName || team.name}</div>
         </div>
         <div style={{ borderBottom: `3px solid ${ink}`, padding: '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
 
@@ -403,7 +405,10 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
       </div>
 
       <div style={{ position: 'absolute', inset: 72, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ alignSelf: 'flex-start', background: P.accent, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 24, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(P.accent, 0.4)}` }}>{team.name}</div>
+        <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 18 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={92} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={92} shape="shield" />}
+          <div style={{ background: P.accent, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 28, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(P.accent, 0.4)}`, maxWidth: 480 }}>{team.fullName || team.name}</div>
+        </div>
 
         <div style={{ marginTop: 'auto' }}>
           <div style={{ display: 'inline-block', background: a(P.accent, 0.18), color: P.accent, fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: 18 }}>{event.kicker}</div>
@@ -464,8 +469,8 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
 
       <div style={{ position: 'absolute', top: 56, left: 64, right: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={60} /> : <ClubLogo monogram={team.monogram} color="#fff" size={60} shape="shield" />}
-          <div style={{ fontFamily: SPORT, fontStyle: 'italic', fontSize: 26, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase', color: '#fff' }}>{team.name}</div>
+          {team.logo ? <ClubLogo src={team.logo} size={94} /> : <ClubLogo monogram={team.monogram} color="#fff" size={94} shape="shield" />}
+          <div style={{ fontFamily: SPORT, fontStyle: 'italic', fontSize: 32, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: '#fff', lineHeight: 0.95, maxWidth: 420 }}>{team.fullName || team.name}</div>
         </div>
         <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${a(P.accent, 0.45)}`, borderRadius: 4, padding: '9px 16px', ...skew }}><span style={unskew}>Club Event</span></div>
       </div>
@@ -518,8 +523,11 @@ export function EVT_Swiss({ team, event = {}, palette }) {
   return (
     <div style={{ ...FRAME, background: paper, color: ink, fontFamily: HELV }}>
       <div style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.3, color: ink }}>{team.fullName || team.name}</div>
+        <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+            {team.logo ? <ClubLogo src={team.logo} size={76} /> : <ClubLogo monogram={team.monogram} color={ink} size={76} shape="shield" />}
+            <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: -0.3, color: ink, lineHeight: 0.98, maxWidth: 520 }}>{team.fullName || team.name}</div>
+          </div>
           <div style={{ textAlign: 'right', fontSize: 15, fontWeight: 500, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>Club Notice<br />№ 01 / 25–26</div>
         </div>
 
@@ -572,12 +580,12 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
       <div style={{ position: 'absolute', inset: 52, border: `1px solid ${a(P.accent, 0.3)}`, pointerEvents: 'none' }} />
 
       <div style={{ position: 'absolute', inset: '84px 96px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ width: 212, height: 212, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-          <div style={{ position: 'absolute', inset: 11, borderRadius: '50%', border: `1px dashed ${a(P.accent, 0.3)}` }} />
-          {team.logo ? <ClubLogo src={team.logo} size={120} /> : <img src={motif?.icon || icoTrophy} alt="" style={{ width: 120, height: 120, objectFit: 'contain' }} />}
+        <div style={{ width: 264, height: 264, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+          <div style={{ position: 'absolute', inset: 13, borderRadius: '50%', border: `1px dashed ${a(P.accent, 0.3)}` }} />
+          {team.logo ? <ClubLogo src={team.logo} size={186} /> : <img src={motif?.icon || icoTrophy} alt="" style={{ width: 130, height: 130, objectFit: 'contain' }} />}
         </div>
 
-        <div style={{ marginTop: 26, background: P.accent, color: P.primary, fontFamily: MONO, fontSize: 18, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase', padding: '11px 46px', clipPath: 'polygon(0 0, 100% 0, calc(100% - 20px) 50%, 100% 100%, 0 100%, 20px 50%)' }}>{team.name}</div>
+        <div style={{ marginTop: 26, background: P.accent, color: P.primary, fontFamily: MONO, fontSize: 22, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase', padding: '12px 50px', clipPath: 'polygon(0 0, 100% 0, calc(100% - 20px) 50%, 100% 100%, 0 100%, 20px 50%)' }}>{team.name}</div>
 
         <div style={{ marginTop: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 20 }}>
@@ -633,9 +641,13 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
       <div style={{ position: 'absolute', inset: 44, border: `2px dashed ${faint}`, borderRadius: 8, pointerEvents: 'none' }} />
 
       <div style={{ position: 'absolute', inset: '88px 92px', display: 'flex', flexDirection: 'column' }}>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 18, letterSpacing: 5, textTransform: 'uppercase', color: chalk2 }}>✶ {team.name} · Notice Board</div>
-          <div style={{ width: 300, height: 3, background: chalk, borderRadius: 3, transform: 'rotate(-1deg)', marginTop: 10, opacity: 0.85 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={88} /> : <ClubLogo monogram={team.monogram} color={chalk} size={88} shape="shield" />}
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 28, letterSpacing: 3, textTransform: 'uppercase', color: chalk, lineHeight: 1 }}>{team.fullName || team.name}</div>
+            <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: chalk2, marginTop: 6 }}>Notice Board</div>
+            <div style={{ width: 300, height: 3, background: chalk, borderRadius: 3, transform: 'rotate(-1deg)', marginTop: 10, opacity: 0.85 }} />
+          </div>
         </div>
 
         <div style={{ marginTop: 'auto' }}>
@@ -682,6 +694,9 @@ export function EVT_Polaroid({ team, event = {}, palette, motif }) {
     <div style={{ ...FRAME, background: paper, color: ink }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
       <div style={{ position: 'absolute', inset: 76, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ marginBottom: 18 }}>
+          <BrandLockup team={team} palette={P} size={84} nameColor={ink} nameSize={30} />
+        </div>
         <div>
           <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: 46, color: P.accent, lineHeight: 1, transform: 'rotate(-1deg)' }}>{event.kicker}</div>
           <div style={{ height: 150, marginTop: 4 }}>

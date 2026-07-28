@@ -8,7 +8,7 @@
 // cricket-templates; the few extra atoms this set needs (Slab, Kicker, Bug,
 // SponsorFooter, AutoFit, Monogram) are defined locally.
 import { useRef, useState, useLayoutEffect } from 'react'
-import { GrainSVG as Grain, Halftone, Stripes, ClubLogo } from './cricket-templates'
+import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup } from './cricket-templates'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -160,12 +160,12 @@ export function FixtureList({ palette: pal, meta = {}, fixtures = [], club = {},
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>FIXTURES</Slab>
           <Kicker color={pal.accent} size={14} style={{ marginTop: 14 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1, lineHeight: 1 }}>{club.name}</div>
-            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 2, color: pal.ink, opacity: 0.6, marginTop: 4 }}>SAT FIXTURES</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 38, letterSpacing: 1, lineHeight: 0.95, maxWidth: 380 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 2, color: pal.ink, opacity: 0.6, marginTop: 6 }}>SAT FIXTURES</div>
           </div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={74} />
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={112} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 196, bottom: 150, display: 'flex', flexDirection: 'column' }}>
@@ -213,9 +213,12 @@ export function FixtureHype({ palette: pal, meta = {}, fixtures = [], club = {},
         <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pal.primary, fontWeight: 700 }}>{`// ${meta.round} · ${meta.comp}`}</div>
         <div style={{ fontFamily: DISPLAY, fontSize: 96, lineHeight: 0.86, letterSpacing: -1, color: pal.primary, marginTop: 6 }}>THIS<br />SATURDAY</div>
       </div>
-      <div style={{ position: 'absolute', right: 56, top: 70, zIndex: 3, display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 1, color: pal.primary, textAlign: 'right' }}>{meta.date}</div>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.primary} size={86} />
+      <div style={{ position: 'absolute', right: 56, top: 64, zIndex: 3, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: 1, lineHeight: 0.95, color: pal.primary, maxWidth: 300 }}>{club.full || club.name}</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 1, color: pal.primary, opacity: 0.85, marginTop: 4 }}>{meta.date}</div>
+        </div>
+        <Shield logo={club.logo} monogram={club.mono} color={pal.primary} size={130} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 360, bottom: 150, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {rows.map((r, i) => {
@@ -256,9 +259,12 @@ export function FixtureGrid({ palette: pal, meta = {}, fixtures = [], club = {},
           <div style={{ fontFamily: DISPLAY, fontSize: 76, letterSpacing: -1, lineHeight: 0.9 }}>FIXTURES</div>
           <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.comp}`}</Kicker>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 24, color: pal.accent }}>{meta.date}</div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={66} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 300 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 22, color: pal.accent, marginTop: 4 }}>{meta.date}</div>
+          </div>
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={100} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 188, bottom: 142, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 18 }}>
@@ -303,7 +309,7 @@ export function FixtureBoard({ palette: pal, meta = {}, fixtures = [], club = {}
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>FIXTURES</Slab>
           <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
         </div>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={74} />
+        <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 196, display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
         {['GRADE', 'MATCH', 'TIME', 'GROUND'].map((h, i) => (
@@ -349,7 +355,7 @@ export function FixtureHeadline({ palette: pal, meta = {}, fixtures = [], club =
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FIXTURES</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={70} />
+        <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={104} layout="row" align="right" nameSize={32} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 198, height: 426, background: pal.secondary, borderTop: `3px solid ${pal.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <Kicker color={pal.accent} size={13} style={{ marginBottom: 22 }}>{`// FEATURE MATCH · ${feat.grade}`}</Kicker>
@@ -409,7 +415,7 @@ export function FixtureSchedule({ palette: pal, meta = {}, fixtures = [], club =
           <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>MATCH-DAY</Slab>
           <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
         </div>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={74} />
+        <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 206, bottom: 150 }}>
         <div style={{ position: 'absolute', left: 158, top: 12, bottom: 12, width: 2, background: `${pal.ink}22` }} />
@@ -454,7 +460,7 @@ export function ResultMarginHero({ palette: pal, result: r, sponsors }) {
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FULL TIME</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
         </div>
-        <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={84} />
+        <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={124} layout="row" align="right" nameSize={32} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 280 }}>
         <div style={{ fontFamily: DISPLAY, fontSize: 60, letterSpacing: 2, color: pal.ink, opacity: 0.55, lineHeight: 1 }}>{winnerName}</div>
@@ -540,7 +546,13 @@ export function ResultBroadcast({ palette: pal, result: r, sponsors }) {
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FULL TIME</Slab>
           <Kicker color={pal.ink} size={12} style={{ marginTop: 11, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
         </div>
-        <div style={{ fontFamily: DISPLAY, fontSize: 50, letterSpacing: 2, color: pal.ink, opacity: 0.9 }}>RESULT</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 320 }}>{r.us.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 2, color: pal.ink, opacity: 0.6, marginTop: 4 }}>RESULT</div>
+          </div>
+          <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={96} />
+        </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 172, bottom: 96, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0 }}>
@@ -597,7 +609,7 @@ export function ResultVersusColumns({ palette: pal, result: r, sponsors }) {
           <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>FULL TIME</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
         </div>
-        <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={78} />
+        <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 224, bottom: 268, display: 'flex', alignItems: 'stretch', gap: 0 }}>
         <Column t={{ ...r.us, bat: r.topBat.us, bowl: r.topBowl.us }} isWinner={won} />
@@ -639,7 +651,7 @@ export function ResultStar({ palette: pal, result: r, sponsors }) {
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FULL TIME</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
         </div>
-        <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={78} />
+        <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 230, display: 'flex', alignItems: 'center', gap: 44 }}>
         <div style={{ width: 300, height: 300, borderRadius: '50%', border: `4px solid ${pal.accent}`, background: `${pal.accent}14`, display: 'grid', placeItems: 'center', fontFamily: DISPLAY, fontSize: 150, color: pal.ink, letterSpacing: 2, flexShrink: 0, overflow: 'hidden' }}>
@@ -715,7 +727,7 @@ export function ResultInningsBars({ palette: pal, result: r, sponsors }) {
           <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>FULL TIME</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
         </div>
-        <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={78} />
+        <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 240, display: 'flex', flexDirection: 'column', gap: 56 }}>
         <Bar t={r.us} val={usR} rr={usRR} win={won} fill={pal.accent} fillInk={pal.primary} />
@@ -751,9 +763,13 @@ export function ResultTicket({ palette: pal, result: r, sponsors }) {
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
       <div style={{ position: 'absolute', left: 80, right: 80, top: 108, bottom: 150, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '24px 36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `2px dashed ${pal.accent}66`, position: 'relative' }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, color: pal.accent }}>MATCH TICKET · FULL TIME</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.grade || r.comp}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+            <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={88} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, color: pal.accent }}>MATCH TICKET · FULL TIME</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1, lineHeight: 0.95, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.us.name}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 1, opacity: 0.7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.grade || r.comp}</div>
+            </div>
           </div>
           <div style={{ textAlign: 'right', fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pal.ink, opacity: 0.72, lineHeight: 1.7, flexShrink: 0, marginLeft: 16 }}>{r.round}<br />{r.date}<br />{r.venue}</div>
           <div style={notch('left')} /><div style={notch('right')} />
@@ -802,12 +818,13 @@ export function ResultsList({ palette: pal, meta = {}, results = [], club = {}, 
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>RESULTS</Slab>
           <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 40, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 320 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 36, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', marginTop: 4 }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
             <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 2, color: pal.ink, opacity: 0.6, marginTop: 4 }}>ROUND RECORD</div>
           </div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={74} />
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={110} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 200, bottom: 138, display: 'flex', flexDirection: 'column' }}>
@@ -873,12 +890,13 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
           <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '8px 16px' }}>RESULTS</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 34, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 280 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', marginTop: 3 }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
             <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: pal.ink, opacity: 0.6, marginTop: 3 }}>ROUND RECORD</div>
           </div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={64} />
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={96} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 158, bottom: 138, display: 'flex', flexDirection: 'column' }}>
@@ -954,9 +972,12 @@ export function ResultsScoreboard({ palette: pal, meta = {}, results = [], club 
           <div style={{ fontFamily: DISPLAY, fontSize: 76, letterSpacing: -1, lineHeight: 0.9 }}>RESULTS</div>
           <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 30 }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={66} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 300 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 28, marginTop: 4 }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
+          </div>
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={100} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 188, bottom: 142, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 24 }}>
@@ -1005,7 +1026,7 @@ export function ResultsRecord({ palette: pal, meta = {}, results = [], club = {}
           <Kicker color={pal.accent} size={15}>{`// ${meta.round} · ${meta.date}`}</Kicker>
           <div style={{ fontFamily: DISPLAY, fontSize: 110, letterSpacing: -2, lineHeight: 0.85, marginTop: 6 }}>WEEKEND<br />WRAP</div>
         </div>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={84} />
+        <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={124} layout="stack" align="right" nameSize={26} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 360, display: 'flex', alignItems: 'center', gap: 26, padding: '20px 28px', background: pal.accent }}>
         <div style={{ fontFamily: DISPLAY, fontSize: 58, letterSpacing: -1, lineHeight: 1, color: pal.primary, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.w} WINS</div>
@@ -1055,8 +1076,11 @@ export function ResultsHeadline({ palette: pal, meta = {}, results = [], club = 
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 36, whiteSpace: 'nowrap' }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={70} />
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 280 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 32, whiteSpace: 'nowrap', marginTop: 4 }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
+          </div>
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 196, height: 340, background: pal.secondary, borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
@@ -1116,8 +1140,11 @@ export function ResultsBoard({ palette: pal, meta = {}, results = [], club = {},
           <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 36, whiteSpace: 'nowrap' }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
-          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={70} />
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 280 }}>{club.full || club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 32, whiteSpace: 'nowrap', marginTop: 4 }}><span style={{ color: WIN }}>{rec.w}W</span> · <span style={{ color: LOSS }}>{rec.l}L</span></div>
+          </div>
+          <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 196, display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
@@ -1187,7 +1214,7 @@ export function ResultsSplit({ palette: pal, meta = {}, results = [], club = {},
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>RESULTS</Slab>
           <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · HOW THE GRADES WENT`}</Kicker>
         </div>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={74} />
+        <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: 200, bottom: 150, display: 'flex', gap: 22, alignItems: 'stretch' }}>
         <Side title="WON" items={wins} color={WIN} count={wins.length} />
