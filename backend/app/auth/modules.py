@@ -370,8 +370,13 @@ def entitlement_summary(org, role: str | None = None) -> dict:
     """
     if role == "super_admin":
         mods = set(ALL_MODULES)
+        core_live = True
     else:
         mods = org_entitled_modules(org)
+        # BetterStats (Core) being live gates the club's own admin data tools
+        # in the frontend, the same lifecycle that already dark-ends the public
+        # site (org_core_live). Fails open for a legacy club with no Core row.
+        core_live = org_core_live(org) if org is not None else True
     renewal = getattr(org, "renewal_date", None) if org is not None else None
     return {
         "modules": sorted(mods),
@@ -379,6 +384,7 @@ def entitlement_summary(org, role: str | None = None) -> dict:
         "status": (getattr(org, "subscription_status", None) or DEFAULT_STATUS) if org is not None else DEFAULT_STATUS,
         "renewal_date": renewal.isoformat() if renewal else None,
         "billing_cycle": getattr(org, "billing_cycle", None) if org is not None else None,
+        "core_live": core_live,
         "module_details": _module_details(org) if org is not None else [],
         "billing_modules": _billing_module_summary(org) if org is not None else [],
     }

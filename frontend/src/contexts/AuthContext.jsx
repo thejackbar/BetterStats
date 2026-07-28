@@ -156,8 +156,17 @@ export function AuthProvider({ children }) {
     return mods.includes(moduleKey)
   }, [user])
 
+  // Whether BetterStats (Core) is live — gates the club's BetterStats admin
+  // surfaces (routes + dashboard tile). A lapsed Core trial / cancelled Core
+  // subscription reads false. Super admins act cross-club and are never gated.
+  // Fail-open when the backend doesn't send the flag (older/not-migrated) or
+  // before entitlements arrive, so we never wrongly lock a live club.
+  const coreLive = user
+    ? (user.role === 'super_admin' ? true : (user.entitlements?.core_live ?? true))
+    : false
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule, coreLive }}>
       {children}
     </AuthContext.Provider>
   )

@@ -3,8 +3,8 @@ import { useAuth } from '../contexts/AuthContext'
 import TrialBanner from './admin/TrialBanner'
 import SetupReturnBar from './admin/SetupReturnBar'
 
-export default function ProtectedRoute({ children, requireRole, requireModule }) {
-  const { user, hasModule } = useAuth()
+export default function ProtectedRoute({ children, requireRole, requireModule, requireCore }) {
+  const { user, hasModule, coreLive } = useAuth()
 
   if (user === undefined) {
     return (
@@ -23,6 +23,17 @@ export default function ProtectedRoute({ children, requireRole, requireModule })
   // Module entitlement gate — clubs not entitled to the module are bounced back
   // to the dashboard, where the locked tile explains the add-on.
   if (requireModule && !hasModule(requireModule)) {
+    return <Navigate to="/admin" replace />
+  }
+
+  // BetterStats (Core) gate — a lapsed Core trial / cancelled Core subscription
+  // blocks the club's own BetterStats admin data tools. Bounced to the
+  // dashboard, where the locked BetterStats tile (and the all-expired reminder)
+  // point the primary admin at subscribing. Super admins read coreLive=true, so
+  // they're never gated. The Account, Settings, Users and Setup pages are never
+  // marked requireCore, so a lapsed club can always still reach billing to
+  // subscribe and recover.
+  if (requireCore && !coreLive) {
     return <Navigate to="/admin" replace />
   }
 
