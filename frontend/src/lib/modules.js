@@ -131,6 +131,9 @@ export const MODULE_GROUPS = {
 export const CORE_TILES = [
   {
     key: 'stats',
+    // Bills/plans as 'core' (BILLABLE_MODULE_NAME.core), so the dashboard tile
+    // resolves its plan row + pending request under 'core', not 'stats'.
+    billingKey: 'core',
     name: 'BetterStats',
     blurb: 'Your matches, players, seasons and records — the data engine every club runs on.',
     to: '/admin/betterstats',

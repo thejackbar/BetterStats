@@ -197,15 +197,18 @@ export default function AdminAccount() {
   // apply it to.
   const hasSubscribedModule = rows.some((r) => r.status === 'subscribed')
 
-  // A Trial-status row, or a Never Trialed row, can be selected for the bulk
-  // Subscribe request below — Never Trialed is included so a club can go
-  // straight to subscribing without running a trial first. Starting a trial
-  // and cancelling are both instant per-row buttons now, no bulk selection
-  // needed for those. A non-primary admin can't select a row at all (only the
-  // primary may request a paid subscription, same rule the backend enforces
-  // regardless) — they get pointed at who can.
+  // Any row the club can still subscribe to can be selected for the bulk
+  // Subscribe request below — that's every status EXCEPT 'subscribed'
+  // (backend `can_subscribe`): Trial (convert early), Never Trialed (subscribe
+  // without trialling first) AND Trial Expired (the whole point once a trial
+  // lapses — previously excluded, which left an expired-trial club with no way
+  // to subscribe at all). Starting a trial and cancelling are both instant
+  // per-row buttons now, no bulk selection needed for those. A non-primary
+  // admin can't select a row at all (only the primary may request a paid
+  // subscription, same rule the backend enforces regardless) — they get
+  // pointed at who can.
   const toggle = (row) => {
-    if (row.status !== 'trial' && row.status !== 'never_trialed') return
+    if (!row.can_subscribe) return
     if (!plan?.is_primary_admin) {
       setBlockedMsg(
         `Only your club's Primary Admin User can subscribe to modules. Please contact ${primaryAdminName || "your club's primary admin"}.`
@@ -413,7 +416,12 @@ export default function AdminAccount() {
               {rows.map((row) => {
                 const brand = moduleBrand(row.module)
                 const pending = row.pending_requests.length > 0
-                const showCheckbox = row.status === 'trial' || row.status === 'never_trialed'
+                // Selectable whenever the club can still subscribe (backend
+                // `can_subscribe` = not already a paying subscription) — Trial,
+                // Never Trialed and Trial Expired all qualify. Keying on the
+                // status list here used to omit Trial Expired, so a lapsed-trial
+                // club saw no checkbox and couldn't subscribe.
+                const showCheckbox = row.can_subscribe
                 const showCancel = row.status === 'subscribed' && plan.is_primary_admin
                 const showStartTrial = row.status === 'never_trialed' && row.trial_eligible
                 const cancelling = cancelConfirm?.module === row.module

@@ -195,6 +195,19 @@ def org_entitled_modules(org, now: datetime | None = None) -> set[str]:
         return set()
     if not org_subscription_active(org):
         return set()
+    # Core (BetterStats) is a hard prerequisite for the whole platform: if it
+    # isn't live (lapsed Core trial / cancelled Core subscription that wasn't
+    # renewed), NO add-on is usable either, regardless of that add-on's own
+    # trial/subscription state — a valid Core is required for BetterCricket to
+    # function for a club. Fails open for a legacy club with no Core row
+    # (org_core_live returns True) and only bites when the subscription rows are
+    # actually loaded (org_core_live is fail-open otherwise), so the cached fast
+    # path is unchanged. This does NOT touch the persisted module_overrides
+    # cache (recomputed independently from the rows' own held statuses in
+    # services/module_subscriptions.py), so the add-ons come straight back the
+    # moment Core is renewed.
+    if not org_core_live(org, now):
+        return set()
     held = {m for m in (getattr(org, "module_overrides", None) or []) if m in ALL_MODULES}
     subs = _loaded_subscriptions(org)
     if subs:
@@ -370,8 +383,13 @@ def entitlement_summary(org, role: str | None = None) -> dict:
     """
     if role == "super_admin":
         mods = set(ALL_MODULES)
+        core_live = True
     else:
         mods = org_entitled_modules(org)
+        # BetterStats (Core) being live gates the club's own admin data tools
+        # in the frontend, the same lifecycle that already dark-ends the public
+        # site (org_core_live). Fails open for a legacy club with no Core row.
+        core_live = org_core_live(org) if org is not None else True
     renewal = getattr(org, "renewal_date", None) if org is not None else None
     return {
         "modules": sorted(mods),
@@ -379,6 +397,7 @@ def entitlement_summary(org, role: str | None = None) -> dict:
         "status": (getattr(org, "subscription_status", None) or DEFAULT_STATUS) if org is not None else DEFAULT_STATUS,
         "renewal_date": renewal.isoformat() if renewal else None,
         "billing_cycle": getattr(org, "billing_cycle", None) if org is not None else None,
+        "core_live": core_live,
         "module_details": _module_details(org) if org is not None else [],
         "billing_modules": _billing_module_summary(org) if org is not None else [],
     }
