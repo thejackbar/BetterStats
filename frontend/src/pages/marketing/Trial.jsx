@@ -11,15 +11,20 @@ import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
+import TextType from '../../components/marketing/TextType'
 
-// The ad-campaign landing page. Search-first, and nothing else in the way: the
-// giant search box sits directly under the header so the one thing we want a
-// visitor to do — look up their club — is unmissable. Clicking a result either
-// opens their existing club page (if already on BetterCricket) or a small
-// choose-modal that offers to set the club up now (free, no card) or have us
-// reach out. We deliberately keep any trial framing OFF the landing page — the
-// goal is to get people inputting their club with no thinking; the "it's a free
-// trial" reassurance only appears once they've picked a club that isn't set up.
+// The ad-campaign landing page. Most visitors arrive on a phone, so the page is
+// mobile-first and forced LIGHT (a `data-theme="light"` wrapper — every pb-*
+// token flips to the light palette) for a brighter, clearer read on a small
+// screen. Search-first, and nothing else in the way: the giant search box sits
+// directly under the header, with an animated typing placeholder that literally
+// shows the action we want — type your club's name, then pick it from the list.
+// Clicking a result either opens their existing club page (if already on
+// BetterCricket) or a small choose-modal that offers to set the club up now
+// (free, no card) or have us reach out. We deliberately keep any trial framing
+// OFF the landing page — the goal is to get people inputting their club with no
+// thinking; the "it's a free trial" reassurance only appears once they've
+// picked a club that isn't set up.
 
 const TRIAL_JSONLD = {
   '@context': 'https://schema.org',
@@ -337,51 +342,75 @@ export default function Trial() {
   }
 
   return (
-    <div className="min-h-screen bg-pb-bg text-pb-text">
+    <div className="min-h-screen bg-pb-bg text-pb-text" data-theme="light">
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
 
         {/* Hero — the giant search sits right under the header so it's the first
-            and most obvious thing to do. No trial/credit-card framing here. */}
-        <section className="relative pt-24 pb-10 px-4 sm:px-6 lg:px-10 overflow-hidden">
-          <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
-          <div className="max-w-3xl mx-auto relative text-center">
-            <h1 className="font-display font-bold text-[28px] sm:text-[40px] lg:text-[50px] tracking-tight leading-[1.02] mb-3">
-              Find your club. See its <span className="gradient-text">entire history</span> come to life.
+            and most obvious thing to do. An animated placeholder demonstrates
+            the action; a one-line instruction spells out the two steps. No
+            image (removed as a distraction), no trial/credit-card framing. */}
+        <section className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
+          <div className="absolute inset-0 hero-glow opacity-60 pointer-events-none" />
+          <div className="max-w-2xl mx-auto relative text-center">
+            <h1 className="font-display font-bold text-[32px] sm:text-[46px] lg:text-[54px] tracking-tight leading-[1.03] mb-4">
+              Find your club on <span className="gradient-text">BetterCricket</span>
             </h1>
-            <p className="text-base sm:text-lg text-pb-dim max-w-xl mx-auto leading-relaxed mb-7">
-              Every player, season and record your club has ever had — search for it below.
+            <p className="text-base sm:text-lg text-pb-dim mx-auto leading-relaxed mb-7 whitespace-nowrap">
+              Type your club&rsquo;s name below to get started.
             </p>
 
             {status === null ? (
               <p className="font-mono text-xs text-pb-faint">Loading…</p>
             ) : available ? (
-              <div className="max-w-2xl mx-auto text-left">
+              <div className="max-w-xl mx-auto text-left">
                 <div className="relative">
-                  <span className="absolute left-5 sm:left-6 top-1/2 -translate-y-1/2 text-pb-faint pointer-events-none">
+                  <span className="absolute left-4 sm:left-5 top-1/2 -translate-y-1/2 text-pb-faint pointer-events-none z-10">
                     <SearchIcon className="w-6 h-6 sm:w-7 sm:h-7" />
                   </span>
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search for your club…"
                     aria-label="Search for your club"
-                    autoFocus
-                    className="w-full bg-pb-surface2 text-pb-text rounded-2xl pl-14 sm:pl-16 pr-5 py-5 sm:py-6 text-lg sm:text-2xl font-display font-semibold outline-none shadow-xl border-2 transition focus:shadow-2xl"
+                    className="w-full bg-pb-surface text-pb-text rounded-2xl pl-14 sm:pl-16 pr-4 sm:pr-5 py-4 sm:py-6 text-lg sm:text-2xl font-display font-semibold outline-none shadow-lg border-2 transition focus:shadow-xl"
                     style={{ borderColor: 'var(--pb-accent)' }}
                   />
+                  {/* Animated placeholder: shows the action (typing a club name)
+                      while the box is empty. pointer-events-none so taps still
+                      land on the input; aria-hidden since the input is labelled. */}
+                  {query === '' && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 left-14 sm:left-16 right-4 sm:right-5 flex items-center overflow-hidden"
+                    >
+                      <TextType
+                        as="span"
+                        className="text-pb-faint font-display font-semibold text-lg sm:text-2xl whitespace-nowrap"
+                        text={[
+                          'Search for your club…',
+                          'e.g. Applecross Cricket Club',
+                          'e.g. Gosnells Cricket Club',
+                          'Type your club’s name…',
+                        ]}
+                        typingSpeed={70}
+                        deletingSpeed={35}
+                        pauseDuration={1600}
+                        cursorCharacter="|"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-3 space-y-2">
                   {searching && <p className="font-mono text-[11px] text-pb-faint px-1">Searching…</p>}
-                  {searchError && <p className="text-xs text-red-400 px-1">{searchError}</p>}
+                  {searchError && <p className="text-xs text-red-500 px-1">{searchError}</p>}
 
                   {results.map((club) => (
                     <button
                       key={club.id || orgName(club)}
                       type="button"
                       onClick={() => handleClubClick(club)}
-                      className="w-full pb-card p-4 flex items-center gap-3 text-left hover:border-accent/40 transition"
+                      className="w-full pb-card bg-pb-surface p-4 flex items-center gap-3 text-left hover:border-accent/50 transition"
                     >
                       <ClubLogo club={club} />
                       <span className="flex-1 min-w-0 font-display font-semibold text-base truncate">{orgName(club)}</span>
@@ -390,7 +419,7 @@ export default function Trial() {
                   ))}
 
                   {searched && !searching && results.length === 0 && !searchError && (
-                    <div className="pb-card p-4">
+                    <div className="pb-card bg-pb-surface p-4">
                       <p className="text-sm text-pb-dim">
                         No clubs matched &ldquo;{query.trim()}&rdquo;.
                       </p>
@@ -398,7 +427,7 @@ export default function Trial() {
                         <button
                           type="button"
                           onClick={openWizardBlank}
-                          className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
+                          className="inline-flex items-center px-4 py-2 rounded-lg font-display font-semibold text-sm text-navy-950 transition hover:opacity-90"
                           style={{ background: 'var(--pb-accent)' }}
                         >
                           Set up your club anyway
@@ -412,9 +441,17 @@ export default function Trial() {
                       </div>
                     </div>
                   )}
+
+                  {/* Steady hint under the box so the two-step action is always
+                      spelled out, even once the animated placeholder is gone. */}
+                  {results.length === 0 && !searched && (
+                    <p className="text-[13px] text-pb-dim text-center pt-1">
+                      Start typing, then tap your club in the list that appears.
+                    </p>
+                  )}
                 </div>
 
-                <p className="font-mono text-[11px] text-pb-faintest mt-4 text-center">
+                <p className="font-mono text-[11px] text-pb-faintest mt-5 text-center">
                   Can&rsquo;t find your club?{' '}
                   <button type="button" onClick={openWizardBlank} className="underline hover:text-pb-text">
                     Set it up yourself
@@ -425,24 +462,8 @@ export default function Trial() {
           </div>
         </section>
 
-        {/* A real club home page, so the offer is concrete. Sits below the
-            search (the search stays the first thing a visitor sees). */}
-        <section className="px-4 sm:px-6 lg:px-10 pb-14">
-          <div className="max-w-4xl mx-auto">
-            <img
-              src="/marketing/club-home.png"
-              alt="A club’s home page on BetterCricket"
-              loading="lazy"
-              className="w-full rounded-xl border pb-hairline shadow-2xl"
-            />
-            <p className="text-center font-mono text-[11px] text-pb-faintest mt-3">
-              A real club, live on BetterCricket.
-            </p>
-          </div>
-        </section>
-
-        {/* Modules — brought up so visitors can see everything BetterCricket
-            does. Same cards as the homepage, each clicking through. */}
+        {/* Modules — visitors can see everything BetterCricket does right after
+            the search. Same cards as the homepage, each clicking through. */}
         <section className="px-4 sm:px-6 lg:px-10 pb-16">
           <div className="max-w-[1200px] mx-auto">
             <h2 className="font-display font-bold text-2xl mb-6 text-center">
