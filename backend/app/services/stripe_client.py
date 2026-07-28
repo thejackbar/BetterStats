@@ -228,6 +228,19 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
 
     if customer_id:
         params["customer"] = customer_id
+        # An existing Customer can predate address capture — e.g. one created
+        # by an earlier checkout attempt that was cancelled before the payer
+        # entered a billing address, so it has no country recorded. Push the
+        # club's resolved address (always at least {"country": "AU"} now, see
+        # routers/billing.py::_stripe_address) so automatic_tax and the AU-only
+        # payment methods (PayTo, BECS) work on this attempt too, not just for
+        # brand-new Customers. Best-effort — a failure here shouldn't block
+        # starting the checkout.
+        if customer_address:
+            try:
+                await stripe.Customer.modify_async(customer_id, address=customer_address)
+            except stripe.error.StripeError:
+                logger.warning("Could not backfill address on Stripe customer %s", customer_id)
     else:
         # A brand new club (no Stripe customer yet) — create one up front
         # with the club's own name rather than passing customer_email alone
