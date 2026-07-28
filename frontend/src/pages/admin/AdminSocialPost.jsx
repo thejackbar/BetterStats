@@ -22,7 +22,11 @@ import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, DEFAULT_COL
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import BlankCanvasEditor from '../../components/admin/BlankCanvasEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems, starterItems, itemBBox, BLANK_FONTS } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
+import { useBlankLayer } from '../../social/useBlankLayer'
+
+// Stable initial value for the (empty) Custom Edit overlay layer.
+const EMPTY_LAYER = () => []
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
@@ -750,100 +754,29 @@ export default function AdminSocialPost() {
   const [eventBg, setEventBg] = useState(null)        // object URL or null
   const [eventBgOpacity, setEventBgOpacity] = useState(0.85)
 
-  // Freeform "Blank Canvas" builder state. Selection is a list so several
-  // blocks can be moved / resized / aligned as a group.
-  const [blankItems, setBlankItems] = useState(defaultBlankItems)
-  const [blankSelIds, setBlankSelIds] = useState([])
-  const patchManyBlank = useCallback((patchMap) => {
-    setBlankItems((its) => its.map((it) => (patchMap[it.id] ? { ...it, ...patchMap[it.id] } : it)))
-  }, [])
-  const updateBlankItem = useCallback((id, patch) => { patchManyBlank({ [id]: patch }) }, [patchManyBlank])
-  const selectBlank = useCallback((id, additive) => {
-    setBlankSelIds((cur) => (additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]))
-  }, [])
-  const newBlankId = () => `bi${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
-  const addBlankItem = (type, opts) => {
-    const it = newBlankItem(type, opts)
-    if (!it) return
-    setBlankItems((its) => [...its, it])
-    setBlankSelIds([it.id])
-    return it
-  }
-  const removeBlankItem = (id) => {
-    setBlankItems((its) => its.filter((it) => it.id !== id))
-    setBlankSelIds((cur) => cur.filter((x) => x !== id))
-  }
-  const duplicateBlankItem = (id) => {
-    const src = blankItems.find((it) => it.id === id)
-    if (!src) return
-    const copy = { ...src, id: newBlankId(), x: src.x + 30, y: src.y + 30 }
-    setBlankItems((its) => [...its, copy])
-    setBlankSelIds([copy.id])
-  }
-  // dir: 'front' | 'back' | 'up' | 'down' (up = towards the front / later in array)
-  const reorderBlankItem = (id, dir) => {
-    setBlankItems((its) => {
-      const i = its.findIndex((it) => it.id === id)
-      if (i < 0) return its
-      const next = its.slice()
-      if (dir === 'front' || dir === 'back') {
-        const j = dir === 'front' ? next.length - 1 : 0
-        if (i === j) return its
-        const [it] = next.splice(i, 1)
-        next.splice(j, 0, it)
-        return next
-      }
-      const j = dir === 'up' ? i + 1 : i - 1
-      if (j < 0 || j >= next.length) return its
-      ;[next[i], next[j]] = [next[j], next[i]]
-      return next
-    })
-  }
-  const moveBlankLayerBefore = (dragId, targetId) => {
-    setBlankItems((its) => {
-      if (dragId === targetId) return its
-      const from = its.findIndex((x) => x.id === dragId)
-      if (from < 0) return its
-      const next = its.slice()
-      const [m] = next.splice(from, 1)
-      const to = next.findIndex((x) => x.id === targetId)
-      if (to < 0) return its
-      next.splice(to, 0, m)
-      return next
-    })
-  }
-  const alignBlank = (mode) => {
-    const sel = blankItems.filter((it) => blankSelIds.includes(it.id))
-    if (sel.length < 2) return
-    const boxes = sel.map((it) => ({ id: it.id, bb: itemBBox(it) }))
-    const minX = Math.min(...boxes.map((b) => b.bb.x))
-    const maxR = Math.max(...boxes.map((b) => b.bb.x + b.bb.w))
-    const cx = (minX + maxR) / 2
-    const patch = {}
-    boxes.forEach((b) => {
-      let x
-      if (mode === 'left') x = minX
-      else if (mode === 'right') x = maxR - b.bb.w
-      else x = cx - b.bb.w / 2
-      patch[b.id] = { x: Math.round(x) }
-    })
-    patchManyBlank(patch)
-  }
-  const applyStarter = (key) => { setBlankItems(starterItems(key)); setBlankSelIds([]) }
+  // Two freeform layers of blocks: `canvas` is the standalone Blank Canvas
+  // template; `overlay` is the "Custom Edit" layer that sits on top of any real
+  // template. Both share the same block model + editor (via useBlankLayer).
+  const canvas = useBlankLayer(defaultBlankItems)
+  const overlay = useBlankLayer(EMPTY_LAYER)
+  // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
+  // template so it can be tweaked and saved as a custom template.
+  const [customEdit, setCustomEdit] = useState(false)
 
   // Save the current post as a reusable Template (works on every tab). Captures
   // the base template + Style; on the Blank Canvas it also captures the block
   // layout (blob-URL images are dropped since they don't survive a reload).
+  const stripBlobImages = (list) => (list || []).map((it) => (it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:') ? { ...it, src: null } : it))
   const saveCurrentTemplate = () => {
     const name = saveTemplateName.trim() || `Template ${savedTemplates.length + 1}`
-    const blank = templateId === 'BL1'
-      ? blankItems.map((it) => (it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:') ? { ...it, src: null } : it))
-      : null
+    const blankTab = templateId === 'BL1'
+    const usingOverlay = customEdit && !blankTab
+    const srcItems = blankTab ? canvas.items : usingOverlay ? overlay.items : null
     const tpl = {
       key: `tpl_${Date.now().toString(36)}`,
-      name, templateId,
+      name, templateId, custom: usingOverlay,
       style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
-      blank,
+      blank: srcItems ? stripBlobImages(srcItems) : null,
     }
     const next = [...savedTemplates, tpl]
     setSavedTemplates(next)
@@ -861,8 +794,21 @@ export default function AdminSocialPost() {
     if (st.bgColors) setBgColors(st.bgColors)
     if (st.customBg) setCustomBg(st.customBg)
     if (st.customAccent) setCustomAccent(st.customAccent)
-    if (tpl.blank) { setBlankItems(tpl.blank.map((it) => ({ ...it }))); setBlankSelIds([]) }
+    const clone = (list) => (list || []).map((it) => ({ ...it }))
+    if (tpl.custom) {
+      setCustomEdit(true)
+      overlay.reset(clone(tpl.blank))
+    } else {
+      setCustomEdit(false)
+      if (tpl.blank) canvas.reset(clone(tpl.blank))
+    }
   }
+  // Enter/leave Custom Edit for the current real template.
+  const startCustomEdit = () => {
+    if (!overlay.items.length) overlay.reset([{ ...newBlankItem('brand'), x: 60, y: 60, size: 150 }])
+    setCustomEdit(true)
+  }
+  const stopCustomEdit = () => setCustomEdit(false)
   const deleteTemplate = (key) => {
     const next = savedTemplates.filter((t) => t.key !== key)
     setSavedTemplates(next)
@@ -1324,7 +1270,8 @@ export default function AdminSocialPost() {
   // ─── Derived values ─────────────────────────────────────────────────────────
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
-  const switchTab = (tabKey) => setTemplateId(TAB_FIRST[tabKey] || 'T1')
+  const switchTab = (tabKey) => { setTemplateId(TAB_FIRST[tabKey] || 'T1'); setCustomEdit(false) }
+  const selectTemplate = (id) => { setTemplateId(id); setCustomEdit(false) }
   const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
   const displayFont = DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0]
 
@@ -1356,6 +1303,12 @@ export default function AdminSocialPost() {
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
+
+  // Which freeform layer is being edited, and whether the freeform tools show.
+  // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
+  const isBlankTab = tmpl.kind === 'blank'
+  const showBlankTools = isBlankTab || customEdit
+  const layer = customEdit && !isBlankTab ? overlay : canvas
 
   // Light-surface event layouts (Ticket, Gazette, Sticker, Swiss, Polaroid) want
   // a paper/ink pair rather than the dark-mode palette; eventPaletteFor is a
@@ -1491,7 +1444,7 @@ export default function AdminSocialPost() {
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'blank') {
-    extraProps.items = blankItems
+    extraProps.items = canvas.items
   }
   if (tmpl.kind === 'event') {
     extraProps.event = event
@@ -1543,8 +1496,9 @@ export default function AdminSocialPost() {
     if (eventBg) URL.revokeObjectURL(eventBg)
     setEventBg(null)
     setEventBgOpacity(0.85)
-    setBlankItems(defaultBlankItems())
-    setBlankSelIds([])
+    canvas.reset(defaultBlankItems())
+    overlay.reset([])
+    setCustomEdit(false)
   }
 
   if (loading) return (
@@ -1767,18 +1721,18 @@ export default function AdminSocialPost() {
               )}
             </section>
 
-            {/* Tab bar */}
-            <div className="flex overflow-x-auto border-b pb-hairline gap-0 -mt-1">
+            {/* Post-type tabs — wrapped so every type is visible at once. */}
+            <div className="flex flex-wrap gap-1.5">
               {TABS.map(tab => (
                 <button
                   key={tab.key}
                   onClick={() => switchTab(tab.key)}
-                  className={`shrink-0 px-3 py-2.5 font-mono text-[10px] tracking-wide2 whitespace-nowrap transition-colors border-b-2 -mb-px ${
+                  className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 whitespace-nowrap border transition-colors ${
                     activeTab === tab.key
-                      ? 'text-pb-text border-pb-accent'
+                      ? 'bg-pb-surface2'
                       : 'text-pb-faint border-transparent hover:text-pb-dim'
                   }`}
-                  style={activeTab === tab.key ? { borderColor: 'var(--pb-accent)' } : {}}
+                  style={activeTab === tab.key ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
                 >
                   {tab.label.toUpperCase()}
                 </button>
@@ -1796,23 +1750,33 @@ export default function AdminSocialPost() {
               </button>
               {templatesOpen && (
                 <div className="mt-3 flex flex-col gap-4">
+                  {!isBlankTab && (
+                    <button
+                      onClick={customEdit ? stopCustomEdit : startCustomEdit}
+                      className="px-3 py-1.5 rounded text-[11px] font-mono border transition-colors self-start"
+                      style={customEdit
+                        ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }
+                        : { borderColor: 'var(--pb-hairline)' }}>
+                      {customEdit ? '✎ Custom editing — click to stop' : '✎ Custom Edit this template'}
+                    </button>
+                  )}
                   {tabTemplates.length > 1 && activeTab !== 'events' && (
                     <div className="flex flex-col gap-1.5">
                       <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">This tab</div>
-                      {tabTemplates.map(t => (
-                        <button
-                          key={t.id}
-                          onClick={() => setTemplateId(t.id)}
-                          className={`text-left p-2.5 rounded border transition-colors ${templateId === t.id ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
-                          style={templateId === t.id ? { borderColor: 'var(--pb-accent)' } : {}}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-[9px] text-pb-faintest">{t.id}</span>
-                            <span className="font-medium text-pb-text text-xs leading-tight">{t.name}</span>
-                          </div>
-                          <div className="text-[10px] text-pb-faint leading-tight mt-0.5">{t.desc}</div>
-                        </button>
-                      ))}
+                      <div className="grid grid-cols-2 gap-2">
+                        {tabTemplates.map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => selectTemplate(t.id)}
+                            className={`text-left p-2.5 rounded border transition-colors ${templateId === t.id ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
+                            style={templateId === t.id ? { borderColor: 'var(--pb-accent)' } : {}}
+                          >
+                            <div className="font-mono text-[9px] text-pb-faintest mb-0.5">{t.id}</div>
+                            <div className="font-medium text-pb-text text-xs leading-tight">{t.name}</div>
+                            <div className="text-[10px] text-pb-faint leading-tight mt-0.5">{t.desc}</div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -1821,16 +1785,20 @@ export default function AdminSocialPost() {
                     {savedTemplates.length === 0 && (
                       <div className="text-pb-faintest text-[10px] font-mono">No saved templates yet — build a post, then save it below.</div>
                     )}
-                    {savedTemplates.map(t => (
-                      <div key={t.key}
-                        className={`flex items-center justify-between gap-2 p-2.5 rounded border transition-colors ${templateId === t.templateId ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}>
-                        <button onClick={() => applyTemplate(t)} className="text-left flex-1 min-w-0">
-                          <div className="font-medium text-pb-text text-xs leading-tight truncate">{t.name}</div>
-                          <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{t.templateId}{t.blank ? ` · ${t.blank.length} blocks` : ''}</div>
-                        </button>
-                        <button onClick={() => deleteTemplate(t.key)} title="Delete template" className="text-pb-faintest hover:text-red-400 text-xs shrink-0">✕</button>
+                    {savedTemplates.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {savedTemplates.map(t => (
+                          <div key={t.key}
+                            className={`relative p-2.5 rounded border transition-colors ${templateId === t.templateId ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}>
+                            <button onClick={() => applyTemplate(t)} className="text-left w-full pr-4">
+                              <div className="font-medium text-pb-text text-xs leading-tight truncate">{t.name}</div>
+                              <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{t.custom ? 'edit' : ''}{t.custom ? ' · ' : ''}{t.templateId}{t.blank ? ` · ${t.blank.length}` : ''}</div>
+                            </button>
+                            <button onClick={() => deleteTemplate(t.key)} title="Delete template" className="absolute top-1.5 right-1.5 text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                     <div className="flex gap-2 mt-1">
                       <input value={saveTemplateName} onChange={e => setSaveTemplateName(e.target.value)} placeholder="Template name..."
                         className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] font-mono text-pb-text" />
@@ -2639,18 +2607,27 @@ export default function AdminSocialPost() {
               </section>
             )}
 
-            {/* Blank Canvas — freeform WYSIWYG builder */}
-            {activeTab === 'blank' && (
-              <BlankCanvasEditor
-                items={blankItems} selIds={blankSelIds}
-                onSelect={selectBlank} onDeselect={() => setBlankSelIds([])}
-                onAdd={addBlankItem} onUpdate={updateBlankItem} onRemove={removeBlankItem}
-                onDuplicate={duplicateBlankItem} onReorder={reorderBlankItem}
-                onMoveLayerBefore={moveBlankLayerBefore} onAlign={alignBlank}
-                onApplyStarter={applyStarter}
-                palette={themedPalette}
-                onPickImage={(itemId, file) => setEditor({ key: 'blankimg', itemId, source: file })}
-              />
+            {/* Blank Canvas builder — for the Blank tab, and as the Custom Edit
+                overlay on top of any real template. */}
+            {showBlankTools && (
+              <>
+                {customEdit && !isBlankTab && (
+                  <div className="pb-card p-3 flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] text-pb-text">Custom editing <span className="text-pb-faint">{tmpl.name}</span> — add blocks on top, then save it as a template.</span>
+                    <button onClick={stopCustomEdit} className="px-2.5 py-1 rounded text-[10px] font-mono border pb-hairline text-pb-faint hover:text-pb-text shrink-0">Done</button>
+                  </div>
+                )}
+                <BlankCanvasEditor
+                  items={layer.items} selIds={layer.selIds}
+                  onSelect={layer.select} onDeselect={layer.deselect}
+                  onAdd={layer.add} onUpdate={layer.update} onRemove={layer.remove}
+                  onDuplicate={layer.duplicate} onReorder={layer.reorder}
+                  onMoveLayerBefore={layer.moveBefore} onAlign={layer.align}
+                  onApplyStarter={layer.applyStarter}
+                  palette={themedPalette}
+                  onPickImage={(itemId, file) => setEditor({ key: 'blankimg', itemId, source: file })}
+                />
+              </>
             )}
 
             {/* Mobile preview (visible on small screens, hidden on xl) */}
@@ -2677,6 +2654,9 @@ export default function AdminSocialPost() {
                     <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
                       {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
                       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+                      {customEdit && !isBlankTab && (
+                        <BlankCanvas team={team} palette={templatePalette} items={overlay.items} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+                      )}
                     </div>
                   </div>
                 )
@@ -2712,19 +2692,25 @@ export default function AdminSocialPost() {
                 return (
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: tmpl.kind === 'blank' ? 'auto' : 'none', position: 'relative' }}>
+                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
                         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-                        {tmpl.kind === 'blank' ? (
-                          <BlankCanvas team={team} palette={templatePalette} items={blankItems}
-                            interactive scale={scale} selectedIds={blankSelIds}
-                            onSelect={selectBlank} onDeselect={() => setBlankSelIds([])} onPatchMany={patchManyBlank} />
+                        {isBlankTab ? (
+                          <BlankCanvas team={team} palette={templatePalette} items={canvas.items}
+                            interactive scale={scale} selectedIds={canvas.selIds}
+                            onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany} />
                         ) : (
                           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+                        )}
+                        {customEdit && !isBlankTab && (
+                          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} transparent width={W} height={H}
+                            interactive scale={scale} selectedIds={overlay.selIds}
+                            onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
+                            style={{ position: 'absolute', inset: 0 }} />
                         )}
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
-                      {W} × {H} px · shown at {Math.round(scale * 100)}%{tmpl.kind === 'blank' ? ' · drag items to move, corner handle to resize' : ''}
+                      {W} × {H} px · shown at {Math.round(scale * 100)}%{showBlankTools ? ' · drag items to move, corner handle to resize' : ''}
                     </p>
                   </>
                 )
@@ -2740,6 +2726,9 @@ export default function AdminSocialPost() {
         <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
           {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+          {customEdit && !isBlankTab && (
+            <BlankCanvas team={team} palette={templatePalette} items={overlay.items} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+          )}
         </div>
       </div>
 
@@ -2759,7 +2748,7 @@ export default function AdminSocialPost() {
             if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
             setHeroImage({ blobUrl: URL.createObjectURL(file) })
           } else if (e.key === 'blankimg' && e.itemId) {
-            updateBlankItem(e.itemId, { src: URL.createObjectURL(file) })
+            layer.update(e.itemId, { src: URL.createObjectURL(file) })
           } else if (typeof e.sponsorIdx === 'number') {
             applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
           }

@@ -176,7 +176,7 @@ function TextBlock({ item, palette }) {
 
 function ImageBlock({ item, palette }) {
   if (item.src) {
-    return <img src={item.src} alt="" style={{ width: item.w, height: item.h, objectFit: item.fit || 'contain', borderRadius: item.radius || 0, display: 'block' }} />
+    return <img src={item.src} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'contain', borderRadius: item.radius || 0, display: 'block', pointerEvents: 'none' }} />
   }
   return (
     <div style={{
@@ -216,12 +216,14 @@ function BlankBlock({ item, palette, team, interactive, selected, single, outlin
   return (
     <div
       onPointerDown={interactive ? (e) => onPointerDown(e, item.id) : undefined}
+      draggable={false}
+      onDragStart={interactive ? (e) => e.preventDefault() : undefined}
       style={{
         position: 'absolute', left: item.x, top: item.y,
         cursor: interactive ? 'move' : 'default',
         outline: interactive && selected ? `${outline}px solid ${accent}` : 'none',
         outlineOffset: outline * 2, transform: rot, transformOrigin: 'top left',
-        touchAction: 'none',
+        touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none',
       }}>
       {renderContent(item, palette, team)}
       {interactive && single && (
@@ -236,6 +238,7 @@ export function BlankCanvas({
   items = [], palette = {}, team = {},
   interactive = false, scale = 1, selectedIds = [],
   onSelect, onDeselect, onPatchMany, onCommit,
+  transparent = false, width = 1080, height = 1080, style = {},
 }) {
   const rootRef = useRef(null)
   const selSet = new Set(selectedIds)
@@ -315,11 +318,12 @@ export function BlankCanvas({
       ref={rootRef}
       onPointerDown={interactive ? (e) => { if (e.target === rootRef.current) onDeselect && onDeselect() } : undefined}
       style={{
-        width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
-        background: palette.primary || '#101113', color: palette.ink || '#fff',
-        fontFamily: "'Inter', sans-serif",
+        width, height, position: 'relative', overflow: 'hidden',
+        background: transparent ? 'transparent' : (palette.primary || '#101113'),
+        color: palette.ink || '#fff', fontFamily: "'Inter', sans-serif",
+        ...style,
       }}>
-      <GrainSVG opacity={0.14} id="blankcanvas" />
+      {!transparent && <GrainSVG opacity={0.14} id="blankcanvas" />}
       {items.map((it) => (
         <BlankBlock
           key={it.id} item={it} palette={palette} team={team} interactive={interactive}
