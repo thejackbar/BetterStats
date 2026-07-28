@@ -49,7 +49,21 @@ export const BLANK_ELEMENTS = [
   { shape: 'rect', name: 'Box' },
   { shape: 'ellipse', name: 'Circle' },
   { shape: 'triangle', name: 'Triangle' },
+  { shape: 'star', name: 'Star' },
+  { shape: 'arrow', name: 'Arrow' },
+  { shape: 'chevron', name: 'Chevron' },
+  { shape: 'diamond', name: 'Diamond' },
+  { shape: 'hexagon', name: 'Hexagon' },
 ]
+
+// Clip-path polygons for the fill-only decorative shapes (scale with w/h).
+const CLIP_SHAPES = {
+  star: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+  arrow: 'polygon(0% 30%, 60% 30%, 60% 10%, 100% 50%, 60% 90%, 60% 70%, 0% 70%)',
+  chevron: 'polygon(0% 0%, 50% 0%, 100% 50%, 50% 100%, 0% 100%, 50% 50%)',
+  diamond: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+  hexagon: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+}
 
 export function newBlankItem(type, opts = {}) {
   const id = nextId()
@@ -74,7 +88,8 @@ export function newBlankItem(type, opts = {}) {
     if (shape === 'divider') return { id, type: 'element', shape, x: 90, y: 540, w: 900, h: 4, thickness: 4, color: 'ink', opacity: 0.5, rotation: 0 }
     if (shape === 'rect') return { id, type: 'element', shape, x: 380, y: 400, w: 320, h: 200, color: 'accent', fill: true, radius: 0, thickness: 6, opacity: 1, rotation: 0 }
     if (shape === 'ellipse') return { id, type: 'element', shape, x: 420, y: 380, w: 240, h: 240, color: 'accent', fill: true, thickness: 6, opacity: 1, rotation: 0 }
-    if (shape === 'triangle') return { id, type: 'element', shape, x: 420, y: 380, w: 260, h: 230, color: 'accent', opacity: 1, rotation: 0 }
+    // Fill-only clip-path shapes (triangle + star/arrow/chevron/diamond/hexagon)
+    return { id, type: 'element', shape, x: 420, y: 380, w: 260, h: 230, color: 'accent', opacity: 1, rotation: 0 }
   }
   return null
 }
@@ -201,6 +216,9 @@ function ElementBlock({ item, palette }) {
   if (item.shape === 'triangle') {
     return <div style={{ width: item.w, height: item.h, background: color, opacity: op, clipPath: 'polygon(50% 0, 100% 100%, 0 100%)' }} />
   }
+  if (CLIP_SHAPES[item.shape]) {
+    return <div style={{ width: item.w, height: item.h, background: color, opacity: op, clipPath: CLIP_SHAPES[item.shape] }} />
+  }
   return <div style={{ width: item.w, height: item.h, borderRadius: item.radius || 0, background: item.fill !== false ? color : 'transparent', border: item.fill === false ? `${item.thickness || 4}px solid ${color}` : 'none', opacity: op }} />
 }
 
@@ -222,7 +240,7 @@ function BlankBlock({ item, palette, team, interactive, selected, single, outlin
         position: 'absolute', left: item.x, top: item.y,
         cursor: interactive ? 'move' : 'default',
         outline: interactive && selected ? `${outline}px solid ${accent}` : 'none',
-        outlineOffset: outline * 2, transform: rot, transformOrigin: 'top left',
+        outlineOffset: outline * 2, transform: rot, transformOrigin: 'center center',
         touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none',
       }}>
       {renderContent(item, palette, team)}

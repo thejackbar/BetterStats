@@ -24,6 +24,7 @@ import EventPostEditor from '../../components/admin/EventPostEditor'
 import BlankCanvasEditor from '../../components/admin/BlankCanvasEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { useBlankLayer } from '../../social/useBlankLayer'
+import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
 const EMPTY_LAYER = () => []
@@ -1402,6 +1403,32 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // Custom Edit → convert the current template into fully-movable blocks (for
+  // the companion post types), else fall back to overlay-on-top editing.
+  const buildCustomEditItems = () => {
+    const annP = selectedPlayers[announcement.playerIdx]
+    const annPlayer = annP ? playerToTemplatePlayer(annP.player, annP, nameFormat, swapNames) : null
+    const motmP = selectedPlayers[motm.playerIdx]
+    const motmPlayer = motmP ? playerToTemplatePlayer(motmP.player, motmP, nameFormat, swapNames) : null
+    return templateToBlocks(templateId, {
+      team, match: matchData,
+      announcement: { kind: announcement.kind, headline: announcement.headline, subheadline: announcement.subheadline, player: annPlayer },
+      toss: { winner: toss.winner, decision: toss.decision, teamName: team.name, oppName: oppData.name },
+      motm: { player: motmPlayer, stats: motm.stats.filter((s) => s.label && s.value), summary: motm.summary },
+      result: { winner: result.winner, teamName: team.name, oppName: oppData.name, teamScore: result.teamScore, oppScore: result.oppScore, margin: result.margin, motmLast: result.motmLast },
+    })
+  }
+  const beginCustomEdit = () => {
+    const items = buildCustomEditItems()
+    if (items && items.length) {
+      canvas.reset(items)
+      setCustomEdit(false)
+      setTemplateId('BL1')
+    } else {
+      startCustomEdit()
+    }
+  }
+
   // Fixtures / single-result / results roundups (new BetterSocials post sets).
   // They share the club identity, sponsor logos and round meta with the rest.
   const clubMark = { name: team.name, full: team.fullName, mono: team.monogram, logo: team.logo }
@@ -1751,14 +1778,25 @@ export default function AdminSocialPost() {
               {templatesOpen && (
                 <div className="mt-3 flex flex-col gap-4">
                   {!isBlankTab && (
-                    <button
-                      onClick={customEdit ? stopCustomEdit : startCustomEdit}
-                      className="px-3 py-1.5 rounded text-[11px] font-mono border transition-colors self-start"
-                      style={customEdit
-                        ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }
-                        : { borderColor: 'var(--pb-hairline)' }}>
-                      {customEdit ? '✎ Custom editing — click to stop' : '✎ Custom Edit this template'}
-                    </button>
+                    <div className="flex flex-col gap-1 self-start">
+                      <button
+                        onClick={customEdit ? stopCustomEdit : beginCustomEdit}
+                        className="px-3 py-1.5 rounded text-[11px] font-mono border transition-colors self-start"
+                        style={customEdit
+                          ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }
+                          : { borderColor: 'var(--pb-hairline)' }}>
+                        {customEdit
+                          ? '✎ Custom editing (overlay) — click to stop'
+                          : CUSTOM_EDITABLE.includes(templateId)
+                            ? '✎ Custom Edit — make every element movable'
+                            : '✎ Custom Edit — add blocks on top'}
+                      </button>
+                      <span className="text-pb-faintest text-[10px]">
+                        {CUSTOM_EDITABLE.includes(templateId)
+                          ? 'Opens this post as fully-editable blocks you can move, then save as a template.'
+                          : 'This layout keeps its content; you can add your own blocks on top.'}
+                      </span>
+                    </div>
                   )}
                   {tabTemplates.length > 1 && activeTab !== 'events' && (
                     <div className="flex flex-col gap-1.5">
