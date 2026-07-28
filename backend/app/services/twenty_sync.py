@@ -342,8 +342,20 @@ async def _engagement(session, club: MarketingClub,
                   "upsellModules": [], "inSalesCycle": False}
         _apply_engagement_cache(club, result)
         return result
+    # An ARCHIVED org (soft-deleted — gone from All Clubs, e.g. a wound-up test
+    # trial) must stop scoring on its own product use. Its remaining activity is
+    # staff/test logins (super admins are already excluded; a "fake admin" test
+    # account resolves only via the org-id branch), so drop the org entirely:
+    # the club then scores as a bare prospect on genuine outreach/email only,
+    # which for a test club is nothing — so it decays to 0 and leaves the
+    # pipeline, instead of holding a score off staff activity forever.
+    org_archived = org is not None and getattr(org, "archived_at", None) is not None
+    if org_archived:
+        org = None
     utm = club.utm_code
-    org_id = str(club.existing_org_id) if club.existing_org_id else None
+    # org_id is what the customer/product-use web branch keys on; drop it too for
+    # an archived org so its own staff/test logins stop counting.
+    org_id = str(club.existing_org_id) if (club.existing_org_id and not org_archived) else None
     paid, trial_mods, _renewals = _module_split(org) if org is not None else ([], [], [])
     # A synced-but-not-yet-paying org (e.g. a demo synced ahead of a sale) is scored
     # as a Prospect's lead heat, not a Customer's account health — "we sync the club"

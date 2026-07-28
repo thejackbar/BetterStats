@@ -1301,37 +1301,77 @@ async def maybe_promote_by_engagement_score(session: AsyncSession, club: Marketi
     return deal
 
 
-async def ensure_pipeline_entry(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
-    """As soon as a club has ANY engagement (cached engagement_score > 0), it
-    belongs on the pipeline: get-or-create its platform deal at Target. Per
-    direct instruction — a score above zero is itself the trigger to start
-    working the club, no enquiry or manual export required.
+# The default valuation for a club that enters the pipeline: BetterStats (Core)
+# at $399 — every prospect is at least a Stats prospect. price_for(["core"]) is
+# 399; kept as a constant so it's obvious and cheap.
+_DEFAULT_DEAL_MODULES = ["core"]
+_DEFAULT_DEAL_VALUE_CENTS = 39900
 
-    Guards:
-      - score <= 0 (or ``not_interested``, which forces the score to 0) never
-        enters — a bare directory row with no activity stays off the board.
-      - Never re-adds a club that ALREADY has a deal (open OR closed): a
-        won/lost club must not come back onto the board from a stray later
-        page view. It enters the pipeline exactly once.
-    Caller commits."""
-    if (club.engagement_score or 0) <= 0:
-        return None
+
+async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
+    """Keep a club's presence on the pipeline in step with its engagement score:
+
+      - score > 0 and NOT on the board  -> create a Target deal, valued at the
+        Stats/$399 default. (Never re-adds a club that already has any
+        non-archived deal, so a won/lost or already-worked club can't be
+        dragged back on.)
+      - score == 0 and it's an AUTO-added deal still sitting at Target -> archive
+        it (out of the pipeline). It re-enters automatically if it re-engages,
+        because an archived deal doesn't count as "already has a deal" above.
+
+    Deliberately NEVER touched (so manual work is safe): a deal whose
+    ``source`` isn't ``engagement`` (a super admin added it by hand), one that
+    is ``stage_auto_locked`` (hand-moved), or one that has advanced past Target
+    (Contacted / Engaged / Trial / Won / Lost). A $0 auto Target deal is also
+    topped up to the Stats/$399 default here. Caller commits."""
+    score = club.engagement_score or 0
     pipeline = await ensure_platform_pipeline(session)
-    existing = (await session.execute(
-        select(CrmDeal.id).where(
+    target = next((s for s in pipeline.stages if s.key == "target"), None)
+    open_deal = (await session.execute(
+        select(CrmDeal).where(
             CrmDeal.pipeline_id == pipeline.id,
             CrmDeal.marketing_club_id == club.id,
+            CrmDeal.status == "open",
             CrmDeal.archived_at.is_(None),
-        ).limit(1)
-    )).scalar_one_or_none()
-    if existing is not None:
+        ).order_by(CrmDeal.created_at.desc())
+    )).scalars().first()
+
+    if score > 0:
+        any_deal = (await session.execute(
+            select(CrmDeal.id).where(
+                CrmDeal.pipeline_id == pipeline.id,
+                CrmDeal.marketing_club_id == club.id,
+                CrmDeal.archived_at.is_(None),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if any_deal is None:
+            deal = await sync_platform_deal_for_club(
+                session, club, stage_key="target", source="engagement",
+                module_keys=_DEFAULT_DEAL_MODULES)
+            await log_activity(
+                session, deal_id=deal.id, type="system",
+                body=f"Auto-added to pipeline (Target): engagement score {score}")
+            return deal
+        # Existing auto Target deal with no value -> top up to the Stats default.
+        if (open_deal is not None and open_deal.source == "engagement"
+                and (open_deal.value_cents or 0) < _DEFAULT_DEAL_VALUE_CENTS
+                and target is not None and open_deal.stage_id == target.id
+                and not open_deal.stage_auto_locked):
+            open_deal.module_keys = sorted(set(open_deal.module_keys or []) | {"core"})
+            open_deal.value_cents = _DEFAULT_DEAL_VALUE_CENTS
+            open_deal.updated_at = func.now()
+        return open_deal
+
+    # score == 0: remove an AUTO-added deal that's still parked at Target.
+    if (open_deal is not None and open_deal.source == "engagement"
+            and not open_deal.stage_auto_locked
+            and target is not None and open_deal.stage_id == target.id):
+        open_deal.archived_at = func.now()
+        await log_activity(
+            session, deal_id=open_deal.id, type="system",
+            body="Auto-removed from pipeline: engagement decayed to 0")
         return None
-    deal = await sync_platform_deal_for_club(
-        session, club, stage_key="target", source="engagement")
-    await log_activity(
-        session, deal_id=deal.id, type="system",
-        body=f"Auto-added to pipeline: engagement score {club.engagement_score}")
-    return deal
+    return None
 
 
 async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
@@ -1348,9 +1388,9 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     change) rather than waiting for a scheduled sweep. Caller commits."""
     from app.services.twenty_sync import _engagement
     await _engagement(session, club, org)
-    entered = await ensure_pipeline_entry(session, club)
+    membership = await sync_pipeline_membership(session, club)
     promoted = await maybe_promote_by_engagement_score(session, club)
-    return promoted or entered
+    return promoted or membership
 
 
 async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=None,

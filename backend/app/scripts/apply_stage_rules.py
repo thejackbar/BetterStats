@@ -9,14 +9,13 @@ WHY THIS EXISTS
     live rules, so the deployed pipeline behaves as configured in code.
 
 WHAT THE CANONICAL SET DOES (per direct instruction)
-    - Score > 0 auto-ENTERS a club at Target (crm.ensure_pipeline_entry) — not a
-      rule here.
+    - Score > 0 auto-ENTERS a club at Target (crm.sync_pipeline_membership) — not a
+      rule here. Score decaying to 0 auto-removes an untouched Target deal.
     - The score NEVER auto-advances a stage (no engagement_score rule).
-    - Contacted / Engaged are moved to BY HAND by a super admin after a real
-      conversation — no rule targets them.
-    - The only automatic forward move is to Trial, from a genuine start signal:
-      a contact-form enquiry, a trial request, a super admin starting a trial,
-      or a self-serve signup.
+    - Contacted is manual (we reached out, no reply). Engaged is two-way contact:
+      manual for a conversation, or automatic when a club submits the contact form.
+    - Trial is a genuine trial-start signal only: a trial request, a super admin
+      starting a trial, or a self-serve signup.
 
     This REPLACES every existing automation rule (it deletes them first), so any
     hand-added custom rule is removed. That's intended — it's a deliberate reset
