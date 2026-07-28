@@ -287,8 +287,8 @@ export default function App() {
           <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
-          <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
-          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
           <Route path="/admin/players/import" element={<ProtectedRoute requireCore><AdminPlayerImport /></ProtectedRoute>} />
           <Route path="/admin/games" element={<ProtectedRoute requireCore><AdminGames /></ProtectedRoute>} />
@@ -311,7 +311,7 @@ export default function App() {
           <Route path="/admin/upload-scorecard" element={<ProtectedRoute requireCore><AdminScorecardUpload /></ProtectedRoute>} />
           <Route path="/admin/import" element={<ProtectedRoute requireCore><AdminImport /></ProtectedRoute>} />
           <Route path="/admin/milestones" element={<ProtectedRoute requireCore><AdminMilestones /></ProtectedRoute>} />
-          <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
+          <Route path="/admin/activity" element={<ProtectedRoute requireActivePlan><AdminActivityLog /></ProtectedRoute>} />
           <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
           <Route path="/admin/reports" element={<ProtectedRoute requireCore><AdminReports /></ProtectedRoute>} />
@@ -344,7 +344,7 @@ export default function App() {
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
-          <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
