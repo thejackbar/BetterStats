@@ -1307,6 +1307,16 @@ async def maybe_promote_by_engagement_score(session: AsyncSession, club: Marketi
 _DEFAULT_DEAL_MODULES = ["core"]
 _DEFAULT_DEAL_VALUE_CENTS = 39900
 
+# The ONE deal source that pipeline-membership never auto-removes or auto-revalues:
+# "manual" is create_deal's default, i.e. a deal a super admin added by hand. Every
+# OTHER source is system-created — an engagement auto-add ("engagement"), a legacy
+# Twenty bulk import ("twenty_import"), an enquiry/trial signal ("auto_enquiry",
+# "auto_trial", "self_serve_trial") — and so IS managed by the sweep below: a 0-score
+# one parked at Target is archived out, and a $0 one is topped up to the Stats default.
+# Using "not manual" (rather than an explicit allow-list) means any future/legacy auto
+# source is handled too, while a hand-added deal is always left alone.
+_PROTECTED_DEAL_SOURCE = "manual"
+
 
 async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
     """Keep a club's presence on the pipeline in step with its engagement score:
@@ -1320,10 +1330,12 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
         because an archived deal doesn't count as "already has a deal" above.
 
     Deliberately NEVER touched (so manual work is safe): a deal whose
-    ``source`` isn't ``engagement`` (a super admin added it by hand), one that
-    is ``stage_auto_locked`` (hand-moved), or one that has advanced past Target
-    (Contacted / Engaged / Trial / Won / Lost). A $0 auto Target deal is also
-    topped up to the Stats/$399 default here. Caller commits."""
+    ``source`` is ``manual`` (a super admin added it by hand — every other
+    source, including a legacy ``twenty_import`` bulk import, is system-created
+    and IS managed here), one that is ``stage_auto_locked`` (hand-moved), or one
+    that has advanced past Target (Contacted / Engaged / Trial / Won / Lost). A
+    $0 auto Target deal is also topped up to the Stats/$399 default here. Caller
+    commits."""
     score = club.engagement_score or 0
     pipeline = await ensure_platform_pipeline(session)
     target = next((s for s in pipeline.stages if s.key == "target"), None)
@@ -1353,7 +1365,7 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
                 body=f"Auto-added to pipeline (Target): engagement score {score}")
             return deal
         # Existing auto Target deal with no value -> top up to the Stats default.
-        if (open_deal is not None and open_deal.source == "engagement"
+        if (open_deal is not None and open_deal.source != _PROTECTED_DEAL_SOURCE
                 and (open_deal.value_cents or 0) < _DEFAULT_DEAL_VALUE_CENTS
                 and target is not None and open_deal.stage_id == target.id
                 and not open_deal.stage_auto_locked):
@@ -1362,8 +1374,9 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
             open_deal.updated_at = func.now()
         return open_deal
 
-    # score == 0: remove an AUTO-added deal that's still parked at Target.
-    if (open_deal is not None and open_deal.source == "engagement"
+    # score == 0: remove an AUTO-added deal (any source but hand-added "manual",
+    # e.g. a legacy "twenty_import") that's still parked at Target.
+    if (open_deal is not None and open_deal.source != _PROTECTED_DEAL_SOURCE
             and not open_deal.stage_auto_locked
             and target is not None and open_deal.stage_id == target.id):
         open_deal.archived_at = func.now()
