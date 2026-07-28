@@ -408,12 +408,12 @@ export default function AdminDashboard() {
               <ModuleTile
                 key={tile.key}
                 mod={tile}
-                // BetterStats (Core) is the one alwaysOpen tile that CAN lock:
-                // when its trial/subscription has lapsed (coreLive=false) it
-                // shows the locked state with a subscribe prompt, like an add-on.
-                // Every other alwaysOpen tile (the BetterSocials hub, which hosts
-                // the Core website) stays open regardless.
-                entitled={tile.core ? coreLive : (tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)))}
+                // Core (BetterStats) being live is a hard prerequisite for the
+                // whole platform: when it's not, EVERY tile locks — including the
+                // alwaysOpen ones (BetterStats itself and the BetterSocials hub,
+                // whose Core website is dark anyway). While Core is live,
+                // alwaysOpen keeps those two open and add-ons gate on their own.
+                entitled={coreLive && (tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)))}
                 planRow={planByModule[billingKey]}
                 pendingKind={pending?.kind}
                 canSubscribe={!!user?.is_primary_admin}
