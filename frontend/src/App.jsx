@@ -398,7 +398,7 @@ export default function App() {
           <Route path="/admin/betteriq/preview" element={<ProtectedRoute requireModule="iq"><IqPreview /></ProtectedRoute>} />
 
           {/* BetterSocials umbrella (Website + Post Designer) — Website is Core, so the hub is open to all */}
-          <Route path="/admin/bettersocials" element={<ProtectedRoute><BetterSocialsHome /></ProtectedRoute>} />
+          <Route path="/admin/bettersocials" element={<ProtectedRoute requireCore><BetterSocialsHome /></ProtectedRoute>} />
 
           {/* BetterAdmin umbrella + BetterComms (bulk email) */}
           <Route path="/admin/betteradmin" element={<ProtectedRoute><BetterAdminHome /></ProtectedRoute>} />
