@@ -108,29 +108,79 @@ def _apply_coupon_to_quote(quote: dict, coupon) -> dict:
     return quote
 
 
-def _stripe_address(club: Organisation) -> dict:
-    """Stripe's Address shape ({"line1","city","state","postal_code","country"})
-    from the club's resolved address (see self_serve_trial._resolve_club_address).
-    Country is always "AU": every club on this platform is an Australian
-    Cricket Australia club (source data is always AU-tenant-filtered), and
-    PlayHQ's own country field is a full name ("Australia"), not the
-    ISO-3166 alpha-2 code Stripe requires.
+# Full country name (what PlayHQ and the Club Directory store — e.g.
+# "Australia", not the code Stripe wants) → ISO 3166-1 alpha-2. Kept small
+# and additive: today's clubs are AU, UK Play-Cricket is the next expansion.
+_COUNTRY_NAME_TO_ISO = {
+    "australia": "AU",
+    "new zealand": "NZ",
+    "united kingdom": "GB",
+    "great britain": "GB",
+    "england": "GB",
+    "scotland": "GB",
+    "wales": "GB",
+    "northern ireland": "GB",
+    "ireland": "IE",
+    "south africa": "ZA",
+    "india": "IN",
+    "united states": "US",
+    "usa": "US",
+    "united states of america": "US",
+}
 
-    ALWAYS returns at least {"country": "AU"}, even when the club has no
-    street address on file — that country alone is what makes both of these
-    work from the very first checkout attempt:
-      * automatic_tax has an AU jurisdiction to apply 10% GST against (a
-        country-level tax; postcode/state refine it but AU country is enough
-        for GST to calculate), instead of $0 with no country set; and
-      * Stripe offers the AU-only recurring payment methods (PayTo, BECS
-        Direct Debit) — both are filtered out of Checkout entirely when the
-        Customer's country is unknown, leaving only the globally-available
-        ones (Card, Klarna).
-    Returning None here (the old behaviour when no street address was on
-    file) left the Customer with no country at all, which broke both — see
-    the report that surfaced this. Street-level fields are added only when
-    present."""
-    addr = {"country": "AU"}
+
+def _country_iso(club: Organisation) -> str | None:
+    """The club's ISO 3166-1 alpha-2 country code for Stripe (Customer.address
+    and automatic tax both want the code, not a full name). Derived from
+    concrete signals, never blanket-assumed, so this stays correct once
+    non-AU clubs (e.g. UK Play-Cricket) are onboarded:
+
+    1. A stored country (from self-serve registration's address resolution —
+       PlayHQ returns a full name like "Australia", so it's normalised to a
+       code; an already-2-letter value is used as-is).
+    2. Failing that, a club that has a PlayHQ id is a Cricket Australia club,
+       so AU (per direct instruction — assume Australia only from a concrete
+       AU signal, not for every club).
+    3. Otherwise None — the country is genuinely unknown, so let Stripe
+       capture it from the billing address the payer enters at checkout
+       (create_checkout_session's customer_update: {"address": "auto"})."""
+    raw = (club.country or "").strip()
+    if raw:
+        if len(raw) == 2 and raw.isalpha():
+            return raw.upper()
+        mapped = _COUNTRY_NAME_TO_ISO.get(raw.lower())
+        if mapped:
+            return mapped
+        # An unrecognised full name — fall through to the PlayHQ signal below
+        # rather than sending Stripe something it would reject.
+    if club.playhq_id:
+        return "AU"
+    return None
+
+
+def _stripe_address(club: Organisation) -> dict | None:
+    """Stripe's Address shape ({"line1","city","state","postal_code","country"})
+    from what we can determine about the club (see self_serve_trial.
+    _resolve_club_address for where the street fields come from).
+
+    Returns None only when the club's country can't be determined at all
+    (see _country_iso) — automatic_tax then falls back to whatever the payer
+    enters at checkout (customer_update: {"address": "auto"} in
+    stripe_client.create_checkout_session). When a country IS known it's
+    always included even with no street address, because that country alone
+    is what makes both of these work from the first checkout attempt:
+      * automatic_tax has a jurisdiction to apply tax against (a country-level
+        tax like AU GST needs only the country; postcode/state refine it),
+        instead of $0 with no country set; and
+      * Stripe offers that country's local recurring payment methods (for AU:
+        PayTo, BECS Direct Debit) — both are filtered out of Checkout entirely
+        when the Customer's country is unknown, leaving only the globally
+        available ones (Card, Klarna).
+    Street-level fields are added only when present."""
+    country = _country_iso(club)
+    if not country:
+        return None
+    addr = {"country": country}
     if club.address_line1:
         addr["line1"] = club.address_line1
     if club.suburb:
