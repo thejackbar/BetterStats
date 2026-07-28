@@ -407,8 +407,15 @@ export default function SuperClubs() {
     return sub?.renewal_date || ''
   }
 
-  const removeModule = (clubId, key) =>
-    runModuleAction(key, () => { clearTrialEdit(key); return api.superRemoveModule(clubId, key) })
+  const removeModule = (clubId, key) => {
+    // Removing Core (BetterStats) removes every add-on the club holds too —
+    // Core is the platform prerequisite, and the backend cascades the same way.
+    if (key === 'core' && !window.confirm(
+      'Removing BetterStats (Core) will also remove EVERY add-on module this club holds. ' +
+      'BetterStats is required for the platform to work. Continue?'
+    )) return
+    return runModuleAction(key, () => { clearTrialEdit(key); return api.superRemoveModule(clubId, key) })
+  }
   const setModuleRenewal = (clubId, key, date) =>
     runModuleAction(key, () => api.superPatchModule(clubId, key, { renewal_date: date || null }))
   const applyTrial = (clubId, key, draft) => {
@@ -451,9 +458,23 @@ export default function SuperClubs() {
     }
     if (status === 'reset') {
       clearTrialEdit(key)
-      removeModule(clubId, key)
+      removeModule(clubId, key)  // has its own Core cascade confirm
       return
     }
+    // Cancelling Core (BetterStats) cancels every add-on the club holds — Core
+    // is the platform prerequisite, and the backend cascades to match. Warn the
+    // super admin first. Pausing is reversible (add-ons are disabled by the
+    // read gate but their rows are preserved and return on reactivation), so it
+    // only warns, it doesn't cancel the add-ons.
+    if (key === 'core' && status === 'cancelled' && !window.confirm(
+      'Cancelling BetterStats (Core) will CANCEL and disable EVERY other module this club holds ' +
+      '(BetterSelect, BetterSocials, BetterAdmin, BetterIQ, BetterFantasyCricket). ' +
+      'BetterStats is required for the platform to work. Continue?'
+    )) return
+    if (key === 'core' && status === 'paused' && !window.confirm(
+      'Pausing BetterStats (Core) disables ALL modules for this club until you reactivate it. ' +
+      'Add-on subscriptions are kept and return when you reactivate BetterStats. Continue?'
+    )) return
     clearTrialEdit(key)
     runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
   }
