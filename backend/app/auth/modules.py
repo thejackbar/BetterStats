@@ -195,6 +195,19 @@ def org_entitled_modules(org, now: datetime | None = None) -> set[str]:
         return set()
     if not org_subscription_active(org):
         return set()
+    # Core (BetterStats) is a hard prerequisite for the whole platform: if it
+    # isn't live (lapsed Core trial / cancelled Core subscription that wasn't
+    # renewed), NO add-on is usable either, regardless of that add-on's own
+    # trial/subscription state — a valid Core is required for BetterCricket to
+    # function for a club. Fails open for a legacy club with no Core row
+    # (org_core_live returns True) and only bites when the subscription rows are
+    # actually loaded (org_core_live is fail-open otherwise), so the cached fast
+    # path is unchanged. This does NOT touch the persisted module_overrides
+    # cache (recomputed independently from the rows' own held statuses in
+    # services/module_subscriptions.py), so the add-ons come straight back the
+    # moment Core is renewed.
+    if not org_core_live(org, now):
+        return set()
     held = {m for m in (getattr(org, "module_overrides", None) or []) if m in ALL_MODULES}
     subs = _loaded_subscriptions(org)
     if subs:

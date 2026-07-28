@@ -4,8 +4,8 @@ export default {
   sortKey: '2026-07-28T13:00:00Z',
   title: 'BetterStats access follows your subscription',
   items: [
-    'When a club’s BetterStats trial or subscription has ended, the BetterStats admin tools are now paused until you subscribe — you can still log in, and the public club page goes dark, exactly as it already did.',
-    'While BetterStats is current, the admin tools and public page stay fully available even if an add-on module’s trial has expired. Each module is gated on its own.',
-    'When every module’s trial or subscription has lapsed, the admin is limited to the dashboard and Plan & Billing (Settings, Activity and Setup are paused too), with a gentle reminder pointing you to subscribe and pick back up.',
+    'BetterStats (Core) now underpins everything: if its trial or subscription has ended, the whole platform is paused for the club — every add-on module is gated too (even one still in trial), the admin is limited to the dashboard and Plan & Billing, and the public club page goes dark. You can always still log in and subscribe to pick back up.',
+    'While BetterStats is current, everything stays available, and add-on modules are gated on their own — an expired add-on locks just itself, the rest keep working.',
+    'When everything has lapsed, a gentle reminder on the dashboard points you to Plan & Billing.',
   ],
 }

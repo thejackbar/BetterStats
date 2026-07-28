@@ -146,6 +146,11 @@ export function AuthProvider({ children }) {
   const hasModule = useCallback((moduleKey) => {
     if (!user) return false
     if (user.role === 'super_admin') return true
+    // Core is a hard prerequisite: if BetterStats isn't live, no add-on is
+    // usable either, whatever its own state. The backend already drops modules
+    // to an empty list in this case (org_entitled_modules), so this is belt-and-
+    // braces — but it also gates instantly, before entitlements are re-fetched.
+    if (user.entitlements?.core_live === false) return false
     // Backward-compat / fail-open: an older backend (or a not-yet-migrated one)
     // doesn't send `entitlements` at all. Don't hide the modules in that case —
     // only gate when the backend explicitly provides the modules list. A club
