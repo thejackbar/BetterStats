@@ -129,21 +129,29 @@ _COUNTRY_NAME_TO_ISO = {
 }
 
 
-def _country_iso(club: Organisation) -> str | None:
+def _country_iso(club: Organisation) -> str:
     """The club's ISO 3166-1 alpha-2 country code for Stripe (Customer.address
-    and automatic tax both want the code, not a full name). Derived from
-    concrete signals, never blanket-assumed, so this stays correct once
-    non-AU clubs (e.g. UK Play-Cricket) are onboarded:
+    and automatic tax both want the code, not a full name). Derived so it
+    stays correct once non-AU clubs (e.g. UK Play-Cricket) are onboarded,
+    rather than blindly hardcoding AU for everything:
 
-    1. A stored country (from self-serve registration's address resolution —
-       PlayHQ returns a full name like "Australia", so it's normalised to a
-       code; an already-2-letter value is used as-is).
-    2. Failing that, a club that has a PlayHQ id is a Cricket Australia club,
-       so AU (per direct instruction — assume Australia only from a concrete
-       AU signal, not for every club).
-    3. Otherwise None — the country is genuinely unknown, so let Stripe
-       capture it from the billing address the payer enters at checkout
-       (create_checkout_session's customer_update: {"address": "auto"})."""
+    1. A stored country wins (from self-serve registration's address
+       resolution — PlayHQ returns a full name like "Australia", so it's
+       normalised to a code; an already-2-letter value is used as-is). This
+       is the branch a future non-AU club takes — its own onboarding source
+       records its real country, which overrides the AU default below.
+    2. Otherwise Australia. Every club onboarded today is a Cricket Australia
+       club (its identity is a PlayHQ/CA GUID), and there is no non-Australian
+       onboarding path yet — so a club with no country on file is Australian.
+
+    This is deliberately NOT gated on the `playhq_id` column: that's a legacy
+    field only populated by a low-value PlayHQ Partner-API lookup during sync,
+    so it's NULL for many genuinely-Australian clubs (Trinity College (WA)
+    among them — which is exactly why gating on it left the Customer with no
+    country). Keying the AU default on "no other-country signal" instead of
+    on that column is what makes GST + the AU payment methods actually work
+    for every current club, while the stored-country branch keeps it honest
+    for the non-AU clubs to come."""
     raw = (club.country or "").strip()
     if raw:
         if len(raw) == 2 and raw.isalpha():
@@ -151,11 +159,9 @@ def _country_iso(club: Organisation) -> str | None:
         mapped = _COUNTRY_NAME_TO_ISO.get(raw.lower())
         if mapped:
             return mapped
-        # An unrecognised full name — fall through to the PlayHQ signal below
-        # rather than sending Stripe something it would reject.
-    if club.playhq_id:
-        return "AU"
-    return None
+        # An unrecognised non-empty country string — fall through to the AU
+        # default rather than sending Stripe something it would reject.
+    return "AU"
 
 
 def _stripe_address(club: Organisation) -> dict | None:
