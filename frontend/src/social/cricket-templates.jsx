@@ -1178,7 +1178,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '36px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
         <div><div style={{ display: 'inline-block', padding: '7px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 3 }}>{(a.kind || 'ANNOUNCEMENT').toUpperCase()}</div></div>
-        <BrandLockup team={team} palette={palette} size={128} align="right" nameSize={30} style={{ maxWidth: 520 }} />
+        <BrandLockup team={team} palette={palette} size={184} align="right" nameSize={30} style={{ maxWidth: 560 }} />
       </div>
       <div style={{ position: 'absolute', left: 40, bottom: 130, right: 40, zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 3, color: palette.accent, marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
@@ -1269,7 +1269,7 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1.5, marginTop: 14, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 6 }}>{match.competition} · {match.round} · {match.date}</div>
         </div>
-        <BrandLockup team={team} palette={palette} size={112} layout="stack" nameSize={22} style={{ maxWidth: 300 }} />
+        <BrandLockup team={team} palette={palette} size={150} layout="stack" nameSize={22} style={{ maxWidth: 320 }} />
       </div>
       <div style={{ position: 'absolute', left: 0, top: 220, width: 520, height: 700, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (

@@ -67,7 +67,7 @@ export function newBlankItem(type) {
 // The canvas a new "Blank" post opens with: club lockup top-left, one headline.
 export function defaultBlankItems() {
   return [
-    { ...newBlankItem('brand'), x: 60, y: 56, size: 160 },
+    { ...newBlankItem('brand'), x: 60, y: 56, size: 184 },
     { ...newBlankItem('text'), text: 'PLAYERS WANTED', x: 70, y: 470, w: 940, fontSize: 150, color: 'ink' },
     { ...newBlankItem('text'), text: 'Join the club this season — all grades, all ages welcome.', x: 72, y: 720, w: 780, fontSize: 40, bold: false, fontFamily: "'Inter', sans-serif", uppercase: false, color: 'ink', lineHeight: 1.2 },
   ]
