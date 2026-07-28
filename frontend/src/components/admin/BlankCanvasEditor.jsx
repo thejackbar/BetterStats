@@ -4,7 +4,7 @@
 // or several blocks (shift-click), align a multi-selection, and edit the
 // selected block. Positioning/resizing is done by dragging on the preview.
 import { useState } from 'react'
-import { BLANK_FONTS, BLANK_ELEMENTS, BLANK_STARTERS } from '../../social/blank-template'
+import { BLANK_FONTS, BLANK_ELEMENTS, BLANK_STARTERS, BLANK_DATA } from '../../social/blank-template'
 
 const SWATCHES = [
   { key: 'primary', label: 'Club primary' },
@@ -78,13 +78,15 @@ function itemLabel(it) {
   if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
   if (it.type === 'image') return it.src ? 'Image' : 'Image (empty)'
   if (it.type === 'brand') return 'Club badge'
-  if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle' }[it.shape] || 'Element'
+  if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
+  if (it.type === 'data') return { fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard', player: 'Player stats' }[it.kind] || 'Data'
   return it.type
 }
 
 export default function BlankCanvasEditor({
   items, selIds, onSelect, onDeselect, onAdd, onUpdate, onRemove, onDuplicate,
   onReorder, onMoveLayerBefore, onAlign, onApplyStarter, palette, onPickImage,
+  players = [],
 }) {
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
@@ -123,6 +125,12 @@ export default function BlankCanvasEditor({
         <span className="font-mono text-[9px] text-pb-faintest uppercase">Elements</span>
         {BLANK_ELEMENTS.map((el) => (
           <AddBtn key={el.shape} onClick={() => onAdd('element', { shape: el.shape })}>+ {el.name}</AddBtn>
+        ))}
+      </div>
+      <div className="flex gap-1.5 flex-wrap items-center">
+        <span className="font-mono text-[9px] text-pb-faintest uppercase">Data</span>
+        {BLANK_DATA.map((d) => (
+          <AddBtn key={d.kind} onClick={() => onAdd('data', { kind: d.kind })}>+ {d.name}</AddBtn>
         ))}
       </div>
 
@@ -167,7 +175,7 @@ export default function BlankCanvasEditor({
       {/* Single-select: property editor */}
       {single && (
         <div className="border-t pb-hairline pt-3 flex flex-col gap-1">
-          <div className="font-mono text-[10px] text-pb-faint uppercase tracking-wide2 mb-1">Edit {single.type === 'element' ? itemLabel(single).toLowerCase() : single.type}</div>
+          <div className="font-mono text-[10px] text-pb-faint uppercase tracking-wide2 mb-1">Edit {single.type === 'element' || single.type === 'data' ? itemLabel(single).toLowerCase() : single.type}</div>
 
           {single.type === 'text' && (
             <>
@@ -258,6 +266,28 @@ export default function BlankCanvasEditor({
               {single.shape !== 'line' && single.shape !== 'divider' && <Row label="Height"><NumField value={single.h} onChange={(v) => onUpdate(single.id, { h: v })} min={4} max={1080} /></Row>}
               <Row label="Rotation"><input type="range" min={-180} max={180} value={single.rotation || 0} onChange={(e) => onUpdate(single.id, { rotation: Number(e.target.value) })} className="w-24" /><NumField value={single.rotation || 0} onChange={(v) => onUpdate(single.id, { rotation: v })} min={-180} max={180} w="w-12" /></Row>
               <Row label="Opacity"><input type="range" min={0.1} max={1} step={0.05} value={single.opacity ?? 1} onChange={(e) => onUpdate(single.id, { opacity: Number(e.target.value) })} className="w-24" /></Row>
+            </>
+          )}
+
+          {single.type === 'data' && (
+            <>
+              {(single.kind === 'fixtures' || single.kind === 'results') && (
+                <Row label="Rows"><NumField value={single.count} onChange={(v) => onUpdate(single.id, { count: Math.max(1, Math.min(12, v)) })} min={1} max={12} w="w-14" /></Row>
+              )}
+              {single.kind === 'player' && (
+                <Row label="Player">
+                  <select value={single.playerId || ''}
+                    onChange={(e) => { const p = players.find((x) => x.id === e.target.value); onUpdate(single.id, { playerId: e.target.value || null, playerName: p ? (p.display_name || p.name) : '' }) }}
+                    className="bg-pb-surface2 border pb-hairline rounded px-2 py-0.5 text-[11px] font-mono text-pb-text max-w-[190px]">
+                    <option value="">Select player…</option>
+                    {players.map((p) => <option key={p.id} value={p.id}>{p.display_name || p.name}</option>)}
+                  </select>
+                </Row>
+              )}
+              <Row label="Text colour"><ColorPicker value={single.color} onChange={(c) => onUpdate(single.id, { color: c })} palette={palette} /></Row>
+              <Row label="Accent"><ColorPicker value={single.accent} onChange={(c) => onUpdate(single.id, { accent: c })} palette={palette} /></Row>
+              <Row label="Width"><NumField value={single.w} onChange={(v) => onUpdate(single.id, { w: v })} min={200} max={1080} /></Row>
+              <p className="text-pb-faintest text-[10px]">Pulls live club data. Fixtures/results/scorecard come from those tabs; edit them there and this updates.</p>
             </>
           )}
 

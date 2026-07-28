@@ -763,6 +763,9 @@ export default function AdminSocialPost() {
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
   // template so it can be tweaked and saved as a custom template.
   const [customEdit, setCustomEdit] = useState(false)
+  // Career stats for players referenced by "player" data blocks, fetched on
+  // demand and cached by id (keeps saved templates live — config only).
+  const [playerStatsCache, setPlayerStatsCache] = useState({})
 
   // Save the current post as a reusable Template (works on every tab). Captures
   // the base template + Style; on the Blank Canvas it also captures the block
@@ -1403,6 +1406,37 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // Live data bundle for the Blank Canvas "data blocks" (fixtures / results /
+  // record / scorecard / player). Built from the state the designer already
+  // holds, so blocks show current info with no extra fetch (bar player stats).
+  const wld = (o) => (o || '').toUpperCase()
+  const blankRecord = {
+    w: results.filter((r) => wld(r.outcome) === 'W').length,
+    l: results.filter((r) => wld(r.outcome) === 'L').length,
+    d: results.filter((r) => ['D', 'T', 'TIE'].includes(wld(r.outcome))).length,
+  }
+  const blankData = {
+    team, match: matchData, fixtures, results, record: blankRecord,
+    scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
+  }
+
+  // Fetch career stats for any player referenced by a player data block.
+  useEffect(() => {
+    const ids = [...canvas.items, ...overlay.items]
+      .filter((it) => it.type === 'data' && it.kind === 'player' && it.playerId)
+      .map((it) => it.playerId)
+    const missing = [...new Set(ids)].filter((id) => !(id in playerStatsCache))
+    if (!missing.length) return undefined
+    let cancelled = false
+    Promise.all(missing.map((id) => api.getPlayerStats(id).then((s) => [id, s]).catch(() => [id, {}])))
+      .then((pairs) => {
+        if (cancelled) return
+        setPlayerStatsCache((prev) => { const next = { ...prev }; pairs.forEach(([id, s]) => { next[id] = s || {} }); return next })
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas.items, overlay.items])
+
   // Custom Edit → convert the current template into fully-movable blocks (for
   // the companion post types), else fall back to overlay-on-top editing.
   const buildCustomEditItems = () => {
@@ -1472,6 +1506,7 @@ export default function AdminSocialPost() {
   }
   if (tmpl.kind === 'blank') {
     extraProps.items = canvas.items
+    extraProps.data = blankData
   }
   if (tmpl.kind === 'event') {
     extraProps.event = event
@@ -2662,7 +2697,7 @@ export default function AdminSocialPost() {
                   onDuplicate={layer.duplicate} onReorder={layer.reorder}
                   onMoveLayerBefore={layer.moveBefore} onAlign={layer.align}
                   onApplyStarter={layer.applyStarter}
-                  palette={themedPalette}
+                  palette={themedPalette} players={allPlayers}
                   onPickImage={(itemId, file) => setEditor({ key: 'blankimg', itemId, source: file })}
                 />
               </>
@@ -2693,7 +2728,7 @@ export default function AdminSocialPost() {
                       {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
                       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
                       {customEdit && !isBlankTab && (
-                        <BlankCanvas team={team} palette={templatePalette} items={overlay.items} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+                        <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
                       )}
                     </div>
                   </div>
@@ -2733,14 +2768,14 @@ export default function AdminSocialPost() {
                       <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
                         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
                         {isBlankTab ? (
-                          <BlankCanvas team={team} palette={templatePalette} items={canvas.items}
+                          <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                             interactive scale={scale} selectedIds={canvas.selIds}
                             onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany} />
                         ) : (
                           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
                         )}
                         {customEdit && !isBlankTab && (
-                          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} transparent width={W} height={H}
+                          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
                             interactive scale={scale} selectedIds={overlay.selIds}
                             onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
                             style={{ position: 'absolute', inset: 0 }} />
@@ -2765,7 +2800,7 @@ export default function AdminSocialPost() {
           {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
           {customEdit && !isBlankTab && (
-            <BlankCanvas team={team} palette={templatePalette} items={overlay.items} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+            <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
           )}
         </div>
       </div>

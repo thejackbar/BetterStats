@@ -56,6 +56,18 @@ export const BLANK_ELEMENTS = [
   { shape: 'hexagon', name: 'Hexagon' },
 ]
 
+// Data blocks pull live club info (fixtures, results, record, a scorecard, a
+// player's career stats) into the canvas. They render from the `data` bundle
+// AdminSocialPost passes down, so a saved template stores only the config and
+// always shows current numbers.
+export const BLANK_DATA = [
+  { kind: 'fixtures', name: 'Fixtures' },
+  { kind: 'results', name: 'Results' },
+  { kind: 'record', name: 'W-L-D record' },
+  { kind: 'scorecard', name: 'Scorecard' },
+  { kind: 'player', name: 'Player stats' },
+]
+
 // Clip-path polygons for the fill-only decorative shapes (scale with w/h).
 const CLIP_SHAPES = {
   star: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
@@ -90,6 +102,14 @@ export function newBlankItem(type, opts = {}) {
     if (shape === 'ellipse') return { id, type: 'element', shape, x: 420, y: 380, w: 240, h: 240, color: 'accent', fill: true, thickness: 6, opacity: 1, rotation: 0 }
     // Fill-only clip-path shapes (triangle + star/arrow/chevron/diamond/hexagon)
     return { id, type: 'element', shape, x: 420, y: 380, w: 260, h: 230, color: 'accent', opacity: 1, rotation: 0 }
+  }
+  if (type === 'data') {
+    const kind = opts.kind || 'fixtures'
+    const base = { id, type: 'data', kind, x: 70, y: 300, w: 940, color: 'ink', accent: 'accent', count: 5, rotation: 0 }
+    if (kind === 'record') return { ...base, w: 900, h: 240 }
+    if (kind === 'player') return { ...base, w: 900, h: 380, playerId: null }
+    if (kind === 'scorecard') return { ...base, w: 940, h: 520 }
+    return { ...base, h: 70 + 5 * 70 } // fixtures / results
   }
   return null
 }
@@ -222,14 +242,152 @@ function ElementBlock({ item, palette }) {
   return <div style={{ width: item.w, height: item.h, borderRadius: item.radius || 0, background: item.fill !== false ? color : 'transparent', border: item.fill === false ? `${item.thickness || 4}px solid ${color}` : 'none', opacity: op }} />
 }
 
-function renderContent(item, palette, team) {
+// ── Data blocks (live club info) ─────────────────────────────────────────────
+const DISPLAY_FONT = "var(--social-display-font, 'Anton', sans-serif)"
+const MONO_FONT = "'JetBrains Mono', monospace"
+
+function DataBlock({ item, palette, data = {} }) {
+  const ink = resolveBlankColor(item.color, palette)
+  const accent = resolveBlankColor(item.accent || 'accent', palette)
+  const rule = `${ink}22`
+  const count = Math.max(1, Math.min(12, item.count || 5))
+  const wrap = { width: item.w, fontFamily: DISPLAY_FONT, color: ink }
+  const Head = ({ children }) => (
+    <div style={{ fontFamily: DISPLAY_FONT, fontSize: 30, letterSpacing: 2, color: accent, marginBottom: 12 }}>{children}</div>
+  )
+  const empty = (label) => (
+    <div style={wrap}><Head>{label}</Head><div style={{ fontFamily: MONO_FONT, fontSize: 15, color: `${ink}99` }}>No {label.toLowerCase()} loaded yet — add them on the {label} tab.</div></div>
+  )
+
+  if (item.kind === 'fixtures') {
+    const rows = (data.fixtures || []).slice(0, count)
+    if (!rows.length) return empty('Fixtures')
+    return (
+      <div style={wrap}>
+        <Head>THIS WEEK</Head>
+        {rows.map((f, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '150px 1fr auto', alignItems: 'baseline', gap: 14, padding: '10px 0', borderTop: i ? `1px solid ${rule}` : 'none' }}>
+            <span style={{ fontSize: 26, color: accent, letterSpacing: 1 }}>{f.grade}</span>
+            <span style={{ fontSize: 30, letterSpacing: 0.5 }}>v {(f.opp || '').toUpperCase()} <span style={{ fontSize: 18, color: `${ink}aa` }}>({f.ha})</span></span>
+            <span style={{ fontFamily: MONO_FONT, fontSize: 15, color: `${ink}bb` }}>{f.time}{f.venue ? ` · ${f.venue}` : ''}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (item.kind === 'results') {
+    const rows = (data.results || []).slice(0, count)
+    if (!rows.length) return empty('Results')
+    return (
+      <div style={wrap}>
+        <Head>RESULTS</Head>
+        {rows.map((r, i) => {
+          const won = (r.outcome || '').toUpperCase() === 'W'
+          return (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '150px 1fr auto 40px', alignItems: 'baseline', gap: 14, padding: '10px 0', borderTop: i ? `1px solid ${rule}` : 'none' }}>
+              <span style={{ fontSize: 24, color: accent, letterSpacing: 1 }}>{r.grade}</span>
+              <span style={{ fontSize: 28 }}>v {(r.opp || '').toUpperCase()}</span>
+              <span style={{ fontFamily: MONO_FONT, fontSize: 16, color: `${ink}cc` }}>{r.us} / {r.them}</span>
+              <span style={{ fontSize: 26, textAlign: 'right', color: won ? accent : `${ink}88` }}>{(r.outcome || '').toUpperCase()}</span>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  if (item.kind === 'record') {
+    const rec = data.record || { w: 0, l: 0, d: 0 }
+    const Cell = ({ n, label }) => (
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 130, lineHeight: 0.9, color: ink }}>{n}</div>
+        <div style={{ fontFamily: MONO_FONT, fontSize: 16, letterSpacing: 3, color: accent, marginTop: 6 }}>{label}</div>
+      </div>
+    )
+    return (
+      <div style={wrap}>
+        <Head>{(data.team?.name || 'CLUB').toUpperCase()} · RECORD</Head>
+        <div style={{ display: 'flex', gap: 60, alignItems: 'flex-end' }}>
+          <Cell n={rec.w} label="WON" /><Cell n={rec.l} label="LOST" /><Cell n={rec.d} label="DRAWN" />
+        </div>
+      </div>
+    )
+  }
+
+  if (item.kind === 'scorecard') {
+    const sc = data.scorecard
+    const m = sc?.meta || {}
+    const side = (t, label) => {
+      if (!t) return null
+      const topBat = (t.batting || []).slice().sort((a, b) => (b.r || 0) - (a.r || 0))[0]
+      const topBowl = (t.bowling || []).slice().sort((a, b) => (b.w || 0) - (a.w || 0))[0]
+      return (
+        <div style={{ padding: '14px 0', borderTop: `1px solid ${rule}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: 34, letterSpacing: 0.5 }}>{(t.name || label).toUpperCase()}</span>
+            <span style={{ fontSize: 46, color: accent }}>{t.total}{t.wickets < 10 ? `/${t.wickets}` : ''}<span style={{ fontSize: 20, color: `${ink}aa` }}> ({t.overs})</span></span>
+          </div>
+          <div style={{ fontFamily: MONO_FONT, fontSize: 15, color: `${ink}bb`, marginTop: 6 }}>
+            {topBat ? `Top bat ${topBat.last} ${topBat.r}${topBat.notOut ? '*' : ''} (${topBat.b})` : ''}
+            {topBowl && topBowl.w ? `  ·  Top bowl ${topBowl.last} ${topBowl.w}/${topBowl.r}` : ''}
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div style={wrap}>
+        <Head>{(m.result || 'SCORECARD').toUpperCase()}</Head>
+        {side(sc?.home, 'HOME')}
+        {side(sc?.away, 'AWAY')}
+      </div>
+    )
+  }
+
+  if (item.kind === 'player') {
+    const stats = item.playerId ? (data.playerStats || {})[item.playerId] : null
+    const bat = stats?.career_batting || {}
+    const bowl = stats?.career_bowling || {}
+    const name = stats?.player?.display_name || stats?.player?.name || item.playerName || 'Select a player'
+    const parts = String(name).trim().split(' ')
+    const last = parts.length > 1 ? parts.slice(1).join(' ') : name
+    const first = parts.length > 1 ? parts[0] : ''
+    const tiles = [
+      { label: 'MATCHES', value: bat.games ?? bowl.games ?? '—' },
+      { label: 'RUNS', value: bat.total_runs ?? '—' },
+      { label: 'BAT AVG', value: bat.average ?? '—' },
+      { label: 'HS', value: bat.high_score ?? '—' },
+      { label: 'WICKETS', value: bowl.total_wickets ?? '—' },
+      { label: 'BOWL AVG', value: bowl.average ?? '—' },
+    ]
+    return (
+      <div style={wrap}>
+        {first && <div style={{ fontSize: 34, color: `${ink}cc` }}>{first.toUpperCase()}</div>}
+        <div style={{ fontSize: 76, lineHeight: 0.95, color: ink }}>{String(last).toUpperCase()}</div>
+        {!stats && item.playerId && <div style={{ fontFamily: MONO_FONT, fontSize: 14, color: `${ink}99`, marginTop: 8 }}>Loading stats…</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 20 }}>
+          {tiles.map((t, i) => (
+            <div key={i} style={{ padding: '12px 16px', border: `1.5px solid ${accent}`, background: `${ink}0c` }}>
+              <div style={{ fontFamily: MONO_FONT, fontSize: 12, letterSpacing: 2, color: `${ink}aa` }}>{t.label}</div>
+              <div style={{ fontSize: 50, lineHeight: 0.95, marginTop: 4, color: ink }}>{t.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
+function renderContent(item, palette, team, data) {
   if (item.type === 'text') return <TextBlock item={item} palette={palette} />
   if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
+  if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
   return <BrandLockup team={team} palette={palette} size={item.size} layout={item.layout} align={item.align} showName={item.showName} nameColor={resolveBlankColor(item.color, palette)} />
 }
 
-function BlankBlock({ item, palette, team, interactive, selected, single, outline, handle, accent, onPointerDown, onResize }) {
+function BlankBlock({ item, palette, team, data, interactive, selected, single, outline, handle, accent, onPointerDown, onResize }) {
   const rot = item.rotation ? `rotate(${item.rotation}deg)` : undefined
   return (
     <div
@@ -243,7 +401,7 @@ function BlankBlock({ item, palette, team, interactive, selected, single, outlin
         outlineOffset: outline * 2, transform: rot, transformOrigin: 'center center',
         touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none',
       }}>
-      {renderContent(item, palette, team)}
+      {renderContent(item, palette, team, data)}
       {interactive && single && (
         <div onPointerDown={(e) => onResize(e, item)} title="Drag to resize"
           style={{ position: 'absolute', right: -handle / 2, bottom: -handle / 2, width: handle, height: handle, borderRadius: 3, background: accent, border: `${outline}px solid #000`, cursor: 'nwse-resize' }} />
@@ -253,7 +411,7 @@ function BlankBlock({ item, palette, team, interactive, selected, single, outlin
 }
 
 export function BlankCanvas({
-  items = [], palette = {}, team = {},
+  items = [], palette = {}, team = {}, data = {},
   interactive = false, scale = 1, selectedIds = [],
   onSelect, onDeselect, onPatchMany, onCommit,
   transparent = false, width = 1080, height = 1080, style = {},
@@ -292,7 +450,7 @@ export function BlankCanvas({
     const w0 = item.w, h0 = item.h, sz0 = item.size, fs0 = item.fontSize
     const move = (ev) => {
       const dx = (ev.clientX - sx) / s, dy = (ev.clientY - sy) / s
-      if (item.type === 'text') onPatchMany({ [item.id]: { w: Math.max(40, Math.round(w0 + dx)) } })
+      if (item.type === 'text' || item.type === 'data') onPatchMany({ [item.id]: { w: Math.max(40, Math.round(w0 + dx)) } })
       else if (item.type === 'image') { const nw = Math.max(30, Math.round(w0 + dx)); const r = h0 && w0 ? h0 / w0 : 1; onPatchMany({ [item.id]: { w: nw, h: Math.max(30, Math.round(nw * r)) } }) }
       else if (item.type === 'element') onPatchMany({ [item.id]: { w: Math.max(4, Math.round(w0 + dx)), h: Math.max(2, Math.round((h0 || 0) + dy)) } })
       else if (item.type === 'brand') onPatchMany({ [item.id]: { size: Math.max(40, Math.round(sz0 + dx)) } })
@@ -344,7 +502,7 @@ export function BlankCanvas({
       {!transparent && <GrainSVG opacity={0.14} id="blankcanvas" />}
       {items.map((it) => (
         <BlankBlock
-          key={it.id} item={it} palette={palette} team={team} interactive={interactive}
+          key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive}
           selected={selSet.has(it.id)} single={selectedIds.length === 1 && selSet.has(it.id)}
           outline={outline} handle={handle} accent={accent}
           onPointerDown={beginMove} onResize={beginResizeSingle}
