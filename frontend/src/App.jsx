@@ -283,19 +283,19 @@ export default function App() {
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/betterstats" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
-          <Route path="/admin/betterstats/:group" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterstats" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
-          <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
-          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
-          <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
-          <Route path="/admin/players/import" element={<ProtectedRoute><AdminPlayerImport /></ProtectedRoute>} />
-          <Route path="/admin/games" element={<ProtectedRoute><AdminGames /></ProtectedRoute>} />
-          <Route path="/admin/seasons" element={<ProtectedRoute><AdminSeasons /></ProtectedRoute>} />
-          <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
-          <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
-          <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
+          <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
+          <Route path="/admin/players/import" element={<ProtectedRoute requireCore><AdminPlayerImport /></ProtectedRoute>} />
+          <Route path="/admin/games" element={<ProtectedRoute requireCore><AdminGames /></ProtectedRoute>} />
+          <Route path="/admin/seasons" element={<ProtectedRoute requireCore><AdminSeasons /></ProtectedRoute>} />
+          <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
+          <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
+          <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
           <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
           <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
           <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
@@ -304,17 +304,17 @@ export default function App() {
           <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/member-portal" element={<ProtectedRoute requireRole="super_admin"><AdminMemberPortal /></ProtectedRoute>} />
           <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><AdminClubDiary /></ProtectedRoute>} />
-          <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
-          <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
-          <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
-          <Route path="/admin/manual-entries" element={<ProtectedRoute><AdminManualEntries /></ProtectedRoute>} />
-          <Route path="/admin/upload-scorecard" element={<ProtectedRoute><AdminScorecardUpload /></ProtectedRoute>} />
-          <Route path="/admin/import" element={<ProtectedRoute><AdminImport /></ProtectedRoute>} />
-          <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
-          <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
+          <Route path="/admin/grades" element={<ProtectedRoute requireCore><AdminGrades /></ProtectedRoute>} />
+          <Route path="/admin/sync" element={<ProtectedRoute requireCore><AdminSync /></ProtectedRoute>} />
+          <Route path="/admin/partnerships" element={<ProtectedRoute requireCore><AdminPartnershipRecords /></ProtectedRoute>} />
+          <Route path="/admin/manual-entries" element={<ProtectedRoute requireCore><AdminManualEntries /></ProtectedRoute>} />
+          <Route path="/admin/upload-scorecard" element={<ProtectedRoute requireCore><AdminScorecardUpload /></ProtectedRoute>} />
+          <Route path="/admin/import" element={<ProtectedRoute requireCore><AdminImport /></ProtectedRoute>} />
+          <Route path="/admin/milestones" element={<ProtectedRoute requireCore><AdminMilestones /></ProtectedRoute>} />
+          <Route path="/admin/activity" element={<ProtectedRoute requireActivePlan><AdminActivityLog /></ProtectedRoute>} />
           <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
-          <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
+          <Route path="/admin/reports" element={<ProtectedRoute requireCore><AdminReports /></ProtectedRoute>} />
           <Route path="/admin/fees" element={<ProtectedRoute requireModule="fees"><AdminFeesMembers /></ProtectedRoute>} />
           <Route path="/admin/fees/schedule" element={<ProtectedRoute requireModule="fees"><AdminFeeSchedule /></ProtectedRoute>} />
           <Route path="/admin/fees/payments" element={<ProtectedRoute requireModule="fees"><AdminFeePayments /></ProtectedRoute>} />
@@ -344,13 +344,13 @@ export default function App() {
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
-          <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
-          <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
-          <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />
+          <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
+          <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
-          <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
-          <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
+          <Route path="/admin/yearbook" element={<ProtectedRoute requireCore><AdminYearbook /></ProtectedRoute>} />
+          <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute requireCore><AdminYearbookDetail /></ProtectedRoute>} />
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
           <Route path="/admin/super" element={<ProtectedRoute requireRole="super_admin"><SuperOverview /></ProtectedRoute>} />
           <Route path="/admin/super/hub/:sectionKey" element={<ProtectedRoute requireRole="super_admin"><SuperHub /></ProtectedRoute>} />
