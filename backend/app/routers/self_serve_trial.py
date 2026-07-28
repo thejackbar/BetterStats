@@ -484,7 +484,8 @@ class AcknowledgeRequest(BaseModel):
 
 
 @router.post("/acknowledge")
-async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def acknowledge(data: AcknowledgeRequest, background_tasks: BackgroundTasks,
+                      request: Request, db: AsyncSession = Depends(get_db)):
     """Records ToS + Privacy acceptance. Both are mandatory — this endpoint
     only succeeds once every box is ticked, matching the source document's
     "required acknowledgements" list. IP is stored hashed
@@ -519,6 +520,17 @@ async def acknowledge(data: AcknowledgeRequest, request: Request, db: AsyncSessi
     )
     db.add(row)
     await db.commit()
+
+    # A prospect who reached the Terms step has supplied a club name AND an
+    # email — a real, contactable lead even if they never finish the wizard.
+    # Ensure they're on the Sales Pipeline so a salesperson can follow up, not
+    # just visible in the Meta Ads wizard-selection table. Best-effort and
+    # backgrounded (its own session); a CRM hiccup never fails the acceptance.
+    from app.services import crm as crm_service
+    background_tasks.add_task(
+        crm_service.sync_deal_for_wizard_lead,
+        club_name=club_name, email=email,
+    )
 
     return {
         "accepted": True,

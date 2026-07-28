@@ -160,6 +160,44 @@ async def selected_clubs(
     return await meta_ads.get_selected_clubs(db, days)
 
 
+class HideSelectionIn(BaseModel):
+    name: str
+
+
+@router.post("/selected-clubs/hide")
+async def hide_selected_club(
+    body: HideSelectionIn,
+    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Flag a wizard-selected club as test noise, hiding it from the table
+    above. A display-only tidy-up (stored in platform_settings, keyed by the
+    normalised club name) — it never touches the Sales Pipeline; a Terms-step
+    lead that already flowed into the pipeline stays there. Returns the fresh
+    selected-clubs payload."""
+    from app.services import platform_settings
+    try:
+        await platform_settings.hide_meta_selection(db, body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return await meta_ads.get_selected_clubs(db, days)
+
+
+@router.post("/selected-clubs/unhide")
+async def unhide_selected_club(
+    body: HideSelectionIn,
+    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Restore a club previously flagged as test noise. Returns the fresh
+    selected-clubs payload."""
+    from app.services import platform_settings
+    await platform_settings.unhide_meta_selection(db, body.name)
+    return await meta_ads.get_selected_clubs(db, days)
+
+
 @router.get("/ad-signups")
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow

@@ -1578,6 +1578,56 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
         return {"error": "failed"}
 
 
+async def sync_deal_for_wizard_lead(*, club_name: str, email: str = "",
+                                    contact_name: str = "", phone: Optional[str] = None,
+                                    furthest_step: str = "Reached Terms & privacy") -> dict:
+    """A prospect who started the self-serve trial wizard and got as far as the
+    Terms & Privacy step — but hasn't (yet) completed registration — is a real,
+    contactable lead (they've supplied a club name AND an email), not the
+    anonymous/crawler noise a bare 'club selected' beacon can be. A completed
+    registration already lands a deal (sync_self_serve_trial_registration); this
+    closes the gap for the ones that stall mid-wizard, so a salesperson can
+    follow up from the Sales Pipeline instead of only the Meta Ads table.
+
+    Get-or-creates the club's ONE open platform deal at Target (advance_only, so
+    it never demotes a warmer deal) valued at the Core default, and logs a CRM
+    activity naming the furthest wizard step reached. Opens its own session;
+    best-effort; never raises. Fires from routers/self_serve_trial.py::acknowledge
+    (both the internal and public self-serve routers register that handler)."""
+    from app.models.db import async_session_maker
+    from app.services.twenty_sync import _resolve_onboarding_club
+    if not (club_name or "").strip():
+        return {"skipped": "no club name"}
+    try:
+        async with async_session_maker() as session:
+            club, contact = await _resolve_onboarding_club(
+                session, club_name=club_name, contact_name=contact_name, email=email, phone=phone)
+            if club is None:
+                return {"skipped": "no club"}
+            person = await resolve_person(
+                session, marketing_club_id=club.id,
+                full_name=contact_name or (contact.full_name if contact else "") or club_name,
+                email=email, phone=phone)
+            deal = await sync_platform_deal_for_club(
+                session, club, stage_key="target", source="wizard_lead",
+                module_keys=_DEFAULT_DEAL_MODULES, person_id=person.id, advance_only=True)
+            await log_activity(
+                session, deal_id=deal.id, person_id=person.id, type="system",
+                body=f"Started the self-serve trial wizard — {furthest_step}"
+                     + (f" ({email})" if email else ""))
+            # This touch may be enough to promote the freshly-recomputed score;
+            # check now in the same session/commit (harmless no-op otherwise).
+            org = (await session.get(Organisation, club.existing_org_id,
+                                     options=[selectinload(Organisation.module_subscriptions)])
+                   if club.existing_org_id else None)
+            await sync_engagement_promotion(session, club, org)
+            await session.commit()
+            return {"deal_id": str(deal.id)}
+    except Exception:  # noqa: BLE001 - best-effort, mirrors sync_deal_for_enquiry
+        logger.exception("crm: failed to sync deal for wizard lead (%s)", club_name)
+        return {"error": "failed"}
+
+
 # ─── Self-serve trial registration → local CRM deal ──────────────────────────
 # A self-serve registration (routers/self_serve_trial.py's shared submit(), hit
 # by both the super-admin-testing internal flow and the public /trial flow)

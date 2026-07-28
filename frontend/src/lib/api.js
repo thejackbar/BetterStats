@@ -1324,6 +1324,10 @@ export const api = {
   metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   metaAdsRegistrationFunnel: (days = 30) => request(`/club-admin/meta-ads/registration-funnel?days=${days}`),
   metaAdsSelectedClubs: (days = 30) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
+  metaAdsHideSelection: (name, days = 30) =>
+    request(`/club-admin/meta-ads/selected-clubs/hide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
+  metaAdsUnhideSelection: (name, days = 30) =>
+    request(`/club-admin/meta-ads/selected-clubs/unhide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
   // Campaign picker — list the ad account's campaigns + which one the dashboard
   // is scoped to, and switch it (stored in the DB, no .env edit / redeploy).
   metaAdsCampaigns: () => request('/club-admin/meta-ads/campaigns'),

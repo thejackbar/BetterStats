@@ -207,6 +207,59 @@ async def set_active_meta_campaign_id(db: AsyncSession, campaign_id: str) -> str
     return cid
 
 
+_HIDDEN_META_SELECTIONS_KEY = "meta_ads_hidden_selections"
+
+
+def _selection_key(name: str) -> str:
+    """The normalised club-name key the Meta Ads wizard-selection table groups
+    by (meta_ads.get_selected_clubs uses the same ``strip().lower()``), so a
+    hidden entry lines up with the row it hides."""
+    return (name or "").strip().lower()
+
+
+async def get_hidden_meta_selections(db: AsyncSession) -> set[str]:
+    """The set of normalised club-name keys a super admin has flagged as test
+    noise on the Meta Ads dashboard, so the wizard-selection table can filter
+    them out. Table-only tidy-up — never touches the Sales Pipeline."""
+    settings = await get_settings(db)
+    raw = settings.get(_HIDDEN_META_SELECTIONS_KEY) or []
+    if not isinstance(raw, list):
+        return set()
+    return {_selection_key(x) for x in raw if isinstance(x, str) and _selection_key(x)}
+
+
+async def _write_hidden_meta_selections(db: AsyncSession, keys: set[str]) -> list[str]:
+    current = await get_settings(db)
+    out = dict(current)
+    out[_HIDDEN_META_SELECTIONS_KEY] = sorted(keys)
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(out)},
+    )
+    await db.commit()
+    return out[_HIDDEN_META_SELECTIONS_KEY]
+
+
+async def hide_meta_selection(db: AsyncSession, name: str) -> list[str]:
+    """Flag a wizard-selected club as test noise (hidden from the Meta Ads
+    table). Idempotent. Returns the full hidden list. Commits."""
+    key = _selection_key(name)
+    if not key:
+        raise ValueError("name is required")
+    keys = await get_hidden_meta_selections(db)
+    keys.add(key)
+    return await _write_hidden_meta_selections(db, keys)
+
+
+async def unhide_meta_selection(db: AsyncSession, name: str) -> list[str]:
+    """Un-flag a previously-hidden wizard selection. Idempotent. Returns the
+    full hidden list. Commits."""
+    key = _selection_key(name)
+    keys = await get_hidden_meta_selections(db)
+    keys.discard(key)
+    return await _write_hidden_meta_selections(db, keys)
+
+
 async def update_settings(db: AsyncSession, patch: dict) -> dict:
     """Merge ``patch`` into the settings blob. Validates known keys; ignores unknown
     ones. Returns the full updated blob. Commits."""
