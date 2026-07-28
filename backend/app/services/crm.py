@@ -1393,6 +1393,43 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     return promoted or membership
 
 
+async def reset_auto_promoted_engaged(session: AsyncSession) -> int:
+    """One-off cleanup: move deals the retired ``engagement_score`` rule
+    auto-promoted to Engaged back to Target. Engaged now means a real two-way
+    conversation, so a score-driven promotion doesn't belong there.
+
+    Targets ONLY score-rule promotions — a deal with a CrmActivity carrying the
+    '(rule: engagement_score)' signature — and only open, non-archived,
+    non-``stage_auto_locked`` deals still sitting at Engaged. A hand-moved
+    Engaged deal (locked) or one moved there by a contact-form enquiry (no such
+    activity) is left alone. Returns how many were moved. Caller commits."""
+    pipeline = await ensure_platform_pipeline(session)
+    stage_by_key = {s.key: s for s in pipeline.stages}
+    engaged, target = stage_by_key.get("engaged"), stage_by_key.get("target")
+    if engaged is None or target is None:
+        return 0
+    deals = (await session.execute(
+        select(CrmDeal).where(
+            CrmDeal.pipeline_id == pipeline.id,
+            CrmDeal.stage_id == engaged.id,
+            CrmDeal.status == "open",
+            CrmDeal.archived_at.is_(None),
+            CrmDeal.stage_auto_locked.is_(False),
+            CrmDeal.id.in_(
+                select(CrmActivity.deal_id).where(
+                    CrmActivity.body.ilike("%(rule: engagement_score)%"))
+            ),
+        )
+    )).scalars().all()
+    for deal in deals:
+        await move_stage(session, deal, target)
+        await log_activity(
+            session, deal_id=deal.id, type="system",
+            body="Reset to Target: the engagement-score auto-promotion rule was retired "
+                 "(Engaged is now for real conversations only).")
+    return len(deals)
+
+
 async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=None,
                                      path=None, email=None, user_id=None) -> dict:
     """Fully event-driven — fired directly from the write path of a web

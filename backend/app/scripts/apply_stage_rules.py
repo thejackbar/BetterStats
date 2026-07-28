@@ -19,9 +19,14 @@ WHAT THE CANONICAL SET DOES (per direct instruction)
 
     This REPLACES every existing automation rule (it deletes them first), so any
     hand-added custom rule is removed. That's intended — it's a deliberate reset
-    to the code-defined policy. It does NOT move any existing deal; deals already
-    sitting at a stage stay put (a super admin can move a wrongly-auto-Engaged
-    deal back by hand).
+    to the code-defined policy.
+
+    IT ALSO does a one-off cleanup of deals the RETIRED ``engagement_score`` rule
+    had auto-promoted to Engaged: those get moved back to Target (Engaged now
+    means a real two-way conversation only). A hand-moved (locked) Engaged deal,
+    or one moved there by a contact-form enquiry, is left alone. See
+    crm.reset_auto_promoted_engaged. Pass --no-reset to skip this and only reset
+    the rules.
 
 USAGE (inside the backend container)
     python -m app.scripts.apply_stage_rules            # apply
@@ -35,7 +40,7 @@ import asyncio
 from sqlalchemy import delete, select
 
 from app.models.db import async_session_maker, CrmAutomationRule
-from app.services import crm_rules
+from app.services import crm, crm_rules
 
 
 def _fmt(r) -> str:
@@ -45,7 +50,7 @@ def _fmt(r) -> str:
     return f"{r.trigger}{p} -> {r.target_stage_key}{force}{en}  \"{r.label}\""
 
 
-async def run(dry_run: bool) -> None:
+async def run(dry_run: bool, reset_engaged: bool) -> None:
     async with async_session_maker() as session:
         current = (await session.execute(
             select(CrmAutomationRule).order_by(CrmAutomationRule.trigger)
@@ -70,12 +75,19 @@ async def run(dry_run: bool) -> None:
         await session.commit()
         print("\nApplied. The automation rules now match the canonical set above.")
 
+        if reset_engaged:
+            moved = await crm.reset_auto_promoted_engaged(session)
+            await session.commit()
+            print(f"Reset {moved} score-auto-promoted Engaged deal(s) back to Target.")
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Reset CRM stage-movement rules to the canonical set.")
     ap.add_argument("--dry-run", action="store_true", help="show current vs new, change nothing")
+    ap.add_argument("--no-reset", action="store_true",
+                    help="only reset the rules; skip moving score-auto-promoted Engaged deals back to Target")
     args = ap.parse_args()
-    asyncio.run(run(args.dry_run))
+    asyncio.run(run(args.dry_run, reset_engaged=not args.no_reset))
 
 
 if __name__ == "__main__":
