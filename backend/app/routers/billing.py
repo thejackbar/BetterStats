@@ -108,24 +108,38 @@ def _apply_coupon_to_quote(quote: dict, coupon) -> dict:
     return quote
 
 
-def _stripe_address(club: Organisation) -> dict | None:
+def _stripe_address(club: Organisation) -> dict:
     """Stripe's Address shape ({"line1","city","state","postal_code","country"})
-    from the club's resolved address (see self_serve_trial._resolve_club_address),
-    or None if nothing's on file — automatic_tax then falls back to whatever
-    the payer enters at checkout (customer_update: {"address": "auto"}) in
-    stripe_client.create_checkout_session. Country is always "AU": every club
-    on this platform is an Australian Cricket Australia club (source data is
-    always AU-tenant-filtered), and PlayHQ's own country field is a full name
-    ("Australia"), not the ISO-3166 alpha-2 code Stripe requires."""
-    if not (club.address_line1 or club.suburb):
-        return None
-    return {
-        "line1": club.address_line1 or "",
-        "city": club.suburb or "",
-        "state": club.state or "",
-        "postal_code": club.postcode or "",
-        "country": "AU",
-    }
+    from the club's resolved address (see self_serve_trial._resolve_club_address).
+    Country is always "AU": every club on this platform is an Australian
+    Cricket Australia club (source data is always AU-tenant-filtered), and
+    PlayHQ's own country field is a full name ("Australia"), not the
+    ISO-3166 alpha-2 code Stripe requires.
+
+    ALWAYS returns at least {"country": "AU"}, even when the club has no
+    street address on file — that country alone is what makes both of these
+    work from the very first checkout attempt:
+      * automatic_tax has an AU jurisdiction to apply 10% GST against (a
+        country-level tax; postcode/state refine it but AU country is enough
+        for GST to calculate), instead of $0 with no country set; and
+      * Stripe offers the AU-only recurring payment methods (PayTo, BECS
+        Direct Debit) — both are filtered out of Checkout entirely when the
+        Customer's country is unknown, leaving only the globally-available
+        ones (Card, Klarna).
+    Returning None here (the old behaviour when no street address was on
+    file) left the Customer with no country at all, which broke both — see
+    the report that surfaced this. Street-level fields are added only when
+    present."""
+    addr = {"country": "AU"}
+    if club.address_line1:
+        addr["line1"] = club.address_line1
+    if club.suburb:
+        addr["city"] = club.suburb
+    if club.state:
+        addr["state"] = club.state
+    if club.postcode:
+        addr["postal_code"] = club.postcode
+    return addr
 
 
 def _validate_keys(module_keys: List[str]) -> list[str]:
