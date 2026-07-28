@@ -149,6 +149,39 @@ export function ClubLogo({ monogram = 'NG', color = '#fff', bg = 'transparent', 
   )
 }
 
+// Prominent club identity lockup — the club's own logo paired with its full
+// name. Used across the post templates so a club's brand reads first (these
+// posts double as recruitment ads, so the club — not the layout chrome — has
+// to be the loudest thing on the card). `layout` is 'row' (logo beside name)
+// or 'stack' (logo above name); `align` flips a row lockup to the right.
+export function BrandLockup({
+  team, palette, size = 120, layout = 'row', align = 'left',
+  showName = true, nameSize, nameColor, nameOpacity = 1, gap, style = {},
+}) {
+  const name = (team?.fullName || team?.name || '').toUpperCase()
+  const col = nameColor || (palette && palette.ink) || '#fff'
+  const ns = nameSize || Math.round(size * (layout === 'stack' ? 0.24 : 0.3))
+  const stack = layout === 'stack'
+  const g = gap != null ? gap : (stack ? Math.round(size * 0.1) : Math.round(size * 0.16))
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center',
+      flexDirection: stack ? 'column' : (align === 'right' ? 'row-reverse' : 'row'),
+      gap: g, textAlign: stack ? 'center' : (align === 'right' ? 'right' : 'left'),
+      ...style,
+    }}>
+      <ClubLogo src={team?.logo} monogram={team?.monogram} color={col} size={size} shape="shield" />
+      {showName && name && (
+        <div style={{
+          fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
+          fontSize: ns, letterSpacing: 1, lineHeight: 0.92,
+          color: col, opacity: nameOpacity, maxWidth: stack ? size * 2.6 : size * 3.4,
+        }}>{name}</div>
+      )}
+    </div>
+  )
+}
+
 export function RoleChip({ kind, accent = '#ffc233', ink = '#0b1530' }) {
   if (!kind) return null
   const labels = { C: 'C', VC: 'VC', WK: 'WK' }
@@ -312,8 +345,8 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         <div style={{
           transform: 'rotate(-90deg)',
           whiteSpace: 'nowrap',
-          fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 8,
-          color: palette.ink, opacity: 0.7,
+          fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 8,
+          color: palette.ink, opacity: 0.92,
         }}>{(team.fullName || team.name).toUpperCase()}</div>
       </div>
       <div style={{
@@ -382,9 +415,9 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
           gap: 16, marginBottom: 26, flexWrap: 'wrap',
         }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
+            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 34, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
           </div>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.accent} size={52} shape="shield" />
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.accent} size={80} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, opacity: 0.7 }}>V</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={52} shape="shield" />
           <div style={{ textAlign: 'left' }}>
@@ -486,8 +519,9 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
           </div>
         </div>
       </div>
-      <div style={{ position: 'absolute', top: 24, right: 32, zIndex: 3 }}>
+      <div style={{ position: 'absolute', top: 24, right: 32, zIndex: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', width: 260 }}>
         <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={200} shape="shield" />
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, lineHeight: 0.95, textAlign: 'center', marginTop: 8 }}>{(team.fullName || team.name).toUpperCase()}</div>
       </div>
       <div style={{
         position: 'absolute', left: 56, right: 56, top: 380, bottom: 100,
@@ -606,11 +640,12 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         color: 'transparent', WebkitTextStroke: `2px ${palette.accent}`,
         whiteSpace: 'nowrap', lineHeight: 0.8,
       }}>{spine}</div>
-      <div style={{ position: 'absolute', left: 460, top: 60, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28, marginBottom: 28 }}>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={110} shape="circle" />
+      <div style={{ position: 'absolute', left: 460, top: 50, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, marginBottom: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginBottom: 24 }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={132} shape="circle" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 3, color: palette.accent }}>VS</div>
-          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={110} shape="circle" />
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={104} shape="circle" />
         </div>
         <div style={{ textAlign: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.8, color: palette.ink, opacity: 0.7, marginBottom: 4 }}>
           {match.competition} · {match.round} · {match.date}
@@ -664,12 +699,12 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginBottom: 4 }}>// PROBABLE XI</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 68, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>BATTING ORDER</div>
         </div>
-        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={116} shape="shield" />
       </div>
       <div style={{ padding: '16px 56px', background: palette.secondary, borderBottom: `1px solid ${palette.ink}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={44} shape="shield" />
+            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={58} shape="shield" />
             <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, color: palette.accent }}>v</div>
             <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={44} shape="shield" />
           </div>
@@ -715,7 +750,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
         })}
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, bottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${palette.ink}22` }}>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.5 }}>{(team.fullName || team.name).toUpperCase()} · {match.season}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 1.5, color: palette.ink, opacity: 0.9 }}>{(team.fullName || team.name).toUpperCase()} · {match.season}</div>
         <div style={{ padding: '6px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.7 }}>BETTERSTATS.CRICKET</div>
       </div>
       <GrainSVG opacity={0.25} id="g4" />
@@ -743,7 +778,10 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
         <circle cx="260" cy="260" r="180" fill="none" stroke={palette.accent} strokeWidth="3" />
       </svg>
       <div style={{ background: palette.accent, color: palette.primary, padding: '24px 44px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 52, letterSpacing: 2, lineHeight: 1 }}>{team.name} XI</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 0 }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.primary} size={96} shape="shield" />
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 52, letterSpacing: 2, lineHeight: 1 }}>{team.name} XI</div>
+        </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>VS {opponent.name}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, marginTop: 6 }}>{match.round} · {match.date}</div>
@@ -806,7 +844,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           1ST XI
           <span style={{ fontSize: 22, letterSpacing: 3, opacity: 0.85 }}>· {match.date.toUpperCase()} ·</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.primary} size={70} shape="shield" />
+            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.primary} size={92} shape="shield" />
             <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 1, lineHeight: 1 }}>v</span>
             <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.primary} size={70} shape="shield" />
           </span>
@@ -815,8 +853,8 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
       <div style={{ position: 'absolute', left: 56, top: 230, right: 56, height: 370, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: 24 }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: 14 }}>// 1ST XI</div>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={260} shape="shield" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, opacity: 0.85, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={272} shape="shield" />
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 34, letterSpacing: 1, color: palette.ink, opacity: 1, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         </div>
         <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
@@ -893,7 +931,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '28px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 4 }}>
         <div><div style={{ display: 'inline-block', padding: '5px 12px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 3 }}>★ MILESTONE</div></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={60} shape="shield" />
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={82} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, opacity: 0.7 }}>VS</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={60} shape="shield" />
         </div>
@@ -968,7 +1006,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
             {team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}
           </div>
         </div>
-        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={76} shape="shield" />
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={104} shape="shield" />
       </div>
       <div style={{ margin: '0 36px', padding: '14px 18px', background: palette.secondary, borderLeft: `3px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, position: 'relative', zIndex: 2 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: palette.ink }}>{match.round}</div>
@@ -1051,8 +1089,8 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
       <div style={{ textAlign: 'center', padding: '44px 40px 12px', position: 'relative', zIndex: 2 }}>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 4, color: palette.accent, marginBottom: 14 }}>★ {match.competition} · {match.season} · PRESENTS ★</div>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 20 }}>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={68} shape="shield" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 70, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={90} shape="shield" />
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 74, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 3, color: palette.accent, padding: '0 8px' }}>vs</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: 1, color: palette.ink, lineHeight: 1, opacity: 0.85 }}>{opponent.name}</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={48} shape="shield" />
@@ -1140,7 +1178,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '36px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
         <div><div style={{ display: 'inline-block', padding: '7px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 3 }}>{(a.kind || 'ANNOUNCEMENT').toUpperCase()}</div></div>
-        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={92} shape="shield" />
+        <BrandLockup team={team} palette={palette} size={128} align="right" nameSize={30} style={{ maxWidth: 520 }} />
       </div>
       <div style={{ position: 'absolute', left: 40, bottom: 130, right: 40, zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 3, color: palette.accent, marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
@@ -1149,7 +1187,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
         {a.subheadline && <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 2, color: palette.accent, marginTop: 10 }}>{a.subheadline.toUpperCase()}</div>}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 2, color: palette.ink }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink }}>{(team.fullName || team.name).toUpperCase()}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.competition} · {match.season}</div>
         <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
       </div>
@@ -1175,7 +1213,7 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
       <div style={{ position: 'absolute', right: 90, top: 130, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 280, letterSpacing: -4, color: palette.primary, lineHeight: 0.85, transform: 'rotate(-6deg)' }}>TOSS</div>
       <div style={{ position: 'absolute', left: -50, bottom: 180, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 460, lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>{decision}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 14, zIndex: 3 }}>
-        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={72} shape="shield" />
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={96} shape="shield" />
         <div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent }}>// {match.competition} · {match.round}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1.5, marginTop: 2, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
@@ -1191,7 +1229,7 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
       </div>
       <div style={{ position: 'absolute', left: 40, right: 40, bottom: 100, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={64} shape="shield" />
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, color: palette.accent }}>VS</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={64} shape="shield" />
         </div>
@@ -1201,7 +1239,7 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
         </div>
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 2, color: palette.ink, opacity: 0.85 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 24, letterSpacing: 2, color: palette.ink, opacity: 1 }}>{(team.fullName || team.name).toUpperCase()}</div>
         <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
       </div>
       <GrainSVG opacity={0.3} id="ca2" />
@@ -1231,7 +1269,7 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1.5, marginTop: 14, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 6 }}>{match.competition} · {match.round} · {match.date}</div>
         </div>
-        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
+        <BrandLockup team={team} palette={palette} size={112} layout="stack" nameSize={22} style={{ maxWidth: 300 }} />
       </div>
       <div style={{ position: 'absolute', left: 0, top: 220, width: 520, height: 700, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
@@ -1301,13 +1339,13 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
             <div style={{ display: 'inline-block', padding: '7px 15px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>FULL TIME</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
           </div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 42, letterSpacing: 2, color: palette.ink }}>RESULT</div>
+          <BrandLockup team={team} palette={palette} size={92} align="right" nameSize={26} style={{ maxWidth: 460 }} />
         </div>
         <div style={{ padding: '18px 48px 12px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 20, alignItems: 'center' }}>
           <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'team' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
             {winnerSide === 'team' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-              <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={64} shape="shield" />
+              <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 4 }}>{result?.teamScore || '—'}</div>
@@ -1439,7 +1477,7 @@ export function SC1_Broadcast({ match, palette = {} }) {
     return (
     <div style={{ background: panel, border: `1px solid ${rule}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, padding: '14px 22px', background: `linear-gradient(90deg, ${accentC}, ${accentC}aa 60%, transparent)`, color: headerInk, borderBottom: `1px solid ${rule}` }}>
-        <ClubLogo monogram={team.short} color={headerInk} src={team.logo || null} size={56} shape='shield' />
+        <ClubLogo monogram={team.short} color={headerInk} src={team.logo || null} size={76} shape='shield' />
         <div>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 42, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
           <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 2, marginTop: 4, opacity: 0.75 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS · CHASE'} · {team.overs} OV</div>
@@ -1561,7 +1599,7 @@ export function SC2_Brutalist({ match, palette = {} }) {
     return (
     <div style={{ borderLeft: `2px solid ${ruleStrong}`, borderRight: `2px solid ${ruleStrong}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ background: ink, color: bg, padding: '16px 22px', display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, borderBottom: `2px solid ${ruleStrong}` }}>
-        <ClubLogo monogram={team.short} color={bg} src={team.logo || null} size={52} shape='shield' />
+        <ClubLogo monogram={team.short} color={bg} src={team.logo || null} size={70} shape='shield' />
         <div>
           <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.65 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} OV</div>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 52, letterSpacing: 1, lineHeight: 0.95, marginTop: 2 }}>{team.name}</div>
@@ -1682,8 +1720,8 @@ export function SC3_Dashboard({ match, palette = {} }) {
     <Card style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 16, padding: '18px 20px', borderBottom: `1px solid ${rule}` }}>
         {team.logo
-          ? <img src={team.logo} alt={team.short} style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 8 }} />
-          : <div style={{ width: 52, height: 52, borderRadius: 12, background: `${accentC}22`, color: accentC, display: 'grid', placeItems: 'center', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 22, letterSpacing: 1 }}>{team.short}</div>
+          ? <img src={team.logo} alt={team.short} style={{ width: 68, height: 68, objectFit: 'contain', borderRadius: 8 }} />
+          : <div style={{ width: 68, height: 68, borderRadius: 12, background: `${accentC}22`, color: accentC, display: 'grid', placeItems: 'center', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 26, letterSpacing: 1 }}>{team.short}</div>
         }
         <div>
           <div style={{ fontFamily: SC_BODY, fontSize: 12, letterSpacing: 1.5, color: dim, fontWeight: 500 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} ov</div>

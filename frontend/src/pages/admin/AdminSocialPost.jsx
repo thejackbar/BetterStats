@@ -21,6 +21,8 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
+import BlankCanvasEditor from '../../components/admin/BlankCanvasEditor'
+import { BlankCanvas, newBlankItem, defaultBlankItems, BLANK_FONTS } from '../../social/blank-template'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
@@ -67,6 +69,8 @@ const TEMPLATES = [
   // Club-event / announcement posters — own "Events" tab, surface + photo flags
   // come from the event registry.
   ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo })),
+  // Freeform WYSIWYG canvas — add/move/resize your own text & images.
+  { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
 
 const TAB_MAP = {
@@ -79,6 +83,7 @@ const TAB_MAP = {
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
+  BL1: 'blank',
 }
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
@@ -90,10 +95,11 @@ const TABS = [
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
   { key: 'events',       label: 'Events' },
+  { key: 'blank',        label: 'Blank' },
 ]
 const TAB_FIRST = {
   lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
-  result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1',
+  result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
 
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
@@ -733,6 +739,43 @@ export default function AdminSocialPost() {
   const [eventBg, setEventBg] = useState(null)        // object URL or null
   const [eventBgOpacity, setEventBgOpacity] = useState(0.85)
 
+  // Freeform "Blank Canvas" builder state.
+  const [blankItems, setBlankItems] = useState(defaultBlankItems)
+  const [blankSelId, setBlankSelId] = useState(null)
+  const updateBlankItem = useCallback((id, patch) => {
+    setBlankItems((its) => its.map((it) => (it.id === id ? { ...it, ...patch } : it)))
+  }, [])
+  const addBlankItem = (type) => {
+    const it = newBlankItem(type)
+    if (!it) return
+    setBlankItems((its) => [...its, it])
+    setBlankSelId(it.id)
+    return it
+  }
+  const removeBlankItem = (id) => {
+    setBlankItems((its) => its.filter((it) => it.id !== id))
+    setBlankSelId((cur) => (cur === id ? null : cur))
+  }
+  const duplicateBlankItem = (id) => {
+    const src = blankItems.find((it) => it.id === id)
+    if (!src) return
+    const copy = { ...src, id: `bi${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`, x: src.x + 30, y: src.y + 30 }
+    setBlankItems((its) => [...its, copy])
+    setBlankSelId(copy.id)
+  }
+  const reorderBlankItem = (id, dir) => {
+    setBlankItems((its) => {
+      const i = its.findIndex((it) => it.id === id)
+      if (i < 0) return its
+      const j = dir === 'front' ? its.length - 1 : 0
+      if (i === j) return its
+      const next = its.slice()
+      const [it] = next.splice(i, 1)
+      next.splice(j, 0, it)
+      return next
+    })
+  }
+
   const onPickPreset = (key) => {
     const p = EVENT_PRESETS.find((x) => x.key === key)
     if (!p) return
@@ -1352,6 +1395,9 @@ export default function AdminSocialPost() {
     }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
+  if (tmpl.kind === 'blank') {
+    extraProps.items = blankItems
+  }
   if (tmpl.kind === 'event') {
     extraProps.event = event
     extraProps.motif = resolveMotif({
@@ -1402,6 +1448,8 @@ export default function AdminSocialPost() {
     if (eventBg) URL.revokeObjectURL(eventBg)
     setEventBg(null)
     setEventBgOpacity(0.85)
+    setBlankItems(defaultBlankItems())
+    setBlankSelId(null)
   }
 
   if (loading) return (
@@ -1417,9 +1465,9 @@ export default function AdminSocialPost() {
   const H = tmpl.h || 1080
 
   // ─── Controls ────────────────────────────────────────────────────────────────
-  const showMatchInfo = !['scorecard', 'events'].includes(activeTab)
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'events'].includes(activeTab)
-  const showPlayers   = activeTab !== 'scorecard' && tmpl.maxPlayers > 0
+  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
+  const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
 
   return (
@@ -2459,6 +2507,17 @@ export default function AdminSocialPost() {
               </section>
             )}
 
+            {/* Blank Canvas — freeform WYSIWYG builder */}
+            {activeTab === 'blank' && (
+              <BlankCanvasEditor
+                items={blankItems} selId={blankSelId} setSelId={setBlankSelId}
+                onAdd={addBlankItem} onUpdate={updateBlankItem} onRemove={removeBlankItem}
+                onDuplicate={duplicateBlankItem} onReorder={reorderBlankItem}
+                palette={themedPalette}
+                onPickImage={(itemId, file) => setEditor({ key: 'blankimg', itemId, source: file })}
+              />
+            )}
+
             {/* Mobile preview (visible on small screens, hidden on xl) */}
             <div className="xl:hidden pb-card p-4">
               <div className="flex items-center justify-between mb-3 gap-2">
@@ -2518,13 +2577,19 @@ export default function AdminSocialPost() {
                 return (
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
+                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: tmpl.kind === 'blank' ? 'auto' : 'none', position: 'relative' }}>
                         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+                        {tmpl.kind === 'blank' ? (
+                          <BlankCanvas team={team} palette={templatePalette} items={blankItems}
+                            interactive scale={scale} selectedId={blankSelId}
+                            onSelect={setBlankSelId} onChange={updateBlankItem} />
+                        ) : (
+                          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+                        )}
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
-                      {W} × {H} px · shown at {Math.round(scale * 100)}%
+                      {W} × {H} px · shown at {Math.round(scale * 100)}%{tmpl.kind === 'blank' ? ' · drag items to move, corner handle to resize' : ''}
                     </p>
                   </>
                 )
@@ -2546,10 +2611,10 @@ export default function AdminSocialPost() {
       <ImageEditorModal
         open={!!editor}
         source={editor?.source}
-        title={editor?.key === 'hero' ? 'Edit Hero Image' : 'Edit Sponsor Logo'}
+        title={editor?.key === 'hero' ? 'Edit Hero Image' : editor?.key === 'blankimg' ? 'Edit Image' : 'Edit Sponsor Logo'}
         aspect={null}
         outputType="image/png"
-        outputName={editor?.key === 'hero' ? 'hero.png' : 'sponsor.png'}
+        outputName={editor?.key === 'hero' ? 'hero.png' : editor?.key === 'blankimg' ? 'image.png' : 'sponsor.png'}
         onCancel={() => setEditor(null)}
         onApply={async (file) => {
           const e = editor
@@ -2558,6 +2623,8 @@ export default function AdminSocialPost() {
           if (e.key === 'hero') {
             if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
             setHeroImage({ blobUrl: URL.createObjectURL(file) })
+          } else if (e.key === 'blankimg' && e.itemId) {
+            updateBlankItem(e.itemId, { src: URL.createObjectURL(file) })
           } else if (typeof e.sponsorIdx === 'number') {
             applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
           }
