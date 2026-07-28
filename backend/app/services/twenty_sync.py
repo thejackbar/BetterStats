@@ -320,8 +320,167 @@ def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
     club.engagement_scored_at = datetime.datetime.now(datetime.timezone.utc)
 
 
+async def batch_web_stats(session) -> dict:
+    """Single-pass equivalent of ``_engagement``'s per-club ``web`` query, for
+    EVERY club at once.
+
+    The per-club query filters ``usage_events`` on the computed ``_RESOLVED_CID``
+    expression, which forces a full re-resolution of every page-view row for
+    every club — O(events x clubs). Fine for one club; ~14h across the whole
+    ``marketing_clubs`` table on a full recalc. This resolves each event to its
+    club ONCE (the MATERIALIZED ``ev`` CTE) and aggregates per club in a single
+    GROUP BY, turning that sweep from hours into minutes.
+
+    Returns ``{club_id_text: {...}}`` carrying EXACTLY the fields the per-club
+    query produces, so ``_engagement(..., web_stats=<this>)`` is equivalent to
+    running the per-club query. The two attribution branches mirror the per-club
+    query's ``OR``: the PROSPECT branch (an anonymous, non-admin visit that
+    resolves to the club) and the CUSTOMER branch (the club's own org traffic).
+    They're ``UNION``-ed (deduped by event id) so a visit matching both counts
+    once, exactly as the row-level ``OR`` does. The customer branch drops
+    archived orgs, matching ``_engagement``'s own ``org_archived`` handling
+    (which sets ``org_id = None`` so a wound-up test club stops scoring on its
+    staff/test logins)."""
+    rows = (await session.execute(text(f"""
+        WITH ev AS MATERIALIZED (
+            SELECT ue.id AS eid, ue.created_at, ue.org_id, ue.user_id,
+                   COALESCE(ue.ip_hash, ue.visitor_id::text) AS ipk,
+                   ({_META_CLICK}) AS is_meta,
+                   (split_part(ue.path, '?', 1) ~* '^/contact(/|$)') AS is_contact,
+                   -- Only an anonymous, non-admin row can ever be prospect-attributed,
+                   -- so only those need the (expensive, 7-subquery) _RESOLVED_CID
+                   -- resolution — skipping it for the (majority) authenticated / api /
+                   -- admin rows is most of the speedup. A CASE THEN is not evaluated
+                   -- when its WHEN is false, so those rows never run the subqueries.
+                   -- rcid NULL therefore means "not a prospect visit", which is
+                   -- exactly the prospect-branch filter below.
+                   CASE WHEN ue.user_id IS NULL
+                             AND split_part(ue.path, '?', 1) !~* '^/admin'
+                        THEN ({_RESOLVED_CID}) ELSE NULL END AS rcid
+            FROM usage_events ue
+        ),
+        attributed AS (
+            -- Prospect marketing traffic: anonymous, non-admin, resolves to a club
+            -- (all three conditions are baked into a non-NULL rcid above).
+            SELECT rcid AS club_id, eid, created_at, ipk, is_meta, is_contact
+            FROM ev
+            WHERE rcid IS NOT NULL
+          UNION
+            -- Customer product use: the club's own (non-archived) org traffic,
+            -- never a super admin's acting-as activity.
+            SELECT mc.id::text AS club_id, ev.eid, ev.created_at, ev.ipk,
+                   ev.is_meta, ev.is_contact
+            FROM ev
+            JOIN marketing_clubs mc ON mc.existing_org_id = ev.org_id
+            JOIN organisations o ON o.id = ev.org_id AND o.archived_at IS NULL
+            WHERE ev.org_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM club_memberships cm
+                              WHERE cm.user_id = ev.user_id AND cm.role = 'super_admin')
+        )
+        SELECT club_id,
+               MAX(created_at) AS last_seen,
+               COUNT(DISTINCT ipk) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
+               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS events_30d,
+               COALESCE(SUM(CASE
+                   WHEN is_meta THEN 0.0
+                   WHEN created_at > NOW() - INTERVAL '7 days' THEN {WEB_DECAY['d7']}
+                   WHEN created_at > NOW() - INTERVAL '14 days' THEN {WEB_DECAY['d14']}
+                   WHEN created_at > NOW() - INTERVAL '21 days' THEN {WEB_DECAY['d21']}
+                   WHEN created_at > NOW() - INTERVAL '28 days' THEN {WEB_DECAY['d28']}
+                   WHEN created_at > NOW() - INTERVAL '90 days' THEN {WEB_DECAY['d90']}
+                   ELSE 0.0
+               END), 0.0)::float AS web_decay_pts,
+               COALESCE(SUM(CASE
+                   WHEN NOT is_meta THEN 0.0
+                   WHEN created_at > NOW() - INTERVAL '7 days' THEN {AD_DECAY['d7']}
+                   WHEN created_at > NOW() - INTERVAL '14 days' THEN {AD_DECAY['d14']}
+                   WHEN created_at > NOW() - INTERVAL '21 days' THEN {AD_DECAY['d21']}
+                   WHEN created_at > NOW() - INTERVAL '28 days' THEN {AD_DECAY['d28']}
+                   WHEN created_at > NOW() - INTERVAL '90 days' THEN {AD_DECAY['d90']}
+                   ELSE 0.0
+               END), 0.0)::float AS ad_decay_pts,
+               COUNT(*) FILTER (WHERE is_meta) AS ad_clicks,
+               BOOL_OR(is_contact) AS visited_contact
+        FROM attributed
+        GROUP BY club_id
+    """))).all()
+    out: dict = {}
+    for r in rows:
+        if r[0] is None:
+            continue
+        out[str(r[0])] = {
+            "last_seen": r[1],
+            "sessions_30d": r[2] or 0,
+            "events_30d": r[3] or 0,
+            "web_decay_pts": float(r[4] or 0.0),
+            "ad_decay_pts": float(r[5] or 0.0),
+            "ad_clicks": r[6] or 0,
+            "visited_contact": bool(r[7]),
+        }
+    return out
+
+
+async def batch_email_stats(session) -> dict:
+    """Single-pass equivalent of ``_engagement``'s per-club ``em`` (email
+    engagement) query, for every club at once — the same idea as
+    ``batch_web_stats``. Attributes each ``email_events`` row to a club by the
+    club's own contact email OR its (non-archived) org id, ``UNION``-ed and
+    deduped by event id so the two branches don't double-count, matching the
+    per-club query's ``OR``. Returns ``{club_id_text: {...}}`` with the exact
+    fields the per-club query yields."""
+    rows = (await session.execute(text(f"""
+        WITH att AS (
+            -- By the club's own contact email.
+            SELECT mcc.marketing_club_id::text AS club_id, ee.id AS eid,
+                   ee.created_at, ee.event_type
+            FROM email_events ee
+            JOIN marketing_club_contacts mcc ON lower(mcc.email) = lower(ee.email)
+            WHERE ee.email IS NOT NULL AND ee.email <> ''
+              AND mcc.email IS NOT NULL AND mcc.email <> ''
+          UNION
+            -- By the club's own (non-archived) org id.
+            SELECT mc.id::text AS club_id, ee.id AS eid, ee.created_at, ee.event_type
+            FROM email_events ee
+            JOIN marketing_clubs mc ON mc.existing_org_id = ee.organisation_id
+            JOIN organisations o ON o.id = ee.organisation_id AND o.archived_at IS NULL
+            WHERE ee.organisation_id IS NOT NULL
+        )
+        SELECT club_id,
+               MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
+               COUNT(*) FILTER (WHERE event_type IN ('open','click')
+                                AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
+               COALESCE(SUM(CASE
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_CLICK_DECAY['d7']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_CLICK_DECAY['d14']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_CLICK_DECAY['d21']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_CLICK_DECAY['d28']}
+                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_CLICK_DECAY['d90']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_OPEN_DECAY['d7']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_OPEN_DECAY['d14']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_OPEN_DECAY['d21']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_OPEN_DECAY['d28']}
+                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_OPEN_DECAY['d90']}
+                   ELSE 0.0
+               END), 0.0)::float AS email_decay_pts
+        FROM att
+        GROUP BY club_id
+    """))).all()
+    out: dict = {}
+    for r in rows:
+        if r[0] is None:
+            continue
+        out[str(r[0])] = {
+            "last_eng": r[1],
+            "eng_30d": r[2] or 0,
+            "email_decay_pts": float(r[3] or 0.0),
+        }
+    return out
+
+
 async def _engagement(session, club: MarketingClub,
-                      org: "Optional[Organisation]" = None) -> dict:
+                      org: "Optional[Organisation]" = None,
+                      web_stats: "Optional[dict]" = None,
+                      email_stats: "Optional[dict]" = None) -> dict:
     """A per-club engagement rollup pushed onto the Company so the CRM can score and
     sort without holding raw events. Signal sources, all attributed to the club: web
     breadcrumbs (``usage_events`` by outreach UTM code or org id, both distinct-visitor
@@ -390,7 +549,8 @@ async def _engagement(session, club: MarketingClub,
     # pages trickled over the full window, and the sum itself differentiates a quiet
     # club from a busy one far more than a flat 30-day count capped at 20 ever could
     # (many genuinely-different clubs were converging on the same capped value).
-    web = (await session.execute(text(f"""
+    if web_stats is None:
+      web = (await session.execute(text(f"""
         SELECT MAX(ue.created_at) AS last_seen,
                -- Distinct visitors deduped by IP FIRST, then visitor_id. The
                -- client-side visitor_id can churn (a bot/crawler or a privacy
@@ -461,13 +621,24 @@ async def _engagement(session, club: MarketingClub,
                 WHERE cm.user_id = ue.user_id AND cm.role = 'super_admin'
           )
     """), {"org": org_id, "cid": str(club.id)})).first()
-    last_web = web[0] if web else None
-    sessions = (web[1] or 0) if web else 0
-    events_30d = (web[2] or 0) if web else 0
-    web_decay_pts = float(web[3] or 0.0) if web else 0.0
-    ad_decay_pts = float(web[4] or 0.0) if web else 0.0
-    ad_clicks = (web[5] or 0) if web else 0
-    visited_contact = bool(web[6]) if web else False
+      last_web = web[0] if web else None
+      sessions = (web[1] or 0) if web else 0
+      events_30d = (web[2] or 0) if web else 0
+      web_decay_pts = float(web[3] or 0.0) if web else 0.0
+      ad_decay_pts = float(web[4] or 0.0) if web else 0.0
+      ad_clicks = (web[5] or 0) if web else 0
+      visited_contact = bool(web[6]) if web else False
+    else:
+      # Batch-precomputed by batch_web_stats() — identical fields, resolved once
+      # for the whole table instead of a per-club scan (the full-recalc fast path).
+      ws = web_stats.get(str(club.id)) or {}
+      last_web = ws.get("last_seen")
+      sessions = ws.get("sessions_30d") or 0
+      events_30d = ws.get("events_30d") or 0
+      web_decay_pts = float(ws.get("web_decay_pts") or 0.0)
+      ad_decay_pts = float(ws.get("ad_decay_pts") or 0.0)
+      ad_clicks = ws.get("ad_clicks") or 0
+      visited_contact = bool(ws.get("visited_contact"))
 
     # Email engagement (email_events opens/clicks) for this club's contact emails, or
     # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
@@ -481,7 +652,8 @@ async def _engagement(session, club: MarketingClub,
     # "Open and click tracking" enabled on the configuration set — if that's off,
     # email_events never gets open/click rows and this is always 0 (see
     # app/scripts/email_opens.py to check).
-    em = (await session.execute(text(f"""
+    if email_stats is None:
+      em = (await session.execute(text(f"""
         SELECT MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
                                 AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
@@ -504,9 +676,15 @@ async def _engagement(session, club: MarketingClub,
                 WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> '')
            OR (CAST(:org AS text) IS NOT NULL AND organisation_id::text = CAST(:org AS text))
     """), {"cid": str(club.id), "org": org_id})).first()
-    last_email = em[0] if em else None
-    eng_30d = (em[1] or 0) if em else 0
-    email_decay_pts = float(em[2] or 0.0) if em else 0.0
+      last_email = em[0] if em else None
+      eng_30d = (em[1] or 0) if em else 0
+      email_decay_pts = float(em[2] or 0.0) if em else 0.0
+    else:
+      # Batch-precomputed by batch_email_stats() — the full-recalc fast path.
+      es = email_stats.get(str(club.id)) or {}
+      last_email = es.get("last_eng")
+      eng_30d = es.get("eng_30d") or 0
+      email_decay_pts = float(es.get("email_decay_pts") or 0.0)
 
     onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm, org_slug)
 

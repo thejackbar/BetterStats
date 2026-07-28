@@ -52,6 +52,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services import crm as crm_service
+from app.services import twenty_sync
 
 logger = logging.getLogger("recalc_engagement")
 
@@ -134,6 +135,18 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
               + (" [DRY RUN — nothing will be saved]" if dry_run else "")
               + " ...")
 
+        # Single-pass precompute of the two per-club scans (web + email) for the
+        # WHOLE table at once. The per-club versions each re-resolve every event
+        # for every club (O(events x clubs)) — the reason a full sweep took ~14h.
+        # Resolving once here and injecting the results makes the loop's scoring
+        # a pure in-memory calc for the common (prospect) case, so 6k clubs run
+        # in minutes. The scoring is byte-for-byte identical (see --verify).
+        print("  building batch web/email stats (one pass over usage_events + email_events) ...")
+        web_map = await twenty_sync.batch_web_stats(session)
+        email_map = await twenty_sync.batch_email_stats(session)
+        print(f"  batch stats ready: {len(web_map)} clubs with web activity, "
+              f"{len(email_map)} with email activity")
+
         batch = 0
         for cid, cname in rows:
             try:
@@ -141,7 +154,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
                 if club is None:
                     continue
                 org = await _load_org(session, club.existing_org_id)
-                deal = await crm_service.sync_engagement_promotion(session, club, org)
+                deal = await crm_service.sync_engagement_promotion(
+                    session, club, org, web_stats=web_map, email_stats=email_map)
                 tier = club.engagement_tier or "UNKNOWN"
                 tiers[tier] += 1
                 # "Linked" = has an Organisation row (an onboarded club: a trial
@@ -201,15 +215,75 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
             "linked": linked_count, "prospects": prospect_count, "tiers": dict(tiers)}
 
 
+# Fields whose value must match between the fast (batch-injected) path and the
+# original per-club path for the optimisation to be trustworthy. Covers the final
+# score/tier AND the underlying web/email aggregates that feed them, so a
+# divergence is caught at its source rather than only if it happens to move the
+# rounded score.
+_VERIFY_FIELDS = ("engagementScore", "engagementTier", "sessions30d",
+                  "emailEngaged30d", "_webDecayPts", "_emailDecayPts",
+                  "_adDecayPts", "_adClicks", "_visitedContact")
+
+
+async def verify(sample: int, name: str | None = None) -> None:
+    """Prove the batch fast path is equivalent to the original per-club path on
+    REAL data before trusting it for a full sweep. For up to ``sample`` clubs,
+    compute each club's engagement BOTH ways — once with the batch-precomputed
+    web/email maps injected, once with the original per-club queries — and report
+    any club whose score, tier, or any underlying web/email aggregate differs.
+    Never persists (rolls back)."""
+    from app.services.twenty_sync import _engagement
+    async with async_session_maker() as session:
+        idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
+        if name:
+            idq = idq.where(func.lower(MarketingClub.name).like(f"%{name.lower()}%"))
+        idq = idq.limit(sample)
+        rows = (await session.execute(idq)).all()
+        print(f"Verifying batch vs per-club for {len(rows)} club(s) ...")
+        print("  building batch web/email stats ...")
+        web_map = await twenty_sync.batch_web_stats(session)
+        email_map = await twenty_sync.batch_email_stats(session)
+
+        checked = 0
+        mismatches = 0
+        for cid, cname in rows:
+            club = await session.get(MarketingClub, cid)
+            if club is None:
+                continue
+            org = await _load_org(session, club.existing_org_id)
+            fast = await _engagement(session, club, org,
+                                     web_stats=web_map, email_stats=email_map)
+            slow = await _engagement(session, club, org)  # per-club queries
+            checked += 1
+            diffs = [(k, fast.get(k), slow.get(k))
+                     for k in _VERIFY_FIELDS if fast.get(k) != slow.get(k)]
+            if diffs:
+                mismatches += 1
+                print(f"  MISMATCH  {cname!r} ({cid})")
+                for k, f, s in diffs:
+                    print(f"      {k}: batch={f!r}  per-club={s!r}")
+        await session.rollback()
+
+        print(f"\nChecked {checked} club(s): "
+              + ("ALL MATCH — the fast path is equivalent, safe to run the full recalc."
+                 if mismatches == 0 else f"{mismatches} MISMATCH(es) — do NOT trust the fast path yet."))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Recalculate all engagement scores.")
     ap.add_argument("--dry-run", action="store_true",
                     help="compute and report a tier distribution, then roll back")
     ap.add_argument("--name", default=None,
                     help="only clubs whose name contains this substring")
+    ap.add_argument("--verify", type=int, default=None, metavar="N",
+                    help="compare the batch fast path against the original per-club "
+                         "path for N clubs and report any divergence; changes nothing")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(recalc(dry_run=args.dry_run, name=args.name))
+    if args.verify is not None:
+        asyncio.run(verify(args.verify, name=args.name))
+    else:
+        asyncio.run(recalc(dry_run=args.dry_run, name=args.name))
 
 
 if __name__ == "__main__":
