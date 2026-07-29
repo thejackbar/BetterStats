@@ -387,6 +387,8 @@ async def get_org_lineups(
     mode: str = Query("upcoming", pattern="^(upcoming|past)$"),
     season_id: str | None = None,
     grade_id: str | None = None,
+    category: str | None = None,
+    finals_only: bool = False,
     offset: int = Query(0, ge=0),
     limit: int = Query(6, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
@@ -400,6 +402,12 @@ async def get_org_lineups(
     the off-season); ``mode=past`` walks back through played games, optionally
     filtered by season and grade, with ``offset``/``limit`` paging.
 
+    ``category`` (one of `grade_labels.GRADE_CATEGORIES` — senior/junior/
+    womens/masters/mixed) filters to grades classified that way — a club's
+    actual Senior/Junior/Women's split, not a per-player attribute. ``finals_only``
+    filters to games whose round name says so (the same `is_final` flag
+    `sync.py` sets once a match is played).
+
     A side its club hasn't published yet comes back with an empty player list
     and ``published: false`` rather than being hidden — "not named yet" is the
     normal state early in the week and worth showing as such.
@@ -412,6 +420,38 @@ async def get_org_lineups(
         raise HTTPException(status_code=404, detail="Organisation not found")
 
     from app.services.lineups import org_lineups
+    from app.services.grade_labels import (
+        GRADE_CATEGORIES, category_for_name, category_label, org_grade_categories,
+    )
+
+    if category and category not in GRADE_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid category")
+
+    categories = await org_grade_categories(db, org.id)
+    # Which categories actually occur among the org's grades — so the frontend
+    # only ever offers a filter option that could return something.
+    available_categories = [
+        {"key": c, "label": category_label(c)}
+        for c in ("senior", "junior", "womens", "masters", "mixed")
+        if c in categories.values()
+    ]
+
+    # Grade rows whose effective category matches the request — resolved once
+    # in Python (category may be an unconfirmed suggestion, not a DB column) so
+    # the games query below can filter on a plain grade_id list.
+    category_grade_ids: list[uuid.UUID] | None = None
+    if category:
+        gid_res = await db.execute(
+            text(
+                "SELECT gr.id, gr.name FROM grades gr "
+                "JOIN seasons s ON s.id = gr.season_id WHERE s.organisation_id = :org"
+            ),
+            {"org": org.id},
+        )
+        category_grade_ids = [
+            gid for gid, gname in gid_res.fetchall()
+            if category_for_name(categories, gname) == category
+        ]
 
     async def _played(off: int, lim: int) -> list[str]:
         """Synced games, newest first. Only 'api' games have a Grassroots match
@@ -427,6 +467,11 @@ async def get_org_lineups(
         if grade_id:
             where.append("g.grade_id = :grade_id")
             params["grade_id"] = uuid.UUID(grade_id)
+        if category_grade_ids is not None:
+            where.append("g.grade_id = ANY(:category_grade_ids)")
+            params["category_grade_ids"] = category_grade_ids
+        if finals_only:
+            where.append("g.is_final = TRUE")
         res = await db.execute(
             text(
                 f"SELECT g.id::text FROM v_effective_games g WHERE {' AND '.join(where)} "
@@ -443,7 +488,12 @@ async def get_org_lineups(
         match_ids, source = ids[:limit], "past"
     else:
         fixtures = await org_grassroots_fixtures(db, org)
-        match_ids = [fx["id"] for fx in fixtures if fx.get("id")][:limit]
+        if category:
+            fixtures = [fx for fx in fixtures if fx.get("category") == category]
+        if finals_only:
+            fixtures = [fx for fx in fixtures if fx.get("is_final")]
+        by_id = {fx["id"]: fx for fx in fixtures if fx.get("id")}
+        match_ids = list(by_id.keys())[:limit]
         has_more = False
         source = "fixtures"
         if not match_ids:
@@ -451,12 +501,56 @@ async def get_org_lineups(
             has_more = len(ids) > limit
             match_ids, source = ids[:limit], "recent"
 
+    matches = await org_lineups(db, org, match_ids) if match_ids else []
+    if source in ("past", "recent"):
+        # Annotate each DB-sourced match with its own grade's category/is_final
+        # — org_lineups() returns Grassroots' own payload shape, which knows
+        # nothing about our category system.
+        g_res = await db.execute(
+            text(
+                "SELECT g.id::text, gr.name, g.is_final FROM v_effective_games g "
+                "LEFT JOIN grades gr ON gr.id = g.grade_id WHERE g.id::text = ANY(:ids)"
+            ),
+            {"ids": [m["match_id"] for m in matches]},
+        )
+        by_match = {mid: (gname, is_final) for mid, gname, is_final in g_res.fetchall()}
+        for m in matches:
+            gname, is_final = by_match.get(m["match_id"], (None, False))
+            cat = category_for_name(categories, gname) if gname else None
+            m["category"] = cat
+            m["category_label"] = category_label(cat) if cat else None
+            m["is_final"] = bool(is_final)
+    else:
+        # 'fixtures' source already carries category/is_final per fixture.
+        for m in matches:
+            fx = by_id.get(m["match_id"])
+            m["category"] = fx.get("category") if fx else None
+            m["category_label"] = category_label(fx["category"]) if fx and fx.get("category") else None
+            m["is_final"] = bool(fx.get("is_final")) if fx else False
+
     return {
         "source": source,
         "offset": offset,
         "has_more": has_more,
-        "matches": await org_lineups(db, org, match_ids) if match_ids else [],
+        "categories": available_categories,
+        "matches": matches,
     }
+
+
+@router.get("/{org_id}/lineups/{match_id}")
+async def get_org_lineup_one(org_id: str, match_id: str, db: AsyncSession = Depends(get_db)):
+    """One match's published lineup — for deep-linking straight from a
+    Fixtures-page row instead of making a supporter hunt through the Lineups
+    list for it. Same payload shape as one entry of the list endpoint's
+    ``matches`` array, so the frontend renders it with the same component."""
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+    from app.services.lineups import match_lineups
+    data = await match_lineups(db, org, match_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="No lineup found for that match")
+    return data
 
 
 async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False):

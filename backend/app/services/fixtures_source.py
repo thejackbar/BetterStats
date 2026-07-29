@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
 from app.services.club_match import club_match_keys
+from app.services.grade_labels import category_for_name, category_label, org_grade_categories
 
 
 async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
@@ -45,12 +46,17 @@ async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
 
     Each fixture carries ``grade_name``/``season_name`` (resolved from the DB
     grade it came from) on top of the normalised
-    ``grassroots_scores_client.get_grade_fixtures`` shape.
+    ``grassroots_scores_client.get_grade_fixtures`` shape, plus ``category``/
+    ``category_label`` (the grade's Senior/Junior/Women's/... classification —
+    confirmed via `grades.category`, else the name-based suggestion) and
+    ``is_final`` (round name contains "final" — the same heuristic
+    `sync.py` uses to set `games.is_final` once a match is played).
     """
     rows = await _current_grade_rows(db, org.id)
     if not rows:
         return []
     meta = {guid: (gname, sname) for guid, gname, sname in rows}
+    categories = await org_grade_categories(db, org.id)
     fixtures = await gr.get_grades_fixtures(
         [guid for guid, _, _ in rows], club_match_keys(org)
     )
@@ -58,4 +64,8 @@ async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
         gname, sname = meta.get(fx.get("grade_id"), (None, None))
         fx["grade_name"] = gname
         fx["season_name"] = sname
+        cat = category_for_name(categories, gname) if gname else None
+        fx["category"] = cat
+        fx["category_label"] = category_label(cat) if cat else None
+        fx["is_final"] = "final" in (fx.get("round") or "").lower()
     return fixtures

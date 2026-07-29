@@ -16,6 +16,9 @@ export default function SeasonSelector({
   overseas = null,
   setOverseas = () => {},
   showOverseasFilter = false,
+  showGenderFilter = true,
+  showFinalsFilter = true,
+  showCaptainFilter = true,
 }) {
   return (
     <div className="flex flex-wrap gap-2 items-center">
@@ -55,7 +58,7 @@ export default function SeasonSelector({
       )}
 
       {/* Gender filter - pill toggle */}
-      {seasons.length > 0 && (
+      {showGenderFilter && seasons.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Gender</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
@@ -81,7 +84,7 @@ export default function SeasonSelector({
       )}
 
       {/* Games - pill toggle */}
-      {seasons.length > 0 && (
+      {showFinalsFilter && seasons.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Games</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
@@ -132,7 +135,7 @@ export default function SeasonSelector({
       )}
 
       {/* Captain filter - pill toggle */}
-      {seasons.length > 0 && (
+      {showCaptainFilter && seasons.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Captain</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">

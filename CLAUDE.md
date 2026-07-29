@@ -772,6 +772,53 @@ live off the Grassroots feed — nothing new is persisted.
   recent games when nothing is scheduled, so the page is never blank in the
   off-season) or `mode=past` with `season_id`/`grade_id`/`offset`/`limit`
   paging. Bounded on purpose — every match is a live upstream fetch.
+- **Category + Finals filters (same day)**: the Lineups page's Past tab used
+  the shared `SeasonSelector`'s Gender/Games/Captain pills, which are
+  wired to per-player leaderboard params it never fetches — the toggles
+  rendered but silently did nothing. Fixed by giving `SeasonSelector` opt-out
+  flags (`showGenderFilter`/`showFinalsFilter`/`showCaptainFilter`, all
+  default `true` so every other caller — Players/Records/Leaderboard/
+  Dashboard/GamesPage — is unaffected) and replacing them here with two
+  filters that actually mean something for a fixture list: **Category**
+  (Senior/Junior/Women's/... — how the **grade** is classified, not a player
+  attribute) and **Finals** (the game's own `is_final`). Captain has no
+  fixture-level meaning and was dropped, not just hidden.
+  - `grade_labels.org_grade_categories(db, org_id)` returns every distinct
+    grade name in the org mapped to its effective category (confirmed via
+    `grades.category`, else `suggest_category`), keyed on the
+    sponsor-suffix-stripped name (`strip_sponsor_suffix` — a Python mirror of
+    `iq_filters.grade_base`'s SQL regex) so "B Grade (DXC Technology)" from a
+    live fixture/lineup and our stored "B Grade" resolve to the same category.
+    Verified against every real grade name at two live clubs (Applecross,
+    Darwin) before shipping — Colts/Juniors/Under-N → junior, PSWL/Women's →
+    womens, everything else → senior, matching the existing
+    `suggest_category` heuristic used for the admin grade list.
+  - Both filters are server-side and paginate correctly: `category` resolves
+    to a `grade_id` list once (category may be an unconfirmed suggestion, not
+    a DB column, so it can't go straight into SQL) and both it and
+    `finals_only` are applied in `_played()`'s WHERE clause for `mode=past`,
+    and as a plain Python filter over `org_grassroots_fixtures()`'s list for
+    `mode=upcoming`. The response's `categories` field lists only the
+    categories actually present among the org's grades, so a club with no
+    Masters/Mixed grades never sees an empty option.
+  - Frontend keeps the returned category list in its own state (not reset
+    alongside the match data on every refetch) so the filter pills don't
+    flash empty while a filter change is loading.
+  - Both public pages also dropped their subtitle taglines ("straight from
+    the association draw" / "straight from Play.Cricket") per direct
+    instruction — a page whose eyebrow+title already say what it is doesn't
+    need one.
+- **Cross-linking (same day)**: a played match's lineup card now links to its
+  scorecard (`/games/{match_id}` — the id is already the same `games.id` for
+  every "past"/"recent"-sourced match, so no extra lookup is needed; the link
+  only renders when `status === 'COMPLETED'`, which an "upcoming"-sourced
+  fixture never is, so there's no dangling link to an unsynced game). A
+  Fixtures-page row's "↗ Lineup" now deep-links to that exact match
+  (`/{slug}/lineups?match={id}`) instead of the generic list. New `GET
+  /organisations/{id}/lineups/{match_id}` (thin wrapper over
+  `services.lineups.match_lineups`, same payload shape as one list entry)
+  backs the deep link; `LineupsPage`'s `?match=` param renders just that one
+  `MatchCard` with a "← All lineups" link, skipping the list fetch entirely.
 - **Frontend**: `FixturesPage.jsx` (grouped by date, Today/Tomorrow/In-N-days
   chips) and `LineupsPage.jsx` (Upcoming/Past toggle, `SeasonSelector` on Past,
   Load more). `TeamBadge` was **extracted from `MatchScorecard.jsx` into

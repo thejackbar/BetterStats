@@ -80,3 +80,54 @@ def category_label(key) -> str:
     """Human label for a category key (falls back to the raw key)."""
     k = normalise_category(key)
     return CATEGORY_LABELS.get(k, "Senior" if k is None else str(key))
+
+
+# A grade name with its trailing sponsor parenthetical removed —
+# "B Grade (DXC Technology)" -> "B Grade". Only a parenthetical with no digit
+# is stripped (sponsors are alphabetic; a genuine sub-grade like "(Div 1)"
+# carries a number and stays distinct). Python mirror of
+# services/iq_filters.py's `grade_base` SQL regex, for callers holding a plain
+# string (a live Grassroots fixture/match) rather than a `grades` row.
+_SPONSOR_SUFFIX = re.compile(r"\s*\([^)0-9]*\)\s*$")
+
+
+def strip_sponsor_suffix(name) -> str:
+    return _SPONSOR_SUFFIX.sub("", str(name or "")).strip()
+
+
+async def org_grade_categories(db, org_id) -> dict[str, str]:
+    """Every distinct grade name in the org, mapped to its EFFECTIVE category —
+    confirmed (any season's row sharing that name has `category` set) else the
+    name-based suggestion. Keyed on the sponsor-suffix-stripped, lowercased
+    name, since CA decorates a grade's name with the season's sponsor and both
+    our stored rows and a live Grassroots fixture/lineup carry this — mirrors
+    the "MAX(category) grouped by name" resolution `admin.py::list_grades_with_stats`
+    already uses for the admin grade list.
+    """
+    from sqlalchemy import text
+    res = await db.execute(
+        text(
+            "SELECT gr.name, gr.category FROM grades gr "
+            "JOIN seasons s ON s.id = gr.season_id "
+            "WHERE s.organisation_id = :org"
+        ),
+        {"org": org_id},
+    )
+    confirmed: dict[str, str] = {}
+    all_names: set[str] = set()
+    for name, category in res.fetchall():
+        key = strip_sponsor_suffix(name).lower()
+        all_names.add(key)
+        cat = normalise_category(category)
+        if cat:
+            confirmed[key] = cat
+    return {name: confirmed.get(name) or suggest_category(name) for name in all_names}
+
+
+def category_for_name(categories: dict[str, str], name) -> str:
+    """Look up a grade's effective category from `org_grade_categories`'s map.
+    Falls back to a fresh suggestion if the exact (stripped) name isn't in the
+    map — shouldn't normally happen, but a live feed name could in principle
+    differ slightly from anything we've stored."""
+    key = strip_sponsor_suffix(name).lower()
+    return categories.get(key) or suggest_category(name)

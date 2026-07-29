@@ -133,16 +133,20 @@ export const api = {
     request(`/organisations/${orgId}/recently-achieved-milestones`),
   getOrgFixtures: (orgId) => request(`/organisations/${orgId}/fixtures`),
   // Published team lists (live from the CA feed). mode 'upcoming' | 'past'.
-  getOrgLineups: (orgId, { mode, seasonId, gradeId, offset, limit } = {}) => {
+  getOrgLineups: (orgId, { mode, seasonId, gradeId, category, finalsOnly, offset, limit } = {}) => {
     const q = new URLSearchParams()
     if (mode) q.set('mode', mode)
     if (seasonId) q.set('season_id', seasonId)
     if (gradeId) q.set('grade_id', gradeId)
+    if (category) q.set('category', category)
+    if (finalsOnly) q.set('finals_only', 'true')
     if (offset) q.set('offset', offset)
     if (limit) q.set('limit', limit)
     const qs = q.toString()
     return request(`/organisations/${orgId}/lineups${qs ? `?${qs}` : ''}`)
   },
+  // One match's lineup, for a direct link from a Fixtures-page row.
+  getOrgLineup: (orgId, matchId) => request(`/organisations/${orgId}/lineups/${matchId}`),
 
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),

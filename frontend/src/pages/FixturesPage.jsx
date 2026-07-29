@@ -57,9 +57,9 @@ function FixtureRow({ fx, clubSlug }) {
         </div>
       </div>
       {time && <span className="font-mono text-[12px] text-pb-dim shrink-0">{time}</span>}
-      <Link to={`/${clubSlug}/lineups`}
+      <Link to={`/${clubSlug}/lineups?match=${fx.id}`}
         className="font-mono text-[10px] px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 transition-colors shrink-0">
-        ↗ Lineups
+        ↗ Lineup
       </Link>
     </div>
   )
@@ -105,7 +105,6 @@ export default function FixturesPage() {
         <PageHeader
           eyebrow={`FIXTURES · ${club?.name?.toUpperCase() || ''}`}
           title="What's coming up."
-          meta={[<span key="x">Straight from the association draw. Results are on the <Link to={`/${clubSlug}/games`} className="text-pb-accent underline">Games</Link> page.</span>]}
         />
 
         {fixtures === null ? <PbSpinner message="Loading fixtures…" /> : days.length === 0 ? (

@@ -13,7 +13,7 @@
 // Nothing here is stored. The record of who actually played still comes from
 // the scorecard once the game is synced.
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useClubData } from '../hooks/useClubData'
@@ -41,6 +41,36 @@ function fmtTime(t) {
   if (Number.isNaN(h)) return t
   const ampm = h >= 12 ? 'pm' : 'am'
   return `${h % 12 || 12}${m ? `.${String(m).padStart(2, '0')}` : ''}${ampm}`
+}
+
+/* ── Category (Senior/Junior/Women's/…) + Finals — both server-filtered,
+   based on how the GRADE is classified, not a per-player attribute. ────── */
+
+function CategoryFilters({ category, setCategory, categories, finalsOnly, setFinalsOnly }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {categories.length > 0 && (
+        <div className="flex items-center border pb-hairline rounded overflow-hidden">
+          {[{ key: '', label: 'All' }, ...categories].map((c) => (
+            <button key={c.key || 'all'} onClick={() => setCategory(c.key)}
+              className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                category === c.key ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center border pb-hairline rounded overflow-hidden">
+        {[{ v: false, label: 'All games' }, { v: true, label: 'Finals' }].map((o) => (
+          <button key={o.label} onClick={() => setFinalsOnly(o.v)}
+            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+              finalsOnly === o.v ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'}`}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 /* ── A player's face: their photo, else the team crest ──────────────────── */
@@ -169,7 +199,17 @@ function MatchCard({ m }) {
       {/* Only once it's played: on an unplayed match the feed puts the
           scheduled start time in resultText, which the header already shows. */}
       {played && m.result_text && (
-        <div className="px-4 pb-2 font-mono text-[10px] text-pb-faint text-center">{m.result_text}</div>
+        <div className="px-4 pb-2 font-mono text-[10px] text-pb-faint text-center">
+          {m.result_text}
+        </div>
+      )}
+      {played && (
+        <div className="px-4 pb-3 text-center">
+          <Link to={`/games/${m.match_id}`}
+            className="font-mono text-[10px] px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 transition-colors">
+            ↗ Full scorecard
+          </Link>
+        </div>
       )}
 
       <div className="grid gap-3 px-3 sm:px-4 pb-4 lg:grid-cols-2">
@@ -185,10 +225,44 @@ function MatchCard({ m }) {
   )
 }
 
+/* ── Single-match view — deep-linked from a Fixtures-page row ("↗ Lineup"),
+   so a supporter lands straight on that game rather than searching the list. */
+
+function SingleMatch({ orgId, matchId, clubSlug }) {
+  const [match, setMatch] = useState(undefined) // undefined = loading, null = not found
+
+  useEffect(() => {
+    let alive = true
+    setMatch(undefined)
+    api.getOrgLineup(orgId, matchId)
+      .then((d) => { if (alive) setMatch(d) })
+      .catch(() => { if (alive) setMatch(null) })
+    return () => { alive = false }
+  }, [orgId, matchId])
+
+  return (
+    <>
+      <Link to={`/${clubSlug}/lineups`}
+        className="inline-block mb-4 font-mono text-[11px] text-pb-faint hover:text-pb-accent">
+        ← All lineups
+      </Link>
+      {match === undefined ? <PbSpinner message="Loading lineup…" /> : match === null ? (
+        <div className="pb-card px-5 py-10 text-center text-pb-faint text-sm">
+          No lineup found for that match.
+        </div>
+      ) : (
+        <MatchCard m={match} />
+      )}
+    </>
+  )
+}
+
 /* ── Page ───────────────────────────────────────────────────────────────── */
 
 export default function LineupsPage() {
   const { clubSlug } = useParams()
+  const [searchParams] = useSearchParams()
+  const matchId = searchParams.get('match')
   const { club, orgId, inactive, notFound } = useClub(clubSlug)
   useClubTheme(club)
   usePageMeta({
@@ -199,7 +273,12 @@ export default function LineupsPage() {
 
   const { seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade } = useClubData(orgId)
   const [mode, setMode] = useState('upcoming')
+  const [category, setCategory] = useState('')       // '' | senior | junior | womens | masters | mixed
+  const [finalsOnly, setFinalsOnly] = useState(false)
   const [data, setData] = useState(null)
+  // Kept separately from `data` (which resets to null on every refetch) so the
+  // Category pill row doesn't flash empty while a filter change is loading.
+  const [availableCategories, setAvailableCategories] = useState([])
   const [more, setMore] = useState([])      // pages loaded beyond the first
   const [loadingMore, setLoadingMore] = useState(false)
 
@@ -207,18 +286,20 @@ export default function LineupsPage() {
     mode,
     limit: PAGE,
     offset,
+    category: category || undefined,
+    finalsOnly,
     ...(mode === 'past' ? { seasonId: selectedSeason, gradeId: selectedGrade } : {}),
-  }), [mode, selectedSeason, selectedGrade])
+  }), [mode, selectedSeason, selectedGrade, category, finalsOnly])
 
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId || matchId) return // a single deep-linked match skips the list entirely
     let alive = true
     setData(null); setMore([])
     api.getOrgLineups(orgId, params(0))
-      .then((d) => { if (alive) setData(d) })
+      .then((d) => { if (alive) { setData(d); if (d.categories) setAvailableCategories(d.categories) } })
       .catch(() => { if (alive) setData({ matches: [], source: mode, has_more: false }) })
     return () => { alive = false }
-  }, [orgId, params, mode])
+  }, [orgId, matchId, params, mode])
 
   const loadMore = async () => {
     const loaded = (data?.matches?.length || 0) + more.reduce((n, p) => n + p.matches.length, 0)
@@ -247,16 +328,23 @@ export default function LineupsPage() {
     </button>
   )
 
+  if (matchId) {
+    return (
+      <div className="min-h-screen bg-pb-bg text-pb-text">
+        <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+          <PageHeader eyebrow={`LINEUP · ${club?.name?.toUpperCase() || ''}`} title="This game." />
+          <SingleMatch orgId={orgId} matchId={matchId} clubSlug={clubSlug} />
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
           eyebrow={`LINEUPS · ${club?.name?.toUpperCase() || ''}`}
           title={mode === 'past' || fellBack ? 'Who took the field.' : "Who's playing."}
-          meta={[<span key="x">
-            Team lists as clubs publish them, straight from Play.Cricket.{' '}
-            {mode === 'upcoming' && !fellBack && <>A side reads "not named yet" until its club names it.</>}
-          </span>]}
         />
 
         <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -271,7 +359,7 @@ export default function LineupsPage() {
         </div>
 
         {mode === 'past' && (
-          <div className="mb-5">
+          <div className="mb-3">
             <SeasonSelector
               seasons={seasons}
               grades={grades}
@@ -279,9 +367,20 @@ export default function LineupsPage() {
               setSelectedSeason={setSelectedSeason}
               selectedGrade={selectedGrade}
               setSelectedGrade={setSelectedGrade}
+              showGenderFilter={false}
+              showFinalsFilter={false}
+              showCaptainFilter={false}
             />
           </div>
         )}
+
+        <div className="mb-5">
+          <CategoryFilters
+            category={category} setCategory={setCategory}
+            categories={availableCategories}
+            finalsOnly={finalsOnly} setFinalsOnly={setFinalsOnly}
+          />
+        </div>
 
         {fellBack && (
           <div className="mb-4 text-[12.5px] text-pb-faint">
