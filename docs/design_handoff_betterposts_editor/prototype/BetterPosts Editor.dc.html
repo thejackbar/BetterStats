@@ -1,0 +1,1746 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Black&family=Barlow+Condensed:wght@400;600;800&family=Bebas+Neue&family=Oswald:wght@400;700&family=Abril+Fatface&family=Permanent+Marker&family=Caveat:wght@700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #07090f; }
+  input, select, textarea, button { font-family: 'JetBrains Mono', monospace; }
+  input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { opacity: .35; }
+  input[type="range"] { accent-color: #EC4899; height: 14px; }
+  input[type="color"] { padding: 0; border: 1px solid #262d3d; background: transparent; border-radius: 4px; }
+  a { color: #EC4899; text-decoration: none; }
+  a:hover { color: #f472b6; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #262d3d; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+
+<x-import component-from-global-scope="SocialBG.SocialBackgroundDefs" from="./social-bg.jsx" hint-size="0px,0px"></x-import>
+
+<div style="position: fixed; right: 14px; bottom: 14px; z-index: 90; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: rgba(16,20,29,.94); border: 1px solid #262d3d; box-shadow: 0 10px 30px rgba(0,0,0,.5);">
+  <sc-for list="{{ screenChips }}" as="c" hint-placeholder-count="3">
+    <button onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</button>
+  </sc-for>
+</div>
+
+<sc-if value="{{ isStart }}" hint-placeholder-val="{{ true }}">
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; padding: 40px 60px; background: #0a0d14; color: #e6e8ef; font-family: 'Inter', system-ui, sans-serif; overflow: hidden;">
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+    <img src="bettersocials.svg" alt="" style="width: 40px; height: 40px; border-radius: 11px;" />
+    <h1 style="margin: 0; font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 34px; letter-spacing: .01em;">Better<span style="color: #EC4899;">Posts</span></h1>
+    <p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #5b6072;">{{ clubLine }}</p>
+  </div>
+
+  <div style="width: 100%; max-width: 1120px;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-size: 15px; font-weight: 600;">What are you posting?</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072;">EVERY LAYOUT ARRIVES PRE-FILLED WITH YOUR CLUB'S DATA</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;">
+      <sc-for list="{{ startTypes }}" as="t" hint-placeholder-count="10">
+        <button onClick="{{ t.onClick }}" style="{{ t.style }}" style-hover="border-color: #EC4899;">
+          <span style="{{ t.thumb }}"></span>
+          <span style="display: block; font-size: 12px; font-weight: 600; color: #e6e8ef;">{{ t.label }}</span>
+          <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072; margin-top: 2px;">{{ t.desc }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="width: 100%; max-width: 1120px; display: flex; align-items: center; gap: 12px; padding-top: 18px; border-top: 1px solid #1d2331;">
+    <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; flex: 0 0 auto;">PICK UP WHERE YOU LEFT OFF</span>
+    <sc-for list="{{ startRecent }}" as="r" hint-placeholder-count="2">
+      <button onClick="{{ r.onClick }}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 7px; border: 1px solid #1d2331; background: #10141d; color: #e6e8ef; font-size: 11px; cursor: pointer;" style-hover="border-color: #EC4899;">
+        {{ r.name }} <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">{{ r.meta }}</span>
+      </button>
+    </sc-for>
+    <span style="flex: 1;"></span>
+    <button onClick="{{ goEditor }}" style="height: 34px; padding: 0 14px; border-radius: 7px; border: none; background: #EC4899; color: #0a0d14; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: .08em; cursor: pointer;">OPEN THE EDITOR →</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isEditor }}" hint-placeholder-val="{{ false }}">
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; background: #0a0d14; color: #e6e8ef; font-family: 'Inter', system-ui, sans-serif; overflow: hidden;">
+
+  <header style="height: 52px; flex: 0 0 52px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: #10141d; border-bottom: 1px solid #1d2331;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span style="display: flex; align-items: center; gap: 7px;">
+        <span style="width: 26px; height: 26px; border-radius: 6px; background: #161b27; color: #8a90a2; display: grid; place-items: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px;">AP</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072;">APPLECROSS CC</span>
+      </span>
+      <span style="width: 1px; height: 20px; background: #1d2331;"></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px;">
+        <img src="bettersocials.svg" alt="" style="width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;" />
+        <span style="font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 17px; letter-spacing: .01em; line-height: 1;">Better<span style="color: #EC4899;">Posts</span></span>
+      </span>
+    </div>
+
+    <div style="width: 1px; height: 22px; background: #1d2331;"></div>
+
+    <button onClick="{{ togglePostTypes }}" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-size: 11px; cursor: pointer;" style-hover="border-color: #3a4256;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .14em; color: #5b6072;">POST</span>
+      <span style="font-weight: 600;">{{ tabLabel }}</span>
+      <span style="color: #5b6072; font-size: 9px;">▾</span>
+    </button>
+
+    <sc-if value="{{ postTypesOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="position: absolute; top: 46px; left: 190px; z-index: 60; width: 460px; padding: 10px; border-radius: 10px; background: #10141d; border: 1px solid #262d3d; box-shadow: 0 20px 50px rgba(0,0,0,.6); display: flex; flex-wrap: wrap; gap: 6px;">
+        <sc-for list="{{ postTypes }}" as="p" hint-placeholder-count="10">
+          <button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</button>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <div style="flex: 1;"></div>
+
+    <div style="display: flex; align-items: center; gap: 4px; padding-right: 6px; border-right: 1px solid #1d2331; margin-right: 4px;">
+      <button onClick="{{ undo }}" title="Undo" style="{{ undoStyle }}">{{ undoIcon }}</button>
+      <button onClick="{{ redo }}" title="Redo" style="{{ redoStyle }}">{{ redoIcon }}</button>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072; padding: 0 6px;">{{ historyLabel }}</span>
+    </div>
+
+    <button onClick="{{ saveTemplate }}" style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #262d3d; background: transparent; color: #8a90a2; font-size: 10px; letter-spacing: .08em; cursor: pointer;" style-hover="color: #e6e8ef; border-color: #3a4256;">SAVE AS TEMPLATE</button>
+    <button style="height: 30px; padding: 0 14px; border-radius: 6px; border: none; background: #EC4899; color: #0a0d14; font-size: 10px; font-weight: 700; letter-spacing: .08em; cursor: pointer;" style-hover="background: #f472b6;">{{ exportLabel }}</button>
+  </header>
+
+  <div style="flex: 1; display: flex; min-height: 0;">
+
+    <nav style="width: 74px; flex: 0 0 74px; background: #10141d; border-right: 1px solid #1d2331; display: flex; flex-direction: column; padding: 8px 0; gap: 2px;">
+      <sc-for list="{{ tools }}" as="t" hint-placeholder-count="7">
+        <button onClick="{{ t.onClick }}" style="{{ t.style }}">
+          {{ t.icon }}
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: .1em;">{{ t.label }}</span>
+        </button>
+      </sc-for>
+      <div style="flex: 1;"></div>
+      <div style="margin: 6px 12px; height: 1px; background: #1d2331;"></div>
+      <sc-for list="{{ endTools }}" as="t" hint-placeholder-count="1">
+        <button onClick="{{ t.onClick }}" style="{{ t.style }}">
+          {{ t.icon }}
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: .1em;">{{ t.label }}</span>
+        </button>
+      </sc-for>
+    </nav>
+
+    <aside style="width: 306px; flex: 0 0 306px; background: #10141d; border-right: 1px solid #1d2331; display: flex; flex-direction: column; min-height: 0;">
+      <div style="height: 44px; flex: 0 0 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #1d2331;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #e6e8ef;">{{ panelTitle }}</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">{{ panelMeta }}</span>
+      </div>
+      <div style="flex: 1; overflow-y: auto; padding: 14px;">
+
+        <sc-if value="{{ isDesign }}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; flex-direction: column; gap: 18px;">
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">LAYOUTS FOR {{ tabLabelUpper }}</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <sc-for list="{{ tabTemplates }}" as="t" hint-placeholder-count="6">
+                  <button onClick="{{ t.onClick }}" style="{{ t.style }}">
+                    <span style="display: block; height: 52px; border-radius: 4px; background: {{ t.thumb }}; margin-bottom: 7px;"></span>
+                    <span style="display: block; font-size: 11px; font-weight: 600; color: #e6e8ef; line-height: 1.2;">{{ t.name }}</span>
+                    <span style="display: block; font-size: 10px; color: #5b6072; line-height: 1.25; margin-top: 2px;">{{ t.desc }}</span>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">YOUR TEMPLATES</div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <sc-for list="{{ savedTemplates }}" as="s" hint-placeholder-count="2">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 7px; background: #161b27; border: 1px solid #1d2331;">
+                    <span style="font-size: 11px; color: #e6e8ef;">{{ s.name }}</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">{{ s.meta }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isContent }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #8a90a2;">The details for this post type. Everything you type here flows straight onto the canvas.</p>
+
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">ADD TO THIS POST</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <sc-for list="{{ contentAdd }}" as="a" hint-placeholder-count="5">
+                  <button onClick="{{ a.onClick }}" style="padding: 7px 10px; border-radius: 6px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-family: 'JetBrains Mono', monospace; font-size: 10px; cursor: pointer;" style-hover="border-color: #EC4899;">{{ a.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">IMAGES FOR THIS POST</div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <sc-for list="{{ mediaSlots }}" as="m" hint-placeholder-count="3">
+                  <button onClick="{{ m.onClick }}" style="display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 10px; border-radius: 7px; border: 1px dashed #3a4256; background: #161b27; cursor: pointer;" style-hover="border-color: #EC4899;">
+                    <span style="width: 30px; height: 30px; border-radius: 5px; background: repeating-linear-gradient(135deg, #1a2030 0 5px, #10141d 5px 10px); flex: 0 0 auto;"></span>
+                    <span style="display: block;">
+                      <span style="display: block; font-size: 11px; font-weight: 600; color: #e6e8ef;">{{ m.label }}</span>
+                      <span style="display: block; font-size: 10px; color: #5b6072; margin-top: 1px;">{{ m.hint }}</span>
+                    </span>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+            <sc-for list="{{ contentGroups }}" as="g" hint-placeholder-count="2">
+              <div>
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">{{ g.title }}</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                  <sc-for list="{{ g.fields }}" as="f" hint-placeholder-count="4">
+                    <label style="{{ f.wrapStyle }}">
+                      <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072; margin-bottom: 4px;">{{ f.label }}</span>
+                      <input value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" style="width: 100%; height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid #1d2331; background: #161b27; color: #e6e8ef; font-family: 'Inter', sans-serif; font-size: 12px;" />
+                    </label>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isText }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <button onClick="{{ addHeading }}" style="text-align: left; padding: 14px; border-radius: 8px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; cursor: pointer; font-family: 'Anton', sans-serif; font-size: 26px; line-height: 1;" style-hover="border-color: #EC4899;">ADD A HEADING</button>
+            <button onClick="{{ addSubheading }}" style="text-align: left; padding: 12px 14px; border-radius: 8px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; cursor: pointer; font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 17px;" style-hover="border-color: #EC4899;">Add a subheading</button>
+            <button onClick="{{ addBody }}" style="text-align: left; padding: 11px 14px; border-radius: 8px; border: 1px solid #262d3d; background: #161b27; color: #8a90a2; cursor: pointer; font-family: 'Inter', sans-serif; font-size: 12px;" style-hover="border-color: #EC4899;">Add body text</button>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">FONTS</div>
+              <div style="display: flex; flex-direction: column; gap: 5px;">
+                <sc-for list="{{ fonts }}" as="f" hint-placeholder-count="10">
+                  <button onClick="{{ f.onClick }}" style="{{ f.style }}">{{ f.name }}</button>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isElements }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">SHAPES &amp; RULES</div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+              <sc-for list="{{ elements }}" as="e" hint-placeholder-count="10">
+                <button onClick="{{ e.onClick }}" title="{{ e.name }}" style="height: 72px; border-radius: 8px; border: 1px solid #1d2331; background: #161b27; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 6px;" style-hover="border-color: #EC4899;">
+                  <span style="{{ e.mark }}"></span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #5b6072;">{{ e.name }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isPhotos }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div style="display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: #161b27; border: 1px solid #1d2331;">
+              <sc-for list="{{ photoTabs }}" as="t" hint-placeholder-count="3">
+                <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+              </sc-for>
+            </div>
+
+            <sc-if value="{{ showUploads }}" hint-placeholder-val="{{ true }}">
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <label style="display: block; padding: 18px; border-radius: 8px; border: 1px dashed #3a4256; background: #161b27; color: #8a90a2; cursor: pointer; font-size: 11px; line-height: 1.5; text-align: center;" style-hover="border-color: #EC4899; color: #e6e8ef;">
+                  Drop images here, or click to upload
+                  <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072; margin-top: 3px;">PNG · JPG · WEBP — kept in the club library</span>
+                  <input type="file" accept="image/png,image/jpeg,image/webp" multiple="true" onChange="{{ onUploadFiles }}" style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;" />
+                </label>
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072;">CLUB LIBRARY</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #3a3f50;">{{ uploadCount }}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                  <sc-for list="{{ uploads }}" as="u" hint-placeholder-count="6">
+                    <button onClick="{{ u.onClick }}" title="{{ u.name }}" style="{{ u.style }}" style-hover="border-color: #EC4899;">
+                      <span style="{{ u.labelStyle }}">{{ u.name }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+                <button onClick="{{ addImage }}" style="padding: 8px; border-radius: 7px; border: 1px solid #1d2331; background: transparent; color: #8a90a2; font-family: 'JetBrains Mono', monospace; font-size: 10px; cursor: pointer;" style-hover="color: #e6e8ef; border-color: #3a4256;">+ EMPTY IMAGE FRAME</button>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ showPlayerPhotos }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <p style="margin: 0 0 10px; font-size: 11px; line-height: 1.5; color: #8a90a2;">Headshots from player profiles — the block stays linked, so the photo updates when the profile does.</p>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                  <sc-for list="{{ playerPhotos }}" as="p" hint-placeholder-count="6">
+                    <button onClick="{{ p.onClick }}" style="aspect-ratio: 1; border-radius: 8px; border: 1px solid #1d2331; background: repeating-linear-gradient(135deg, #161b27 0 6px, #1a2030 6px 12px); color: #8a90a2; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 8px; padding: 4px;" style-hover="border-color: #EC4899;">{{ p.name }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ showClubMedia }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button onClick="{{ addBrand }}" style="width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; border: 1px solid #1d2331; background: #161b27; color: #e6e8ef; cursor: pointer; font-size: 11px;" style-hover="border-color: #EC4899;">
+                  <span style="width: 26px; height: 26px; border-radius: 5px; background: rgba(236,72,153,.15); color: #EC4899; display: grid; place-items: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px;">AP</span>
+                  Add the club lockup
+                </button>
+                <div>
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">SPONSOR LOGOS</div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <sc-for list="{{ sponsors }}" as="sp" hint-placeholder-count="2">
+                      <button onClick="{{ sp.onClick }}" style="{{ sp.style }}" style-hover="border-color: #EC4899;">
+                        <span style="width: 24px; height: 24px; border-radius: 4px; background: repeating-linear-gradient(135deg, #1a2030 0 5px, #10141d 5px 10px); flex: 0 0 auto;"></span>
+                        {{ sp.name }}
+                      </button>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isData }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #8a90a2;">Live blocks — names, photos and numbers come straight from the club's records, so a saved template is always current.</p>
+            <sc-for list="{{ dataGroups }}" as="g" hint-placeholder-count="2">
+              <div>
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">{{ g.title }}</div>
+                <div style="display: flex; flex-direction: column; gap: 7px;">
+                  <sc-for list="{{ g.items }}" as="d" hint-placeholder-count="3">
+                    <button onClick="{{ d.onClick }}" style="text-align: left; padding: 12px; border-radius: 8px; border: 1px solid #1d2331; background: #161b27; cursor: pointer;" style-hover="border-color: #EC4899;">
+                      <span style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                        <span style="font-size: 12px; font-weight: 600; color: #e6e8ef;">{{ d.name }}</span>
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #EC4899;">LIVE</span>
+                      </span>
+                      <span style="display: block; font-size: 10px; color: #5b6072; margin-top: 3px; line-height: 1.35;">{{ d.desc }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isBrand }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 18px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border-radius: 8px; background: #161b27; border: 1px solid #1d2331;">
+              <span style="font-size: 11px; line-height: 1.4; color: #8a90a2;">Saved here once, applied to every post the club makes.</span>
+              <button onClick="{{ saveBrand }}" style="{{ brandSaveStyle }}">{{ brandSaveLabel }}</button>
+            </div>
+
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">CREST &amp; SPONSORS</div>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="{{ crestStyle }}">
+                  CREST
+                  <input type="file" accept="image/png,image/svg+xml,image/jpeg" onChange="{{ onCrest }}" style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;" />
+                </label>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <sc-for list="{{ sponsors }}" as="sp" hint-placeholder-count="2">
+                    <span style="{{ sp.style }}">
+                      <span style="width: 20px; height: 20px; border-radius: 4px; background: repeating-linear-gradient(135deg, #1a2030 0 5px, #10141d 5px 10px); flex: 0 0 auto;"></span>
+                      {{ sp.name }}
+                    </span>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">COLOUR</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 7px;">
+                <sc-for list="{{ palettes }}" as="p" hint-placeholder-count="8">
+                  <button onClick="{{ p.onClick }}" title="{{ p.name }}" style="{{ p.style }}"><span style="{{ p.bar }}"></span></button>
+                </sc-for>
+              </div>
+              <div style="display: flex; gap: 14px; margin-top: 10px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">
+                  <input type="color" value="{{ palPrimary }}" onChange="{{ onPrimary }}" style="width: 26px; height: 26px; cursor: pointer;" /> BACKGROUND
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">
+                  <input type="color" value="{{ palAccent }}" onChange="{{ onAccent }}" style="width: 26px; height: 26px; cursor: pointer;" /> ACCENT
+                </label>
+              </div>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">TEXTURE</div>
+              <sc-for list="{{ bgGroups }}" as="g" hint-placeholder-count="4">
+                <div style="margin-bottom: 10px;">
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #3a3f50; margin-bottom: 5px;">{{ g.title }}</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <sc-for list="{{ g.items }}" as="b" hint-placeholder-count="5">
+                      <button onClick="{{ b.onClick }}" title="{{ b.label }}" style="{{ b.style }}">
+                        <sc-if value="{{ b.textured }}" hint-placeholder-val="{{ true }}">
+                          <x-import component-from-global-scope="SocialBG.SocialBackground" from="./social-bg.jsx"
+                            variant="{{ b.key }}" dc-props="{{ b.swatchProps }}" hint-size="36px,36px"
+                            style="position: absolute; inset: 0;"></x-import>
+                        </sc-if>
+                        <sc-if value="{{ b.clean }}" hint-placeholder-val="{{ false }}">
+                          <span style="position: absolute; inset: 0; display: grid; place-items: center; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: rgba(255,255,255,.5);">✕</span>
+                        </sc-if>
+                      </button>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+              <sc-if value="{{ bgEditable }}" hint-placeholder-val="{{ true }}">
+                <div style="margin-top: 4px; padding: 10px; border-radius: 8px; background: #161b27; border: 1px solid #1d2331;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px;">
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #8a90a2;">{{ bgStyleLabel }} COLOURS</span>
+                    <sc-if value="{{ bgHasOverride }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ resetBgColors }}" style="border: none; background: transparent; color: #5b6072; font-family: 'JetBrains Mono', monospace; font-size: 9px; text-decoration: underline; cursor: pointer; padding: 0;" style-hover="color: #e6e8ef;">RESET TO CLUB</button>
+                    </sc-if>
+                  </div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                    <sc-for list="{{ bgColorFields }}" as="c" hint-placeholder-count="5">
+                      <label style="display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer;">
+                        <input type="color" value="{{ c.value }}" onChange="{{ c.onChange }}" style="width: 34px; height: 26px; cursor: pointer;" />
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: .06em; color: #5b6072;">{{ c.label }}</span>
+                      </label>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">HEADLINE FONT</div>
+              <div style="display: flex; flex-direction: column; gap: 5px;">
+                <sc-for list="{{ brandFonts }}" as="f" hint-placeholder-count="6">
+                  <button onClick="{{ f.onClick }}" style="{{ f.style }}">{{ f.name }}</button>
+                </sc-for>
+              </div>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">SAVED LOOKS</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 7px; align-items: center;">
+                <sc-for list="{{ savedLooks }}" as="s" hint-placeholder-count="3">
+                  <button onClick="{{ s.onClick }}" title="{{ s.name }}" style="{{ s.style }}"></button>
+                </sc-for>
+                <button onClick="{{ saveLook }}" style="height: 30px; padding: 0 10px; border-radius: 6px; border: 1px dashed #3a4256; background: transparent; color: #8a90a2; font-size: 10px; cursor: pointer;" style-hover="color: #e6e8ef; border-color: #EC4899;">+ Save this look</button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isLayers }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 18px;">
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">FRONT ON TOP</div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <sc-for list="{{ layers }}" as="l" hint-placeholder-count="4">
+                  <div onClick="{{ l.onClick }}" style="{{ l.style }}">
+                    <span style="display: flex; align-items: center; gap: 7px; min-width: 0;">
+                      <span style="color: #3a3f50; display: flex;">{{ gripIcon }}</span>
+                      <span style="font-size: 11px; color: #e6e8ef; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ l.label }}</span>
+                    </span>
+                    <span style="display: flex; align-items: center; gap: 2px; flex: 0 0 auto;">
+                      <button onClick="{{ l.onUp }}" title="Bring forward" style="border: none; background: transparent; color: #5b6072; cursor: pointer; padding: 2px 3px; display: flex;" style-hover="color: #e6e8ef;">{{ upIcon }}</button>
+                      <button onClick="{{ l.onDown }}" title="Send backward" style="border: none; background: transparent; color: #5b6072; cursor: pointer; padding: 2px 3px; display: flex;" style-hover="color: #e6e8ef;">{{ downIcon }}</button>
+                      <button onClick="{{ l.onDup }}" title="Duplicate" style="border: none; background: transparent; color: #5b6072; cursor: pointer; padding: 2px 3px; display: flex;" style-hover="color: #e6e8ef;">{{ dupIcon }}</button>
+                      <button onClick="{{ l.onDel }}" title="Delete" style="border: none; background: transparent; color: #5b6072; cursor: pointer; padding: 2px 3px; display: flex;" style-hover="color: #ef5b5b;">{{ delIcon }}</button>
+                    </span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">HISTORY</div>
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <sc-for list="{{ history }}" as="h" hint-placeholder-count="4">
+                  <div style="{{ h.style }}">{{ h.label }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+      </div>
+    </aside>
+
+    <main style="flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; background: #07090f;">
+      <div onPointerDown="{{ onStageDown }}" style="flex: 1; min-height: 0; display: grid; place-items: center; padding: 26px;">
+        <div style="position: relative;">
+          <div style="{{ canvasStyle }}">
+            <sc-if value="{{ bgActive }}" hint-placeholder-val="{{ true }}">
+              <x-import component-from-global-scope="SocialBG.SocialBackground" from="./social-bg.jsx"
+                variant="{{ bgStyle }}" dc-props="{{ bgProps }}" hint-size="100%,100%"
+                style="position: absolute; inset: 0;"></x-import>
+            </sc-if>
+            <sc-for list="{{ blocks }}" as="b" hint-placeholder-count="3">
+              <div onPointerDown="{{ b.onDown }}" onDoubleClick="{{ b.onDouble }}" style="{{ b.wrap }}">
+                {{ b.content }}
+                <sc-if value="{{ b.single }}" hint-placeholder-val="{{ false }}">
+                  <div onPointerDown="{{ b.onHandle }}" title="Drag to resize" style="{{ b.handle }}"></div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="position: absolute; left: 0; right: 0; bottom: -22px; display: flex; align-items: center; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #3a3f50;">
+            <span>1080 × 1080 · {{ zoomLabel }} · {{ pageLabel }}</span>
+            <span>{{ hintLabel }}</span>
+          </div>
+
+          <div style="position: absolute; left: -84px; top: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: .1em; color: #3a3f50; margin-bottom: 2px;">PAGES</span>
+            <sc-for list="{{ pages }}" as="pg" hint-placeholder-count="1">
+              <span onClick="{{ pg.onClick }}" style="{{ pg.style }}">
+                {{ pg.label }}
+                <sc-if value="{{ pg.deletable }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ pg.onDelete }}" title="Delete page" style="position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #262d3d; background: #10141d; color: #5b6072; font-size: 8px; line-height: 1; cursor: pointer; padding: 0;" style-hover="color: #ef5b5b;">✕</button>
+                </sc-if>
+              </span>
+            </sc-for>
+            <button onClick="{{ addPage }}" title="Add a page" style="width: 46px; height: 30px; border-radius: 6px; border: 1px dashed #3a4256; background: transparent; color: #5b6072; font-size: 13px; cursor: pointer;" style-hover="border-color: #EC4899; color: #e6e8ef;">+</button>
+            <button onClick="{{ duplicatePage }}" title="Duplicate this page" style="width: 46px; height: 24px; border-radius: 6px; border: 1px solid #1d2331; background: transparent; color: #5b6072; font-family: 'JetBrains Mono', monospace; font-size: 8px; cursor: pointer;" style-hover="color: #e6e8ef;">DUP</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="{{ inspectorWrap }}">
+        <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ inspectorBar }}">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; flex: 0 0 auto;">{{ selLabel }}</span>
+              <span style="width: 1px; height: 20px; background: #1d2331;"></span>
+
+              <sc-if value="{{ selIsText }}" hint-placeholder-val="{{ true }}">
+                <select value="{{ sel.fontFamily }}" onChange="{{ onFont }}" style="height: 28px; max-width: 148px; padding: 0 6px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-size: 11px;">
+                  <sc-for list="{{ fontOptions }}" as="o" hint-placeholder-count="10">
+                    <option value="{{ o.family }}">{{ o.name }}</option>
+                  </sc-for>
+                </select>
+                <input type="number" value="{{ sel.fontSize }}" onChange="{{ onFontSize }}" style="width: 58px; height: 28px; padding: 0 6px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-size: 11px;" />
+                <button onClick="{{ toggleBold }}" style="{{ boldStyle }}">B</button>
+                <button onClick="{{ toggleCaps }}" style="{{ capsStyle }}">AA</button>
+                <span style="display: flex; gap: 2px;">
+                  <sc-for list="{{ alignOptions }}" as="a" hint-placeholder-count="3">
+                    <button onClick="{{ a.onClick }}" style="{{ a.style }}">{{ a.glyph }}</button>
+                  </sc-for>
+                </span>
+              </sc-if>
+
+              <sc-if value="{{ selHasFill }}" hint-placeholder-val="{{ false }}">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <sc-for list="{{ colorSwatches }}" as="c" hint-placeholder-count="6">
+                    <button onClick="{{ c.onClick }}" title="{{ c.title }}" style="{{ c.style }}"></button>
+                  </sc-for>
+                  <input type="color" value="{{ selColorHex }}" onChange="{{ onCustomColor }}" style="width: 24px; height: 24px; cursor: pointer;" />
+                </span>
+              </sc-if>
+
+              <sc-if value="{{ selIsImage }}" hint-placeholder-val="{{ false }}">
+                <span style="display: flex; gap: 4px;">
+                  <button onClick="{{ onImageUpload }}" style="height: 28px; padding: 0 10px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-size: 10px; cursor: pointer;">Replace</button>
+                  <button onClick="{{ onFitToggle }}" style="height: 28px; padding: 0 10px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #8a90a2; font-size: 10px; cursor: pointer;">{{ fitLabel }}</button>
+                </span>
+              </sc-if>
+
+              <sc-if value="{{ selIsRowData }}" hint-placeholder-val="{{ false }}">
+                <label style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">ROWS
+                  <input type="number" value="{{ sel.count }}" onChange="{{ onRows }}" style="width: 48px; height: 28px; padding: 0 6px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-size: 11px;" />
+                </label>
+              </sc-if>
+
+              <sc-if value="{{ selIsPlayerBlock }}" hint-placeholder-val="{{ false }}">
+                <label style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072;">PLAYER
+                  <select value="{{ sel.playerId }}" onChange="{{ onPlayerPick }}" style="height: 28px; max-width: 170px; padding: 0 6px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-size: 11px;">
+                    <sc-for list="{{ rosterPick }}" as="r" hint-placeholder-count="6">
+                      <option value="{{ r.id }}">{{ r.name }}</option>
+                    </sc-for>
+                  </select>
+                </label>
+              </sc-if>
+
+              <div style="flex: 1;"></div>
+
+              <span style="display: flex; align-items: center; gap: 2px;">
+                <button onClick="{{ selForward }}" title="Bring forward" style="{{ iconBtn }}">{{ upIcon }}</button>
+                <button onClick="{{ selBackward }}" title="Send backward" style="{{ iconBtn }}">{{ downIcon }}</button>
+                <button onClick="{{ selDuplicate }}" title="Duplicate" style="{{ iconBtn }}">{{ dupIcon }}</button>
+                <button onClick="{{ selDelete }}" title="Delete" style="{{ iconBtn }}">{{ delIcon }}</button>
+                <button onClick="{{ toggleAdv }}" title="More settings" style="{{ advBtnStyle }}">{{ advIcon }}</button>
+              </span>
+            </div>
+
+            <sc-if value="{{ advOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #1d2331; display: flex; flex-wrap: wrap; gap: 14px; align-items: center;">
+                <sc-if value="{{ selIsText }}" hint-placeholder-val="{{ false }}">
+                  <textarea value="{{ sel.text }}" onChange="{{ onText }}" rows="2" style="flex: 1 1 220px; min-width: 200px; padding: 6px 8px; border-radius: 5px; border: 1px solid #262d3d; background: #161b27; color: #e6e8ef; font-family: 'Inter', sans-serif; font-size: 12px; resize: vertical;"></textarea>
+                </sc-if>
+                <sc-for list="{{ advControls }}" as="c" hint-placeholder-count="4">
+                  <label style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .06em; color: #5b6072;">
+                    {{ c.label }}
+                    <input type="{{ c.type }}" value="{{ c.value }}" min="{{ c.min }}" max="{{ c.max }}" step="{{ c.step }}" onChange="{{ c.onChange }}" style="{{ c.style }}" />
+                  </label>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}">
+          <div style="height: 46px; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #3a3f50;">SELECT SOMETHING ON THE CANVAS TO EDIT IT</div>
+        </sc-if>
+      </div>
+    </main>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+<div style="width: 1440px; height: 900px; display: grid; place-items: center; background: #07090f; font-family: 'Inter', system-ui, sans-serif;">
+  <div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #0a0d14; color: #e6e8ef; border-radius: 34px; border: 1px solid #262d3d; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.6);">
+
+    <div style="height: 46px; flex: 0 0 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072;">9:41</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #3a3f50;">APPLECROSS CC</span>
+    </div>
+
+    <div style="flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 16px 12px;">
+      <span style="display: flex; align-items: center; gap: 8px;">
+        <img src="bettersocials.svg" alt="" style="width: 24px; height: 24px; border-radius: 7px;" />
+        <span style="font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 19px; line-height: 1;">Quick <span style="color: #EC4899;">post</span></span>
+      </span>
+      <button onClick="{{ goEditor }}" style="height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid #262d3d; background: transparent; color: #8a90a2; font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .06em; cursor: pointer;">FULL EDITOR</button>
+    </div>
+
+    <div style="flex: 0 0 auto; padding: 0 16px;">
+      <div style="{{ mobileCanvasStyle }}">
+        <sc-if value="{{ bgActive }}" hint-placeholder-val="{{ true }}">
+          <x-import component-from-global-scope="SocialBG.SocialBackground" from="./social-bg.jsx"
+            variant="{{ bgStyle }}" dc-props="{{ mobileBgProps }}" hint-size="100%,100%"
+            style="position: absolute; inset: 0;"></x-import>
+        </sc-if>
+        <sc-for list="{{ mobileBlocks }}" as="b" hint-placeholder-count="3">
+          <div style="{{ b.wrap }}">{{ b.content }}</div>
+        </sc-for>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-top: 6px; font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: .08em; color: #3a3f50;">
+        <span>1080 × 1080</span><span>{{ pageLabel }}</span>
+      </div>
+    </div>
+
+    <div style="flex: 1; min-height: 0; margin-top: 14px; border-top: 1px solid #1d2331; background: #10141d; border-radius: 20px 20px 0 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto;">
+      <div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">1 · WHAT IS IT</div>
+        <div style="display: flex; gap: 7px; overflow-x: auto; padding-bottom: 2px;">
+          <sc-for list="{{ mobileTypes }}" as="t" hint-placeholder-count="6">
+            <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <sc-if value="{{ hasMobileFields }}" hint-placeholder-val="{{ true }}">
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">2 · THE DETAILS</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <sc-for list="{{ mobileFields }}" as="f" hint-placeholder-count="3">
+            <label style="display: block;">
+              <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #5b6072; margin-bottom: 4px;">{{ f.label }}</span>
+              <input value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" style="width: 100%; height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #1d2331; background: #161b27; color: #e6e8ef; font-family: 'Inter', sans-serif; font-size: 15px;" />
+            </label>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; color: #5b6072; margin-bottom: 8px;">3 · THE LOOK</div>
+        <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px;">
+          <sc-for list="{{ mobileLooks }}" as="l" hint-placeholder-count="7">
+            <button onClick="{{ l.onClick }}" style="{{ l.style }}"></button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex: 0 0 auto; display: flex; gap: 8px; padding: 12px 16px 22px; background: #10141d; border-top: 1px solid #1d2331;">
+      <button style="flex: 1; height: 48px; border-radius: 12px; border: 1px solid #262d3d; background: transparent; color: #8a90a2; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .06em; cursor: pointer;">SAVE DRAFT</button>
+      <button style="flex: 2; height: 48px; border-radius: 12px; border: none; background: #EC4899; color: #0a0d14; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .06em; cursor: pointer;">↓ SAVE TO PHONE</button>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EC4899&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EC4899&quot;,&quot;#16C784&quot;,&quot;#3B82F6&quot;,&quot;#F59E0B&quot;],&quot;section&quot;:&quot;Look&quot;},&quot;inspectorPlacement&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;float&quot;,&quot;options&quot;:[&quot;float&quot;,&quot;dock&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+const PALETTES = {
+  club:     { key: 'club',     name: 'Club',     primary: '#101113', secondary: '#1d1f23', accent: '#ef5b5b', ink: '#ffffff' },
+  midnight: { key: 'midnight', name: 'Midnight', primary: '#0b1530', secondary: '#1a2647', accent: '#ffc233', ink: '#ffffff' },
+  crimson:  { key: 'crimson',  name: 'Crimson',  primary: '#2a0a0e', secondary: '#5a0f1a', accent: '#ff3344', ink: '#fff4e6' },
+  forest:   { key: 'forest',   name: 'Forest',   primary: '#0c2418', secondary: '#163828', accent: '#c4ff4d', ink: '#f4fbe8' },
+  cobalt:   { key: 'cobalt',   name: 'Cobalt',   primary: '#0b1f4a', secondary: '#17336b', accent: '#00c2ff', ink: '#ffffff' },
+  rust:     { key: 'rust',     name: 'Rust',     primary: '#1e0f08', secondary: '#3a1a0a', accent: '#ff7a1a', ink: '#fff1e3' },
+  graphite: { key: 'graphite', name: 'Graphite', primary: '#101113', secondary: '#1d1f23', accent: '#e8ff00', ink: '#ffffff' },
+};
+
+const FONTS = [
+  { key: 'anton', name: 'Anton', family: "'Anton', sans-serif" },
+  { key: 'barlow', name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif" },
+  { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
+  { key: 'archivo', name: 'Archivo Black', family: "'Archivo Black', sans-serif" },
+  { key: 'oswald', name: 'Oswald', family: "'Oswald', sans-serif" },
+  { key: 'abril', name: 'Abril Fatface', family: "'Abril Fatface', serif" },
+  { key: 'marker', name: 'Permanent Marker', family: "'Permanent Marker', cursive" },
+  { key: 'caveat', name: 'Caveat', family: "'Caveat', cursive" },
+  { key: 'inter', name: 'Inter (body)', family: "'Inter', sans-serif" },
+  { key: 'mono', name: 'Mono', family: "'JetBrains Mono', monospace" },
+];
+
+const ELEMENTS = [
+  { shape: 'line', name: 'Line' }, { shape: 'divider', name: 'Divider' }, { shape: 'rect', name: 'Box' },
+  { shape: 'ellipse', name: 'Circle' }, { shape: 'triangle', name: 'Triangle' }, { shape: 'star', name: 'Star' },
+  { shape: 'arrow', name: 'Arrow' }, { shape: 'chevron', name: 'Chevron' }, { shape: 'diamond', name: 'Diamond' },
+  { shape: 'hexagon', name: 'Hexagon' },
+];
+
+const CLIP_SHAPES = {
+  star: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+  arrow: 'polygon(0% 30%, 60% 30%, 60% 10%, 100% 50%, 60% 90%, 60% 70%, 0% 70%)',
+  chevron: 'polygon(0% 0%, 50% 0%, 100% 50%, 50% 100%, 0% 100%, 50% 50%)',
+  diamond: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+  hexagon: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+  triangle: 'polygon(50% 0, 100% 100%, 0 100%)',
+};
+
+const DATA_BLOCKS = [
+  { kind: 'playerphoto', name: 'Player photo', desc: 'The headshot on their profile, cut out.', group: 'PLAYER' },
+  { kind: 'playername', name: 'Player name', desc: 'First name + surname lockup, with role.', group: 'PLAYER' },
+  { kind: 'player', name: 'Player stats', desc: 'A career stat tile grid for one player.', group: 'PLAYER' },
+  { kind: 'fixtures', name: 'Fixtures', desc: "This round's fixtures, every grade.", group: 'CLUB' },
+  { kind: 'results', name: 'Results', desc: 'Weekend results with win / loss coding.', group: 'CLUB' },
+  { kind: 'record', name: 'W–L–D record', desc: 'Season record as three big numbers.', group: 'CLUB' },
+  { kind: 'scorecard', name: 'Scorecard', desc: 'Both innings with the top performers.', group: 'CLUB' },
+];
+
+const BACKGROUNDS = [
+  { key: 'none', label: 'Clean', group: 'Clean' },
+  { key: 'ink-splatter', label: 'Ink Splatter', group: 'Splatter & Spray' },
+  { key: 'spray-stencil', label: 'Spray Stencil', group: 'Splatter & Spray' },
+  { key: 'paint-sweep', label: 'Paint Sweep', group: 'Splatter & Spray' },
+  { key: 'drip-curtain', label: 'Drip Curtain', group: 'Splatter & Spray' },
+  { key: 'graffiti', label: 'Graffiti Chaos', group: 'Splatter & Spray' },
+  { key: 'concrete-grit', label: 'Concrete Grit', group: 'Grit & Grunge' },
+  { key: 'chevron-grit', label: 'Chevron Grit', group: 'Grit & Grunge' },
+  { key: 'airbrush-glow', label: 'Airbrush Glow', group: 'Grit & Grunge' },
+  { key: 'spotlight', label: 'Photo Spotlight', group: 'Grit & Grunge' },
+  { key: 'torn-halftone', label: 'Torn Halftone', group: 'Print' },
+  { key: 'halftone-ramp', label: 'Halftone Ramp', group: 'Print' },
+  { key: 'poster-solid', label: 'Poster Solid', group: 'Print' },
+  { key: 'led', label: 'LED Scoreboard', group: 'Print' },
+  { key: 'riso-geometric', label: 'Riso Geometric', group: 'Geometric' },
+  { key: 'gradient-linework', label: 'Gradient Linework', group: 'Geometric' },
+  { key: 'bolt', label: 'Bolt Energy', group: 'Geometric' },
+  { key: 'shard', label: 'Shard Cut', group: 'Geometric' },
+  { key: 'contour-rings', label: 'Contour Rings', group: 'Geometric' },
+];
+
+const POST_TYPES = [
+  { key: 'lineup', label: 'Lineup' },
+  { key: 'fixtures', label: 'Fixtures' },
+  { key: 'result', label: 'Final Score' },
+  { key: 'results', label: 'Results' },
+  { key: 'motm', label: 'Player of Match' },
+  { key: 'announcement', label: 'Announcement' },
+  { key: 'toss', label: 'Toss' },
+  { key: 'scorecard', label: 'Scorecard' },
+  { key: 'events', label: 'Events' },
+  { key: 'blank', label: 'Blank canvas' },
+];
+
+const TAB_TEMPLATES = {
+  lineup: [
+    { id: 'T1', name: 'Hero List', desc: 'Big player + name list' },
+    { id: 'T3', name: 'Side Numbered', desc: 'Side photo + numbered XI' },
+    { id: 'T5', name: 'Brutalist', desc: 'Typography-forward XI' },
+    { id: 'T9', name: 'Flyer', desc: 'Festival poster style' },
+  ],
+  fixtures: [
+    { id: 'FX1', name: 'List', desc: 'Clean factual rows' },
+    { id: 'FX2', name: 'Match-day Hype', desc: 'Diagonal poster' },
+    { id: 'FX4', name: 'Board', desc: 'Departure-board table' },
+    { id: 'FX6', name: 'Schedule', desc: 'Match-day timeline' },
+  ],
+  result: [
+    { id: 'C4', name: 'Classic', desc: 'Full time result + performers' },
+    { id: 'RS1', name: 'Margin Hero', desc: 'Big WIN headline + margin' },
+    { id: 'RS5', name: 'Innings Bars', desc: 'Proportional score bars' },
+    { id: 'RS6', name: 'Match Ticket', desc: 'Ticket-stub aesthetic' },
+  ],
+  results: [
+    { id: 'RR1', name: 'Weekend Wrap', desc: 'Win/loss list' },
+    { id: 'RR3', name: 'Record Strip', desc: 'W–L record summary' },
+    { id: 'RR5', name: 'Board', desc: 'Results table' },
+    { id: 'RR6', name: 'Win/Loss Split', desc: 'Wins vs losses columns' },
+  ],
+  motm: [
+    { id: 'C3', name: 'Player Spotlight', desc: 'Man of match / player stats' },
+    { id: 'RS4', name: 'Star of the Day', desc: 'Player-of-the-match hero' },
+  ],
+  announcement: [{ id: 'C1', name: 'Announcement', desc: 'Captain / debut / award' }],
+  toss: [{ id: 'C2', name: 'Toss', desc: 'Toss result post' }],
+  scorecard: [
+    { id: 'SC1', name: 'Broadcast', desc: 'TV-style full scorecard' },
+    { id: 'SC2', name: 'Brutalist', desc: 'Bold type, heavy rules' },
+    { id: 'SC3', name: 'Dashboard', desc: 'Soft cards, app-style' },
+  ],
+  events: [
+    { id: 'EV1', name: 'Floodlit', desc: 'Night-game poster' },
+    { id: 'EV3', name: 'Ticket', desc: 'Ticket-stub event' },
+    { id: 'EV5', name: 'Gazette', desc: 'Newspaper masthead' },
+    { id: 'EV9', name: 'Crest', desc: 'Club crest centrepiece' },
+  ],
+  blank: [
+    { id: 'blank', name: 'Empty', desc: 'Just the club badge' },
+    { id: 'players', name: 'Players wanted', desc: 'Recruitment headline' },
+    { id: 'announcement', name: 'Announcement', desc: 'Name + supporting line' },
+    { id: 'quote', name: 'Big quote', desc: 'Pull-quote and attribution' },
+    { id: 'fixture', name: 'This week', desc: 'Fixture headline block' },
+  ],
+};
+
+const CONTENT_GROUPS = {
+  match: {
+    title: 'MATCH INFO',
+    fields: [
+      ['headline', 'Headline', 'SQUAD · 1st XI', true],
+      ['competition', 'Competition', 'PREMIER T20'],
+      ['round', 'Round', 'ROUND 7'],
+      ['venue', 'Venue', 'Heathcote Reserve'],
+      ['date', 'Date', 'SAT 30 MAY'],
+      ['time', 'Time', '2:30 PM'],
+      ['season', 'Season', '2025–26'],
+    ],
+  },
+  opponent: { title: 'OPPONENT', fields: [['oppName', 'Club', 'Melville CC', true], ['oppShort', 'Short', 'MEL']] },
+  announcement: { title: 'ANNOUNCEMENT', fields: [['kind', 'Kind', 'APPOINTMENT', true], ['headline2', 'Headline', 'NAMED CAPTAIN', true], ['first', 'First name', 'Jack'], ['last', 'Surname', 'Barlow'], ['sub', 'Supporting line', 'For the 2026-27 season', true]] },
+  toss: { title: 'TOSS', fields: [['winner', 'Winner', 'US'], ['decision', 'Decision', 'BAT'], ['oppName', 'Opponent', 'Melville CC', true]] },
+  motm: { title: 'PLAYER', fields: [['first', 'First name', 'Jack'], ['last', 'Surname', 'Barlow'], ['role', 'Role', 'All-Rounder'], ['summary', 'Summary', '87 (54) and 2/22', true]] },
+  result: { title: 'RESULT', fields: [['teamScore', 'Our score', '184/6'], ['oppScore', 'Their score', '178'], ['margin', 'Margin', 'BY 6 RUNS'], ['motmLast', 'MOTM', 'BARLOW']] },
+};
+
+const TAB_CONTENT = {
+  lineup: ['match', 'opponent'], fixtures: ['match'], result: ['match', 'result'],
+  results: ['match'], motm: ['match', 'motm'], announcement: ['announcement'],
+  toss: ['match', 'toss'], scorecard: ['result'], events: ['match'], blank: [],
+};
+
+const CLUB = { name: 'APPLECROSS', full: 'Applecross Cricket Club', short: 'APP', ground: 'Heathcote Reserve' };
+
+const DEMO = {
+  fixtures: [
+    { grade: '1ST XI', opp: 'Melville', ha: 'H', time: '1:00 PM', venue: 'Heathcote' },
+    { grade: '2ND XI', opp: 'Fremantle', ha: 'A', time: '1:00 PM', venue: 'Stevens Res' },
+    { grade: '3RD XI', opp: 'Willetton', ha: 'H', time: '12:30 PM', venue: 'Ken Hurst' },
+    { grade: '4TH XI', opp: 'Rossmoyne', ha: 'A', time: '12:30 PM', venue: 'Shelley Res' },
+    { grade: '6TH XI', opp: 'Bicton', ha: 'H', time: '10:00 AM', venue: 'Heathcote' },
+  ],
+  results: [
+    { grade: '1ST XI', opp: 'Melville', us: '184/6', them: '178', outcome: 'W' },
+    { grade: '2ND XI', opp: 'Fremantle', us: '142', them: '201/4', outcome: 'L' },
+    { grade: '3RD XI', opp: 'Willetton', us: '210/8', them: '160', outcome: 'W' },
+    { grade: '4TH XI', opp: 'Rossmoyne', us: '98', them: '99/3', outcome: 'L' },
+    { grade: '6TH XI', opp: 'Bicton', us: '156/5', them: '120', outcome: 'W' },
+  ],
+  record: { w: 9, l: 4, d: 1 },
+  // The club roster the Club Data blocks read from — same shape the templates
+  // use (first / last / role / headshot), so a player block is name + photo + stats.
+  roster: [
+    { id: 'p1', first: 'Jack', last: 'BARLOW', role: 'All-Rounder', bat: { games: 84, runs: 2411, avg: 34.4, hs: 121 }, bowl: { wkts: 63, avg: 22.8 } },
+    { id: 'p2', first: 'Tom', last: 'NGUYEN', role: 'Batter', bat: { games: 61, runs: 1876, avg: 31.8, hs: 104 }, bowl: { wkts: 8, avg: 41.2 } },
+    { id: 'p3', first: 'Simran', last: 'KAUR', role: 'Wicket-Keeper', bat: { games: 52, runs: 1204, avg: 26.2, hs: 88 }, bowl: { wkts: 0, avg: '—' } },
+    { id: 'p4', first: 'Michael', last: 'OYELARAN', role: 'Bowler', bat: { games: 47, runs: 402, avg: 11.5, hs: 34 }, bowl: { wkts: 91, avg: 18.4 } },
+    { id: 'p5', first: 'Dan', last: 'PETROV', role: 'Batter', bat: { games: 73, runs: 2140, avg: 30.1, hs: 96 }, bowl: { wkts: 22, avg: 29.7 } },
+    { id: 'p6', first: 'Aaron', last: 'WHITCOMBE', role: 'All-Rounder', bat: { games: 38, runs: 861, avg: 24.6, hs: 71 }, bowl: { wkts: 44, avg: 21.1 } },
+  ],
+};
+const rosterOf = (id) => DEMO.roster.find((p) => p.id === id) || DEMO.roster[0];
+
+let _seq = 0;
+const nid = () => `bi${Date.now().toString(36)}${(_seq++).toString(36)}`;
+
+function newItem(type, opts = {}) {
+  const id = nid();
+  if (type === 'text') return { id, type: 'text', text: opts.text || 'YOUR TEXT HERE', x: 90, y: 440, w: 900, fontFamily: opts.fontFamily || "'Anton', sans-serif", fontSize: opts.fontSize || 120, bold: opts.bold !== false, color: 'ink', align: 'left', lineHeight: 0.92, letterSpacing: 0, uppercase: opts.uppercase !== false, bg: 'none', rotation: 0 };
+  if (type === 'image') return { id, type: 'image', x: 340, y: 340, w: 400, h: 400, src: opts.src || null, srcName: opts.srcName || null, radius: 0, fit: opts.src ? 'cover' : 'contain', rotation: 0 };
+  if (type === 'brand') return { id, type: 'brand', x: 60, y: 60, size: 160, layout: 'row', showName: true, align: 'left', color: 'ink' };
+  if (type === 'element') {
+    const shape = opts.shape || 'line';
+    if (shape === 'line') return { id, type: 'element', shape, x: 120, y: 220, w: 840, h: 6, thickness: 6, color: 'accent', opacity: 1, rotation: 0 };
+    if (shape === 'divider') return { id, type: 'element', shape, x: 90, y: 540, w: 900, h: 4, thickness: 4, color: 'ink', opacity: 0.5, rotation: 0 };
+    if (shape === 'rect') return { id, type: 'element', shape, x: 380, y: 400, w: 320, h: 200, color: 'accent', fill: true, radius: 0, thickness: 6, opacity: 1, rotation: 0 };
+    if (shape === 'ellipse') return { id, type: 'element', shape, x: 420, y: 380, w: 240, h: 240, color: 'accent', fill: true, thickness: 6, opacity: 1, rotation: 0 };
+    return { id, type: 'element', shape, x: 420, y: 380, w: 260, h: 230, color: 'accent', opacity: 1, rotation: 0 };
+  }
+  if (type === 'data') {
+    const kind = opts.kind || 'fixtures';
+    const base = { id, type: 'data', kind, x: 70, y: 300, w: 940, color: 'ink', accent: 'accent', count: 5, rotation: 0 };
+    if (kind === 'record') return { ...base, w: 900, h: 240 };
+    if (kind === 'player') return { ...base, w: 900, h: 380, playerId: 'p1' };
+    if (kind === 'playerphoto') return { ...base, x: 540, y: 300, w: 460, h: 620, playerId: opts.playerId || 'p1', fit: 'contain' };
+    if (kind === 'playername') return { ...base, x: 70, y: 560, w: 900, h: 260, playerId: opts.playerId || 'p1', showRole: true };
+    if (kind === 'scorecard') return { ...base, w: 940, h: 520 };
+    return { ...base, h: 70 + 5 * 70 };
+  }
+  return null;
+}
+
+const T = (text, o = {}) => ({ ...newItem('text'), text, bold: true, uppercase: true, ...o });
+const BODY = (text, o = {}) => ({ ...newItem('text'), text, bold: false, uppercase: false, fontFamily: "'Inter', sans-serif", lineHeight: 1.2, ...o });
+const EL = (shape, o = {}) => ({ ...newItem('element', { shape }), ...o });
+const BR = (o = {}) => ({ ...newItem('brand'), ...o });
+const DT = (kind, o = {}) => ({ ...newItem('data', { kind }), ...o });
+
+const STARTERS = {
+  blank: () => [BR({ x: 60, y: 56, size: 150 })],
+  players: () => [
+    BR({ x: 60, y: 56, size: 184 }),
+    T('PLAYERS WANTED', { x: 70, y: 470, w: 940, fontSize: 150, color: 'ink' }),
+    BODY('Join the club this season — all grades, all ages welcome.', { x: 72, y: 770, w: 780, fontSize: 40, color: 'ink' }),
+  ],
+  announcement: () => [
+    BR({ x: 700, y: 56, size: 150, layout: 'stack', align: 'right' }),
+    T('APPOINTMENT', { x: 70, y: 70, w: 360, fontSize: 34, color: 'accent' }),
+    EL('line', { x: 70, y: 470, w: 260, h: 10, thickness: 10, color: 'accent' }),
+    T('PLAYER NAME', { x: 70, y: 520, w: 940, fontSize: 130, color: 'ink' }),
+    T('NAMED FOR THE 2026-27 SEASON', { x: 72, y: 860, w: 820, fontSize: 40, color: 'accent' }),
+  ],
+  quote: () => [
+    BR({ x: 60, y: 56, size: 150 }),
+    T('“', { x: 60, y: 300, w: 300, fontSize: 340, color: 'accent', lineHeight: 0.7 }),
+    T('Add your quote here — a message from the club.', { x: 90, y: 470, w: 900, fontSize: 90, color: 'ink', uppercase: false, lineHeight: 1.05 }),
+    BODY('— Name, Role', { x: 92, y: 880, w: 700, fontSize: 44, color: 'accent' }),
+  ],
+  fixture: () => [
+    BR({ x: 60, y: 56, size: 150 }),
+    T('THIS WEEK', { x: 70, y: 300, w: 940, fontSize: 120, color: 'accent' }),
+    T('1ST XI v OPPONENT', { x: 70, y: 470, w: 940, fontSize: 96, color: 'ink' }),
+    EL('divider', { x: 70, y: 640, w: 940, h: 4, thickness: 4, color: 'ink', opacity: 0.4 }),
+    T('SAT · 1:00 PM · HOME GROUND', { x: 72, y: 700, w: 900, fontSize: 46, color: 'ink' }),
+  ],
+  C1: () => [
+    BR({ x: 700, y: 56, size: 150, layout: 'stack', align: 'right' }),
+    T('APPOINTMENT', { x: 70, y: 70, w: 420, fontSize: 34, color: 'accent' }),
+    EL('line', { x: 70, y: 470, w: 260, h: 10, thickness: 10, color: 'accent' }),
+    T('NAMED CAPTAIN', { x: 70, y: 520, w: 940, fontSize: 56, color: 'accent' }),
+    T('JACK', { x: 70, y: 600, w: 940, fontSize: 64, color: 'ink' }),
+    T('BARLOW', { x: 70, y: 668, w: 960, fontSize: 150, color: 'ink' }),
+    T('FOR THE 2026-27 SEASON', { x: 72, y: 880, w: 860, fontSize: 40, color: 'accent' }),
+  ],
+  C2: () => [
+    BR({ x: 60, y: 56, size: 120, layout: 'row' }),
+    T('WE WON THE TOSS', { x: 70, y: 300, w: 940, fontSize: 40, color: 'primary', bg: 'accent' }),
+    T("WE'RE", { x: 70, y: 400, w: 940, fontSize: 80, color: 'ink' }),
+    T('BAT', { x: 70, y: 490, w: 960, fontSize: 200, color: 'ink' }),
+    T('FIRST', { x: 70, y: 710, w: 940, fontSize: 72, color: 'accent' }),
+    T('US V MELVILLE CC', { x: 70, y: 840, w: 940, fontSize: 40, color: 'ink' }),
+    BODY('SAT 30 MAY · HEATHCOTE RESERVE', { x: 72, y: 920, w: 900, fontSize: 30, color: 'ink' }),
+  ],
+  // Uses the Club Data player blocks — photo, name and career tiles all read
+  // from the chosen player's profile.
+  C3: () => [
+    BR({ x: 60, y: 56, size: 120 }),
+    T('★ PLAYER OF THE MATCH', { x: 70, y: 220, w: 640, fontSize: 30, color: 'accent' }),
+    DT('playerphoto', { x: 560, y: 290, w: 460, h: 500, playerId: 'p1' }),
+    DT('playername', { x: 70, y: 300, w: 520, playerId: 'p1', showRole: true }),
+    EL('line', { x: 70, y: 620, w: 260, h: 10, thickness: 10, color: 'accent' }),
+    DT('player', { x: 70, y: 680, w: 900, playerId: 'p1' }),
+  ],
+  C4: () => [
+    BR({ x: 700, y: 56, size: 120, layout: 'stack', align: 'right' }),
+    T('FULL TIME', { x: 70, y: 70, w: 420, fontSize: 34, color: 'accent' }),
+    T('US', { x: 70, y: 300, w: 700, fontSize: 48, color: 'ink' }),
+    T('184/6', { x: 70, y: 360, w: 700, fontSize: 96, color: 'ink' }),
+    T('MELVILLE CC', { x: 70, y: 520, w: 700, fontSize: 48, color: 'ink' }),
+    T('178', { x: 70, y: 580, w: 700, fontSize: 96, color: 'ink' }),
+    T('WE WIN BY 6 RUNS', { x: 70, y: 760, w: 960, fontSize: 60, color: 'accent' }),
+    BODY('★ MOTM · BARLOW', { x: 72, y: 900, w: 900, fontSize: 32, color: 'ink', fontFamily: "'JetBrains Mono', monospace" }),
+  ],
+  fixturesData: () => [
+    BR({ x: 60, y: 56, size: 130 }),
+    T('THIS ROUND', { x: 70, y: 210, w: 940, fontSize: 90, color: 'accent' }),
+    DT('fixtures', { x: 70, y: 340, w: 940 }),
+  ],
+  resultsData: () => [
+    BR({ x: 60, y: 56, size: 130 }),
+    T('WEEKEND WRAP', { x: 70, y: 210, w: 940, fontSize: 90, color: 'accent' }),
+    DT('results', { x: 70, y: 340, w: 940 }),
+  ],
+  scorecardData: () => [
+    BR({ x: 60, y: 56, size: 120 }),
+    DT('scorecard', { x: 70, y: 260, w: 940 }),
+  ],
+  lineupData: () => [
+    BR({ x: 60, y: 56, size: 150 }),
+    T('SQUAD', { x: 70, y: 230, w: 940, fontSize: 44, color: 'accent' }),
+    T('1ST XI v MELVILLE', { x: 70, y: 290, w: 940, fontSize: 96, color: 'ink' }),
+    EL('line', { x: 70, y: 430, w: 300, h: 10, thickness: 10, color: 'accent' }),
+    BODY('BARLOW (c)\nNGUYEN\nKAUR (wk)\nOYELARAN\nPETROV\nWHITCOMBE', { x: 72, y: 480, w: 500, fontSize: 46, color: 'ink', lineHeight: 1.25 }),
+    BODY('SAT 30 MAY · 1:00 PM\nHEATHCOTE RESERVE', { x: 72, y: 930, w: 900, fontSize: 30, color: 'accent', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4 }),
+  ],
+  eventsData: () => [
+    BR({ x: 60, y: 56, size: 150, layout: 'stack' }),
+    T('SEASON LAUNCH', { x: 70, y: 420, w: 940, fontSize: 130, color: 'ink' }),
+    EL('rect', { x: 70, y: 700, w: 420, h: 90, color: 'accent', fill: true, radius: 0 }),
+    T('FRI 3 OCT · 6PM', { x: 92, y: 718, w: 400, fontSize: 46, color: 'primary' }),
+    BODY('Clubrooms · tickets at the bar · all families welcome.', { x: 72, y: 840, w: 820, fontSize: 34, color: 'ink' }),
+  ],
+};
+
+const TAB_STARTER = {
+  lineup: 'lineupData', fixtures: 'fixturesData', result: 'C4', results: 'resultsData',
+  motm: 'C3', announcement: 'C1', toss: 'C2', scorecard: 'scorecardData',
+  events: 'eventsData', blank: 'players',
+};
+
+const TOKEN_SWATCHES = [
+  { key: 'primary', label: 'Club primary' }, { key: 'secondary', label: 'Club secondary' },
+  { key: 'accent', label: 'Accent' }, { key: 'ink', label: 'Text' },
+  { key: 'white', label: 'White' }, { key: 'black', label: 'Black' },
+];
+
+const CANVAS = 660;
+const SCALE = CANVAS / 1080;
+
+// Icon geometry lifted verbatim from frontend/src/pages/admin/betterselect/ui.jsx
+// (the app's own <Icon /> kit — same 24px viewBox, stroke = currentColor).
+const ICON_PATHS = {
+  overview: [['rect', { x: 3, y: 3, width: 7, height: 7, rx: 1.5 }], ['rect', { x: 14, y: 3, width: 7, height: 7, rx: 1.5 }], ['rect', { x: 3, y: 14, width: 7, height: 7, rx: 1.5 }], ['rect', { x: 14, y: 14, width: 7, height: 7, rx: 1.5 }]],
+  sheet: [['rect', { x: 4, y: 3.5, width: 16, height: 17, rx: 2 }], ['path', { d: 'M8 8.5h8M8 12h8M8 15.5h5' }]],
+  list: [['path', { d: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01' }]],
+  selection: [['path', { d: 'M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z' }]],
+  player: [['circle', { cx: 12, cy: 8, r: 3.4 }], ['path', { d: 'M5.5 20a6.5 6.5 0 0 1 13 0' }]],
+  ladders: [['path', { d: 'M5 21V9M12 21V4M19 21v-8' }]],
+  settings: [['circle', { cx: 12, cy: 12, r: 3 }], ['path', { d: 'M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9' }]],
+  cols: [['rect', { x: 3.5, y: 4, width: 7, height: 16, rx: 1.6 }], ['rect', { x: 13.5, y: 4, width: 7, height: 16, rx: 1.6 }]],
+  reset: [['path', { d: 'M3.5 12a8.5 8.5 0 1 1 2.5 6' }], ['path', { d: 'M3.5 20v-5h5' }]],
+  trash: [['path', { d: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13' }]],
+  grip: [['circle', { cx: 9, cy: 6, r: 1.1, fill: 'currentColor', stroke: 'none' }], ['circle', { cx: 15, cy: 6, r: 1.1, fill: 'currentColor', stroke: 'none' }], ['circle', { cx: 9, cy: 12, r: 1.1, fill: 'currentColor', stroke: 'none' }], ['circle', { cx: 15, cy: 12, r: 1.1, fill: 'currentColor', stroke: 'none' }], ['circle', { cx: 9, cy: 18, r: 1.1, fill: 'currentColor', stroke: 'none' }], ['circle', { cx: 15, cy: 18, r: 1.1, fill: 'currentColor', stroke: 'none' }]],
+  chevron: [['path', { d: 'M9 6l6 6-6 6' }]],
+  arrow: [['path', { d: 'M5 12h14M13 6l6 6-6 6' }]],
+  filter: [['path', { d: 'M4 6h16M7 12h10M10 18h4' }]],
+  share: [['circle', { cx: 6, cy: 12, r: 2.4 }], ['circle', { cx: 17, cy: 6, r: 2.4 }], ['circle', { cx: 17, cy: 18, r: 2.4 }], ['path', { d: 'M8.1 11l6.8-3.9M8.1 13l6.8 3.9' }]],
+};
+
+function icon(name, size = 18, style) {
+  const paths = ICON_PATHS[name] || [];
+  return React.createElement('svg', {
+    width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+    strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+    style: { display: 'block', flex: '0 0 auto', ...(style || {}) },
+  }, paths.map(([tag, attrs], i) => React.createElement(tag, { key: i, ...attrs })));
+}
+
+const TOOLS = [
+  { key: 'design', icon: 'overview', label: 'DESIGN', title: 'Design', meta: 'layouts' },
+  { key: 'content', icon: 'sheet', label: 'CONTENT', title: 'Content', meta: 'this post' },
+  { key: 'text', icon: 'list', label: 'TEXT', title: 'Text', meta: '' },
+  { key: 'elements', icon: 'selection', label: 'SHAPES', title: 'Shapes', meta: '' },
+  { key: 'photos', icon: 'player', label: 'PHOTOS', title: 'Photos & badge', meta: '' },
+  { key: 'data', icon: 'ladders', label: 'CLUB DATA', title: 'Club data', meta: 'live' },
+  { key: 'brand', icon: 'settings', label: 'BRAND', title: 'Brand kit', meta: 'colour · type' },
+];
+
+class Component extends DCLogic {
+  state = {
+    tab: 'blank',
+    tool: 'design',
+    postTypesOpen: false,
+    items: STARTERS.players(),
+    selIds: [],
+    paletteKey: 'club',
+    custom: { primary: '#101113', accent: '#EC4899' },
+    bgStyle: 'poster-solid',
+    // Per-texture colour overrides, keyed by texture — same shape as
+    // AdminSocialPost's bgColors state (primary/secondary/tertiary/paper/ink).
+    bgColors: {},
+    fontKey: 'anton',
+    advOpen: false,
+    past: [],
+    future: [],
+    log: [{ label: 'Opened Players wanted', t: 0 }],
+    savedLooks: [
+      { name: 'Match Day Grunge', primary: '#101113', accent: '#e8ff00', bgStyle: 'concrete-grit' },
+      { name: 'Night Fixture', primary: '#0b1530', accent: '#ffc233', bgStyle: 'led' },
+    ],
+    savedTemplates: [
+      { name: 'Round wrap — 1st XI', meta: 'RR1 · 6 blocks' },
+      { name: 'Debut announcement', meta: 'C1 · edit' },
+    ],
+    content: { headline: '', competition: '', round: '', venue: '', date: '', time: '', season: '' },
+    // Which surface is on screen: first-run picker, the desktop editor, or the phone quick-post.
+    screen: 'start',
+    // Carousel pages. `items` is always the live page; the others are stashed here.
+    pageStore: {},
+    pageIdx: 0,
+    pageCount: 1,
+    // Club media library — uploads are reusable across every post.
+    uploads: [
+      { id: 'u1', name: 'Team huddle 2026', url: null },
+      { id: 'u2', name: 'Heathcote sunset', url: null },
+      { id: 'u3', name: 'Barlow cut shot', url: null },
+      { id: 'u4', name: 'Premiership cup', url: null },
+    ],
+    photoTab: 'uploads',
+    brand: {
+      crest: null,
+      colours: { primary: '#101113', accent: '#ef5b5b', secondary: '#1d1f23', ink: '#ffffff' },
+      headlineFont: 'anton',
+      bodyFont: 'inter',
+      sponsors: [{ name: 'Applecross Physio', url: null }, { name: 'Riseley Bakery', url: null }],
+    },
+    brandSaved: true,
+  };
+
+  // ── pages (carousel) ──────────────────────────────────────────────────────
+  goToPage(i) {
+    this.setState((s) => ({ pageStore: { ...s.pageStore, [s.pageIdx]: s.items }, pageIdx: i, items: s.pageStore[i] || [], selIds: [], past: [], future: [] }));
+  }
+  addPage() {
+    this.setState((s) => {
+      const i = s.pageCount;
+      return { pageStore: { ...s.pageStore, [s.pageIdx]: s.items }, pageCount: s.pageCount + 1, pageIdx: i, items: STARTERS.blank(), selIds: [], log: [{ label: `Added page ${i + 1}`, t: Date.now() }, ...s.log].slice(0, 8) };
+    });
+  }
+  removePage(i) {
+    this.setState((s) => {
+      if (s.pageCount < 2) return {};
+      const store = { ...s.pageStore, [s.pageIdx]: s.items };
+      const kept = [];
+      for (let k = 0; k < s.pageCount; k++) if (k !== i) kept.push(store[k] || []);
+      const store2 = {};
+      kept.forEach((v, k) => { store2[k] = v; });
+      const idx = Math.max(0, Math.min(kept.length - 1, s.pageIdx > i ? s.pageIdx - 1 : s.pageIdx));
+      return { pageStore: store2, pageCount: kept.length, pageIdx: idx, items: store2[idx] || [], selIds: [] };
+    });
+  }
+  duplicatePage() {
+    this.setState((s) => ({ pageStore: { ...s.pageStore, [s.pageIdx]: s.items, [s.pageCount]: s.items.map((it) => ({ ...it, id: nid() })) }, pageCount: s.pageCount + 1, log: [{ label: 'Duplicated page', t: Date.now() }, ...s.log].slice(0, 8) }));
+  }
+
+  // ── media library ─────────────────────────────────────────────────────────
+  onUploadFiles(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const added = files.map((f) => ({ id: nid(), name: f.name.replace(/\.[a-z]+$/i, ''), url: URL.createObjectURL(f) }));
+    this.setState((s) => ({ uploads: [...added, ...s.uploads] }));
+    e.target.value = '';
+  }
+  useUpload(u) {
+    const sel = this.state.selIds.length === 1 ? this.state.items.find((it) => it.id === this.state.selIds[0]) : null;
+    if (sel && sel.type === 'image') this.update(sel.id, { src: u.url, srcName: u.name }, 'Replaced image');
+    else this.add('image', { src: u.url, srcName: u.name }, 'Added image');
+  }
+
+  componentDidMount() {
+    this._key = (e) => {
+      const t = e.target.tagName;
+      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+      if ((e.key === 'Delete' || e.key === 'Backspace') && this.state.selIds.length) { e.preventDefault(); this.remove(this.state.selIds[0]); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? this.redo() : this.undo(); }
+    };
+    window.addEventListener('keydown', this._key);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._key); }
+
+  // ── history ───────────────────────────────────────────────────────────────
+  commit(label, mutate) {
+    this.setState((s) => {
+      const next = mutate(s);
+      return {
+        ...next,
+        past: [...s.past, s.items].slice(-40),
+        future: [],
+        log: [{ label, t: Date.now() }, ...s.log].slice(0, 8),
+      };
+    });
+  }
+  undo() {
+    this.setState((s) => (s.past.length ? { items: s.past[s.past.length - 1], past: s.past.slice(0, -1), future: [s.items, ...s.future], log: [{ label: 'Undo', t: Date.now() }, ...s.log].slice(0, 8) } : {}));
+  }
+  redo() {
+    this.setState((s) => (s.future.length ? { items: s.future[0], future: s.future.slice(1), past: [...s.past, s.items], log: [{ label: 'Redo', t: Date.now() }, ...s.log].slice(0, 8) } : {}));
+  }
+
+  // ── item ops ──────────────────────────────────────────────────────────────
+  patchMany(map) { this.setState((s) => ({ items: s.items.map((it) => (map[it.id] ? { ...it, ...map[it.id] } : it)) })); }
+  update(id, patch, label) {
+    if (label) this.commit(label, (s) => ({ items: s.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) }));
+    else this.patchMany({ [id]: patch });
+  }
+  add(type, opts, label) {
+    const it = newItem(type, opts);
+    this.commit(label || `Added ${type}`, (s) => ({ items: [...s.items, it], selIds: [it.id] }));
+  }
+  remove(id) { this.commit('Deleted block', (s) => ({ items: s.items.filter((it) => it.id !== id), selIds: [] })); }
+  duplicate(id) {
+    this.commit('Duplicated block', (s) => {
+      const src = s.items.find((it) => it.id === id);
+      if (!src) return {};
+      const copy = { ...src, id: nid(), x: src.x + 30, y: src.y + 30 };
+      return { items: [...s.items, copy], selIds: [copy.id] };
+    });
+  }
+  reorder(id, dir) {
+    this.commit(dir === 'up' ? 'Brought forward' : 'Sent backward', (s) => {
+      const i = s.items.findIndex((it) => it.id === id);
+      if (i < 0) return {};
+      const j = dir === 'up' ? i + 1 : i - 1;
+      if (j < 0 || j >= s.items.length) return {};
+      const next = s.items.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return { items: next };
+    });
+  }
+  select(id, additive) {
+    this.setState((s) => ({ selIds: additive ? (s.selIds.includes(id) ? s.selIds.filter((x) => x !== id) : [...s.selIds, id]) : [id] }));
+  }
+
+  palette() {
+    if (this.state.paletteKey === 'custom') return { key: 'custom', name: 'Custom', primary: this.state.custom.primary, secondary: this.state.custom.primary, accent: this.state.custom.accent, ink: '#ffffff' };
+    return PALETTES[this.state.paletteKey] || PALETTES.club;
+  }
+  resolve(c) {
+    const p = this.palette();
+    const map = { ink: p.ink, accent: p.accent, primary: p.primary, secondary: p.secondary, white: '#ffffff', black: '#0a0a0a' };
+    return map[c] || c || p.ink;
+  }
+
+  // ── canvas interaction ────────────────────────────────────────────────────
+  beginMove(e, id) {
+    e.stopPropagation();
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const cur = this.state.selIds;
+    const active = additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : (cur.includes(id) ? cur : [id]);
+    this.select(id, additive);
+    if (!active.length) return;
+    const starts = {};
+    active.forEach((aid) => { const it = this.state.items.find((x) => x.id === aid); if (it) starts[aid] = { x: it.x, y: it.y }; });
+    const sx = e.clientX, sy = e.clientY;
+    let moved = false;
+    const move = (ev) => {
+      moved = true;
+      const dx = (ev.clientX - sx) / SCALE, dy = (ev.clientY - sy) / SCALE;
+      const patch = {};
+      Object.entries(starts).forEach(([aid, st]) => { patch[aid] = { x: Math.round(st.x + dx), y: Math.round(st.y + dy) }; });
+      this.patchMany(patch);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (moved) this.setState((s) => ({ past: [...s.past, s.items].slice(-40), future: [], log: [{ label: 'Moved block', t: Date.now() }, ...s.log].slice(0, 8) }));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  beginResize(e, item) {
+    e.stopPropagation(); e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    const w0 = item.w, h0 = item.h, sz0 = item.size;
+    const move = (ev) => {
+      const dx = (ev.clientX - sx) / SCALE, dy = (ev.clientY - sy) / SCALE;
+      if (item.type === 'text' || item.type === 'data') this.patchMany({ [item.id]: { w: Math.max(40, Math.round(w0 + dx)) } });
+      else if (item.type === 'image') { const nw = Math.max(30, Math.round(w0 + dx)); const r = h0 && w0 ? h0 / w0 : 1; this.patchMany({ [item.id]: { w: nw, h: Math.max(30, Math.round(nw * r)) } }); }
+      else if (item.type === 'element') this.patchMany({ [item.id]: { w: Math.max(4, Math.round(w0 + dx)), h: Math.max(2, Math.round((h0 || 0) + dy)) } });
+      else if (item.type === 'brand') this.patchMany({ [item.id]: { size: Math.max(40, Math.round(sz0 + dx)) } });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this.setState((s) => ({ past: [...s.past, s.items].slice(-40), future: [], log: [{ label: 'Resized block', t: Date.now() }, ...s.log].slice(0, 8) }));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // ── block content (generated art, not layout chrome) ──────────────────────
+  content(it) {
+    const h = React.createElement;
+    const p = this.palette();
+    if (it.type === 'text') {
+      return h('div', { style: { width: it.w, fontFamily: it.fontFamily, fontSize: it.fontSize, fontWeight: it.bold ? 800 : 400, color: this.resolve(it.color), textAlign: it.align, lineHeight: it.lineHeight ?? 1, letterSpacing: it.letterSpacing || 0, textTransform: it.uppercase ? 'uppercase' : 'none', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: it.bg && it.bg !== 'none' ? this.resolve(it.bg) : 'transparent', padding: it.bg && it.bg !== 'none' ? '0.15em 0.4em' : 0, pointerEvents: 'none' } }, it.text || ' ');
+    }
+    if (it.type === 'image') {
+      if (it.src) return h('img', { src: it.src, alt: '', draggable: false, style: { width: it.w, height: it.h, objectFit: it.fit || 'contain', borderRadius: it.radius || 0, display: 'block', pointerEvents: 'none' } });
+      const ink = this.resolve('ink');
+      return h('div', { style: { width: it.w, height: it.h, borderRadius: it.radius || 0, border: `3px dashed ${ink}55`, background: `repeating-linear-gradient(135deg, ${ink}0f 0 14px, transparent 14px 28px)`, display: 'grid', placeItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 22, letterSpacing: 2, color: `${ink}99`, textAlign: 'center', padding: 16, pointerEvents: 'none' } }, it.srcName || 'PICK FROM UPLOADS');
+    }
+    if (it.type === 'brand') {
+      const ink = this.resolve(it.color);
+      const stack = it.layout === 'stack';
+      return h('div', { style: { display: 'flex', flexDirection: stack ? 'column' : 'row', alignItems: stack ? (it.align === 'right' ? 'flex-end' : 'flex-start') : 'center', gap: it.size * 0.14, pointerEvents: 'none' } }, [
+        h('div', { key: 'b', style: { width: it.size, height: it.size, borderRadius: it.size * 0.12, background: p.accent, color: p.primary, display: 'grid', placeItems: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: it.size * 0.42 } }, CLUB.short),
+        it.showName ? h('div', { key: 'n', style: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: it.size * 0.3, color: ink, lineHeight: 1, letterSpacing: '.01em', textAlign: stack && it.align === 'right' ? 'right' : 'left' } }, [CLUB.name, h('div', { key: 'c', style: { fontSize: it.size * 0.15, color: p.accent, letterSpacing: '.14em' } }, 'CRICKET CLUB')]) : null,
+      ]);
+    }
+    if (it.type === 'element') {
+      const color = this.resolve(it.color);
+      const op = it.opacity ?? 1;
+      if (it.shape === 'line' || it.shape === 'divider') return h('div', { style: { width: it.w, height: Math.max(1, it.thickness || 4), background: color, opacity: op, pointerEvents: 'none' } });
+      if (it.shape === 'ellipse') return h('div', { style: { width: it.w, height: it.h, borderRadius: '50%', background: it.fill !== false ? color : 'transparent', border: it.fill === false ? `${it.thickness || 4}px solid ${color}` : 'none', opacity: op, pointerEvents: 'none' } });
+      if (CLIP_SHAPES[it.shape]) return h('div', { style: { width: it.w, height: it.h, background: color, opacity: op, clipPath: CLIP_SHAPES[it.shape], pointerEvents: 'none' } });
+      return h('div', { style: { width: it.w, height: it.h, borderRadius: it.radius || 0, background: it.fill !== false ? color : 'transparent', border: it.fill === false ? `${it.thickness || 4}px solid ${color}` : 'none', opacity: op, pointerEvents: 'none' } });
+    }
+    if (it.type === 'data') return this.dataContent(it);
+    return null;
+  }
+
+  dataContent(it) {
+    const h = React.createElement;
+    const ink = this.resolve(it.color);
+    const accent = this.resolve(it.accent || 'accent');
+    const rule = `${ink}22`;
+    const display = "'Anton', sans-serif";
+    const mono = "'JetBrains Mono', monospace";
+    const wrap = { width: it.w, fontFamily: display, color: ink, pointerEvents: 'none' };
+    const head = (txt) => h('div', { key: 'h', style: { fontFamily: display, fontSize: 30, letterSpacing: 2, color: accent, marginBottom: 12 } }, txt);
+    const n = Math.max(1, Math.min(12, it.count || 5));
+
+    if (it.kind === 'fixtures') {
+      return h('div', { style: wrap }, [head('THIS WEEK'), ...DEMO.fixtures.slice(0, n).map((f, i) =>
+        h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '150px 1fr auto', alignItems: 'baseline', gap: 14, padding: '10px 0', borderTop: i ? `1px solid ${rule}` : 'none' } }, [
+          h('span', { key: 'g', style: { fontSize: 26, color: accent, letterSpacing: 1 } }, f.grade),
+          h('span', { key: 'o', style: { fontSize: 30, letterSpacing: 0.5 } }, `v ${f.opp.toUpperCase()} (${f.ha})`),
+          h('span', { key: 't', style: { fontFamily: mono, fontSize: 15, color: `${ink}bb` } }, `${f.time} · ${f.venue}`),
+        ]))]);
+    }
+    if (it.kind === 'results') {
+      return h('div', { style: wrap }, [head('RESULTS'), ...DEMO.results.slice(0, n).map((r, i) =>
+        h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '150px 1fr auto 40px', alignItems: 'baseline', gap: 14, padding: '10px 0', borderTop: i ? `1px solid ${rule}` : 'none' } }, [
+          h('span', { key: 'g', style: { fontSize: 24, color: accent, letterSpacing: 1 } }, r.grade),
+          h('span', { key: 'o', style: { fontSize: 28 } }, `v ${r.opp.toUpperCase()}`),
+          h('span', { key: 's', style: { fontFamily: mono, fontSize: 16, color: `${ink}cc` } }, `${r.us} / ${r.them}`),
+          h('span', { key: 'w', style: { fontSize: 26, textAlign: 'right', color: r.outcome === 'W' ? accent : `${ink}88` } }, r.outcome),
+        ]))]);
+    }
+    if (it.kind === 'record') {
+      const cell = (num, label) => h('div', { key: label, style: { textAlign: 'center' } }, [
+        h('div', { key: 'n', style: { fontSize: 130, lineHeight: 0.9, color: ink } }, num),
+        h('div', { key: 'l', style: { fontFamily: mono, fontSize: 16, letterSpacing: 3, color: accent, marginTop: 6 } }, label),
+      ]);
+      return h('div', { style: wrap }, [head('SEASON · RECORD'), h('div', { key: 'r', style: { display: 'flex', gap: 60, alignItems: 'flex-end' } }, [cell(DEMO.record.w, 'WON'), cell(DEMO.record.l, 'LOST'), cell(DEMO.record.d, 'DRAWN')])]);
+    }
+    if (it.kind === 'playerphoto') {
+      const pl = rosterOf(it.playerId);
+      return h('div', { style: { width: it.w, height: it.h, position: 'relative', pointerEvents: 'none', overflow: 'hidden' } }, [
+        h('div', { key: 'ph', style: { position: 'absolute', inset: 0, background: `repeating-linear-gradient(135deg, ${ink}12 0 14px, ${ink}05 14px 28px)`, border: `2px dashed ${ink}33` } }),
+        h('div', { key: 'lb', style: { position: 'absolute', left: 0, right: 0, bottom: 18, textAlign: 'center', fontFamily: mono, fontSize: 18, letterSpacing: 2, color: `${ink}88` } }, `${pl.first.toUpperCase()} ${pl.last} · HEADSHOT`),
+        h('div', { key: 'tg', style: { position: 'absolute', top: 16, left: 16, padding: '5px 10px', background: accent, color: this.palette().primary, fontFamily: mono, fontSize: 15, letterSpacing: 2 } }, 'FROM PROFILE'),
+      ]);
+    }
+    if (it.kind === 'playername') {
+      const pl = rosterOf(it.playerId);
+      return h('div', { style: wrap }, [
+        h('div', { key: 'f', style: { fontSize: 52, lineHeight: 1, color: accent, letterSpacing: 1 } }, pl.first.toUpperCase()),
+        h('div', { key: 'l', style: { fontSize: 148, lineHeight: 0.92, color: ink } }, pl.last),
+        it.showRole ? h('div', { key: 'r', style: { fontFamily: mono, fontSize: 26, letterSpacing: 3, color: `${ink}aa`, marginTop: 10 } }, pl.role.toUpperCase()) : null,
+      ]);
+    }
+    if (it.kind === 'player') {
+      const pl = rosterOf(it.playerId);
+      const tiles = [['MATCHES', pl.bat.games], ['RUNS', pl.bat.runs], ['BAT AVG', pl.bat.avg], ['HS', pl.bat.hs], ['WICKETS', pl.bowl.wkts], ['BOWL AVG', pl.bowl.avg]];
+      return h('div', { style: wrap }, [
+        h('div', { key: 'f', style: { fontSize: 34, color: `${ink}cc` } }, pl.first.toUpperCase()),
+        h('div', { key: 'l', style: { fontSize: 76, lineHeight: 0.95, color: ink } }, pl.last),
+        h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 20 } }, tiles.map(([label, value]) =>
+          h('div', { key: label, style: { padding: '12px 16px', border: `1.5px solid ${accent}`, background: `${ink}0c` } }, [
+            h('div', { key: 'l', style: { fontFamily: mono, fontSize: 12, letterSpacing: 2, color: `${ink}aa` } }, label),
+            h('div', { key: 'v', style: { fontSize: 50, lineHeight: 0.95, marginTop: 4, color: ink } }, String(value)),
+          ]))),
+      ]);
+    }
+    const side = (name, total, line) => h('div', { key: name, style: { padding: '14px 0', borderTop: `1px solid ${rule}` } }, [
+      h('div', { key: 'r', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' } }, [
+        h('span', { key: 'n', style: { fontSize: 34, letterSpacing: 0.5 } }, name),
+        h('span', { key: 't', style: { fontSize: 46, color: accent } }, total),
+      ]),
+      h('div', { key: 'l', style: { fontFamily: mono, fontSize: 15, color: `${ink}bb`, marginTop: 6 } }, line),
+    ]);
+    return h('div', { style: wrap }, [head('WE WON BY 6 RUNS'), side(CLUB.name, '184/6 (20)', 'Top bat Barlow 87 (54)'), side('MELVILLE', '178 (19.4)', 'Top bowl Kaur 3/24')]);
+  }
+
+  itemLabel(it) {
+    if (it.type === 'text') { const t = (it.text || '').replace(/\n/g, ' '); return `“${t.slice(0, 18) || 'Text'}${t.length > 18 ? '…' : ''}”`; }
+    if (it.type === 'image') return it.srcName || (it.src ? 'Image' : 'Image (empty)');
+    if (it.type === 'brand') return 'Club badge';
+    if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Shape';
+    if (it.type === 'data') return { fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard', player: 'Player stats', playerphoto: 'Player photo', playername: 'Player name' }[it.kind] || 'Data';
+    return it.type;
+  }
+
+  switchTab(key) {
+    const starter = TAB_STARTER[key];
+    this.commit(`Switched to ${key}`, () => ({ tab: key, items: STARTERS[starter](), selIds: [], postTypesOpen: false, tool: key === 'blank' ? 'design' : 'content' }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const p = this.palette();
+    const accent = this.props.accent ?? '#EC4899';
+    const dock = (this.props.inspectorPlacement ?? 'float') === 'dock';
+    const sel = s.selIds.length === 1 ? s.items.find((it) => it.id === s.selIds[0]) : null;
+    const tab = POST_TYPES.find((t) => t.key === s.tab) || POST_TYPES[9];
+
+    const railBtn = (on) => ({ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, height: 58, margin: '0 6px', border: 'none', borderRadius: 8, cursor: 'pointer', background: on ? 'rgba(236,72,153,.12)' : 'transparent', color: on ? accent : '#5b6072' });
+    const chip = (on) => ({ padding: '7px 11px', borderRadius: 6, border: `1px solid ${on ? accent : '#262d3d'}`, background: on ? 'rgba(236,72,153,.1)' : '#161b27', color: on ? accent : '#8a90a2', fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: '.08em', cursor: 'pointer' });
+    const miniBtn = (on) => ({ height: 28, minWidth: 28, padding: '0 8px', borderRadius: 5, border: `1px solid ${on ? accent : '#262d3d'}`, background: on ? 'rgba(236,72,153,.12)' : '#161b27', color: on ? accent : '#8a90a2', fontSize: 11, cursor: 'pointer' });
+    const listBtn = (on, extra = {}) => ({ textAlign: 'left', padding: '9px 11px', borderRadius: 7, border: `1px solid ${on ? accent : '#1d2331'}`, background: on ? 'rgba(236,72,153,.08)' : '#161b27', color: '#e6e8ef', cursor: 'pointer', fontSize: 14, ...extra });
+
+    // Texture colours are derived from the post palette exactly as
+    // AdminSocialPost's paletteToBgColors does (accent → secondary, +35° hue → tertiary).
+    const rotate = (hex, deg) => {
+      try {
+        const r = parseInt(hex.slice(1, 3), 16) / 255, g2 = parseInt(hex.slice(3, 5), 16) / 255, b2 = parseInt(hex.slice(5, 7), 16) / 255;
+        const max = Math.max(r, g2, b2), min = Math.min(r, g2, b2), l = (max + min) / 2, d = max - min;
+        let hh = 0, ss = 0;
+        if (d) { ss = d / (1 - Math.abs(2 * l - 1)); hh = max === r ? ((g2 - b2) / d) % 6 : max === g2 ? (b2 - r) / d + 2 : (r - g2) / d + 4; hh = (hh * 60 + 360) % 360; }
+        hh = (hh + deg + 360) % 360;
+        const c = (1 - Math.abs(2 * l - 1)) * ss, x = c * (1 - Math.abs(((hh / 60) % 2) - 1)), m = l - c / 2;
+        const t = hh < 60 ? [c, x, 0] : hh < 120 ? [x, c, 0] : hh < 180 ? [0, c, x] : hh < 240 ? [0, x, c] : hh < 300 ? [x, 0, c] : [c, 0, x];
+        return '#' + t.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('');
+      } catch { return hex; }
+    };
+    const bgBase = { primary: p.primary, secondary: p.accent, tertiary: rotate(p.accent, 35), paper: '#ece4d3', ink: p.ink };
+    const bgColors = { ...bgBase, ...(s.bgColors[s.bgStyle] || {}) };
+    const setBgColor = (key, value) => this.setState((st) => ({ bgColors: { ...st.bgColors, [st.bgStyle]: { ...(st.bgColors[st.bgStyle] || {}), [key]: value } } }));
+
+    const groups = [];
+    BACKGROUNDS.forEach((b) => {
+      let g = groups.find((x) => x.title === b.group.toUpperCase());
+      if (!g) { g = { title: b.group.toUpperCase(), items: [] }; groups.push(g); }
+      g.items.push({
+        key: b.key, label: b.label,
+        textured: b.key !== 'none', clean: b.key === 'none',
+        swatchProps: { colors: { ...bgBase, ...(s.bgColors[b.key] || {}) }, size: 36 },
+        onClick: () => this.setState({ bgStyle: b.key }),
+        style: { width: 40, height: 40, borderRadius: 6, cursor: 'pointer', overflow: 'hidden', position: 'relative', padding: 0, background: p.primary, border: `2px solid ${s.bgStyle === b.key ? p.accent : 'transparent'}`, flex: '0 0 auto' },
+      });
+    });
+
+    const contentGroups = (TAB_CONTENT[s.tab] || []).map((k) => {
+      const g = CONTENT_GROUPS[k];
+      return {
+        title: g.title,
+        fields: g.fields.map(([key, label, placeholder, wide]) => ({
+          label, placeholder, value: s.content[key] || '',
+          wrapStyle: { display: 'block', gridColumn: wide ? 'span 2' : 'span 1' },
+          onChange: (e) => { const v = e.target.value; this.setState((st) => ({ content: { ...st.content, [key]: v } })); },
+        })),
+      };
+    });
+
+    const swatchList = (value, onPick) => TOKEN_SWATCHES.map((t) => ({
+      title: t.label, onClick: () => onPick(t.key),
+      style: { width: 22, height: 22, borderRadius: 5, cursor: 'pointer', background: this.resolve(t.key), border: value === t.key ? `2px solid ${accent}` : '1px solid rgba(255,255,255,.18)' },
+    }));
+
+    const adv = [];
+    const num = (label, key, min, max, step) => ({ label, type: 'number', value: sel[key] ?? 0, min, max, step: step || 1, onChange: (e) => this.update(sel.id, { [key]: Number(e.target.value) }), style: { width: 62, height: 26, padding: '0 6px', borderRadius: 5, border: '1px solid #262d3d', background: '#161b27', color: '#e6e8ef', fontSize: 11 } });
+    const rng = (label, key, min, max, step) => ({ label, type: 'range', value: sel[key] ?? 1, min, max, step, onChange: (e) => this.update(sel.id, { [key]: Number(e.target.value) }), style: { width: 92 } });
+    if (sel) {
+      if (sel.type === 'text') { adv.push(rng('LINE HEIGHT', 'lineHeight', 0.8, 2, 0.05), num('LETTER SP', 'letterSpacing', -20, 60), num('WIDTH', 'w', 40, 1080)); }
+      if (sel.type === 'image') { adv.push(num('WIDTH', 'w', 40, 1080), num('HEIGHT', 'h', 40, 1080), num('CORNER', 'radius', 0, 540)); }
+      if (sel.type === 'brand') { adv.push(rng('SIZE', 'size', 60, 420, 1)); }
+      if (sel.type === 'element') { adv.push(num('WIDTH', 'w', 4, 1080), num('HEIGHT', 'h', 4, 1080), rng('ROTATION', 'rotation', -180, 180, 1), rng('OPACITY', 'opacity', 0.1, 1, 0.05)); }
+      if (sel.type === 'data') { adv.push(num('WIDTH', 'w', 200, 1080)); }
+      adv.push(num('X', 'x', -400, 1080), num('Y', 'y', -400, 1080));
+    }
+
+    return {
+      // chrome
+      tabLabel: tab.label,
+      tabLabelUpper: tab.label.toUpperCase(),
+      postTypesOpen: s.postTypesOpen,
+      togglePostTypes: () => this.setState((st) => ({ postTypesOpen: !st.postTypesOpen })),
+      postTypes: POST_TYPES.map((t) => ({ label: t.label.toUpperCase(), style: chip(t.key === s.tab), onClick: () => this.switchTab(t.key) })),
+      undo: () => this.undo(),
+      redo: () => this.redo(),
+      undoStyle: { ...miniBtn(false), opacity: s.past.length ? 1 : 0.35, fontSize: 13 },
+      redoStyle: { ...miniBtn(false), opacity: s.future.length ? 1 : 0.35, fontSize: 13 },
+      historyLabel: `${s.past.length} STEP${s.past.length === 1 ? '' : 'S'}`,
+      saveTemplate: () => this.setState((st) => ({ savedTemplates: [{ name: `${tab.label} — ${new Date().toLocaleDateString()}`, meta: `${st.items.length} blocks` }, ...st.savedTemplates] })),
+
+      tools: TOOLS.map((t) => ({ ...t, icon: icon(t.icon, 18), style: railBtn(s.tool === t.key), onClick: () => this.setState({ tool: t.key }) })),
+      endTools: [{ icon: icon('cols', 18), label: 'LAYERS', style: railBtn(s.tool === 'layers'), onClick: () => this.setState({ tool: 'layers' }) }],
+      undoIcon: icon('reset', 15),
+      redoIcon: icon('reset', 15, { transform: 'scaleX(-1)' }),
+      gripIcon: icon('grip', 13),
+      upIcon: icon('chevron', 13, { transform: 'rotate(-90deg)' }),
+      downIcon: icon('chevron', 13, { transform: 'rotate(90deg)' }),
+      dupIcon: icon('cols', 13),
+      delIcon: icon('trash', 13),
+      advIcon: icon('filter', 14),
+      panelTitle: (TOOLS.find((t) => t.key === s.tool) || { title: 'Layers' }).title,
+      panelMeta: s.tool === 'layers' ? `${s.items.length} BLOCKS` : ((TOOLS.find((t) => t.key === s.tool) || {}).meta || '').toUpperCase(),
+
+      isDesign: s.tool === 'design', isContent: s.tool === 'content', isText: s.tool === 'text',
+      isElements: s.tool === 'elements', isPhotos: s.tool === 'photos', isData: s.tool === 'data',
+      isBrand: s.tool === 'brand', isLayers: s.tool === 'layers',
+
+      // design panel
+      tabTemplates: (TAB_TEMPLATES[s.tab] || []).map((t, i) => ({
+        name: t.name, desc: t.desc,
+        thumb: i % 2 ? `linear-gradient(150deg, ${p.primary}, ${p.secondary})` : `linear-gradient(150deg, ${p.accent}55, ${p.primary})`,
+        style: listBtn(i === 0, { padding: 9 }),
+        onClick: () => this.commit(`Applied ${t.name}`, () => ({ items: STARTERS[s.tab === 'blank' ? t.id : TAB_STARTER[s.tab]](), selIds: [] })),
+      })),
+      savedTemplates: s.savedTemplates,
+      contentGroups,
+
+      // text panel
+      addHeading: () => this.add('text', { text: 'BIG HEADLINE', fontSize: 140 }, 'Added heading'),
+      addSubheading: () => this.add('text', { text: 'Supporting subheading', fontSize: 64, fontFamily: "'Barlow Condensed', sans-serif" }, 'Added subheading'),
+      addBody: () => this.add('text', { text: 'Body copy for the details that matter.', fontSize: 40, bold: false, uppercase: false, fontFamily: "'Inter', sans-serif" }, 'Added body text'),
+      fonts: FONTS.map((f) => ({ name: f.name, style: listBtn(s.fontKey === f.key, { fontFamily: f.family, fontSize: 18, padding: '10px 11px' }), onClick: () => this.setState({ fontKey: f.key }) })),
+
+      // elements panel
+      elements: ELEMENTS.map((e) => ({
+        name: e.name.toUpperCase(),
+        mark: e.shape === 'line' || e.shape === 'divider'
+          ? { width: 26, height: 4, background: '#8a90a2', display: 'block' }
+          : { width: 24, height: 24, background: '#8a90a2', display: 'block', borderRadius: e.shape === 'ellipse' ? '50%' : 2, clipPath: CLIP_SHAPES[e.shape] || 'none' },
+        onClick: () => this.add('element', { shape: e.shape }, `Added ${e.name.toLowerCase()}`),
+      })),
+
+      // photos panel
+      addImage: () => this.add('image', {}, 'Added image frame'),
+      addBrand: () => this.add('brand', {}, 'Added club badge'),
+      playerPhotos: DEMO.roster.map((r) => ({ name: `${r.first[0]}. ${r.last}`, onClick: () => this.add('data', { kind: 'playerphoto', playerId: r.id }, 'Added player photo') })),
+
+      // data panel
+      dataGroups: ['PLAYER', 'CLUB'].map((title) => ({
+        title: title === 'PLAYER' ? 'FROM A PLAYER PROFILE' : 'FROM THE CLUB',
+        items: DATA_BLOCKS.filter((d) => d.group === title).map((d) => ({
+          name: d.name, desc: d.desc,
+          onClick: () => this.add('data', { kind: d.kind }, `Added ${d.name.toLowerCase()}`),
+        })),
+      })),
+      rosterPick: DEMO.roster.map((r) => ({ id: r.id, name: `${r.first} ${r.last}` })),
+      selIsPlayerBlock: !!sel && sel.type === 'data' && ['player', 'playerphoto', 'playername'].includes(sel.kind),
+      selIsRowData: !!sel && sel.type === 'data' && (sel.kind === 'fixtures' || sel.kind === 'results'),
+      onPlayerPick: (e) => this.update(sel.id, { playerId: e.target.value }, 'Changed player'),
+
+      // brand panel
+      palettes: [...Object.values(PALETTES), { key: 'custom', name: 'Custom', primary: s.custom.primary, accent: s.custom.accent }].map((pal) => ({
+        name: pal.name,
+        onClick: () => this.setState({ paletteKey: pal.key }),
+        style: { width: 36, height: 36, borderRadius: 6, cursor: 'pointer', position: 'relative', overflow: 'hidden', background: pal.primary, border: `2px solid ${s.paletteKey === pal.key ? pal.accent : 'transparent'}`, padding: 0 },
+        bar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 10, background: pal.accent },
+      })),
+      palPrimary: s.custom.primary,
+      palAccent: s.custom.accent,
+      onPrimary: (e) => { const v = e.target.value; this.setState((st) => ({ custom: { ...st.custom, primary: v }, paletteKey: 'custom' })); },
+      onAccent: (e) => { const v = e.target.value; this.setState((st) => ({ custom: { ...st.custom, accent: v }, paletteKey: 'custom' })); },
+      bgGroups: groups,
+      bgEditable: s.bgStyle !== 'none',
+      bgStyleLabel: (BACKGROUNDS.find((b) => b.key === s.bgStyle) || {}).label || '',
+      bgHasOverride: !!s.bgColors[s.bgStyle],
+      resetBgColors: () => this.setState((st) => { const next = { ...st.bgColors }; delete next[st.bgStyle]; return { bgColors: next }; }),
+      bgColorFields: [
+        { key: 'primary', label: 'BASE' }, { key: 'secondary', label: 'SPLATTER' },
+        { key: 'tertiary', label: 'HIGHLIGHT' }, { key: 'paper', label: 'PAPER' }, { key: 'ink', label: 'INK' },
+      ].map((f) => ({
+        label: f.label,
+        value: bgColors[f.key] || '#000000',
+        overridden: !!(s.bgColors[s.bgStyle] || {})[f.key],
+        onChange: (e) => setBgColor(f.key, e.target.value),
+      })),
+      brandFonts: FONTS.slice(0, 6).map((f) => ({ name: f.name, style: listBtn(s.fontKey === f.key, { fontFamily: f.family, fontSize: 18, padding: '10px 11px' }), onClick: () => this.setState({ fontKey: f.key }) })),
+      savedLooks: s.savedLooks.map((l) => ({
+        name: l.name,
+        onClick: () => this.setState({ paletteKey: 'custom', custom: { primary: l.primary, accent: l.accent }, bgStyle: l.bgStyle }),
+        style: { width: 44, height: 44, borderRadius: 6, cursor: 'pointer', border: '2px solid transparent', background: `linear-gradient(135deg, ${l.accent} 0 45%, ${l.primary} 45% 100%)` },
+      })),
+      saveLook: () => this.setState((st) => ({ savedLooks: [...st.savedLooks, { name: `Look ${st.savedLooks.length + 1}`, primary: p.primary, accent: p.accent, bgStyle: st.bgStyle }] })),
+
+      // layers panel
+      layers: s.items.slice().reverse().map((it) => ({
+        label: this.itemLabel(it),
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 8px', borderRadius: 6, cursor: 'grab', border: `1px solid ${s.selIds.includes(it.id) ? accent : 'transparent'}`, background: s.selIds.includes(it.id) ? 'rgba(236,72,153,.08)' : 'transparent' },
+        onClick: (e) => this.select(it.id, e.shiftKey || e.metaKey || e.ctrlKey),
+        onUp: (e) => { e.stopPropagation(); this.reorder(it.id, 'up'); },
+        onDown: (e) => { e.stopPropagation(); this.reorder(it.id, 'down'); },
+        onDup: (e) => { e.stopPropagation(); this.duplicate(it.id); },
+        onDel: (e) => { e.stopPropagation(); this.remove(it.id); },
+      })),
+      history: s.log.map((l, i) => ({ label: l.label, style: { padding: '5px 8px', borderRadius: 5, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: i === 0 ? '#e6e8ef' : '#5b6072', background: i === 0 ? '#161b27' : 'transparent' } })),
+
+      // canvas
+      canvasStyle: { width: CANVAS, height: CANVAS, position: 'relative', overflow: 'hidden', borderRadius: 4, background: p.primary, boxShadow: '0 24px 60px rgba(0,0,0,.55)' },
+      bgActive: s.bgStyle !== 'none',
+      bgStyle: s.bgStyle,
+      bgProps: { colors: bgColors, size: CANVAS },
+      zoomLabel: `${Math.round(SCALE * 100)}%`,
+      hintLabel: s.selIds.length > 1 ? `${s.selIds.length} SELECTED · DRAG TO MOVE THE GROUP` : 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL',
+      onStageDown: () => this.setState({ selIds: [] }),
+      blocks: s.items.map((it) => {
+        const on = s.selIds.includes(it.id);
+        return {
+          content: this.content(it),
+          single: s.selIds.length === 1 && on,
+          wrap: { position: 'absolute', left: it.x * SCALE, top: it.y * SCALE, transform: `scale(${SCALE}) ${it.rotation ? `rotate(${it.rotation}deg)` : ''}`, transformOrigin: 'top left', cursor: 'move', outline: on ? `${Math.round(2 / SCALE)}px solid ${p.accent}` : 'none', outlineOffset: 4, touchAction: 'none', userSelect: 'none' },
+          handle: { position: 'absolute', right: -9, bottom: -9, width: 18, height: 18, borderRadius: 3, background: p.accent, border: '2px solid #000', cursor: 'nwse-resize' },
+          onDown: (e) => this.beginMove(e, it.id),
+          onHandle: (e) => this.beginResize(e, it),
+          onDouble: () => this.setState({ advOpen: true, tool: it.type === 'data' ? 'data' : 'text' }),
+        };
+      }),
+
+      // inspector
+      hasSel: !!sel || s.selIds.length > 1,
+      noSel: s.selIds.length === 0,
+      sel: sel || {},
+      selLabel: sel ? this.itemLabel(sel).toUpperCase() : `${s.selIds.length} SELECTED`,
+      selIsText: !!sel && sel.type === 'text',
+      selIsImage: !!sel && sel.type === 'image',
+      selIsData: !!sel && sel.type === 'data',
+      selHasFill: !!sel && sel.type !== 'image',
+      inspectorWrap: dock
+        ? { flex: '0 0 auto', padding: '0 22px 16px' }
+        : { position: 'absolute', left: 22, right: 22, bottom: 16 },
+      inspectorBar: { padding: '9px 12px', borderRadius: 10, background: 'rgba(16,20,29,.96)', border: '1px solid #262d3d', boxShadow: '0 16px 40px rgba(0,0,0,.5)', backdropFilter: 'blur(8px)' },
+      fontOptions: FONTS,
+      onFont: (e) => this.update(sel.id, { fontFamily: e.target.value }, 'Changed font'),
+      onFontSize: (e) => this.update(sel.id, { fontSize: Number(e.target.value) }),
+      onText: (e) => this.update(sel.id, { text: e.target.value }),
+      toggleBold: () => this.update(sel.id, { bold: !sel.bold }, 'Toggled bold'),
+      toggleCaps: () => this.update(sel.id, { uppercase: !sel.uppercase }, 'Toggled caps'),
+      boldStyle: { ...miniBtn(!!sel && sel.bold), fontWeight: 800 },
+      capsStyle: { ...miniBtn(!!sel && sel.uppercase), fontSize: 10 },
+      alignOptions: ['left', 'center', 'right'].map((a) => ({
+        glyph: a === 'left' ? '⇤' : a === 'center' ? '⇔' : '⇥',
+        style: miniBtn(!!sel && sel.align === a),
+        onClick: () => this.update(sel.id, { align: a }, 'Changed alignment'),
+      })),
+      colorSwatches: sel ? swatchList(sel.color, (c) => this.update(sel.id, { color: c }, 'Changed colour')) : [],
+      selColorHex: sel && sel.color && sel.color.startsWith('#') ? sel.color : '#ffffff',
+      onCustomColor: (e) => this.update(sel.id, { color: e.target.value }, 'Changed colour'),
+      onImageUpload: () => {},
+      onFitToggle: () => this.update(sel.id, { fit: sel.fit === 'cover' ? 'contain' : 'cover' }, 'Changed image fit'),
+      fitLabel: sel && sel.fit === 'cover' ? 'Fill' : 'Fit',
+      onRows: (e) => this.update(sel.id, { count: Math.max(1, Math.min(12, Number(e.target.value))) }),
+      iconBtn: { height: 28, minWidth: 28, borderRadius: 5, border: '1px solid #262d3d', background: '#161b27', color: '#8a90a2', fontSize: 10, cursor: 'pointer' },
+      advBtnStyle: miniBtn(s.advOpen),
+      advOpen: s.advOpen && !!sel,
+      toggleAdv: () => this.setState((st) => ({ advOpen: !st.advOpen })),
+      advControls: adv,
+      selForward: () => sel && this.reorder(sel.id, 'up'),
+      selBackward: () => sel && this.reorder(sel.id, 'down'),
+      selDuplicate: () => sel && this.duplicate(sel.id),
+      selDelete: () => sel && this.remove(sel.id),
+
+      // ── screens ───────────────────────────────────────────────────────────
+      isStart: s.screen === 'start',
+      isEditor: s.screen === 'editor',
+      isMobile: s.screen === 'mobile',
+      screenChips: [['start', 'START'], ['editor', 'DESKTOP'], ['mobile', 'MOBILE']].map(([k, label]) => ({
+        label, onClick: () => this.setState({ screen: k }),
+        style: { padding: '5px 9px', borderRadius: 5, border: 'none', background: s.screen === k ? 'rgba(236,72,153,.16)' : 'transparent', color: s.screen === k ? accent : '#5b6072', fontFamily: "'JetBrains Mono', monospace", fontSize: 9, letterSpacing: '.1em', cursor: 'pointer' },
+      })),
+      startTypes: POST_TYPES.map((t, i) => ({
+        label: t.label,
+        desc: (TAB_TEMPLATES[t.key] || []).length + (t.key === 'blank' ? ' starters' : ' layouts'),
+        thumb: { display: 'block', height: 74, borderRadius: 6, background: i % 3 === 0 ? `linear-gradient(150deg, ${p.accent}66, ${p.primary})` : i % 3 === 1 ? `linear-gradient(150deg, ${p.primary}, ${p.secondary})` : `linear-gradient(30deg, ${p.primary}, ${p.accent}44)`, marginBottom: 8 },
+        style: { textAlign: 'left', padding: 10, borderRadius: 9, border: '1px solid #1d2331', background: '#10141d', cursor: 'pointer' },
+        onClick: () => { this.switchTab(t.key); this.setState({ screen: 'editor' }); },
+      })),
+      startRecent: s.savedTemplates.map((t) => ({ name: t.name, meta: t.meta, onClick: () => this.setState({ screen: 'editor' }) })),
+      goEditor: () => this.setState({ screen: 'editor' }),
+      goMobile: () => this.setState({ screen: 'mobile' }),
+      goStart: () => this.setState({ screen: 'start' }),
+      clubLine: `${CLUB.full} · ${CLUB.ground}`,
+
+      // ── pages / carousel ─────────────────────────────────────────────────
+      pages: Array.from({ length: s.pageCount }, (_, i) => ({
+        label: String(i + 1),
+        onClick: () => this.goToPage(i),
+        onDelete: (e) => { e.stopPropagation(); this.removePage(i); },
+        deletable: s.pageCount > 1,
+        style: { position: 'relative', width: 46, height: 46, borderRadius: 6, cursor: 'pointer', flex: '0 0 auto', background: p.primary, border: `2px solid ${i === s.pageIdx ? accent : '#262d3d'}`, color: i === s.pageIdx ? accent : '#5b6072', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, display: 'grid', placeItems: 'center' },
+      })),
+      addPage: () => this.addPage(),
+      duplicatePage: () => this.duplicatePage(),
+      pageLabel: s.pageCount > 1 ? `PAGE ${s.pageIdx + 1} OF ${s.pageCount} · CAROUSEL` : 'SINGLE POST',
+      exportLabel: s.pageCount > 1 ? `↓ ${s.pageCount} SLIDES` : '↓ DOWNLOAD PNG',
+
+      // ── media library ────────────────────────────────────────────────────
+      photoTabs: [['uploads', 'UPLOADS'], ['players', 'PLAYERS'], ['club', 'CLUB']].map(([k, label]) => ({
+        label, onClick: () => this.setState({ photoTab: k }),
+        style: { flex: 1, padding: '6px 0', borderRadius: 6, border: 'none', background: s.photoTab === k ? '#161b27' : 'transparent', color: s.photoTab === k ? '#e6e8ef' : '#5b6072', fontFamily: "'JetBrains Mono', monospace", fontSize: 9, letterSpacing: '.08em', cursor: 'pointer' },
+      })),
+      showUploads: s.photoTab === 'uploads',
+      showPlayerPhotos: s.photoTab === 'players',
+      showClubMedia: s.photoTab === 'club',
+      uploads: s.uploads.map((u) => ({
+        name: u.name,
+        onClick: () => this.useUpload(u),
+        style: { position: 'relative', aspectRatio: '1', borderRadius: 8, border: '1px solid #1d2331', cursor: 'pointer', overflow: 'hidden', padding: 0, background: u.url ? `center/cover no-repeat url(${u.url})` : 'repeating-linear-gradient(135deg, #161b27 0 6px, #1a2030 6px 12px)' },
+        labelStyle: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: '4px 5px', background: 'linear-gradient(transparent, rgba(7,9,15,.9))', color: '#8a90a2', fontFamily: "'JetBrains Mono', monospace", fontSize: 7.5, lineHeight: 1.2, textAlign: 'left' },
+      })),
+      onUploadFiles: (e) => this.onUploadFiles(e),
+      uploadCount: `${s.uploads.length} IN LIBRARY`,
+
+      // ── content quick-add (not just fields) ──────────────────────────────
+      contentAdd: [
+        { label: '+ Text', onClick: () => this.add('text', { text: 'NEW TEXT', fontSize: 90 }, 'Added text') },
+        { label: '+ Image', onClick: () => this.setState({ tool: 'photos', photoTab: 'uploads' }) },
+        { label: '+ Player', onClick: () => this.add('data', { kind: 'playername' }, 'Added player name') },
+        { label: '+ Club data', onClick: () => this.setState({ tool: 'data' }) },
+        { label: '+ Shape', onClick: () => this.setState({ tool: 'elements' }) },
+      ],
+      mediaSlots: [
+        { label: 'Hero image', hint: 'Cut-out player or match photo', onClick: () => this.setState({ tool: 'photos', photoTab: 'uploads' }) },
+        { label: 'Player headshot', hint: 'Pulled from a player profile', onClick: () => this.add('data', { kind: 'playerphoto' }, 'Added player photo') },
+        { label: 'Sponsor logo', hint: `${s.brand.sponsors.length} saved in the brand kit`, onClick: () => this.setState({ tool: 'brand' }) },
+      ],
+
+      // ── brand kit ────────────────────────────────────────────────────────
+      brandSaved: s.brandSaved,
+      brandSaveLabel: s.brandSaved ? 'SAVED TO CLUB' : 'SAVE TO CLUB',
+      brandSaveStyle: { height: 30, padding: '0 12px', borderRadius: 6, border: `1px solid ${s.brandSaved ? '#1d2331' : accent}`, background: s.brandSaved ? 'transparent' : 'rgba(236,72,153,.12)', color: s.brandSaved ? '#5b6072' : accent, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, letterSpacing: '.08em', cursor: 'pointer' },
+      saveBrand: () => this.setState({ brandSaved: true }),
+      crestStyle: { width: 54, height: 54, borderRadius: 10, border: '1px dashed #3a4256', background: s.brand.crest ? `center/contain no-repeat url(${s.brand.crest})` : '#161b27', color: '#5b6072', display: 'grid', placeItems: 'center', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 8, textAlign: 'center', flex: '0 0 auto' },
+      onCrest: (e) => { const f = e.target.files?.[0]; if (f) this.setState((st) => ({ brand: { ...st.brand, crest: URL.createObjectURL(f) }, brandSaved: false })); e.target.value = ''; },
+      sponsors: s.brand.sponsors.map((sp) => ({
+        name: sp.name,
+        style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 7, border: '1px solid #1d2331', background: '#161b27', fontSize: 11, color: '#8a90a2' },
+        onClick: () => this.add('image', { srcName: sp.name.toUpperCase() }, 'Added sponsor logo'),
+      })),
+
+      // ── mobile quick post ────────────────────────────────────────────────
+      mobileCanvasStyle: { width: 342, height: 342, position: 'relative', overflow: 'hidden', borderRadius: 10, background: p.primary },
+      mobileBgProps: { colors: bgColors, size: 342 },
+      mobileBlocks: s.items.map((it) => ({
+        content: this.content(it),
+        wrap: { position: 'absolute', left: it.x * (342 / 1080), top: it.y * (342 / 1080), transform: `scale(${342 / 1080}) ${it.rotation ? `rotate(${it.rotation}deg)` : ''}`, transformOrigin: 'top left', pointerEvents: 'none' },
+      })),
+      hasMobileFields: contentGroups.length > 0 || s.items.some((it) => it.type === 'text'),
+      mobileTypes: POST_TYPES.slice(0, 6).map((t) => ({
+        label: t.label.toUpperCase(), onClick: () => this.switchTab(t.key),
+        style: { padding: '8px 12px', minHeight: 44, borderRadius: 22, border: `1px solid ${t.key === s.tab ? accent : '#262d3d'}`, background: t.key === s.tab ? 'rgba(236,72,153,.12)' : '#161b27', color: t.key === s.tab ? accent : '#8a90a2', fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: '.06em', cursor: 'pointer', flex: '0 0 auto' },
+      })),
+      mobileLooks: [...Object.values(PALETTES)].map((pal) => ({
+        onClick: () => this.setState({ paletteKey: pal.key }),
+        style: { width: 44, height: 44, borderRadius: 10, cursor: 'pointer', flex: '0 0 auto', padding: 0, background: `linear-gradient(135deg, ${pal.accent} 0 45%, ${pal.primary} 45% 100%)`, border: `2px solid ${s.paletteKey === pal.key ? accent : 'transparent'}` },
+      })),
+      // On a post type with no form fields (the freeform canvas) step 2 edits the
+      // canvas's own text blocks instead, so it is never a dead step.
+      mobileFields: contentGroups[0]
+        ? contentGroups[0].fields.slice(0, 3)
+        : s.items.filter((it) => it.type === 'text').slice(0, 3).map((it, i) => ({
+            label: i === 0 ? 'HEADLINE' : i === 1 ? 'SECOND LINE' : 'THIRD LINE',
+            value: it.text, placeholder: 'Your text',
+            onChange: (e) => this.update(it.id, { text: e.target.value }),
+          })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>
