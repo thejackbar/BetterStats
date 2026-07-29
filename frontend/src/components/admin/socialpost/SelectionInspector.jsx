@@ -122,6 +122,17 @@ export default function SelectionInspector({
           </>
         )}
 
+        {single?.type === 'brand' && (
+          <>
+            <Btn active={single.layout === 'row'} title="Logo and name side by side" onClick={() => patch({ layout: 'row' })}>Row</Btn>
+            <Btn active={single.layout === 'stack'} title="Logo above name" onClick={() => patch({ layout: 'stack' })}>Stack</Btn>
+            <span className="w-px h-5 bg-pb-hairline" />
+            <Btn active={single.showLogo !== false && single.showName} onClick={() => patch({ showLogo: true, showName: true })}>Both</Btn>
+            <Btn active={single.showLogo !== false && !single.showName} onClick={() => patch({ showLogo: true, showName: false })}>Logo</Btn>
+            <Btn active={single.showLogo === false && single.showName} onClick={() => patch({ showLogo: false, showName: true })}>Name</Btn>
+          </>
+        )}
+
         {single && single.type !== 'image' && (
           <Swatches value={single.color} onChange={c => patch({ color: c })} palette={palette} />
         )}

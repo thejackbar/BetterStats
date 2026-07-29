@@ -103,7 +103,7 @@ export function newBlankItem(type, opts = {}) {
     }
   }
   if (type === 'brand') {
-    return { id, type: 'brand', x: 60, y: 60, size: 160, layout: 'row', showName: true, align: 'left', color: 'ink' }
+    return { id, type: 'brand', x: 60, y: 60, size: 160, layout: 'row', showName: true, showLogo: true, align: 'left', color: 'ink' }
   }
   if (type === 'element') {
     const shape = opts.shape || 'line'
@@ -459,11 +459,30 @@ function renderContent(item, palette, team, data) {
   if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
   if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
-  return <BrandLockup team={team} palette={palette} size={item.size} layout={item.layout} align={item.align} showName={item.showName} nameColor={resolveBlankColor(item.color, palette)} />
+  return <BrandLockup team={team} palette={palette} size={item.size} layout={item.layout} align={item.align} showName={item.showName} showLogo={item.showLogo !== false} nameColor={resolveBlankColor(item.color, palette)} />
 }
 
-function BlankBlock({ item, palette, team, data, interactive, selected, single, outline, handle, accent, onPointerDown, onResize }) {
+// Canva-style selection box: 8 resize handles (corners scale, edges stretch),
+// a rotation handle below and a floating toolbar (duplicate / delete) above.
+const RESIZE_HANDLES = [
+  { k: 'nw', x: 0, y: 0, cur: 'nwse-resize' },
+  { k: 'n', x: 0.5, y: 0, cur: 'ns-resize' },
+  { k: 'ne', x: 1, y: 0, cur: 'nesw-resize' },
+  { k: 'e', x: 1, y: 0.5, cur: 'ew-resize' },
+  { k: 'se', x: 1, y: 1, cur: 'nwse-resize' },
+  { k: 's', x: 0.5, y: 1, cur: 'ns-resize' },
+  { k: 'sw', x: 0, y: 1, cur: 'nesw-resize' },
+  { k: 'w', x: 0, y: 0.5, cur: 'ew-resize' },
+]
+
+function BlankBlock({ item, palette, team, data, interactive, selected, single, outline, handle, accent, onPointerDown, onResize, onRotate, onDuplicate, onRemove }) {
   const rot = item.rotation ? `rotate(${item.rotation}deg)` : undefined
+  const H = handle
+  const gap = H * 1.6
+  // Near the top of the canvas there's no room above for the toolbar, so drop it
+  // below the block and move the rotation handle up.
+  const toolBelow = item.y < H * 4.5
+  const toolBtn = { width: H * 1.5, height: H * 1.5, display: 'grid', placeItems: 'center', background: 'transparent', border: 'none', cursor: 'pointer', color: '#fff', padding: 0 }
   return (
     <div
       onPointerDown={interactive ? (e) => onPointerDown(e, item.id) : undefined}
@@ -478,8 +497,35 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
       }}>
       {renderContent(item, palette, team, data)}
       {interactive && single && (
-        <div onPointerDown={(e) => onResize(e, item)} title="Drag to resize"
-          style={{ position: 'absolute', right: -handle / 2, bottom: -handle / 2, width: handle, height: handle, borderRadius: 3, background: accent, border: `${outline}px solid #000`, cursor: 'nwse-resize' }} />
+        <>
+          {/* Quick toolbar */}
+          <div onPointerDown={(e) => e.stopPropagation()}
+            style={{ position: 'absolute', left: '50%', top: toolBelow ? '100%' : 0, transform: toolBelow ? `translate(-50%, ${gap}px)` : `translate(-50%, calc(-100% - ${gap}px))`, display: 'flex', gap: H * 0.2, padding: `${H * 0.25}px ${H * 0.4}px`, borderRadius: H, background: 'rgba(16,20,29,.96)', border: `${outline}px solid ${accent}`, boxShadow: '0 4px 14px rgba(0,0,0,.5)', pointerEvents: 'auto' }}>
+            <button title="Duplicate" style={toolBtn} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onDuplicate && onDuplicate(item.id) }}>
+              <svg width={H} height={H} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+            </button>
+            <button title="Delete" style={toolBtn} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onRemove && onRemove(item.id) }}>
+              <svg width={H} height={H} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
+            </button>
+          </div>
+
+          {/* Resize handles */}
+          {RESIZE_HANDLES.map((h) => {
+            const corner = h.k.length === 2
+            const w = corner ? H : (h.k === 'n' || h.k === 's' ? H * 1.9 : H * 0.7)
+            const ht = corner ? H : (h.k === 'e' || h.k === 'w' ? H * 1.9 : H * 0.7)
+            return (
+              <div key={h.k} onPointerDown={(e) => onResize(e, item, h.k)} title="Drag to resize"
+                style={{ position: 'absolute', left: `${h.x * 100}%`, top: `${h.y * 100}%`, width: w, height: ht, transform: 'translate(-50%, -50%)', background: '#fff', border: `${outline}px solid ${accent}`, borderRadius: corner ? Math.round(H * 0.2) : H, cursor: h.cur, pointerEvents: 'auto' }} />
+            )
+          })}
+
+          {/* Rotation handle (opposite the toolbar) */}
+          <div onPointerDown={(e) => onRotate(e, item)} title="Drag to rotate"
+            style={{ position: 'absolute', left: '50%', top: toolBelow ? 0 : '100%', transform: toolBelow ? `translate(-50%, calc(-100% - ${gap}px))` : `translate(-50%, ${gap}px)`, width: H * 1.1, height: H * 1.1, borderRadius: '50%', background: '#fff', border: `${outline}px solid ${accent}`, cursor: 'grab', pointerEvents: 'auto', display: 'grid', placeItems: 'center' }}>
+            <svg width={H * 0.7} height={H * 0.7} viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v5h-5" /></svg>
+          </div>
+        </>
       )}
     </div>
   )
@@ -488,7 +534,7 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
 export function BlankCanvas({
   items = [], palette = {}, team = {}, data = {},
   interactive = false, scale = 1, selectedIds = [],
-  onSelect, onDeselect, onPatchMany, onCommit, onGestureStart,
+  onSelect, onDeselect, onPatchMany, onCommit, onGestureStart, onDuplicate, onRemove,
   transparent = false, width = 1080, height = 1080, style = {},
 }) {
   const rootRef = useRef(null)
@@ -521,18 +567,71 @@ export function BlankCanvas({
     window.addEventListener('pointerup', up)
   }
 
-  const beginResizeSingle = (e, item) => {
+  // Corner handles scale the whole block proportionally (a "pure" resize — an
+  // image keeps its aspect, so it grows/shrinks rather than cropping); edge
+  // handles stretch a single axis (for images that's a crop/stretch).
+  const beginResize = (e, item, hnd) => {
     e.stopPropagation(); e.preventDefault()
     const sx = e.clientX, sy = e.clientY
-    const w0 = item.w, h0 = item.h, sz0 = item.size, fs0 = item.fontSize
+    const bb = itemBBox(item)
+    const w0 = bb.w || 1, h0 = bb.h || 1
+    const x0 = item.x, y0 = item.y, fs0 = item.fontSize || 0, sz0 = item.size || 0, th0 = item.thickness || 0, iw0 = item.w || 0, ih0 = item.h || 0
+    const right = hnd.includes('e'), left = hnd.includes('w'), bottom = hnd.includes('s'), top = hnd.includes('n')
+    const corner = (left || right) && (top || bottom)
     let started = false
     const move = (ev) => {
       if (!started) { started = true; onGestureStart && onGestureStart() }
       const dx = (ev.clientX - sx) / s, dy = (ev.clientY - sy) / s
-      if (item.type === 'text' || item.type === 'data') onPatchMany({ [item.id]: { w: Math.max(40, Math.round(w0 + dx)) } })
-      else if (item.type === 'image') { const nw = Math.max(30, Math.round(w0 + dx)); const r = h0 && w0 ? h0 / w0 : 1; onPatchMany({ [item.id]: { w: nw, h: Math.max(30, Math.round(nw * r)) } }) }
-      else if (item.type === 'element') onPatchMany({ [item.id]: { w: Math.max(4, Math.round(w0 + dx)), h: Math.max(2, Math.round((h0 || 0) + dy)) } })
-      else if (item.type === 'brand') onPatchMany({ [item.id]: { size: Math.max(40, Math.round(sz0 + dx)) } })
+      let dW = right ? dx : left ? -dx : 0
+      let dH = bottom ? dy : top ? -dy : 0
+      let f = 1
+      if (corner) {
+        f = Math.max(0.1, Math.min(8, 1 + (dW / w0 + dH / h0) / 2))
+        dW = w0 * (f - 1); dH = h0 * (f - 1)
+      }
+      const dX = left ? -dW : 0
+      const dY = top ? -dH : 0
+      const p = {}
+      if (item.type === 'text') {
+        if (corner) { p.fontSize = Math.max(8, Math.round(fs0 * f)); p.w = Math.max(40, Math.round(iw0 * f)) }
+        else if (left || right) p.w = Math.max(40, Math.round(iw0 + dW))
+        else p.fontSize = Math.max(8, Math.round(fs0 * (1 + dH / h0)))
+        if (dX) p.x = Math.round(x0 + dX)
+      } else if (item.type === 'brand') {
+        p.size = Math.max(40, Math.round(sz0 * (corner ? f : 1 + (dW || dH) / (w0 || h0))))
+        if (dX) p.x = Math.round(x0 + dX)
+        if (dY) p.y = Math.round(y0 + dY)
+      } else { // image / element / data
+        const minW = item.type === 'element' ? 4 : 30
+        const minH = item.type === 'element' ? 2 : 30
+        p.w = Math.max(minW, Math.round(iw0 + dW))
+        if ('h' in item) p.h = Math.max(minH, Math.round(ih0 + dH))
+        if (item.type === 'element' && corner && th0) p.thickness = Math.max(1, Math.round(th0 * f))
+        if (dX) p.x = Math.round(x0 + dX)
+        if (dY) p.y = Math.round(y0 + dY)
+      }
+      onPatchMany({ [item.id]: p })
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); onCommit && onCommit() }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  const beginRotate = (e, item) => {
+    e.stopPropagation(); e.preventDefault()
+    const bb = itemBBox(item)
+    const rect = rootRef.current?.getBoundingClientRect()
+    const cx = (rect?.left || 0) + (bb.x + bb.w / 2) * s
+    const cy = (rect?.top || 0) + (bb.y + bb.h / 2) * s
+    const start = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI
+    const rot0 = item.rotation || 0
+    let started = false
+    const move = (ev) => {
+      if (!started) { started = true; onGestureStart && onGestureStart() }
+      const a = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI
+      let next = Math.round(rot0 + (a - start))
+      if (ev.shiftKey) next = Math.round(next / 15) * 15
+      onPatchMany({ [item.id]: { rotation: ((next % 360) + 360) % 360 } })
     }
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); onCommit && onCommit() }
     window.addEventListener('pointermove', move)
@@ -586,7 +685,8 @@ export function BlankCanvas({
           key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive}
           selected={selSet.has(it.id)} single={selectedIds.length === 1 && selSet.has(it.id)}
           outline={outline} handle={handle} accent={accent}
-          onPointerDown={beginMove} onResize={beginResizeSingle}
+          onPointerDown={beginMove} onResize={beginResize} onRotate={beginRotate}
+          onDuplicate={onDuplicate} onRemove={onRemove}
         />
       ))}
       {interactive && multi && gbb && (

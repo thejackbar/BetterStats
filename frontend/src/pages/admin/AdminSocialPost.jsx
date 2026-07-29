@@ -128,6 +128,29 @@ const TAB_ICON = {
   events: 'availability', blank: 'plus',
 }
 
+// Perceived-luminance test so the "Created using" mark contrasts its backdrop.
+function isLightHex(hex) {
+  const h = String(hex || '').replace('#', '')
+  if (h.length < 6) return false
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150
+}
+
+// A "Created using BetterCricket" mark baked into every post (preview + export),
+// bottom-right. A crisp wordmark rather than the multi-MB raster logo so it
+// stays sharp and weightless in exports; black on light, white on dark.
+function CreatedWith({ light }) {
+  const col = light ? '#0a0a0a' : '#ffffff'
+  // Bottom-left keeps clear of the templates' own bottom-right "presented by"
+  // footers/sponsor slots.
+  return (
+    <div style={{ position: 'absolute', left: 26, bottom: 20, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.8, pointerEvents: 'none', zIndex: 6 }}>
+      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: col, opacity: 0.6, textTransform: 'uppercase' }}>Created using</span>
+      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, lineHeight: 1, letterSpacing: 0.3, color: col }}>BetterCricket</span>
+    </div>
+  )
+}
+
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
 // Print / Geometric), in first-seen order from SOCIAL_BACKGROUNDS itself so
 // the picker stays in sync if that list changes.
@@ -1467,6 +1490,9 @@ export default function AdminSocialPost() {
   // fills can't be touched individually (~40 of them), so this is done by
   // feeding them a translucent palette instead.
   const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, '99') } : renderPalette
+  // Drives the "Created using BetterCricket" mark's colour (black on a light
+  // post, white on a dark one).
+  const postLight = isLightHex(renderPalette?.primary)
 
   const filteredPlayers = allPlayers.filter(p => {
     if (!playerSearch) return true
@@ -1723,6 +1749,7 @@ export default function AdminSocialPost() {
         {customEdit && !isBlankTab && (
           <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
         )}
+        <CreatedWith light={postLight} />
       </>
     )
     // The three details that matter most for the active post type.
@@ -1906,7 +1933,7 @@ export default function AdminSocialPost() {
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
                 onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
-                onGestureStart={() => record('Move block')} />
+                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
             ) : (
               <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
             )}
@@ -1914,9 +1941,10 @@ export default function AdminSocialPost() {
               <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
                 interactive scale={scale} selectedIds={overlay.selIds}
                 onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
-                onGestureStart={() => record('Move block')}
+                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
                 style={{ position: 'absolute', inset: 0 }} />
             )}
+            <CreatedWith light={postLight} />
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
@@ -3101,6 +3129,7 @@ export default function AdminSocialPost() {
             <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
               {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
               <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
+              <CreatedWith light={postLight} />
             </div>
           ))
         ) : (
@@ -3110,6 +3139,7 @@ export default function AdminSocialPost() {
             {customEdit && !isBlankTab && (
               <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
             )}
+            <CreatedWith light={postLight} />
           </div>
         )}
       </div>

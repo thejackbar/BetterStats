@@ -156,7 +156,7 @@ export function ClubLogo({ monogram = 'NG', color = '#fff', bg = 'transparent', 
 // or 'stack' (logo above name); `align` flips a row lockup to the right.
 export function BrandLockup({
   team, palette, size = 120, layout = 'row', align = 'left',
-  showName = true, nameSize, nameColor, nameOpacity = 1, gap, style = {},
+  showName = true, showLogo = true, nameSize, nameColor, nameOpacity = 1, gap, style = {},
 }) {
   const name = (team?.fullName || team?.name || '').toUpperCase()
   const col = nameColor || (palette && palette.ink) || '#fff'
@@ -170,7 +170,7 @@ export function BrandLockup({
       gap: g, textAlign: stack ? 'center' : (align === 'right' ? 'right' : 'left'),
       ...style,
     }}>
-      <ClubLogo src={team?.logo} monogram={team?.monogram} color={col} size={size} shape="shield" />
+      {showLogo && <ClubLogo src={team?.logo} monogram={team?.monogram} color={col} size={size} shape="shield" />}
       {showName && name && (
         <div style={{
           fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
