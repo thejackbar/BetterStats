@@ -1376,11 +1376,18 @@ export default function AdminSocialPost() {
     logo: opponent.logo || null,
   }
 
+  // A saved design carries its own primary/secondary/accent/ink, so it resolves
+  // as a palette in its own right; the trailing club fallback guarantees this is
+  // never undefined even if a design's paired palette got out of sync (which
+  // used to crash the whole editor with "reading 'primary'").
   const activePalette = paletteKey === 'club'
     ? orgToPalette(settings)
     : paletteKey === 'custom'
       ? { name: 'Custom', primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
-      : (savedPalettes.find(p => p.key === paletteKey) || PALETTES[paletteKey])
+      : (savedPalettes.find(p => p.key === paletteKey)
+         || savedDesigns.find(d => d.key === paletteKey)
+         || PALETTES[paletteKey]
+         || orgToPalette(settings))
 
   const themedPalette = applyTheme(activePalette, darkMode)
 
