@@ -534,22 +534,46 @@ function FixturesTab({ canManage, openFixture, setOpenFixture }) {
   const toast = useToast()
   const [data, setData] = useState(null)
   const [year, setYear] = useState(null)
+  const [gradeId, setGradeId] = useState('')
+  const [roundKey, setRoundKey] = useState('')
+  const [q, setQ] = useState('')
 
   const load = useCallback(() => {
-    api.votesFixtures(year).then(setData).catch((e) => toast.error(e.message))
-  }, [year, toast])
+    api.votesFixtures({ year, grade_id: gradeId || undefined, round_key: roundKey || undefined, q: q || undefined })
+      .then(setData).catch((e) => toast.error(e.message))
+  }, [year, gradeId, roundKey, q, toast])
   useEffect(() => { load() }, [load])
+
+  const changeGrade = (v) => { setGradeId(v); setRoundKey('') } // rounds are scoped to the grade
 
   if (openFixture) return <FixtureDetail fixtureId={openFixture} onBack={() => { setOpenFixture(null); load() }} />
   if (!data) return <PbSpinner message="Loading fixtures…" />
 
+  const filtered = gradeId || roundKey || q
+
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <select value={data.year} onChange={(e) => setYear(parseInt(e.target.value, 10))}
+      <div className="flex flex-wrap items-center gap-2.5 mb-4">
+        <select value={data.year} onChange={(e) => { setYear(parseInt(e.target.value, 10)); setRoundKey('') }}
           className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
           {data.years.map((y) => <option key={y} value={y}>Season {seasonLabel(y)}</option>)}
         </select>
+        {(data.grades || []).length > 0 && (
+          <select value={gradeId} onChange={(e) => changeGrade(e.target.value)}
+            className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
+            <option value="">All teams / grades</option>
+            {data.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        )}
+        {(data.rounds || []).length > 0 && (
+          <select value={roundKey} onChange={(e) => setRoundKey(e.target.value)}
+            className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
+            <option value="">All rounds</option>
+            {data.rounds.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+          </select>
+        )}
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search opponent…"
+          className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm w-40 focus:outline-none focus:border-pb-accent" />
         {!data.settings?.enabled && (
           <span className="text-[12.5px] text-pb-amber">
             The voting link is off, so players can't vote yet. Turn it on under Settings (admins can still enter ballots here).
@@ -558,7 +582,7 @@ function FixturesTab({ canManage, openFixture, setOpenFixture }) {
       </div>
       {data.fixtures.length === 0 ? (
         <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
-          No played fixtures this season yet.
+          {filtered ? 'No fixtures match these filters.' : 'No played fixtures this season yet.'}
         </div>
       ) : (
         <div className="rounded-xl border pb-hairline overflow-hidden divide-y divide-pb-hairline">

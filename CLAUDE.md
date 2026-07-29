@@ -912,13 +912,15 @@ BetterFees' derived allocation.
   `vote_fixture_overrides` ('locked'|'reopened' on top of the auto-close
   window).
 - **Eligibility = the synced scorecard** (per direct instruction, not the
-  saved lineup): a fixture is votable once `games.id == fixture.id` exists
-  (playhq fixtures share ids with their games; manual fixtures aren't votable
-  yet), and the votable/voter list is `services/votes.eligible_players` — the
-  union of `game_appearances` + batting/bowling/fielding rows, **org-scoped
-  through `players.organisation_id`** (the shared-game cross-club leak rule).
-  Captain-only mode uses `game_appearances.is_captain`, falling back to the
-  lineup's captain when the sync predates the flag.
+  saved lineup): a fixture is votable once its game has landed in `games`
+  (manual fixtures aren't votable yet), and the votable/voter list is
+  `services/votes.eligible_players` — the union of `game_appearances` +
+  batting/bowling/fielding rows, **org-scoped through `players.organisation_id`**
+  (the shared-game cross-club leak rule). Captain-only mode uses
+  `game_appearances.is_captain`, falling back to the lineup's captain when the
+  sync predates the flag. **`games.id` is NOT `fixture.id`** for a synced
+  fixture — see `services.votes.match_ref_id` below; this was wrong at launch
+  and is fixed in the v8.94.5 note further down.
 - **Counting** (`services/votes.py`, pure functions, unit-checked offline):
   'tally' = season points are the raw sum (10 voters' 3s = 30). 'rank' =
   weekly conversion — top raw vote-getter earns `ballot_values[0]`, etc.;
@@ -983,8 +985,43 @@ BetterFees' derived allocation.
   NOT in the undo log — an undone merge leaves votes on the kept player
   (same human, no vote lost).
 - **Known gap** (deliberate v1): manual fixtures/games aren't votable — the
-  votable probe is `games.id == fixture.id`, and manual games have no
-  fixture link.
+  votable probe needs a real synced game (see `match_ref_id` below), and a
+  manual fixture has no upstream match at all.
+- **Fixed: `fixture.id` was never the real match GUID (v8.94.5)** — reported
+  live: a played fixture (Darwin CC 2nd XI vs Waratah Warriors B, already
+  fully scorecarded on Play.Cricket) showed **0** for all three eligibility
+  sources — "Match scorecard", "BetterSelect XI" AND "Play.Cricket team
+  list" — even though the match had a live team list AND a completed
+  scorecard, confirmed by fetching the Grassroots match directly. Root
+  cause: `routers/fixtures.py::sync_fixtures` (the only automated path that
+  creates `Fixture` rows) sets `source='grassroots'` and mints a **random
+  `uuid4()`** for `Fixture.id`, storing the REAL Grassroots match GUID in
+  `Fixture.playhq_id` instead (so two clubs playing each other keep separate
+  fixture rows despite sharing one `games.id`) — the Fixture model's own
+  docstring ("`id == the CA/PlayHQ game GUID`") describes a scheme that was
+  never actually implemented this way. `services/votes.py` took that
+  docstring at face value: `game_exists`/`eligible_players` (scorecard
+  source) and the live `our_lineup_players` call (Play.Cricket source) both
+  cross-referenced bare `fixture.id` against `games.id` / a live Grassroots
+  fetch — which never matches, so both sources always read empty for any
+  auto-synced fixture, regardless of whether the game was actually synced or
+  published. Fixed with `services.votes.match_ref_id(fixture)` — returns
+  `fixture.playhq_id` (parsed to a UUID) when set, else `fixture.id` for a
+  manual fixture (correctly never matches a real game) — used everywhere
+  `eligible_from_source`, `routers/votes.py::list_vote_fixtures`'s `synced`
+  set, and `routers/public_votes.py::_open_fixtures`'s `synced` set
+  previously used the bare Fixture PK. `fixture_lineups` (BetterSelect XI)
+  is untouched — it's keyed on the Fixture's own PK throughout, which is
+  self-consistent regardless of `playhq_id`.
+- **Fixtures tab filters (v8.94.5)**: with the id bug fixed, clubs running
+  several grades hit the next problem — one flat, unfilterable list of every
+  played fixture across every team for the season. `GET /votes/fixtures`
+  gained `grade_id`/`round_key`/`q` (free-text opponent search); the
+  response's `grades`/`rounds` option lists are always built from the WHOLE
+  season regardless of the other filters, so the dropdowns never collapse to
+  the current selection. `AdminVotes.jsx`'s Fixtures tab grew Team/Grade,
+  Round and a search box alongside the existing season-year picker; picking
+  a grade resets the round filter, since round options are scoped to it.
 
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 

@@ -166,8 +166,10 @@ async def _open_fixtures(db: AsyncSession, club: Organisation, cfg: dict) -> lis
     from sqlalchemy import text
     from app.models.db import VoteFixtureOverride
     fids = [f.id for f in fixtures]
-    g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": fids})
-    synced = {str(r[0]) for r in g_res.fetchall()}
+    match_ids = [vote_svc.match_ref_id(f) for f in fixtures]
+    g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": match_ids})
+    synced_games = {str(r[0]) for r in g_res.fetchall()}
+    synced = {str(f.id) for f in fixtures if str(vote_svc.match_ref_id(f)) in synced_games}
     l_res = await db.execute(
         text("SELECT DISTINCT fixture_id FROM fixture_lineups "
              "WHERE organisation_id = :org AND fixture_id = ANY(:ids)"),

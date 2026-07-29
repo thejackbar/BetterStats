@@ -8,11 +8,18 @@ the whole season consistently (same philosophy as BetterFees' derived
 match-day allocation).
 
 Eligibility is the SYNCED SCORECARD, per direct instruction: a fixture is
-votable only once its game has landed in `games` (fixture.id == games.id for
-playhq-sourced fixtures), and the votable/voter list is who actually played —
-the union of game_appearances + per-innings stat rows, org-scoped through
-players.organisation_id (never trust a shared game's rows without that scope,
-see the cross-club leak notes in CLAUDE.md).
+votable only once its game has landed in `games`, and the votable/voter list
+is who actually played — the union of game_appearances + per-innings stat
+rows, org-scoped through players.organisation_id (never trust a shared
+game's rows without that scope, see the cross-club leak notes in CLAUDE.md).
+
+``Fixture.id`` is NOT the real upstream match GUID for a synced fixture —
+``routers/fixtures.py::sync_fixtures`` mints a random ``uuid4()`` for the row
+and stores the actual Grassroots match id in ``Fixture.playhq_id`` instead
+(so two clubs playing each other keep separate fixture rows even though they
+share one ``games.id``). ``games.id`` and a live Grassroots lookup are both
+keyed on that real match id, so anything here that cross-references either
+one must go through ``match_ref_id()``, never bare ``fixture.id``.
 """
 from __future__ import annotations
 
@@ -89,10 +96,28 @@ def effective_config(s: Optional[VoteSettings]) -> dict:
 
 # ─── Eligibility (who played) ────────────────────────────────────────────────
 
-async def game_exists(db: AsyncSession, fixture_id) -> bool:
-    """Has the fixture's game synced? playhq fixtures share their id with the
-    eventual games row, so this is a straight PK probe."""
-    res = await db.execute(text("SELECT 1 FROM games WHERE id = :gid LIMIT 1"), {"gid": fixture_id})
+def match_ref_id(fixture: Fixture):
+    """The real upstream match/game GUID for a fixture.
+
+    A synced ('grassroots', and any future 'playhq') fixture keeps a random,
+    resync-stable ``uuid4()`` as its own PK and stores the actual Grassroots
+    match id in ``playhq_id`` (see ``routers/fixtures.py::sync_fixtures``) —
+    that's what ``games.id`` and a live Grassroots lookup are keyed on, not
+    the Fixture PK. A manual fixture has no upstream match at all, so its own
+    id is used, which correctly never matches a real game.
+    """
+    if fixture.playhq_id:
+        try:
+            return uuid.UUID(fixture.playhq_id)
+        except ValueError:
+            return fixture.playhq_id
+    return fixture.id
+
+
+async def game_exists(db: AsyncSession, game_id) -> bool:
+    """Has this game synced? ``game_id`` must be the real match GUID
+    (``match_ref_id(fixture)``), not the Fixture PK."""
+    res = await db.execute(text("SELECT 1 FROM games WHERE id = :gid LIMIT 1"), {"gid": game_id})
     return res.first() is not None
 
 
@@ -172,17 +197,20 @@ async def eligible_from_source(db: AsyncSession, club, fixture, source: str) -> 
     is a real player FK.
     """
     if source == "lineup":
+        # BetterSelect XIs are keyed on the Fixture's own PK, not the real
+        # match id — that mapping is self-consistent regardless of playhq_id.
         return await lineup_players(db, club.id, fixture.id), []
+    game_id = match_ref_id(fixture)
     if source == "playhq":
         from app.services.lineups import our_lineup_players
         try:
-            return await our_lineup_players(db, club, str(fixture.id))
+            return await our_lineup_players(db, club, str(game_id))
         except Exception:
             # A live upstream fetch must never take the vote page down.
             logger.warning("vote eligibility: Play.Cricket lineup fetch failed for %s", fixture.id)
             return [], []
-    if await game_exists(db, fixture.id):
-        return await eligible_players(db, club.id, fixture.id), []
+    if await game_exists(db, game_id):
+        return await eligible_players(db, club.id, game_id), []
     return [], []
 
 

@@ -2085,7 +2085,15 @@ export const api = {
   votesSetSettings: (data) =>
     request('/votes/settings', { method: 'POST', body: JSON.stringify(data) }),
   votesRegenerateLink: () => request('/votes/settings/regenerate', { method: 'POST' }),
-  votesFixtures: (year) => request(`/votes/fixtures${year ? `?year=${year}` : ''}`),
+  votesFixtures: ({ year, grade_id, round_key, q } = {}) => {
+    const params = new URLSearchParams()
+    if (year) params.set('year', year)
+    if (grade_id) params.set('grade_id', grade_id)
+    if (round_key) params.set('round_key', round_key)
+    if (q) params.set('q', q)
+    const qs = params.toString()
+    return request(`/votes/fixtures${qs ? `?${qs}` : ''}`)
+  },
   votesFixtureDetail: (fixtureId) => request(`/votes/fixtures/${fixtureId}`),
   votesAdminBallot: (fixtureId, data) =>
     request(`/votes/fixtures/${fixtureId}/ballots`, { method: 'POST', body: JSON.stringify(data) }),

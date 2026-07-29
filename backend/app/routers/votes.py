@@ -150,12 +150,24 @@ async def _org_fixture(db: AsyncSession, club: Organisation, fixture_id: str) ->
 @router.get("/fixtures")
 async def list_vote_fixtures(
     year: Optional[int] = None,
+    grade_id: Optional[str] = None,
+    round_key: Optional[str] = None,
+    q: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_any_cap(MANAGE_VOTES, VIEW_VOTE_RESULTS)),
 ):
     """Played fixtures for a season year, newest first, each annotated with its
-    voting state and ballot count. Also returns the season-year options."""
+    voting state and ballot count.
+
+    ``grade_id`` (one of the club's teams/grades) and ``round_key`` (the
+    ``key`` of one of the returned ``rounds``) narrow the list — a club with
+    several grades otherwise gets one long jumbled list with no way to jump
+    straight to, say, 1st XI Round 10. ``q`` is a free-text opponent search.
+    ``grades``/``rounds`` in the response are built from the WHOLE season
+    regardless of the other filters, so the dropdowns never collapse to just
+    the current selection.
+    """
     s = await vote_svc.get_settings(db, club.id)
     cfg = vote_svc.effective_config(s)
     today = date.today()
@@ -182,18 +194,56 @@ async def list_vote_fixtures(
         )
         .order_by(Fixture.played_on.desc())
     )
-    fixtures = fx_res.scalars().all()
+    season_fixtures = fx_res.scalars().all()
+
+    grade_names: dict[str, str] = {}
+    gids = {f.grade_id for f in season_fixtures if f.grade_id}
+    if gids:
+        from sqlalchemy import text
+        gn_res = await db.execute(
+            text("SELECT id, name FROM grades WHERE id = ANY(:ids)"), {"ids": list(gids)},
+        )
+        grade_names = {str(gid): name for gid, name in gn_res.fetchall()}
+    grades = sorted(
+        ({"id": gid, "name": name} for gid, name in grade_names.items()),
+        key=lambda g: g["name"],
+    )
+
+    # Round options scoped to the grade filter (if any) but not the round
+    # filter itself, newest first.
+    rounds_seen: dict[str, tuple[str, Optional[date]]] = {}
+    for f in season_fixtures:
+        if grade_id and str(f.grade_id) != grade_id:
+            continue
+        key = vote_svc.round_key_for(f)
+        if key not in rounds_seen:
+            rounds_seen[key] = (vote_svc.round_label_for(f), f.played_on)
+    rounds = [
+        {"key": k, "label": lbl}
+        for k, (lbl, d) in sorted(rounds_seen.items(), key=lambda kv: kv[1][1] or date.min, reverse=True)
+    ]
+
+    fixtures = season_fixtures
+    if grade_id:
+        fixtures = [f for f in fixtures if str(f.grade_id) == grade_id]
+    if round_key:
+        fixtures = [f for f in fixtures if vote_svc.round_key_for(f) == round_key.lower()]
+    if q:
+        ql = q.strip().lower()
+        fixtures = [f for f in fixtures if ql in (f.opponent_name or f.label or "").lower()]
+
     fids = [f.id for f in fixtures]
+    match_ids = [vote_svc.match_ref_id(f) for f in fixtures]
 
     synced: set[str] = set()
     lineup_saved: set[str] = set()
     counts: dict[str, int] = {}
     overrides: dict[str, VoteFixtureOverride] = {}
-    grade_names: dict[str, str] = {}
     if fids:
         from sqlalchemy import text
-        g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": fids})
-        synced = {str(r[0]) for r in g_res.fetchall()}
+        g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": match_ids})
+        synced_games = {str(r[0]) for r in g_res.fetchall()}
+        synced = {str(f.id) for f in fixtures if str(vote_svc.match_ref_id(f)) in synced_games}
         l_res = await db.execute(
             text("SELECT DISTINCT fixture_id FROM fixture_lineups "
                  "WHERE organisation_id = :org AND fixture_id = ANY(:ids)"),
@@ -210,12 +260,6 @@ async def list_vote_fixtures(
             select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id.in_(fids))
         )
         overrides = {str(o.fixture_id): o for o in o_res.scalars().all()}
-        gids = {f.grade_id for f in fixtures if f.grade_id}
-        if gids:
-            gn_res = await db.execute(
-                text("SELECT id, name FROM grades WHERE id = ANY(:ids)"), {"ids": list(gids)},
-            )
-            grade_names = {str(gid): name for gid, name in gn_res.fetchall()}
 
     out = []
     for f in fixtures:
@@ -235,6 +279,7 @@ async def list_vote_fixtures(
             "id": fid,
             "opponent": f.opponent_name or f.label,
             "round": vote_svc.round_label_for(f),
+            "round_key": vote_svc.round_key_for(f),
             "date": f.played_on.isoformat() if f.played_on else None,
             "grade": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "grade_id": str(f.grade_id) if f.grade_id else None,
@@ -247,7 +292,10 @@ async def list_vote_fixtures(
             "closes_on": close.isoformat() if close and state == "open" else None,
             "ballots": counts.get(fid, 0),
         })
-    return {"year": year, "years": years or [year], "fixtures": out, "settings": _settings_payload(s)}
+    return {
+        "year": year, "years": years or [year], "fixtures": out, "settings": _settings_payload(s),
+        "grades": grades, "grade_id": grade_id, "rounds": rounds, "round_key": round_key, "q": q,
+    }
 
 
 @router.get("/fixtures/{fixture_id}")
