@@ -23,8 +23,10 @@ function ConditionalNavbar() {
   const { pathname } = useLocation()
   const isMarketing = isMarketingPath(pathname)
   // The public self-service availability page is a standalone, white-labelled
-  // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/')
+  // mobile page — it renders its own minimal header, no club nav. The BetterPosts
+  // editor is a full-viewport takeover with its own header, so suppress the club
+  // nav there too.
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 

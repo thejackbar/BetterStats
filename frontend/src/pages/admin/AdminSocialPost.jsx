@@ -2018,24 +2018,6 @@ export default function AdminSocialPost() {
               )}
             </section>
 
-            {/* Post-type tabs — wrapped so every type is visible at once. */}
-            <div className="flex flex-wrap gap-1.5">
-              {TABS.map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => switchTab(tab.key)}
-                  className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 whitespace-nowrap border transition-colors ${
-                    activeTab === tab.key
-                      ? 'bg-pb-surface2'
-                      : 'text-pb-faint border-transparent hover:text-pb-dim'
-                  }`}
-                  style={activeTab === tab.key ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
-                >
-                  {tab.label.toUpperCase()}
-                </button>
-              ))}
-            </div>
-
             </>)}
 
             {tool === 'design' && (<>
