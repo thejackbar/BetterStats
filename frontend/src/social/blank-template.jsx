@@ -60,12 +60,17 @@ export const BLANK_ELEMENTS = [
 // player's career stats) into the canvas. They render from the `data` bundle
 // AdminSocialPost passes down, so a saved template stores only the config and
 // always shows current numbers.
+// `group` splits the Club-data panel into "from a player profile" vs "from the
+// club". The three player kinds all read the same `playerId`, so one picker
+// drives photo + name + numbers.
 export const BLANK_DATA = [
-  { kind: 'fixtures', name: 'Fixtures' },
-  { kind: 'results', name: 'Results' },
-  { kind: 'record', name: 'W-L-D record' },
-  { kind: 'scorecard', name: 'Scorecard' },
-  { kind: 'player', name: 'Player stats' },
+  { kind: 'playerphoto', name: 'Player photo', group: 'player' },
+  { kind: 'playername', name: 'Player name', group: 'player' },
+  { kind: 'player', name: 'Player stats', group: 'player' },
+  { kind: 'fixtures', name: 'Fixtures', group: 'club' },
+  { kind: 'results', name: 'Results', group: 'club' },
+  { kind: 'record', name: 'W-L-D record', group: 'club' },
+  { kind: 'scorecard', name: 'Scorecard', group: 'club' },
 ]
 
 // Clip-path polygons for the fill-only decorative shapes (scale with w/h).
@@ -107,7 +112,9 @@ export function newBlankItem(type, opts = {}) {
     const kind = opts.kind || 'fixtures'
     const base = { id, type: 'data', kind, x: 70, y: 300, w: 940, color: 'ink', accent: 'accent', count: 5, rotation: 0 }
     if (kind === 'record') return { ...base, w: 900, h: 240 }
-    if (kind === 'player') return { ...base, w: 900, h: 380, playerId: null }
+    if (kind === 'player') return { ...base, w: 900, h: 380, playerId: opts.playerId || null }
+    if (kind === 'playerphoto') return { ...base, x: 540, y: 300, w: 460, h: 620, playerId: opts.playerId || null, fit: 'cover' }
+    if (kind === 'playername') return { ...base, x: 70, y: 560, w: 900, h: 260, playerId: opts.playerId || null, showRole: true }
     if (kind === 'scorecard') return { ...base, w: 940, h: 520 }
     return { ...base, h: 70 + 5 * 70 } // fixtures / results
   }
@@ -125,6 +132,21 @@ export function itemBBox(it) {
   }
   if (it.type === 'brand') return { x: it.x, y: it.y, w: it.showName ? it.size * 3 : it.size, h: it.size }
   return { x: it.x, y: it.y, w: it.w || 100, h: it.h || 100 }
+}
+
+// Human label for a block — shared by the Layers panel, the inspector title and
+// the Content panel. Images prefer their stored asset name.
+export function itemLabel(it) {
+  if (!it) return ''
+  if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
+  if (it.type === 'image') return it.srcName || (it.src ? 'Image' : 'Image (empty)')
+  if (it.type === 'brand') return 'Club badge'
+  if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
+  if (it.type === 'data') return {
+    fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard',
+    player: 'Player stats', playerphoto: 'Player photo', playername: 'Player name',
+  }[it.kind] || 'Data'
+  return it.type
 }
 
 export function groupBBox(list) {
@@ -246,6 +268,20 @@ function ElementBlock({ item, palette }) {
 const DISPLAY_FONT = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO_FONT = "'JetBrains Mono', monospace"
 
+const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+// Same headshot URL the lineup templates use (playerToTemplatePlayer builds
+// `headshot` from it) — no new server endpoint needed.
+const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)
+
+// "LAST, First" / "First Last" split, mirroring splitName in AdminSocialPost.
+function splitPlayerName(name) {
+  const n = String(name || '').trim()
+  if (!n) return ['', '']
+  if (n.includes(', ')) { const [l, f] = n.split(', '); return [f || '', l || ''] }
+  const parts = n.split(/\s+/)
+  return [parts.slice(0, -1).join(' '), parts.slice(-1)[0] || '']
+}
+
 function DataBlock({ item, palette, data = {} }) {
   const ink = resolveBlankColor(item.color, palette)
   const accent = resolveBlankColor(item.accent || 'accent', palette)
@@ -340,6 +376,39 @@ function DataBlock({ item, palette, data = {} }) {
         <Head>{(m.result || 'SCORECARD').toUpperCase()}</Head>
         {side(sc?.home, 'HOME')}
         {side(sc?.away, 'AWAY')}
+      </div>
+    )
+  }
+
+  if (item.kind === 'playerphoto') {
+    const player = (data.players || []).find((p) => p.id === item.playerId)
+    const src = headshotUrl(player)
+    if (src) {
+      return <img src={src} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'cover', display: 'block', pointerEvents: 'none' }} />
+    }
+    return (
+      <div style={{
+        width: item.w, height: item.h, border: `3px dashed ${ink}55`,
+        display: 'grid', placeItems: 'center', textAlign: 'center', padding: 16,
+        fontFamily: MONO_FONT, fontSize: 20, letterSpacing: 2, color: `${ink}99`,
+      }}>
+        {player ? `NO PHOTO ON ${(player.display_name || player.name || '').toUpperCase()}'S PROFILE` : 'SELECT A PLAYER'}
+      </div>
+    )
+  }
+
+  if (item.kind === 'playername') {
+    const player = (data.players || []).find((p) => p.id === item.playerId)
+    const name = player ? (player.display_name || player.name || '') : ''
+    const [first, last] = splitPlayerName(name)
+    const role = player?.roles?.[0] || player?.role || player?.player_role || ''
+    return (
+      <div style={{ width: item.w, fontFamily: DISPLAY_FONT, color: ink }}>
+        {first && <div style={{ fontSize: 52, lineHeight: 1, color: accent, letterSpacing: 1 }}>{first.toUpperCase()}</div>}
+        <div style={{ fontSize: 148, lineHeight: 0.92 }}>{(last || 'PLAYER').toUpperCase()}</div>
+        {item.showRole && role && (
+          <div style={{ fontFamily: MONO_FONT, fontSize: 26, letterSpacing: 3, color: `${ink}aa`, marginTop: 10 }}>{String(role).toUpperCase()}</div>
+        )}
       </div>
     )
   }
