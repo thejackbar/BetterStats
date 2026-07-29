@@ -871,6 +871,20 @@ live off the Grassroots feed — nothing new is persisted.
   reference-perfect on an undo"); a stale alias after an undo is a rare,
   low-stakes case an admin can delete by hand via "Also known as" if it ever
   comes up.
+- **BetterPosts lineup posts can pull from either source** (v8.94.4,
+  frontend-only — no backend change, `GET /organisations/{id}/lineups` already
+  returned everything needed): `AdminSocialPost.jsx`'s Lineup data step gained
+  a BetterSelect / Play.Cricket toggle alongside the existing saved-XI list.
+  Picking a Play.Cricket fixture (`loadLineupFromPlayCricket`) needs no second
+  fetch — the list call already returns each match's full `teams[].players[]`
+  with `player_id` resolved (alias-aware, per the fix above), so it maps
+  straight onto the same `selectedPlayers`/`match`/`opponent` shape the
+  BetterSelect handoff builds. A resolved player gets their normal roster
+  record (photo, role); an unresolved one still renders using the live
+  Play.Cricket name. Defaults to whichever source has data (an admin's
+  explicit pick always wins from then on, `lineupSourceTouched` ref); a side
+  that hasn't been published yet shows in the list but its button is
+  disabled ("not published yet") rather than silently building an empty post.
 - **Not built (deliberate)**: nothing here is persisted, so there's no lineup
   history beyond what the feed still serves. Also noticed while investigating:
   `matchSummary.teams` carries `wonToss`/`battedFirst`, which contradicts the

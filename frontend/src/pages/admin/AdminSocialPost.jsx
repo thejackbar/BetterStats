@@ -131,7 +131,7 @@ const TAB_ICON = {
 // import). These open on the "Get your data" step so the source is collected first.
 const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard']
 const SOURCE_HELP = {
-  lineup: 'Lineups come from BetterSelect. Pick a saved XI below to pull the players, captain, keeper and match details — or add players yourself in Content.',
+  lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
   result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
@@ -661,6 +661,12 @@ export default function AdminSocialPost() {
   // BetterSelect fixtures with saved XIs, for the lineup source step.
   const [sourceFixtures, setSourceFixtures] = useState(null)
   const [lineupLoad, setLineupLoad] = useState(null)
+  // Play.Cricket-published team lists for the same lineup source step — an
+  // admin can pull from either, per post (see loadLineupFromPlayCricket).
+  const [pcFixtures, setPcFixtures] = useState(null)
+  const [lineupSourceKind, setLineupSourceKind] = useState('betterselect')
+  // Once the admin has manually picked a source, stop auto-defaulting it.
+  const lineupSourceTouched = useRef(false)
   // Hidden file input the inspector's "Replace" drives; remembers which image
   // block to fill.
   const blankImgInputRef = useRef(null)
@@ -1394,6 +1400,22 @@ export default function AdminSocialPost() {
       api.bsSelectionOverview().then((d) => setSourceFixtures(d.fixtures || [])).catch(() => setSourceFixtures([]))
     }
   }, [tool, activeTab, sourceFixtures])
+  // Load Play.Cricket-published team lists (upcoming, falling back to recent)
+  // the same way — a second, independent source for the same lineup step.
+  useEffect(() => {
+    if (tool === 'source' && activeTab === 'lineup' && pcFixtures === null && settings?.id) {
+      api.getOrgLineups(settings.id, { mode: 'upcoming', limit: 20 }).then((d) => setPcFixtures(d.matches || [])).catch(() => setPcFixtures([]))
+    }
+  }, [tool, activeTab, pcFixtures, settings])
+  // Default to whichever source actually has something to pick, once both have
+  // loaded — an admin who hasn't manually chosen a source shouldn't land on an
+  // empty "No saved teams yet" BetterSelect card when Play.Cricket has one.
+  useEffect(() => {
+    if (lineupSourceTouched.current) return
+    if (Array.isArray(sourceFixtures) && sourceFixtures.length === 0 && Array.isArray(pcFixtures) && pcFixtures.length > 0) {
+      setLineupSourceKind('playcricket')
+    }
+  }, [sourceFixtures, pcFixtures])
   const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
   const displayFont = DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0]
 
@@ -1875,6 +1897,36 @@ export default function AdminSocialPost() {
     } catch (e) { setLineupLoad(`err:${e?.message || 'Failed to load'}`) }
   }
 
+  // Pull a Play.Cricket-published team list into the lineup post instead — the
+  // match's full lineup (both teams, ours already flagged/linked) is already
+  // in `fx` from the source-panel list, so no extra fetch is needed. A player
+  // we hold gets their full roster record (photo, role); an unregistered
+  // fill-in or a redacted junior still renders using their live-feed name.
+  const loadLineupFromPlayCricket = (fx) => {
+    if (!fx) return
+    const ourTeam = (fx.teams || []).find((t) => t.is_ours)
+    const oppTeam = (fx.teams || []).find((t) => !t.is_ours)
+    if (!ourTeam || !ourTeam.players?.length) { setLineupLoad('err:No published side for this match yet'); return }
+    const byId = {}; allPlayers.forEach((p) => { byId[p.id] = p })
+    const picked = ourTeam.players.map((p) => {
+      const player = p.player_id ? byId[p.player_id] : null
+      const fallback = { id: p.participant_id, display_name: p.name }
+      return {
+        player: player || fallback,
+        role: p.is_wicket_keeper ? 'WK' : (player?.player_role || 'BAT'),
+        captain: !!p.is_captain,
+        viceCaptain: false,
+        keeper: !!p.is_wicket_keeper,
+      }
+    })
+    setSelectedPlayers(picked)
+    setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
+    if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
+    const tn = ourTeam.name || ourTeam.club || ''
+    if (tn) setHeadline(tn)
+    setLineupLoad(`ok:${picked.length}`)
+  }
+
   // Media library handlers (optimistic upload, then swap in the stored URL).
   const uploadMedia = async (files) => {
     for (const f of files) {
@@ -2042,26 +2094,62 @@ export default function AdminSocialPost() {
 
                 {activeTab === 'lineup' && (
                   <div className="pb-card p-4 flex flex-col gap-2">
-                    <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">From BetterSelect</div>
-                    {sourceFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading your teams…</div>}
-                    {Array.isArray(sourceFixtures) && sourceFixtures.length === 0 && (
-                      <div className="text-pb-faintest text-[11px] leading-relaxed">No saved teams yet. Pick your XI in BetterSelect, or add players yourself in Content.</div>
-                    )}
-                    {Array.isArray(sourceFixtures) && sourceFixtures.length > 0 && (
-                      <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto">
-                        {sourceFixtures.slice(0, 20).map((fx) => (
-                          <button key={fx.id} onClick={() => loadLineupFromSelection(fx.id)}
-                            className="text-left px-3 py-2 rounded-lg border pb-hairline bg-pb-surface2 hover:border-pb-accent transition-colors">
-                            <div className="text-pb-text text-[12px] truncate">v {fx.opponent_name || 'TBC'}</div>
-                            <div className="font-mono text-[9px] text-pb-faint">{[fx.grade, fx.round, fx.played_on].filter(Boolean).join(' · ')}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface2 border pb-hairline">
+                      {[{ key: 'betterselect', label: 'BetterSelect' }, { key: 'playcricket', label: 'Play.Cricket' }].map((s) => (
+                        <button key={s.key}
+                          onClick={() => { lineupSourceTouched.current = true; setLineupSourceKind(s.key) }}
+                          className={`flex-1 py-1.5 rounded-md font-mono text-[9px] tracking-wide2 uppercase transition-colors ${
+                            lineupSourceKind === s.key ? 'bg-pb-surface text-pb-text' : 'text-pb-faint hover:text-pb-dim'
+                          }`}>{s.label}</button>
+                      ))}
+                    </div>
+
+                    {lineupSourceKind === 'betterselect' && (<>
+                      {sourceFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading your teams…</div>}
+                      {Array.isArray(sourceFixtures) && sourceFixtures.length === 0 && (
+                        <div className="text-pb-faintest text-[11px] leading-relaxed">No saved teams yet. Pick your XI in BetterSelect, or add players yourself in Content.</div>
+                      )}
+                      {Array.isArray(sourceFixtures) && sourceFixtures.length > 0 && (
+                        <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto">
+                          {sourceFixtures.slice(0, 20).map((fx) => (
+                            <button key={fx.id} onClick={() => loadLineupFromSelection(fx.id)}
+                              className="text-left px-3 py-2 rounded-lg border pb-hairline bg-pb-surface2 hover:border-pb-accent transition-colors">
+                              <div className="text-pb-text text-[12px] truncate">v {fx.opponent_name || 'TBC'}</div>
+                              <div className="font-mono text-[9px] text-pb-faint">{[fx.grade, fx.round, fx.played_on].filter(Boolean).join(' · ')}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <button onClick={() => navigate('/admin/betterselect')} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">Open BetterSelect →</button>
+                    </>)}
+
+                    {lineupSourceKind === 'playcricket' && (<>
+                      {pcFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading published team lists…</div>}
+                      {Array.isArray(pcFixtures) && pcFixtures.length === 0 && (
+                        <div className="text-pb-faintest text-[11px] leading-relaxed">No fixtures found on Play.Cricket yet. Try BetterSelect, or add players yourself in Content.</div>
+                      )}
+                      {Array.isArray(pcFixtures) && pcFixtures.length > 0 && (
+                        <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto">
+                          {pcFixtures.slice(0, 20).map((fx) => {
+                            const oppTeam = (fx.teams || []).find((t) => !t.is_ours)
+                            const ourTeam = (fx.teams || []).find((t) => t.is_ours)
+                            const published = !!ourTeam?.published
+                            return (
+                              <button key={fx.match_id} onClick={() => loadLineupFromPlayCricket(fx)} disabled={!published}
+                                className="text-left px-3 py-2 rounded-lg border pb-hairline bg-pb-surface2 hover:border-pb-accent transition-colors disabled:opacity-50 disabled:hover:border-transparent disabled:cursor-not-allowed">
+                                <div className="text-pb-text text-[12px] truncate">v {oppTeam?.club || oppTeam?.name || 'TBC'}</div>
+                                <div className="font-mono text-[9px] text-pb-faint">{[fx.grade, fx.round, fx.date].filter(Boolean).join(' · ')}{!published ? ' · not published yet' : ''}</div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <button onClick={() => navigate(`/${settings?.slug || ''}/lineups`)} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">View Lineups page →</button>
+                    </>)}
+
                     {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded — head to Content or Design</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('err:') && <div className="text-pb-red text-[10px] font-mono">✗ {lineupLoad.slice(4)}</div>}
-                    <button onClick={() => navigate('/admin/betterselect')} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">Open BetterSelect →</button>
                   </div>
                 )}
 
