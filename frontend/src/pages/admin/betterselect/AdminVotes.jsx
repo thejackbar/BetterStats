@@ -475,6 +475,14 @@ function FixtureDetail({ fixtureId, onBack }) {
         </div>
       )}
 
+      {(fx.state === 'closed' || fx.state === 'locked') && (
+        <div className="rounded-lg px-4 py-3 text-sm bg-pb-surface2 border pb-hairline text-pb-dim">
+          Voting {fx.state === 'locked' ? 'is locked' : 'has closed'} for this game, but you can still enter
+          ballots below without reopening it — handy for catching up at the end of a season.
+          Only use "Reopen voting" above if you want players to be able to vote themselves via the public link again.
+        </div>
+      )}
+
       <EligibilityPanel detail={detail} onChanged={load} />
 
       {/* Weekly result */}

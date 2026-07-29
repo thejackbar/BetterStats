@@ -1035,6 +1035,48 @@ BetterFees' derived allocation.
   a sync predating the captain flag leaving `eligible[].is_captain` all
   false, in which case it falls back to showing everyone rather than an
   empty list).
+- **Fixed: round order + a missing grade filter (v8.94.7)**: reported live —
+  the Round dropdown listed rounds out of numeric order ("Round 13, 15, 12,
+  14, 11, 7, 10…"), and the Team/Grade filter didn't appear at all. Both
+  traced to the same underlying gap: `routers/fixtures.py::sync_fixtures`
+  (the only automated path that creates `Fixture` rows) never populated
+  `Fixture.grade_id` at all — it only auto-attributes `team_id` (BetterSelect's
+  own team concept) — so every auto-synced fixture read `grade_id = NULL`,
+  starving the grade dropdown of any options; and several grades' fixtures
+  routinely share one match date (ordinary Saturday club cricket), so the old
+  date-only round sort left same-date rounds in undefined order, exposing
+  that a numeric label ("Round 13") was being tie-broken as a plain string
+  ("Round 10" < "Round 7" alphabetically). Fixed three ways:
+  1. `services.votes.round_sort_key(label, date)` sorts numerically on the
+     label first (falls back to a large sentinel for a non-numeric label like
+     a final, so it sorts after every numbered round), date second — used by
+     both `list_vote_fixtures`'s round options and `build_leaderboard`'s
+     round grouping.
+  2. `services.votes.effective_grade_ids(db, fixtures)` resolves a fixture's
+     grade from its own `grade_id` when set, else falls back to the synced
+     game's `grade_id` (via `match_ref_id` — the game-level sync is a
+     separate, correct pipeline that always sets this). Used everywhere
+     `list_vote_fixtures`/`build_leaderboard` build grade options, filter by
+     grade, or label a fixture's grade — so the filter/leaderboard grade chip
+     both work retroactively for already-synced fixtures, no backfill needed.
+  3. `sync_fixtures` itself now also stamps `Fixture.grade_id` going forward,
+     via a new `db_grade_id` field threaded through
+     `services.fixtures_source.org_grassroots_fixtures` (our own `grades.id`
+     for the fixture's grade — NOT the raw CA grade guid the function already
+     returned under `grade_id`, which can differ on a cross-club collision,
+     see the grade-collision note above).
+- **Entering ballots on a closed/locked round already worked, made obvious
+  (v8.94.7)**: asked live whether a club admin or super admin can catch up on
+  end-of-season voting for rounds that auto-closed. Turns out
+  `admin_enter_ballot` never had a voting-state gate at all ("works whatever
+  the voting state — paper votes often arrive after close", already in its
+  own docstring) and `build_leaderboard`/`tally_ballots` count every stored
+  ballot regardless of the fixture's current state — so a late-entered ballot
+  on a closed round already counted correctly, no code change needed there.
+  What was missing was that the UI never SAID so: `FixtureDetail` now shows a
+  plain note on a closed/locked fixture that ballots can still be entered
+  below without reopening, and that "Reopen voting" is only needed if players
+  should be able to self-serve vote via the public link again.
 
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 

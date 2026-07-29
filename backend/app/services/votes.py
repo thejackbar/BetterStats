@@ -24,6 +24,7 @@ one must go through ``match_ref_id()``, never bare ``fixture.id``.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date, timedelta
 from typing import Optional
@@ -406,6 +407,52 @@ def round_label_for(fixture: Fixture) -> str:
     return "Unscheduled"
 
 
+def _round_numeric(label: str) -> Optional[int]:
+    m = re.search(r"(\d+)", label or "")
+    return int(m.group(1)) if m else None
+
+
+def round_sort_key(label: str, played_on: Optional[date]) -> tuple:
+    """Earliest-first sort key for a round, robust to several grades sharing
+    one match date (ordinary Saturday club cricket). Date is the primary
+    signal; when several rounds tie on date (different grades, same weekend)
+    a numeric label ("Round 13") needs numeric comparison, not string
+    comparison ("Round 10" < "Round 7" alphabetically) — a non-numeric label
+    (a final) sorts after every numbered round. Reverse the result for a
+    most-recent-first list."""
+    n = _round_numeric(label)
+    return (played_on or date.min, n if n is not None else 10**6, label or "")
+
+
+async def effective_grade_ids(db: AsyncSession, fixtures: list[Fixture]) -> dict[str, uuid.UUID]:
+    """``fixture.id`` (str) → its effective grade id.
+
+    ``routers/fixtures.py::sync_fixtures`` never populates ``Fixture.grade_id``
+    at all (it only auto-attributes ``team_id``, BetterSelect's own team
+    concept) — so every auto-synced fixture reads NULL there, even long after
+    it's played, starving any grade/team filter of options. The separate
+    game-level sync IS correct and sets ``games.grade_id``, so this falls back
+    to that (via ``match_ref_id``) for any fixture whose own column is unset.
+    """
+    out: dict[str, uuid.UUID] = {}
+    missing = [f for f in fixtures if not f.grade_id]
+    if missing:
+        match_ids = [match_ref_id(f) for f in missing]
+        res = await db.execute(
+            text("SELECT id, grade_id FROM games WHERE id = ANY(:ids) AND grade_id IS NOT NULL"),
+            {"ids": match_ids},
+        )
+        game_grade = {str(gid): grade_id for gid, grade_id in res.fetchall()}
+        for f in missing:
+            gid = game_grade.get(str(match_ref_id(f)))
+            if gid:
+                out[str(f.id)] = gid
+    for f in fixtures:
+        if f.grade_id:
+            out[str(f.id)] = f.grade_id
+    return out
+
+
 async def load_ballots_by_fixture(db: AsyncSession, org_id, fixture_ids: list) -> dict:
     """All ballots (picks eager-loaded) for a set of fixtures, grouped by
     fixture id (string keys)."""
@@ -464,16 +511,21 @@ async def build_leaderboard(
         )
         .order_by(Fixture.played_on.asc())
     )
+    all_fixtures = (await db.execute(q)).scalars().all()
+    # sync_fixtures never populated Fixture.grade_id (see effective_grade_ids'
+    # own docstring) — resolve every fixture's grade before filtering, or a
+    # grade_id filter would silently match nothing.
+    grade_by_fixture = await effective_grade_ids(db, all_fixtures)
+    fixtures = all_fixtures
     if grade_id:
-        q = q.where(Fixture.grade_id == uuid.UUID(str(grade_id)))
-    fixtures = (await db.execute(q)).scalars().all()
+        fixtures = [f for f in fixtures if str(grade_by_fixture.get(str(f.id))) == grade_id]
 
     ballots_by_fx = await load_ballots_by_fixture(db, org_id, [f.id for f in fixtures])
     # Only fixtures that actually collected votes appear on the board.
     voted = [f for f in fixtures if ballots_by_fx.get(str(f.id))]
 
     # Grade names for the fixture chips.
-    grade_ids = {f.grade_id for f in voted if f.grade_id}
+    grade_ids = {grade_by_fixture.get(str(f.id)) for f in voted if grade_by_fixture.get(str(f.id))}
     grade_names: dict[str, str] = {}
     if grade_ids:
         res = await db.execute(
@@ -482,7 +534,10 @@ async def build_leaderboard(
         )
         grade_names = {str(gid): name for gid, name in res.fetchall()}
 
-    # Group into rounds, ordered by each round's earliest date.
+    # Group into rounds, ordered by each round's earliest date — a numeric
+    # round label ("Round 13") sorts numerically (round_sort_key), since
+    # several grades often share a match date (ordinary Saturday cricket) and
+    # a plain string sort would put "Round 10" before "Round 7".
     rounds: list[dict] = []
     by_key: dict[str, dict] = {}
     for f in voted:
@@ -494,7 +549,7 @@ async def build_leaderboard(
             rounds.append(rd)
         rd["date"] = min(rd["date"], f.played_on)
         rd["fixtures"].append(f)
-    rounds.sort(key=lambda r: (r["date"], r["key"]))
+    rounds.sort(key=lambda r: round_sort_key(r["label"], r["date"]))
 
     values = cfg["ballot_values"]
     cumulative: dict[str, dict] = {}
@@ -516,11 +571,12 @@ async def build_leaderboard(
                 })
                 all_pids.add(pid)
             results.sort(key=lambda r: (-r["points"], -r["raw"]))
+            eff_gid = grade_by_fixture.get(str(f.id))
             fixtures_out.append({
                 "id": str(f.id),
                 "opponent": f.opponent_name or f.label,
-                "grade_id": str(f.grade_id) if f.grade_id else None,
-                "grade": grade_names.get(str(f.grade_id)) if f.grade_id else None,
+                "grade_id": str(eff_gid) if eff_gid else None,
+                "grade": grade_names.get(str(eff_gid)) if eff_gid else None,
                 "date": f.played_on.isoformat() if f.played_on else None,
                 "ballots": len(ballots_by_fx.get(str(f.id), [])),
                 "results": results,

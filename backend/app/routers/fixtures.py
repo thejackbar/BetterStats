@@ -344,6 +344,15 @@ async def sync_fixtures(
         target = existing or Fixture(id=uuid.uuid4(), organisation_id=club.id)
         target.source = "grassroots"
         target.playhq_id = str(gid)
+        # Was never set here before — every synced fixture read grade_id=NULL,
+        # starving any grade/team filter (e.g. BetterSelect Votes) of options.
+        # See services.votes.effective_grade_ids for the read-side fallback
+        # covering fixtures synced before this line existed.
+        if g.get("db_grade_id"):
+            try:
+                target.grade_id = uuid.UUID(g["db_grade_id"])
+            except ValueError:
+                pass
         target.round = g.get("round")
         target.played_on = _parse_date(played)
         target.start_time = g.get("time")

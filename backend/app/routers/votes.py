@@ -196,8 +196,13 @@ async def list_vote_fixtures(
     )
     season_fixtures = fx_res.scalars().all()
 
+    # sync_fixtures never populated Fixture.grade_id (see effective_grade_ids'
+    # own docstring) — fall back to the synced game's own grade for any
+    # fixture whose column is unset, so the filter has options at all.
+    grade_by_fixture = await vote_svc.effective_grade_ids(db, season_fixtures)
+
     grade_names: dict[str, str] = {}
-    gids = {f.grade_id for f in season_fixtures if f.grade_id}
+    gids = {gid for gid in grade_by_fixture.values() if gid}
     if gids:
         from sqlalchemy import text
         gn_res = await db.execute(
@@ -213,19 +218,21 @@ async def list_vote_fixtures(
     # filter itself, newest first.
     rounds_seen: dict[str, tuple[str, Optional[date]]] = {}
     for f in season_fixtures:
-        if grade_id and str(f.grade_id) != grade_id:
+        if grade_id and str(grade_by_fixture.get(str(f.id))) != grade_id:
             continue
         key = vote_svc.round_key_for(f)
         if key not in rounds_seen:
             rounds_seen[key] = (vote_svc.round_label_for(f), f.played_on)
     rounds = [
         {"key": k, "label": lbl}
-        for k, (lbl, d) in sorted(rounds_seen.items(), key=lambda kv: kv[1][1] or date.min, reverse=True)
+        for k, (lbl, d) in sorted(
+            rounds_seen.items(), key=lambda kv: vote_svc.round_sort_key(kv[1][0], kv[1][1]), reverse=True,
+        )
     ]
 
     fixtures = season_fixtures
     if grade_id:
-        fixtures = [f for f in fixtures if str(f.grade_id) == grade_id]
+        fixtures = [f for f in fixtures if str(grade_by_fixture.get(str(f.id))) == grade_id]
     if round_key:
         fixtures = [f for f in fixtures if vote_svc.round_key_for(f) == round_key.lower()]
     if q:
@@ -275,14 +282,15 @@ async def list_vote_fixtures(
         )
         state = vote_svc.fixture_vote_state(f, cfg, ov.status if ov else None, ready, today)
         close = vote_svc.fixture_close_date(f, cfg)
+        eff_gid = grade_by_fixture.get(fid)
         out.append({
             "id": fid,
             "opponent": f.opponent_name or f.label,
             "round": vote_svc.round_label_for(f),
             "round_key": vote_svc.round_key_for(f),
             "date": f.played_on.isoformat() if f.played_on else None,
-            "grade": grade_names.get(str(f.grade_id)) if f.grade_id else None,
-            "grade_id": str(f.grade_id) if f.grade_id else None,
+            "grade": grade_names.get(str(eff_gid)) if eff_gid else None,
+            "grade_id": str(eff_gid) if eff_gid else None,
             "home_away": f.home_away,
             "state": state,
             "source": source,

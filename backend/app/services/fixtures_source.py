@@ -14,17 +14,23 @@ from app.services.grade_labels import category_for_name, category_label, org_gra
 
 
 async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
-    """``[(grade_guid, grade_name, season_name)]`` for the org's latest season.
+    """``[(grade_guid, our_grade_id, grade_name, season_name)]`` for the org's
+    latest season.
 
     The raw CA grade GUID (``grassroots_id``, COALESCE'd with ``id`` for legacy
     rows) is what ``/scores/grades/{id}/matches`` is keyed on. Restricting to the
     org's most-recent season year keeps this to ~one season of grades rather than
-    fanning out across all of history.
+    fanning out across all of history. ``our_grade_id`` is our own DB grade's
+    PK — NOT always the same as the raw guid (a per-club ``uuid5`` on a
+    cross-club collision, see the grade-collision note in CLAUDE.md) — so
+    callers that need to stamp a real ``grades.id`` FK (e.g. a persisted
+    Fixture row) must use it, not the guid.
     """
     res = await db.execute(
         text(
             """
             SELECT DISTINCT COALESCE(g.grassroots_id, g.id::text) AS guid,
+                   g.id AS grade_id,
                    COALESCE(g.display_name_override, g.name) AS grade_name,
                    s.name AS season_name
             FROM grades g
@@ -38,7 +44,7 @@ async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
         ),
         {"org": str(org_id)},
     )
-    return [(r.guid, r.grade_name, r.season_name) for r in res]
+    return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
 
 
 async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
@@ -48,20 +54,24 @@ async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
     grade it came from) on top of the normalised
     ``grassroots_scores_client.get_grade_fixtures`` shape, plus ``category``/
     ``category_label`` (the grade's Senior/Junior/Women's/... classification —
-    confirmed via `grades.category`, else the name-based suggestion) and
+    confirmed via `grades.category`, else the name-based suggestion),
     ``is_final`` (round name contains "final" — the same heuristic
-    `sync.py` uses to set `games.is_final` once a match is played).
+    `sync.py` uses to set `games.is_final` once a match is played), and
+    ``db_grade_id`` — our own ``grades.id`` for the fixture's grade (distinct
+    from the raw CA grade guid returned under ``grade_id``), for a caller that
+    needs to stamp a real FK (e.g. persisting a Fixture row).
     """
     rows = await _current_grade_rows(db, org.id)
     if not rows:
         return []
-    meta = {guid: (gname, sname) for guid, gname, sname in rows}
+    meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
     categories = await org_grade_categories(db, org.id)
     fixtures = await gr.get_grades_fixtures(
-        [guid for guid, _, _ in rows], club_match_keys(org)
+        [guid for guid, _, _, _ in rows], club_match_keys(org)
     )
     for fx in fixtures:
-        gname, sname = meta.get(fx.get("grade_id"), (None, None))
+        db_grade_id, gname, sname = meta.get(fx.get("grade_id"), (None, None, None))
+        fx["db_grade_id"] = str(db_grade_id) if db_grade_id else None
         fx["grade_name"] = gname
         fx["season_name"] = sname
         cat = category_for_name(categories, gname) if gname else None
