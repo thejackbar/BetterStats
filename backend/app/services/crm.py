@@ -780,17 +780,28 @@ async def reset_marketing_club_engagement(session: AsyncSession, club: Marketing
     so a later genuine self-serve signup or enquiry scores itself fresh
     rather than inheriting stale test state. Does NOT delete the
     MarketingClub row itself — it's the club's real directory entry, not
-    test data."""
-    from app.services import club_directory
-    await club_directory.set_sales_state(
-        session, str(club.id), trial_modules=[], requested_trial_modules=[],
-        demo_status=None, not_interested=False)
+    test data.
+
+    Sets the fields DIRECTLY and does NOT commit — the caller owns the unit of
+    work (super_delete_deal_permanent deletes the deal in the same
+    transaction). This used to delegate to club_directory.set_sales_state,
+    which runs its OWN session.commit() mid-flow; that committed (and expired)
+    the caller's already-loaded deal object before it was deleted, which broke
+    the delete and surfaced as a 500 with nothing removed. set_sales_state's
+    trial-request / Twenty-push side effects only fire when a module is ADDED,
+    so a reset (which only clears) never triggered them anyway — nothing is
+    lost by setting the same fields here directly."""
+    club.trial_modules = []
+    club.requested_trial_modules = []
+    club.demo_status = None
+    club.not_interested = False
     club.emailed_at = None
     club.emailed_via = None
     club.emailed_note = None
     club.engagement_score = None
     club.engagement_tier = None
     club.engagement_scored_at = None
+    club.updated_at = func.now()
 
 
 # ─── People / contacts ───────────────────────────────────────────────────────
