@@ -354,7 +354,7 @@ export default function Trial() {
           <div className="absolute inset-0 hero-glow opacity-60 pointer-events-none" />
           <div className="max-w-2xl mx-auto relative text-center">
             <h1 className="font-display font-bold text-[32px] sm:text-[46px] lg:text-[54px] tracking-tight leading-[1.03] mb-4">
-              Find your club on <span className="gradient-text">BetterCricket</span>
+              Check out your club on <span className="gradient-text">BetterCricket</span>
             </h1>
             <p className="text-base sm:text-lg text-pb-dim mx-auto leading-relaxed mb-7 whitespace-nowrap">
               Type your club&rsquo;s name below to get started.
