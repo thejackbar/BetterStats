@@ -120,10 +120,14 @@ echo "==> [5/7] Backend API health check (end-to-end through the proxy)"
 # 2026 post-mortem, where /api was served by a different app). On failure, print the
 # backend's own state and logs so the cause is right here in the deploy output.
 api_ok=""
-for i in 1 2 3 4 5 6; do
+# The backend's lifespan runs a batch of idempotent DDL mirrors + seeds before
+# uvicorn reports ready, and that startup time grows with the data, so give it a
+# generous window (≈15×5s ≈ 75s) before declaring it down — a slow-but-healthy
+# boot was being false-flagged as DOWN at the old 6×4s.
+for i in $(seq 1 15); do
   body="$(curl -s -m 10 https://betterat.cricket/api/openapi.json || true)"
   case "$body" in *BetterStats*) api_ok=1; break ;; esac
-  echo "    attempt $i/6: API not healthy yet, waiting…"; sleep 4
+  echo "    attempt $i/15: API not healthy yet, waiting…"; sleep 5
 done
 if [ -n "$api_ok" ]; then
   echo "    backend API healthy ✓ — /api is answered by BetterStats"
@@ -136,9 +140,14 @@ else
   echo "    --- betterstats-backend last 50 log lines ---"
   docker compose logs --tail=50 betterstats-backend 2>&1 | tail -50 || true
   echo ""
-  echo "    The container runs 'alembic upgrade head && uvicorn …', so a failed migration"
-  echo "    stops uvicorn from ever starting and the container crash-loops. Fix forward and"
-  echo "    redeploy, or revert the last change on main to restore service."
+  echo "    The container runs 'alembic upgrade head && uvicorn …'. Two common causes:"
+  echo "      1) a failed migration — uvicorn never starts and the container crash-loops"
+  echo "         (the log above ends BEFORE 'Started server process')."
+  echo "      2) a SLOW-but-healthy startup that just overran this window — the log shows"
+  echo "         'Started server process' / 'Waiting for application startup' but not yet"
+  echo "         'Application startup complete'. Re-check in a moment:"
+  echo "         docker compose logs --tail=10 betterstats-backend   # look for 'Application startup complete.'"
+  echo "    Fix forward and redeploy, or revert the last change on main to restore service."
   exit 1
 fi
 

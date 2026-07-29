@@ -44,6 +44,26 @@ async def _run_stripe_subscription_sweep():
             logger.error(f"Stripe subscription sweep failed or timed out: {e}")
 
 
+async def _run_yearbook_stub_sweep():
+    """Background counterpart for yearbook-stub generation — moved off the inline
+    boot path: generate_all_stubs iterates EVERY org and season, so it grows with
+    the platform and had begun to overrun deploy.sh's own health-check window,
+    flagging a perfectly healthy backend as DOWN (uvicorn stuck at "Waiting for
+    application startup" only because this hadn't returned yet). It's a
+    non-critical convenience sweep — a missing stub is also created on demand —
+    so running it just after startup instead of before uvicorn is ready is safe.
+    Mirrors _run_stripe_subscription_sweep's session isolation + never-fatal
+    error handling."""
+    from app.models.db import async_session_maker as AsyncSessionLocal
+    from app.routers.yearbooks import generate_all_stubs
+    async with AsyncSessionLocal() as session:
+        try:
+            await generate_all_stubs(session)
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Yearbook stub sweep failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from sqlalchemy import text
@@ -3697,11 +3717,14 @@ async def lifespan(app: FastAPI):
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
-    # Generate yearbook stubs for any seasons that don't have one yet
     from app.models.db import async_session_maker as AsyncSessionLocal
-    from app.routers.yearbooks import generate_all_stubs
-    async with AsyncSessionLocal() as stub_session:
-        await generate_all_stubs(stub_session)
+    # Generate yearbook stubs for any seasons that don't have one yet — fired as
+    # a background task, NOT awaited: it iterates every org/season, so it grows
+    # with the platform and had begun to overrun deploy.sh's health-check window
+    # (flagging a healthy backend as DOWN). Non-critical (a missing stub is also
+    # created on demand), so running it just after boot is safe. Same reasoning
+    # as the Stripe sweep below.
+    asyncio.create_task(_run_yearbook_stub_sweep())
 
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
