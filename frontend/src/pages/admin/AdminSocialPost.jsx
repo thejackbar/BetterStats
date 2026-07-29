@@ -9,6 +9,7 @@ import PostEditorShell from '../../components/admin/socialpost/PostEditorShell'
 import SelectionInspector from '../../components/admin/socialpost/SelectionInspector'
 import MediaLibraryPanel from '../../components/admin/socialpost/MediaLibraryPanel'
 import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
+import StartScreen from '../../components/admin/socialpost/StartScreen'
 import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
@@ -646,9 +647,14 @@ export default function AdminSocialPost() {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
 
-  const [templateId, setTemplateId] = useState(() =>
-    localStorage.getItem('bs_social_template') || 'T1'
-  )
+  const [templateId, setTemplateId] = useState(() => {
+    // A ?type= deep link (from the Start screen or the dashboard) wins over the
+    // last-used template so the editor opens on the requested post type.
+    const p = new URLSearchParams(window.location.search)
+    const t = p.get('type')
+    if (t && TAB_FIRST[t]) return TAB_FIRST[t]
+    return localStorage.getItem('bs_social_template') || 'T1'
+  })
   const [paletteKey, setPaletteKey] = useState(() =>
     localStorage.getItem('bs_social_palette') || 'club'
   )
@@ -1665,6 +1671,30 @@ export default function AdminSocialPost() {
   const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
+
+  // ─── Start screen ─────────────────────────────────────────────────────────
+  // A bare /admin/social-post (no ?type / ?template) shows the first-run post
+  // picker; a deep link that names a type or template goes straight to editing.
+  const entryParams = new URLSearchParams(location.search)
+  const showStart = !entryParams.has('type') && !entryParams.has('template')
+  if (showStart) {
+    const startTypes = TABS.map((t) => ({
+      key: t.key, label: t.label,
+      count: TEMPLATES.filter((x) => TAB_MAP[x.id] === t.key).length,
+    }))
+    const openType = (typeKey) => { switchTab(typeKey); navigate(`/admin/social-post?type=${typeKey}`) }
+    return (
+      <StartScreen
+        types={startTypes}
+        club={{ name: settings?.name, subtitle: settings?.home_ground || settings?.home_venue || '', logo: team.logo }}
+        moduleLogo={moduleBrand('socials').logo}
+        savedTemplates={savedTemplates}
+        onPick={openType}
+        onOpenEditor={() => navigate(`/admin/social-post?type=${activeTab}`)}
+        onApplyTemplate={(tpl) => { applyTemplate(tpl); navigate(`/admin/social-post?template=${tpl.key}`) }}
+      />
+    )
+  }
 
   // ─── Editor shell scaffolding ────────────────────────────────────────────
   // Add a freeform block to the layer being edited: the standalone canvas on the
