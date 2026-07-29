@@ -1,4 +1,4 @@
-// BetterSocials — Event / Announcement posters. The whitelabel club-event suite
+// BetterCricket — Event / Announcement posters. The whitelabel club-event suite
 // (Auction Night, 100 Club, Curry Night, Selections, Presentation Night, …).
 //
 // Same contract as cricket-templates / round-templates so these slot straight
@@ -44,7 +44,7 @@ const MONO = "'JetBrains Mono', monospace"
 // direction's own face when the picker hasn't set one.
 const SPORT = "var(--social-display-font, 'Barlow Condensed', sans-serif)"
 
-// Small pink BetterSocials chip-mark used as the export watermark.
+// Small pink BetterCricket chip-mark used as the export watermark.
 function BSMark({ size = 22, color = '#f25aa6' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" style={{ flexShrink: 0 }}>
@@ -98,7 +98,7 @@ function Watermark({ sponsor, color = 'rgba(255,255,255,0.42)' }) {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <BSMark />
-        <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>Made with BetterSocials</span>
+        <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>Made with BetterCricket</span>
       </div>
       {sponsor ? <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>{sponsor}</div> : null}
     </div>
@@ -256,7 +256,7 @@ export function EVT_Ticket({ team, event = {}, palette, motif }) {
           {event.cta ? <div style={{ marginTop: 30, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${P.accent}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 30 }}>
             <BSMark size={18} color={P.accent} />
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with BetterSocials{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
           </div>
         </div>
       </div>
@@ -377,7 +377,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>{event.sponsor}</span> : null}
             <span style={{ color: line }}>|</span>
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>Made with BetterSocials</span>
+            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>Made with BetterCricket</span>
           </div>
         </div>
       </div>
@@ -441,7 +441,7 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
 
       <div style={{ position: 'absolute', bottom: 30, left: 72, display: 'flex', alignItems: 'center', gap: 9 }}>
         <BSMark size={18} />
-        <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with BetterSocials{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+        <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
       </div>
     </div>
   )
@@ -556,7 +556,7 @@ export function EVT_Swiss({ team, event = {}, palette }) {
           <span style={{ fontSize: 16, fontWeight: 500, color: ink }}>{event.cta}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <BSMark size={17} color={P.accent} />
-            <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: 1, color: faint }}>Made with BetterSocials{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: 1, color: faint }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
           </div>
         </div>
       </div>
@@ -616,7 +616,7 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
           {(event.cta || event.price) ? <div style={{ marginTop: 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: cream, border: `1px solid ${P.accent}`, borderRadius: 2, padding: '11px 28px' }}>{[event.cta, event.price].filter(Boolean).join(' · ')}</div> : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
             <BSMark size={17} />
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(cream, 0.72) }}>Made with BetterSocials{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(cream, 0.72) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
           </div>
         </div>
       </div>
@@ -672,7 +672,7 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
             {event.cta ? <div style={{ fontFamily: HAND, fontWeight: 700, fontSize: 46, color: P.accent, border: `3px solid ${P.accent}`, borderRadius: '60% 58% 62% 56%', padding: '8px 34px', transform: 'rotate(-2deg)', lineHeight: 1 }}>{event.cta}</div> : <span />}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <BSMark size={18} />
-              <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: chalk2 }}>BetterSocials{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+              <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: chalk2 }}>BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
             </div>
           </div>
         </div>
@@ -732,7 +732,7 @@ export function EVT_Polaroid({ team, event = {}, palette, motif }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <BSMark size={18} color="#be185d" />
-          <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with BetterSocials{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+          <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
     </div>
@@ -797,7 +797,7 @@ export const EVENT_PRESETS = [
   },
   {
     key: 'selections', label: 'Selections', template: 'EV4', motif: 'bat', photoLabel: 'Squad / team photo',
-    event: { kicker: 'Round 1 · 25/26', title: 'Selections', subtitle: 'First-grade XI named for the season opener. Full team list below.', date: 'Sat 4 Oct', time: '10:30 AM', venue: 'Ashcombe Oval', price: '1ST XI', cta: 'Congrats to all named', sponsor: 'Powered by BetterStats' },
+    event: { kicker: 'Round 1 · 25/26', title: 'Selections', subtitle: 'First-grade XI named for the season opener. Full team list below.', date: 'Sat 4 Oct', time: '10:30 AM', venue: 'Ashcombe Oval', price: '1ST XI', cta: 'Congrats to all named', sponsor: '' },
   },
   {
     key: 'presentation', label: 'Presentation Night', template: 'EV9', motif: 'trophy', photoLabel: 'Team photo',
@@ -805,7 +805,7 @@ export const EVENT_PRESETS = [
   },
   {
     key: 'launch', label: 'Season Launch', template: 'EV7', motif: 'calendar', photoLabel: 'Action / team photo',
-    event: { kicker: 'Round 1 · 25/26', title: 'Season Launch', subtitle: 'New season, new caps. Meet the squads and kick off the campaign.', date: 'Sat 4 Oct', time: '11:00 AM', venue: 'Ashcombe Oval', price: 'Free', cta: 'Bring the family', sponsor: 'Powered by BetterStats' },
+    event: { kicker: 'Round 1 · 25/26', title: 'Season Launch', subtitle: 'New season, new caps. Meet the squads and kick off the campaign.', date: 'Sat 4 Oct', time: '11:00 AM', venue: 'Ashcombe Oval', price: 'Free', cta: 'Bring the family', sponsor: '' },
   },
   {
     key: 'music', label: 'Live Music', template: 'EV11', motif: 'star', photoLabel: 'Band / live photo',

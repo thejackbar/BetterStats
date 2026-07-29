@@ -15,8 +15,6 @@ import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
-import brandBlack from '../../assets/bettercricket-black.svg'
-import brandWhite from '../../assets/bettercricket-white.svg'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -130,26 +128,6 @@ const TAB_ICON = {
   events: 'availability', blank: 'plus',
 }
 
-// Perceived-luminance test so the "Created using" mark contrasts its backdrop.
-function isLightHex(hex) {
-  const h = String(hex || '').replace('#', '')
-  if (h.length < 6) return false
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
-  return (0.299 * r + 0.587 * g + 0.114 * b) > 150
-}
-
-// A "Created using [BetterCricket logo]" credit baked into every post (preview +
-// export), bottom-right. Uses the real brand mark (the same asset the nav /
-// ShareCard use) — black on a light post, white on a dark one.
-function CreatedWith({ light }) {
-  const col = light ? '#0a0a0a' : '#ffffff'
-  return (
-    <div style={{ position: 'absolute', right: 26, bottom: 20, display: 'flex', alignItems: 'center', gap: 10, opacity: 0.9, pointerEvents: 'none', zIndex: 6 }}>
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: col, opacity: 0.6, textTransform: 'uppercase' }}>Created using</span>
-      <img src={light ? brandBlack : brandWhite} alt="BetterCricket" style={{ height: 62, width: 'auto', display: 'block' }} />
-    </div>
-  )
-}
 
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
 // Print / Geometric), in first-seen order from SOCIAL_BACKGROUNDS itself so
@@ -1490,9 +1468,6 @@ export default function AdminSocialPost() {
   // fills can't be touched individually (~40 of them), so this is done by
   // feeding them a translucent palette instead.
   const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, '99') } : renderPalette
-  // Drives the "Created using BetterCricket" mark's colour (black on a light
-  // post, white on a dark one).
-  const postLight = isLightHex(renderPalette?.primary)
 
   const filteredPlayers = allPlayers.filter(p => {
     if (!playerSearch) return true
@@ -1749,7 +1724,6 @@ export default function AdminSocialPost() {
         {customEdit && !isBlankTab && (
           <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
         )}
-        <CreatedWith light={postLight} />
       </>
     )
     // The three details that matter most for the active post type.
@@ -1944,7 +1918,6 @@ export default function AdminSocialPost() {
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
                 style={{ position: 'absolute', inset: 0 }} />
             )}
-            <CreatedWith light={postLight} />
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
@@ -3129,7 +3102,6 @@ export default function AdminSocialPost() {
             <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
               {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
               <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
-              <CreatedWith light={postLight} />
             </div>
           ))
         ) : (
@@ -3139,7 +3111,6 @@ export default function AdminSocialPost() {
             {customEdit && !isBlankTab && (
               <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
             )}
-            <CreatedWith light={postLight} />
           </div>
         )}
       </div>

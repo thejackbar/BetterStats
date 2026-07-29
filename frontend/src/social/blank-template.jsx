@@ -10,7 +10,7 @@
 // deltas by the preview `scale` so dragging tracks the cursor 1:1.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef } from 'react'
-import { BrandLockup, GrainSVG } from './cricket-templates'
+import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -680,6 +680,13 @@ export function BlankCanvas({
         ...style,
       }}>
       {!transparent && <GrainSVG opacity={0.14} id="blankcanvas" />}
+      {/* BetterCricket credit — only on the standalone Blank canvas, not the
+          overlay layer (real templates carry their own footer mark). */}
+      {!transparent && (
+        <div style={{ position: 'absolute', right: 36, bottom: 30, pointerEvents: 'none', zIndex: 2 }}>
+          <CreditMark ink={palette.ink || '#fff'} h={44} />
+        </div>
+      )}
       {items.map((it) => (
         <BlankBlock
           key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive}

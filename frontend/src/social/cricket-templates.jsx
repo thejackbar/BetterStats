@@ -3,6 +3,24 @@
 // Font stack: Anton, Bebas Neue, Archivo Black, Inter, JetBrains Mono (loaded in index.html)
 
 import { useRef, useState, useLayoutEffect } from 'react'
+import brandBlack from '../assets/bettercricket-black.svg'
+import brandWhite from '../assets/bettercricket-white.svg'
+
+// The BetterCricket credit mark used in every template's footer — the real
+// brand logo (black on a light footer, white on a dark one), no wordmark text.
+// Sits where each template already places its credit so it's vertically centred
+// in that footer section.
+function _isLight(hex) {
+  const h = String(hex || '').replace('#', '')
+  if (h.length < 6) return false
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150
+}
+export function CreditMark({ ink = '#ffffff', h = 46, style = {} }) {
+  // `ink` is the footer's text colour, which already contrasts the background —
+  // so the logo matches it: a light ink (dark post) → white logo, dark ink → black.
+  return <img src={_isLight(ink) ? brandWhite : brandBlack} alt="BetterCricket" style={{ height: h, width: 'auto', display: 'block', opacity: 0.92, ...style }} />
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTO-FIT TEXT
@@ -451,8 +469,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         position: 'absolute', right: 40, bottom: 36,
         display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
       }}>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: palette.ink, opacity: 0.5, letterSpacing: 1.5 }}>PRESENTED BY</div>
-        <div style={{ padding: '10px 18px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS.CRICKET</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g1" />
     </div>
@@ -563,7 +580,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
         })}
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, bottom: 32, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-        <div style={{ padding: '10px 18px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS.CRICKET</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g2" />
     </div>
@@ -674,7 +691,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
           })}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${palette.accent}` }}>
-          <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.7 }}>BETTERSTATS.CRICKET</div>
+          <CreditMark ink={palette.ink} h={44} />
         </div>
       </div>
       <GrainSVG opacity={0.3} id="g3" />
@@ -751,7 +768,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, bottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${palette.ink}22` }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 1.5, color: palette.ink, opacity: 0.9 }}>{(team.fullName || team.name).toUpperCase()} · {match.season}</div>
-        <div style={{ padding: '6px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.7 }}>BETTERSTATS.CRICKET</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.25} id="g4" />
     </div>
@@ -817,7 +834,7 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85, marginTop: 6 }}>{match.competition} · {match.time}</div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <div style={{ padding: '8px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 13, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+          <CreditMark ink={palette.ink} h={44} />
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g5" />
@@ -901,7 +918,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: 1.5, color: palette.accent, opacity: 0.85 }}>{match.competition} · {match.round}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 24, letterSpacing: 1.5, color: palette.ink, marginTop: 2 }}>{match.date.toUpperCase()} · {match.time}</div>
         </div>
-        <div style={{ justifySelf: 'end', padding: '6px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g6" />
     </div>
@@ -1052,7 +1069,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
             </div>
           ))}
         </div>
-        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.28} id="g8" />
     </div>
@@ -1146,7 +1163,7 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 2, lineHeight: 1 }}>{match.venue.toUpperCase()}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, marginTop: 4 }}>{match.round}</div>
         </div>
-        <div style={{ padding: '10px 16px', border: `2px solid ${palette.primary}`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g9" />
     </div>
@@ -1189,7 +1206,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink }}>{(team.fullName || team.name).toUpperCase()}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.competition} · {match.season}</div>
-        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.32} id="ca1" />
     </div>
@@ -1240,7 +1257,7 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 24, letterSpacing: 2, color: palette.ink, opacity: 1 }}>{(team.fullName || team.name).toUpperCase()}</div>
-        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca2" />
     </div>
@@ -1298,7 +1315,7 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 2, color: palette.ink }}>{match.venue.toUpperCase()}</div>
-        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca3" />
     </div>
@@ -1393,7 +1410,7 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 48px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 2, color: palette.ink }}>{match.venue.toUpperCase()}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.season} SEASON</div>
-        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+        <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca4" />
     </div>
@@ -1433,7 +1450,6 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
       display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 24,
       padding: '0 22px', borderRadius: 12, background: bg, border: `1px solid ${rule}`, ...style,
     }}>
-      <div style={{ fontFamily: SC_BODY, fontSize: 10, letterSpacing: 2.5, color: dim, fontWeight: 600 }}>PRESENTED BY</div>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 40, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 18, letterSpacing: 3, color: dimmer }}>
         {slots.map(i => {
           const s = sponsors?.[i]
@@ -1442,7 +1458,7 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
             : <div key={i} style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
         })}
       </div>
-      <div style={{ fontFamily: SC_MONO, fontSize: 10, letterSpacing: 1.5, color: dimmer }}>BETTERSTATS.CRICKET</div>
+      <CreditMark ink={palette.ink} h={44} />
     </div>
   )
 }
