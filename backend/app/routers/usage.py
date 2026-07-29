@@ -1743,16 +1743,27 @@ async def background_processes(
 
     # ── Clubs actively working the Setup Wizard ──────────────────────────────
     # Progress state touched in the last 15 minutes and not fully addressed.
-    # The acting user comes from the most recent setup_wizard_* audit entry for
-    # that org (onboarding state is org-scoped, not per-user).
+    # Onboarding state is org-scoped, but the club has a known owner: its
+    # primary admin (the person who registered it — club_memberships.is_primary_admin).
+    # That's who we identify as running the onboarding. The most recent
+    # setup_wizard_* audit entry is kept as a fallback for the rare club whose
+    # primary admin flag isn't set (or where a different admin is doing the work).
     onboard_rows = (await db.execute(text("""
         SELECT ows.organisation_id AS org_id, ows.updated_at,
                ows.completed_steps, ows.skipped_steps, ows.na_steps,
                o.name AS club_name,
-               al.user_id AS actor_id, u.email AS actor_email,
-               u.display_name AS actor_display_name
+               pa.email AS admin_email, pa.display_name AS admin_display_name,
+               au.email AS actor_email, au.display_name AS actor_display_name
         FROM onboarding_wizard_state ows
         JOIN organisations o ON o.id = ows.organisation_id
+        LEFT JOIN LATERAL (
+            SELECT u.email, u.display_name
+            FROM club_memberships cm
+            JOIN users u ON u.id = cm.user_id
+            WHERE cm.club_id = ows.organisation_id AND cm.is_primary_admin IS TRUE
+            ORDER BY cm.created_at ASC
+            LIMIT 1
+        ) pa ON TRUE
         LEFT JOIN LATERAL (
             SELECT user_id
             FROM audit_logs
@@ -1762,7 +1773,7 @@ async def background_processes(
             ORDER BY created_at DESC
             LIMIT 1
         ) al ON TRUE
-        LEFT JOIN users u ON u.id = al.user_id
+        LEFT JOIN users au ON au.id = al.user_id
         WHERE ows.updated_at >= NOW() - INTERVAL '15 minutes'
         ORDER BY ows.updated_at DESC
         LIMIT 50
@@ -1772,6 +1783,8 @@ async def background_processes(
     for r in onboard_rows:
         done = len(r["completed_steps"] or [])
         addressed = done + len(r["skipped_steps"] or []) + len(r["na_steps"] or [])
+        primary_admin = (r["admin_display_name"] or r["admin_email"]) if r["admin_email"] else None
+        actor = (r["actor_display_name"] or r["actor_email"]) if r["actor_email"] else None
         onboarding.append({
             "org_id": str(r["org_id"]),
             "club_name": r["club_name"],
@@ -1779,7 +1792,10 @@ async def background_processes(
             "addressed": addressed,
             "last_activity_at": r["updated_at"].isoformat() if r["updated_at"] else None,
             "idle_seconds": _secs(r["updated_at"]),
-            "actor": (r["actor_display_name"] or r["actor_email"]) if r["actor_email"] else None,
+            # Who owns the onboarding: the club's primary admin, else whoever
+            # last touched a wizard step.
+            "actor": primary_admin or actor,
+            "primary_admin": primary_admin,
         })
 
     return {
