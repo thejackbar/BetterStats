@@ -15,6 +15,8 @@ import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
+import brandBlack from '../../assets/bettercricket-black.svg'
+import brandWhite from '../../assets/bettercricket-white.svg'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -136,17 +138,15 @@ function isLightHex(hex) {
   return (0.299 * r + 0.587 * g + 0.114 * b) > 150
 }
 
-// A "Created using BetterCricket" mark baked into every post (preview + export),
-// bottom-right. A crisp wordmark rather than the multi-MB raster logo so it
-// stays sharp and weightless in exports; black on light, white on dark.
+// A "Created using [BetterCricket logo]" credit baked into every post (preview +
+// export), bottom-right. Uses the real brand mark (the same asset the nav /
+// ShareCard use) — black on a light post, white on a dark one.
 function CreatedWith({ light }) {
   const col = light ? '#0a0a0a' : '#ffffff'
-  // Bottom-left keeps clear of the templates' own bottom-right "presented by"
-  // footers/sponsor slots.
   return (
-    <div style={{ position: 'absolute', left: 26, bottom: 20, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.8, pointerEvents: 'none', zIndex: 6 }}>
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: col, opacity: 0.6, textTransform: 'uppercase' }}>Created using</span>
-      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, lineHeight: 1, letterSpacing: 0.3, color: col }}>BetterCricket</span>
+    <div style={{ position: 'absolute', right: 26, bottom: 20, display: 'flex', alignItems: 'center', gap: 10, opacity: 0.9, pointerEvents: 'none', zIndex: 6 }}>
+      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: col, opacity: 0.6, textTransform: 'uppercase' }}>Created using</span>
+      <img src={light ? brandBlack : brandWhite} alt="BetterCricket" style={{ height: 62, width: 'auto', display: 'block' }} />
     </div>
   )
 }
