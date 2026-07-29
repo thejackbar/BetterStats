@@ -67,11 +67,6 @@ function defaultStartsAt() {
   return isoToLocalInput(d.toISOString())
 }
 
-const EMPTY = {
-  event_type: 'meeting', starts_at: '', title: '', location: '', body: '',
-  owner_user_id: '', contact_person_id: '', first_alert: '', second_alert: '',
-}
-
 // The Event fields — shared by the card-detail composer, the card-detail inline
 // editor, and the standalone Events page. `ownerOptions` = super admins;
 // `contactOptions` = [{id, name}] (a deal's linked people, or a chosen club's
@@ -80,14 +75,25 @@ const EMPTY = {
 export default function EventForm({ initial, ownerOptions = [], contactOptions = [], extraTop,
                                     onSubmit, onCancel, submitLabel = 'Save event', saving }) {
   const toast = useToast()
+  // Pick fields explicitly with '' fallbacks rather than spreading `...initial`
+  // wholesale: an existing event's optional columns come back as `null`, and a
+  // null title/location/body would (a) make a controlled input go uncontrolled
+  // and (b) throw on `.trim()` at submit — which silently aborted the save on
+  // edit. Every text field is therefore always a string in state.
   const [form, setForm] = useState(() => ({
-    ...EMPTY,
-    ...(initial || {}),
+    event_type: initial?.event_type || 'meeting',
     // Prefill a valid default (next full hour) for a brand-new event so the
     // datetime field is complete out of the box — otherwise a 12-hour-locale
     // browser leaves the AM/PM segment blank, the input reports an empty
     // value, and the form can't be submitted with no obvious reason why.
     starts_at: initial?.starts_at ? isoToLocalInput(initial.starts_at) : defaultStartsAt(),
+    title: initial?.title || '',
+    location: initial?.location || '',
+    body: initial?.body || '',
+    owner_user_id: initial?.owner_user_id || '',
+    contact_person_id: initial?.contact_person_id || '',
+    first_alert: initial?.first_alert || '',
+    second_alert: initial?.second_alert || '',
   }))
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -97,9 +103,9 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
     onSubmit({
       event_type: form.event_type,
       starts_at: localInputToIso(form.starts_at),
-      title: form.title.trim() || null,
-      location: form.location.trim() || null,
-      body: form.body.trim() || null,
+      title: (form.title || '').trim() || null,
+      location: (form.location || '').trim() || null,
+      body: (form.body || '').trim() || null,
       owner_user_id: form.owner_user_id || null,
       contact_person_id: form.contact_person_id || null,
       first_alert: form.first_alert || null,
