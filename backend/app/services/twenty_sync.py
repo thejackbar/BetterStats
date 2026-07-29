@@ -109,6 +109,11 @@ DIRECT_ENQUIRY_SCORE = 80
 # the reliable, always-present signal (the same one routers/usage.py reads).
 _META_CLICK = "(ue.path ~* '(fbclid|igshid)=')"
 
+# Perth / Western Australia is AWST (UTC+8) year-round — no daylight saving —
+# so a fixed +08:00 offset is exact. Used for the engagement up/down arrow's
+# day-over-day ("yesterday vs today") boundary, which is a Perth calendar day.
+_PERTH_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
 
 def _tier_for(score: float) -> str:
     return ("COLD" if score < TIER_WARM_MIN
@@ -318,9 +323,24 @@ def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
     Segments can filter on a real number without recomputing this per-club
     scan themselves. Just sets attributes on the already-session-attached ORM
     object — the caller's own commit (every call site has one) persists it."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    # Day-over-day baseline for the CRM pipeline's engagement up/down arrow
+    # (migration 192). The FIRST write on a new calendar day rolls the value
+    # this club last held on an earlier day into _prev — so (current vs _prev)
+    # is the day-over-day direction. A second (or later) write the same day
+    # leaves _prev alone, so it keeps pointing at the previous day's last value
+    # rather than being overwritten with today's own earlier reading. "Calendar
+    # day" is Perth / Western Australia time (AWST, UTC+8, no DST) so the
+    # boundary is Perth midnight, not UTC midnight (which is 8am in Perth).
+    prev_at = club.engagement_scored_at
+    prev_day = prev_at.astimezone(_PERTH_TZ).date() if prev_at is not None else None
+    if (club.engagement_score is not None and prev_day is not None
+            and prev_day < now.astimezone(_PERTH_TZ).date()):
+        club.engagement_score_prev = club.engagement_score
+        club.engagement_score_prev_date = prev_day
     club.engagement_score = fields.get("engagementScore")
     club.engagement_tier = fields.get("engagementTier")
-    club.engagement_scored_at = datetime.datetime.now(datetime.timezone.utc)
+    club.engagement_scored_at = now
 
 
 async def batch_web_stats(session) -> dict:

@@ -1,8 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
-import BetterSocialsLayout from '../../components/admin/BetterSocialsLayout'
+import { useLocation, useNavigate } from 'react-router-dom'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import Dropdown from '../../components/Dropdown'
+import ModuleLockup from '../../components/ModuleLockup'
+import { moduleBrand } from '../../lib/moduleBrand'
+import { Icon } from './betterselect/ui'
+import PostEditorShell from '../../components/admin/socialpost/PostEditorShell'
+import SelectionInspector from '../../components/admin/socialpost/SelectionInspector'
+import MediaLibraryPanel from '../../components/admin/socialpost/MediaLibraryPanel'
+import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
+import StartScreen from '../../components/admin/socialpost/StartScreen'
+import MobileQuickPost from '../../components/admin/socialpost/MobileQuickPost'
+import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
+import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
+import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
+import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -21,8 +33,15 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import BlankCanvasEditor from '../../components/admin/BlankCanvasEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems, BLANK_FONTS } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
+import { useBlankLayer } from '../../social/useBlankLayer'
+import { useEditHistory } from '../../social/useEditHistory'
+import { usePages } from '../../social/usePages'
+import PageStrip from '../../components/admin/socialpost/PageStrip'
+import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
+
+// Stable initial value for the (empty) Custom Edit overlay layer.
+const EMPTY_LAYER = () => []
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
@@ -101,6 +120,24 @@ const TAB_FIRST = {
   lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
+// Icon per post type (from the app's own kit) for the post-type bar and the
+// Start-screen cards.
+const TAB_ICON = {
+  lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
+  motm: 'player', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
+  events: 'availability', blank: 'plus',
+}
+// Post types that pull from external data (BetterSelect / a match link / a round
+// import). These open on the "Get your data" step so the source is collected first.
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard']
+const SOURCE_HELP = {
+  lineup: 'Lineups come from BetterSelect. Pick a saved XI below to pull the players, captain, keeper and match details — or add players yourself in Content.',
+  result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
+  scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
+  fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
+  results: 'Pull the latest round\'s results for every grade straight from the results feed.',
+}
+
 
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
 // Print / Geometric), in first-seen order from SOCIAL_BACKGROUNDS itself so
@@ -605,11 +642,40 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
 // before any style has ever been stored server-side.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
-  bg_colors: {}, palettes: [], designs: [],
+  bg_colors: {}, palettes: [], designs: [], templates: [],
 })
 
 export default function AdminSocialPost() {
   const location = useLocation()
+  const navigate = useNavigate()
+  // Which rail tool's panel is showing. A data-driven post type opens on the
+  // "Get your data" step so the source is collected before editing; everything
+  // else starts on Content.
+  const [tool, setTool] = useState(() => {
+    const t = new URLSearchParams(window.location.search).get('type')
+    return t && DATA_TABS.includes(t) ? 'source' : 'content'
+  })
+  // Post types whose data step has already been shown this session (so switching
+  // back to a tab doesn't force the step again).
+  const sourceSeen = useRef(new Set())
+  // BetterSelect fixtures with saved XIs, for the lineup source step.
+  const [sourceFixtures, setSourceFixtures] = useState(null)
+  const [lineupLoad, setLineupLoad] = useState(null)
+  // Hidden file input the inspector's "Replace" drives; remembers which image
+  // block to fill.
+  const blankImgInputRef = useRef(null)
+  const pendingImgItem = useRef(null)
+  // Club media library (persisted via the social-media API).
+  const [mediaAssets, setMediaAssets] = useState([])
+  // Below md the editor drops its drag canvas for a guided phone quick-post
+  // (unless the user taps "Full editor").
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false))
+  const [forceFullEditor, setForceFullEditor] = useState(false)
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
   const [adminSponsors, setAdminSponsors] = useState([])
@@ -617,9 +683,14 @@ export default function AdminSocialPost() {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
 
-  const [templateId, setTemplateId] = useState(() =>
-    localStorage.getItem('bs_social_template') || 'T1'
-  )
+  const [templateId, setTemplateId] = useState(() => {
+    // A ?type= deep link (from the Start screen or the dashboard) wins over the
+    // last-used template so the editor opens on the requested post type.
+    const p = new URLSearchParams(window.location.search)
+    const t = p.get('type')
+    if (t && TAB_FIRST[t]) return TAB_FIRST[t]
+    return localStorage.getItem('bs_social_template') || 'T1'
+  })
   const [paletteKey, setPaletteKey] = useState(() =>
     localStorage.getItem('bs_social_palette') || 'club'
   )
@@ -677,6 +748,17 @@ export default function AdminSocialPost() {
   })
   const [saveDesignName, setSaveDesignName] = useState('')
   const [showSaveDesign, setShowSaveDesign] = useState(false)
+
+  // Saved Templates — a reusable starting point saved from ANY tab: the base
+  // template + the full Style (palette/bg/font/dark) and, for the Blank Canvas,
+  // its whole block layout. Shown in the collapsible Templates section under
+  // "Custom". Persists to localStorage and rides the same server socials_style
+  // sync as palettes/designs so it survives browser changes and other admins.
+  const [savedTemplates, setSavedTemplates] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_templates') || '[]') } catch { return [] }
+  })
+  const [saveTemplateName, setSaveTemplateName] = useState('')
+  const [templatesOpen, setTemplatesOpen] = useState(true)
 
   const [heroImage, setHeroImage] = useState({ blobUrl: null })
   const [heroMode, setHeroMode] = useState('player')
@@ -739,41 +821,85 @@ export default function AdminSocialPost() {
   const [eventBg, setEventBg] = useState(null)        // object URL or null
   const [eventBgOpacity, setEventBgOpacity] = useState(0.85)
 
-  // Freeform "Blank Canvas" builder state.
-  const [blankItems, setBlankItems] = useState(defaultBlankItems)
-  const [blankSelId, setBlankSelId] = useState(null)
-  const updateBlankItem = useCallback((id, patch) => {
-    setBlankItems((its) => its.map((it) => (it.id === id ? { ...it, ...patch } : it)))
-  }, [])
-  const addBlankItem = (type) => {
-    const it = newBlankItem(type)
-    if (!it) return
-    setBlankItems((its) => [...its, it])
-    setBlankSelId(it.id)
-    return it
+  // Two freeform layers of blocks: `canvas` is the standalone Blank Canvas
+  // template; `overlay` is the "Custom Edit" layer that sits on top of any real
+  // template. Both share the same block model + editor (via useBlankLayer).
+  // The Blank canvas resumes from the last session so freeform work isn't lost
+  // on a reload (blob-URL images don't survive, same as saved templates).
+  const canvas = useBlankLayer(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('bs_social_canvas') || 'null')
+      if (Array.isArray(s) && s.length) return s
+    } catch { /* fall back to the default starter */ }
+    return defaultBlankItems()
+  })
+  const overlay = useBlankLayer(EMPTY_LAYER)
+  // Undo/redo + action log, one per layer (history is per page/layer).
+  const canvasHistory = useEditHistory(canvas)
+  const overlayHistory = useEditHistory(overlay)
+  // Carousel pages ride the freeform canvas layer (Blank tab). Switching a page
+  // starts a fresh undo history — snapshots belong to a single page.
+  const pages = usePages(canvas, { onPageChange: () => canvasHistory.clear() })
+  const pageRefs = useRef([])
+  // Coalesces a burst of same-label edits (e.g. slider ticks) into one snapshot.
+  const lastRec = useRef({ label: '', t: 0 })
+  // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
+  // template so it can be tweaked and saved as a custom template.
+  const [customEdit, setCustomEdit] = useState(false)
+  // Career stats for players referenced by "player" data blocks, fetched on
+  // demand and cached by id (keeps saved templates live — config only).
+  const [playerStatsCache, setPlayerStatsCache] = useState({})
+
+  // Save the current post as a reusable Template (works on every tab). Captures
+  // the base template + Style; on the Blank Canvas it also captures the block
+  // layout (blob-URL images are dropped since they don't survive a reload).
+  const stripBlobImages = (list) => (list || []).map((it) => (it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:') ? { ...it, src: null } : it))
+  const saveCurrentTemplate = () => {
+    const name = saveTemplateName.trim() || `Template ${savedTemplates.length + 1}`
+    const blankTab = templateId === 'BL1'
+    const usingOverlay = customEdit && !blankTab
+    const srcItems = blankTab ? canvas.items : usingOverlay ? overlay.items : null
+    const tpl = {
+      key: `tpl_${Date.now().toString(36)}`,
+      name, templateId, custom: usingOverlay,
+      style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
+      blank: srcItems ? stripBlobImages(srcItems) : null,
+    }
+    const next = [...savedTemplates, tpl]
+    setSavedTemplates(next)
+    localStorage.setItem('bs_social_templates', JSON.stringify(next))
+    setSaveTemplateName('')
   }
-  const removeBlankItem = (id) => {
-    setBlankItems((its) => its.filter((it) => it.id !== id))
-    setBlankSelId((cur) => (cur === id ? null : cur))
+  const applyTemplate = (tpl) => {
+    if (!tpl) return
+    setTemplateId(tpl.templateId)
+    const st = tpl.style || {}
+    if (st.palette) setPaletteKey(st.palette)
+    if (typeof st.dark === 'boolean') setDarkMode(st.dark)
+    if (st.font) setFontKey(st.font)
+    if (st.bg) setBgStyle(st.bg)
+    if (st.bgColors) setBgColors(st.bgColors)
+    if (st.customBg) setCustomBg(st.customBg)
+    if (st.customAccent) setCustomAccent(st.customAccent)
+    const clone = (list) => (list || []).map((it) => ({ ...it }))
+    if (tpl.custom) {
+      setCustomEdit(true)
+      overlay.reset(clone(tpl.blank))
+    } else {
+      setCustomEdit(false)
+      if (tpl.blank) canvas.reset(clone(tpl.blank))
+    }
   }
-  const duplicateBlankItem = (id) => {
-    const src = blankItems.find((it) => it.id === id)
-    if (!src) return
-    const copy = { ...src, id: `bi${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`, x: src.x + 30, y: src.y + 30 }
-    setBlankItems((its) => [...its, copy])
-    setBlankSelId(copy.id)
+  // Enter/leave Custom Edit for the current real template.
+  const startCustomEdit = () => {
+    if (!overlay.items.length) overlay.reset([{ ...newBlankItem('brand'), x: 60, y: 60, size: 150 }])
+    setCustomEdit(true)
   }
-  const reorderBlankItem = (id, dir) => {
-    setBlankItems((its) => {
-      const i = its.findIndex((it) => it.id === id)
-      if (i < 0) return its
-      const j = dir === 'front' ? its.length - 1 : 0
-      if (i === j) return its
-      const next = its.slice()
-      const [it] = next.splice(i, 1)
-      next.splice(j, 0, it)
-      return next
-    })
+  const stopCustomEdit = () => setCustomEdit(false)
+  const deleteTemplate = (key) => {
+    const next = savedTemplates.filter((t) => t.key !== key)
+    setSavedTemplates(next)
+    localStorage.setItem('bs_social_templates', JSON.stringify(next))
   }
 
   const onPickPreset = (key) => {
@@ -794,6 +920,16 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
+  // Debounced persistence of the Blank canvas so it resumes after a reload.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        const clean = canvas.items.map((it) => (it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:') ? { ...it, src: null } : it))
+        localStorage.setItem('bs_social_canvas', JSON.stringify(clean))
+      } catch { /* quota or serialisation issue — skip */ }
+    }, 500)
+    return () => clearTimeout(id)
+  }, [canvas.items])
 
   // Server persistence of the Style choices (organisations.socials_style,
   // migration 162) — the club's look survives browser changes and second
@@ -805,7 +941,7 @@ export default function AdminSocialPost() {
   const styleSaveTimer = useRef(null)
   const styleSnapshot = JSON.stringify({
     palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle,
-    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns,
+    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns, templates: savedTemplates,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -837,6 +973,7 @@ export default function AdminSocialPost() {
             bg_colors: st.bg_colors && typeof st.bg_colors === 'object' ? st.bg_colors : {},
             palettes: Array.isArray(st.palettes) ? st.palettes : [],
             designs: Array.isArray(st.designs) ? st.designs : [],
+            templates: Array.isArray(st.templates) ? st.templates : [],
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -845,6 +982,7 @@ export default function AdminSocialPost() {
           setBgColors(applied.bg_colors)
           setSavedPalettes(applied.palettes)
           setSavedDesigns(applied.designs)
+          setSavedTemplates(applied.templates)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -867,6 +1005,9 @@ export default function AdminSocialPost() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
+
+  // Club media library — reusable uploads shared across posts and admins.
+  useEffect(() => { api.listSocialMedia().then((a) => setMediaAssets(a || [])).catch(() => {}) }, [])
 
   // Team-sheet handoff from BetterSelect selection. Pre-populates the lineup
   // post from a saved XI once the player list has loaded. Runs once.
@@ -1208,17 +1349,23 @@ export default function AdminSocialPost() {
   // with Google Fonts embedded so the display face survives the capture). The
   // render target is already mounted off-screen at full W×H.
   const handleExport = async () => {
-    if (!renderRef.current) return
     setExporting(true)
     setExportError(null)
     try {
       const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
       const H = tmpl.h || 1080
-      await exportNodeToPng(renderRef.current, {
-        width: W,
-        height: H,
-        fileName: `betterstats-${templateId.toLowerCase()}-${Date.now()}.png`,
-      })
+      const stamp = Date.now()
+      // A Blank-tab carousel exports every page as its own PNG (slideN).
+      if (tmpl.kind === 'blank' && pages.count > 1) {
+        for (let i = 0; i < pages.count; i++) {
+          const node = pageRefs.current[i]
+          if (!node) continue
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-carousel-${stamp}-slide${i + 1}.png` })
+        }
+      } else {
+        if (!renderRef.current) return
+        await exportNodeToPng(renderRef.current, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}.png` })
+      }
     } catch (e) {
       setExportError(e.message || 'Export failed')
     } finally {
@@ -1229,7 +1376,24 @@ export default function AdminSocialPost() {
   // ─── Derived values ─────────────────────────────────────────────────────────
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
-  const switchTab = (tabKey) => setTemplateId(TAB_FIRST[tabKey] || 'T1')
+  const switchTab = (tabKey) => {
+    setTemplateId(TAB_FIRST[tabKey] || 'T1'); setCustomEdit(false)
+    // Open the data step the first time you land on a data-driven type; leave it
+    // if you move to a type that has nothing to import.
+    if (DATA_TABS.includes(tabKey)) {
+      if (!sourceSeen.current.has(tabKey)) { setTool('source'); sourceSeen.current.add(tabKey) }
+    } else {
+      setTool((t) => (t === 'source' ? 'content' : t))
+    }
+  }
+  const selectTemplate = (id) => { setTemplateId(id); setCustomEdit(false) }
+
+  // Load BetterSelect fixtures the first time the lineup data step is opened.
+  useEffect(() => {
+    if (tool === 'source' && activeTab === 'lineup' && sourceFixtures === null) {
+      api.bsSelectionOverview().then((d) => setSourceFixtures(d.fixtures || [])).catch(() => setSourceFixtures([]))
+    }
+  }, [tool, activeTab, sourceFixtures])
   const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
   const displayFont = DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0]
 
@@ -1249,11 +1413,18 @@ export default function AdminSocialPost() {
     logo: opponent.logo || null,
   }
 
+  // A saved design carries its own primary/secondary/accent/ink, so it resolves
+  // as a palette in its own right; the trailing club fallback guarantees this is
+  // never undefined even if a design's paired palette got out of sync (which
+  // used to crash the whole editor with "reading 'primary'").
   const activePalette = paletteKey === 'club'
     ? orgToPalette(settings)
     : paletteKey === 'custom'
       ? { name: 'Custom', primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
-      : (savedPalettes.find(p => p.key === paletteKey) || PALETTES[paletteKey])
+      : (savedPalettes.find(p => p.key === paletteKey)
+         || savedDesigns.find(d => d.key === paletteKey)
+         || PALETTES[paletteKey]
+         || orgToPalette(settings))
 
   const themedPalette = applyTheme(activePalette, darkMode)
 
@@ -1261,6 +1432,57 @@ export default function AdminSocialPost() {
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
+
+  // Which freeform layer is being edited, and whether the freeform tools show.
+  // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
+  const isBlankTab = tmpl.kind === 'blank'
+  const showBlankTools = isBlankTab || customEdit
+  // The layer the rail panels + inspector edit: the standalone canvas on the
+  // Blank tab, else the overlay that floats on top of a real template. (Adding
+  // a block to a real template turns Custom Edit on so the overlay shows.)
+  const layer = isBlankTab ? canvas : overlay
+  const history = isBlankTab ? canvasHistory : overlayHistory
+
+  // Snapshot the current layer BEFORE a mutation so undo restores it. A burst of
+  // the same label within 400ms coalesces into one snapshot (slider drags).
+  const record = (label) => {
+    const t = Date.now()
+    if (label === lastRec.current.label && t - lastRec.current.t < 400) { lastRec.current.t = t; return }
+    lastRec.current = { label, t }
+    history.commit(label)
+  }
+  // History-aware wrappers around the layer mutators the inspector/panels drive.
+  const hUpdate = (id, patch) => { record('Edit block'); layer.update(id, patch) }
+  const hReorder = (id, dir) => { record('Reorder'); layer.reorder(id, dir) }
+  const hDuplicate = (id) => { record('Duplicate'); layer.duplicate(id) }
+  const hRemove = (id) => { record('Delete'); layer.remove(id) }
+  const hAlign = (mode) => { record('Align'); layer.align(mode) }
+  const hMoveBefore = (a, b) => { record('Reorder'); layer.moveBefore(a, b) }
+
+  // Keyboard: delete removes the selection; ⌘/Ctrl-Z undo, ⇧⌘Z redo. Ignored
+  // while typing in a field.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return
+      const meta = e.metaKey || e.ctrlKey
+      if (meta && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) history.redo(); else history.undo()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && layer.selIds.length) {
+        e.preventDefault()
+        record('Delete')
+        layer.selIds.forEach((id) => layer.remove(id))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, layer])
+
+  // A template switch starts a fresh undo history (the old snapshots belong to a
+  // different layout).
+  useEffect(() => { canvasHistory.clear(); overlayHistory.clear() }, [templateId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Light-surface event layouts (Ticket, Gazette, Sticker, Swiss, Polaroid) want
   // a paper/ink pair rather than the dark-mode palette; eventPaletteFor is a
@@ -1354,6 +1576,63 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // Live data bundle for the Blank Canvas "data blocks" (fixtures / results /
+  // record / scorecard / player). Built from the state the designer already
+  // holds, so blocks show current info with no extra fetch (bar player stats).
+  const wld = (o) => (o || '').toUpperCase()
+  const blankRecord = {
+    w: results.filter((r) => wld(r.outcome) === 'W').length,
+    l: results.filter((r) => wld(r.outcome) === 'L').length,
+    d: results.filter((r) => ['D', 'T', 'TIE'].includes(wld(r.outcome))).length,
+  }
+  const blankData = {
+    team, match: matchData, fixtures, results, record: blankRecord,
+    scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
+  }
+
+  // Fetch career stats for any player referenced by a player data block.
+  useEffect(() => {
+    const ids = [...canvas.items, ...overlay.items]
+      .filter((it) => it.type === 'data' && it.kind === 'player' && it.playerId)
+      .map((it) => it.playerId)
+    const missing = [...new Set(ids)].filter((id) => !(id in playerStatsCache))
+    if (!missing.length) return undefined
+    let cancelled = false
+    Promise.all(missing.map((id) => api.getPlayerStats(id).then((s) => [id, s]).catch(() => [id, {}])))
+      .then((pairs) => {
+        if (cancelled) return
+        setPlayerStatsCache((prev) => { const next = { ...prev }; pairs.forEach(([id, s]) => { next[id] = s || {} }); return next })
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas.items, overlay.items])
+
+  // Custom Edit → convert the current template into fully-movable blocks (for
+  // the companion post types), else fall back to overlay-on-top editing.
+  const buildCustomEditItems = () => {
+    const annP = selectedPlayers[announcement.playerIdx]
+    const annPlayer = annP ? playerToTemplatePlayer(annP.player, annP, nameFormat, swapNames) : null
+    const motmP = selectedPlayers[motm.playerIdx]
+    const motmPlayer = motmP ? playerToTemplatePlayer(motmP.player, motmP, nameFormat, swapNames) : null
+    return templateToBlocks(templateId, {
+      team, match: matchData,
+      announcement: { kind: announcement.kind, headline: announcement.headline, subheadline: announcement.subheadline, player: annPlayer },
+      toss: { winner: toss.winner, decision: toss.decision, teamName: team.name, oppName: oppData.name },
+      motm: { player: motmPlayer, stats: motm.stats.filter((s) => s.label && s.value), summary: motm.summary },
+      result: { winner: result.winner, teamName: team.name, oppName: oppData.name, teamScore: result.teamScore, oppScore: result.oppScore, margin: result.margin, motmLast: result.motmLast },
+    })
+  }
+  const beginCustomEdit = () => {
+    const items = buildCustomEditItems()
+    if (items && items.length) {
+      canvas.reset(items)
+      setCustomEdit(false)
+      setTemplateId('BL1')
+    } else {
+      startCustomEdit()
+    }
+  }
+
   // Fixtures / single-result / results roundups (new BetterSocials post sets).
   // They share the club identity, sponsor logos and round meta with the rest.
   const clubMark = { name: team.name, full: team.fullName, mono: team.monogram, logo: team.logo }
@@ -1396,7 +1675,8 @@ export default function AdminSocialPost() {
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'blank') {
-    extraProps.items = blankItems
+    extraProps.items = canvas.items
+    extraProps.data = blankData
   }
   if (tmpl.kind === 'event') {
     extraProps.event = event
@@ -1448,16 +1728,15 @@ export default function AdminSocialPost() {
     if (eventBg) URL.revokeObjectURL(eventBg)
     setEventBg(null)
     setEventBgOpacity(0.85)
-    setBlankItems(defaultBlankItems())
-    setBlankSelId(null)
+    canvas.reset(defaultBlankItems())
+    overlay.reset([])
+    setCustomEdit(false)
   }
 
   if (loading) return (
-    <BetterSocialsLayout>
-      <div className="flex items-center justify-center h-64">
-        <span className="font-mono text-[11px] text-pb-faint animate-pulse">LOADING...</span>
-      </div>
-    </BetterSocialsLayout>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-pb-bg">
+      <span className="font-mono text-[11px] text-pb-faint animate-pulse">LOADING...</span>
+    </div>
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
@@ -1470,14 +1749,410 @@ export default function AdminSocialPost() {
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
 
-  return (
-    <BetterSocialsLayout>
-      <SocialBackgroundDefs />
-      <div className="max-w-full">
-        <div className="flex gap-5 items-start">
+  // ─── Mobile quick post ────────────────────────────────────────────────────
+  if (isMobile && !forceFullEditor) {
+    const previewContent = (
+      <>
+        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+        {isBlankTab
+          ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
+          : <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />}
+        {customEdit && !isBlankTab && (
+          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+        )}
+      </>
+    )
+    // The three details that matter most for the active post type.
+    let mFields = []
+    if (activeTab === 'lineup') mFields = [
+      { label: 'Headline', value: headline, onChange: setHeadline, placeholder: 'SQUAD' },
+      { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    else if (activeTab === 'result') mFields = [
+      { label: 'Our score', value: result.teamScore, onChange: (v) => setResult((r) => ({ ...r, teamScore: v })), placeholder: '6/188' },
+      { label: 'Their score', value: result.oppScore, onChange: (v) => setResult((r) => ({ ...r, oppScore: v })), placeholder: '184' },
+      { label: 'Margin', value: result.margin, onChange: (v) => setResult((r) => ({ ...r, margin: v })), placeholder: 'BY 4 WICKETS' },
+    ]
+    else if (activeTab === 'announcement') mFields = [
+      { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
+      { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
+    ]
+    else if (activeTab === 'fixtures' || activeTab === 'results') mFields = [
+      { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    else if (isBlankTab) mFields = canvas.items.filter((it) => it.type === 'text').slice(0, 3)
+      .map((it, i) => ({ label: `Text ${i + 1}`, value: it.text, onChange: (v) => canvas.update(it.id, { text: v }) }))
+    else mFields = [
+      { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    const mPalettes = [
+      { key: 'club', label: 'Club', color: orgAccent(settings) },
+      ...Object.entries(PALETTES).map(([key, pal]) => ({ key, label: pal.name, color: pal.accent })),
+    ]
+    return (
+      <>
+        <SocialBackgroundDefs />
+        <MobileQuickPost
+          moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
+          W={W} H={H} content={previewContent} fontStyle={fontStyle}
+          types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
+          fields={mFields} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
+          onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
+          onFullEditor={() => setForceFullEditor(true)}
+        />
+      </>
+    )
+  }
 
-          {/* ─── LEFT: controls ────────────────────────────────────────────── */}
-          <div className="w-full xl:w-[500px] 2xl:w-[540px] shrink-0 flex flex-col gap-4 pb-20">
+  // ─── Start screen ─────────────────────────────────────────────────────────
+  // A bare /admin/social-post (no ?type / ?template) shows the first-run post
+  // picker; a deep link that names a type or template goes straight to editing.
+  const entryParams = new URLSearchParams(location.search)
+  const showStart = !entryParams.has('type') && !entryParams.has('template')
+  if (showStart) {
+    const startTypes = TABS.map((t) => ({
+      key: t.key, label: t.label, icon: TAB_ICON[t.key],
+      count: TEMPLATES.filter((x) => TAB_MAP[x.id] === t.key).length,
+    }))
+    const openType = (typeKey) => { switchTab(typeKey); navigate(`/admin/social-post?type=${typeKey}`) }
+    // "Continue" resumes the post type you had open last (its in-session work is
+    // still in state; the type + look also persist across reloads).
+    const lastType = TABS.find((t) => t.key === activeTab)
+    return (
+      <StartScreen
+        types={startTypes}
+        club={{ name: settings?.name, subtitle: settings?.home_ground || settings?.home_venue || '', logo: team.logo }}
+        moduleLogo={moduleBrand('socials').logo}
+        savedTemplates={savedTemplates}
+        lastType={lastType ? { key: lastType.key, label: lastType.label } : null}
+        onPick={openType}
+        onResume={() => navigate(`/admin/social-post?type=${activeTab}`)}
+        onApplyTemplate={(tpl) => { applyTemplate(tpl); navigate(`/admin/social-post?template=${tpl.key}`) }}
+        onExit={() => navigate('/admin')}
+      />
+    )
+  }
+
+  // ─── Editor shell scaffolding ────────────────────────────────────────────
+  // Add a freeform block to the layer being edited: the standalone canvas on the
+  // Blank tab, else the overlay on top of a real template (turning on Custom
+  // Edit so it shows).
+  const addBlock = (type, opts = {}) => {
+    if (!isBlankTab && !customEdit) setCustomEdit(true)
+    const target = isBlankTab ? canvas : overlay
+    record(`Add ${type}`)
+    return target.add(type, opts)
+  }
+
+  // Pull a saved BetterSelect XI into the lineup post (players + captain / keeper
+  // + match + opponent), mirroring the Selection page's "share to social" handoff.
+  const loadLineupFromSelection = async (fixtureId) => {
+    if (!fixtureId) return
+    setLineupLoad('loading')
+    try {
+      const d = await api.bsGetSelection(fixtureId)
+      const lineup = (d.lineup || []).slice().sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999))
+      const byId = {}; allPlayers.forEach((p) => { byId[p.id] = p })
+      const poolById = {}; (d.pool || []).forEach((p) => { poolById[p.id] = p })
+      const picked = lineup.map((l) => {
+        const player = byId[l.player_id]
+        if (!player) return null
+        const pp = poolById[l.player_id]
+        return { player, role: (pp?.skill_positions?.[0]) || pp?.player_role || player.player_role || 'BAT', captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
+      }).filter(Boolean)
+      setSelectedPlayers(picked)
+      const fx = d.fixture
+      if (fx) {
+        setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
+        if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
+        const tn = (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || ''
+        if (tn) setHeadline(tn)
+      }
+      setLineupLoad(`ok:${picked.length}`)
+    } catch (e) { setLineupLoad(`err:${e?.message || 'Failed to load'}`) }
+  }
+
+  // Media library handlers (optimistic upload, then swap in the stored URL).
+  const uploadMedia = async (files) => {
+    for (const f of files) {
+      if (!f) continue
+      const tmpId = `tmp_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+      const tmpUrl = URL.createObjectURL(f)
+      setMediaAssets((a) => [{ id: tmpId, name: f.name, url: tmpUrl, _tmp: true }, ...a])
+      try {
+        const saved = await api.uploadSocialMedia(f)
+        setMediaAssets((a) => a.map((x) => (x.id === tmpId ? saved : x)))
+      } catch { setMediaAssets((a) => a.filter((x) => x.id !== tmpId)) }
+    }
+  }
+  const useMediaAsset = (asset) => {
+    const sel = layer.selIds.length === 1 ? layer.items.find((it) => it.id === layer.selIds[0]) : null
+    if (sel && sel.type === 'image') { record('Replace image'); layer.update(sel.id, { src: asset.url, srcName: asset.name }) }
+    else addBlock('image', { src: asset.url, srcName: asset.name })
+  }
+  const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
+
+  const clubName = settings?.name || 'Club'
+  const headerLeft = (
+    <>
+      <button onClick={() => navigate('/admin')} title="Exit to admin" className="w-7 h-7 grid place-items-center rounded-md text-pb-faint hover:text-pb-text transition-colors"><Icon name="back" size={16} /></button>
+      <button onClick={() => navigate('/admin/social-post')} title="What are you posting? — start over"
+        className="hidden sm:flex items-center gap-1.5 px-2.5 h-8 rounded-md border pb-hairline2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">
+        <Icon name="overview" size={14} /><span className="font-mono text-[9px] tracking-wide2 uppercase">Posts</span>
+      </button>
+      <span className="w-px h-5 bg-pb-hairline" />
+      <span className="flex items-center gap-2 min-w-0">
+        {team.logo
+          ? <img src={team.logo} alt="" className="w-[26px] h-[26px] rounded object-contain shrink-0 bg-pb-surface2" />
+          : <span className="w-[26px] h-[26px] rounded grid place-items-center font-mono text-[11px] bg-pb-surface2 text-pb-dim shrink-0">{deriveShort(clubName).slice(0, 2)}</span>}
+        <span className="font-mono text-[9px] text-pb-faint uppercase truncate max-w-[110px] hidden lg:block">{clubName}</span>
+      </span>
+      <span className="w-px h-5 bg-pb-hairline hidden sm:block" />
+      <ModuleLockup name="BetterPosts" logo={moduleBrand('socials').logo} accent="#EC4899" />
+    </>
+  )
+
+  // Every post type across the top — replaces the old dropdown.
+  const tabBar = TABS.map((t) => {
+    const on = activeTab === t.key
+    return (
+      <button key={t.key} onClick={() => switchTab(t.key)}
+        className={`shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-md font-mono text-[10px] tracking-wide2 uppercase whitespace-nowrap transition-colors ${
+          on ? 'text-pb-accent' : 'text-pb-faint hover:text-pb-dim'
+        }`}
+        style={on ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
+        <Icon name={TAB_ICON[t.key] || 'sheet'} size={14} />{t.label}
+      </button>
+    )
+  })
+  const headerRight = (
+    <>
+      <span className="flex items-center gap-1">
+        <button onClick={history.undo} disabled={!history.canUndo} title="Undo (⌘Z)"
+          className="w-7 h-7 grid place-items-center rounded-md text-pb-dim hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-dim transition-colors"><Icon name="reset" size={15} /></button>
+        <button onClick={history.redo} disabled={!history.canRedo} title="Redo (⇧⌘Z)"
+          className="w-7 h-7 grid place-items-center rounded-md text-pb-dim hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-dim transition-colors"><Icon name="reset" size={15} style={{ transform: 'scaleX(-1)' }} /></button>
+        <span className="font-mono text-[8px] tracking-wide2 uppercase text-pb-faintest w-11 leading-tight">{history.depth} step{history.depth === 1 ? '' : 's'}</span>
+      </span>
+      <span className="w-px h-5 bg-pb-hairline" />
+      {exportError && <span className="text-pb-red text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
+      <button onClick={handleReset} title="Reset the fields for this post type"
+        className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
+      <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
+        className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
+      <button onClick={handleExport} disabled={exporting}
+        className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : '↓ DOWNLOAD PNG')}</button>
+    </>
+  )
+
+  const panelMeta = {
+    source: DATA_TABS.includes(activeTab) ? 'pull it first' : 'nothing to pull',
+    design: `${tabTemplates.length} layout${tabTemplates.length === 1 ? '' : 's'}`,
+    content: 'this post', data: 'live', brand: 'colour · type',
+    layers: `${layer.items.length} block${layer.items.length === 1 ? '' : 's'}`,
+  }[tool] || ''
+
+  const renderCanvas = ({ availW, availH }) => {
+    const scale = Math.max(0.05, Math.min(availW / W, availH / H, 1))
+    const pw = Math.round(W * scale), ph = Math.round(H * scale)
+    return (
+      <div className="relative">
+        {isBlankTab && (
+          <PageStrip count={pages.count} index={pages.index}
+            onGoTo={pages.goTo} onAdd={pages.add} onDuplicate={pages.duplicate} onRemove={pages.remove} />
+        )}
+        <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
+          <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
+            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+            {isBlankTab ? (
+              <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
+                interactive scale={scale} selectedIds={canvas.selIds}
+                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
+                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
+            ) : (
+              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+            )}
+            {customEdit && !isBlankTab && (
+              <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
+                interactive scale={scale} selectedIds={overlay.selIds}
+                onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
+                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
+                style={{ position: 'absolute', inset: 0 }} />
+            )}
+          </div>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : 'SINGLE POST'}</span>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{showBlankTools ? 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL' : ''}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const inspectorNode = (
+    <SelectionInspector
+      items={layer.items} selIds={layer.selIds}
+      onUpdate={hUpdate} onReorder={hReorder}
+      onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
+      palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem}
+    />
+  )
+
+  const photosPanel = (
+    <MediaLibraryPanel
+      assets={mediaAssets} onUpload={uploadMedia} onUseAsset={useMediaAsset} onAddEmptyFrame={() => addBlock('image')}
+      players={allPlayers} onAddPlayerPhoto={(pid) => addBlock('data', { kind: 'playerphoto', playerId: pid })}
+      onAddBrandLockup={() => addBlock('brand')}
+      sponsors={adminSponsors.map((s) => ({ name: s.name, url: `${BASE_URL}/images/sponsors/${s.id}/logo` }))}
+      onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
+      club={{ name: settings?.name, logo_url: team.logo }}
+    />
+  )
+
+  return (
+    <>
+      <SocialBackgroundDefs />
+      <input ref={blankImgInputRef} type="file" accept="image/png,image/webp,image/jpeg" className="sr-only"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f && pendingImgItem.current) setEditor({ key: 'blankimg', itemId: pendingImgItem.current, source: f }); e.target.value = '' }} />
+      <PostEditorShell
+        headerLeft={headerLeft}
+        headerRight={headerRight}
+        tool={tool}
+        onTool={setTool}
+        tabBar={tabBar}
+        panelTitle={TOOL_TITLE[tool]}
+        panelMeta={panelMeta}
+        renderCanvas={renderCanvas}
+        inspector={inspectorNode}
+        panel={(
+          <div className="flex flex-col gap-4">
+            {tool === 'source' && (
+              <div className="flex flex-col gap-4">
+                <div className="pb-card p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Icon name={TAB_ICON[activeTab] || 'bolt'} size={15} className="text-pb-accent" />
+                    <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{TABS.find((t) => t.key === activeTab)?.label} · data</h2>
+                  </div>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">{SOURCE_HELP[activeTab] || "This post type has nothing to import — it's all yours to design."}</p>
+                </div>
+
+                {activeTab === 'lineup' && (
+                  <div className="pb-card p-4 flex flex-col gap-2">
+                    <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">From BetterSelect</div>
+                    {sourceFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading your teams…</div>}
+                    {Array.isArray(sourceFixtures) && sourceFixtures.length === 0 && (
+                      <div className="text-pb-faintest text-[11px] leading-relaxed">No saved teams yet. Pick your XI in BetterSelect, or add players yourself in Content.</div>
+                    )}
+                    {Array.isArray(sourceFixtures) && sourceFixtures.length > 0 && (
+                      <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto">
+                        {sourceFixtures.slice(0, 20).map((fx) => (
+                          <button key={fx.id} onClick={() => loadLineupFromSelection(fx.id)}
+                            className="text-left px-3 py-2 rounded-lg border pb-hairline bg-pb-surface2 hover:border-pb-accent transition-colors">
+                            <div className="text-pb-text text-[12px] truncate">v {fx.opponent_name || 'TBC'}</div>
+                            <div className="font-mono text-[9px] text-pb-faint">{[fx.grade, fx.round, fx.played_on].filter(Boolean).join(' · ')}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
+                    {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded — head to Content or Design</div>}
+                    {typeof lineupLoad === 'string' && lineupLoad.startsWith('err:') && <div className="text-pb-red text-[10px] font-mono">✗ {lineupLoad.slice(4)}</div>}
+                    <button onClick={() => navigate('/admin/betterselect')} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">Open BetterSelect →</button>
+                  </div>
+                )}
+
+                {(activeTab === 'result' || activeTab === 'scorecard') && (
+                  <div className="pb-card p-4">
+                    <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Paste the match link</div>
+                    <div className="flex gap-2">
+                      <input
+                        value={activeTab === 'result' ? resUrlInput : scUrlInput}
+                        onChange={(e) => { if (activeTab === 'result') { setResUrlInput(e.target.value); setResUrlStatus(null) } else { setScUrlInput(e.target.value); setScUrlStatus(null) } }}
+                        onKeyDown={(e) => e.key === 'Enter' && (activeTab === 'result' ? handleResultImport() : handleScUrlImport())}
+                        placeholder="Match link or ID (e.g. 37af9ea5-…)"
+                        className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-2 text-xs text-pb-text font-mono" />
+                      <button onClick={activeTab === 'result' ? handleResultImport : handleScUrlImport}
+                        disabled={(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading'}
+                        className="px-3 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50" style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+                        {(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading' ? '…' : 'Fetch'}
+                      </button>
+                    </div>
+                    {(() => {
+                      const st = activeTab === 'result' ? resUrlStatus : scUrlStatus
+                      if (!st || st === 'loading') return null
+                      const ok = st === 'ok'
+                      return <p className={`font-mono text-[9px] mt-1.5 ${ok ? 'text-green-400' : 'text-pb-red'}`}>{ok ? (activeTab === 'result' ? '✓ Result, scores & top performers loaded' : '✓ Scorecard loaded') : `✗ ${st}`}</p>
+                    })()}
+                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Pulls the scores, top performers and matched player photos. You can still edit everything after.</p>
+                  </div>
+                )}
+
+                {activeTab === 'fixtures' && (
+                  <div className="pb-card p-4">
+                    <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
+                      status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
+                      onPull={importFixtures}
+                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                  </div>
+                )}
+                {activeTab === 'results' && (
+                  <div className="pb-card p-4">
+                    <RoundImportBox hint="recent results" rowsKey="results"
+                      status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
+                      onPull={importResults}
+                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                  </div>
+                )}
+
+                <button onClick={() => setTool(DATA_TABS.includes(activeTab) ? 'content' : 'content')}
+                  className="self-start px-3.5 h-9 rounded-md font-mono text-[10px] tracking-wide2 uppercase"
+                  style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+                  {DATA_TABS.includes(activeTab) ? 'Continue to editor →' : 'Start designing →'}
+                </button>
+              </div>
+            )}
+            {tool === 'text' && <TextPanel onAdd={addBlock} />}
+            {tool === 'elements' && <ShapesPanel onAdd={addBlock} />}
+            {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
+            {tool === 'photos' && photosPanel}
+            {tool === 'layers' && (
+              <LayersPanel
+                items={layer.items} selIds={layer.selIds}
+                onSelect={layer.select} onReorder={hReorder}
+                onDuplicate={hDuplicate} onRemove={hRemove}
+                onMoveLayerBefore={hMoveBefore} historyLog={history.log}
+              />
+            )}
+            {tool === 'brand' && (<>
+
+            {/* Brand kit banner — the club's crest + sponsor marks, with a note
+                that the look below saves to the club automatically. */}
+            <section className="pb-card p-4">
+              <div className="flex items-center gap-2.5">
+                {team.logo
+                  ? <img src={team.logo} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 shrink-0" />
+                  : <span className="w-9 h-9 rounded grid place-items-center font-mono text-[12px] shrink-0" style={{ background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent)' }}>{deriveShort(settings?.name || 'C').slice(0, 2)}</span>}
+                <div className="min-w-0">
+                  <div className="text-pb-text text-[13px] font-semibold truncate">{settings?.name || 'Your club'}</div>
+                  <div className="font-mono text-[9px] text-pb-faintest">Saved to the club automatically</div>
+                </div>
+              </div>
+              {adminSponsors.length > 0 && (
+                <div className="mt-3 pt-3 border-t pb-hairline">
+                  <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Sponsors</div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {adminSponsors.map((s) => (
+                      <img key={s.id} src={`${BASE_URL}/images/sponsors/${s.id}/logo`} alt={s.name} title={s.name}
+                        className="h-8 max-w-[72px] object-contain rounded bg-pb-surface2 px-1" onError={(e) => { e.target.style.display = 'none' }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
 
             {/* Style: palette + dark/light + font */}
             <section className="pb-card p-4">
@@ -1672,46 +2347,103 @@ export default function AdminSocialPost() {
               )}
             </section>
 
-            {/* Tab bar */}
-            <div className="flex overflow-x-auto border-b pb-hairline gap-0 -mt-1">
-              {TABS.map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => switchTab(tab.key)}
-                  className={`shrink-0 px-3 py-2.5 font-mono text-[10px] tracking-wide2 whitespace-nowrap transition-colors border-b-2 -mb-px ${
-                    activeTab === tab.key
-                      ? 'text-pb-text border-pb-accent'
-                      : 'text-pb-faint border-transparent hover:text-pb-dim'
-                  }`}
-                  style={activeTab === tab.key ? { borderColor: 'var(--pb-accent)' } : {}}
-                >
-                  {tab.label.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            </>)}
 
-            {/* Template variant selector (only when multiple exist). The Events
-                tab carries its own Layout picker in EventPostEditor. */}
-            {tabTemplates.length > 1 && activeTab !== 'events' && (
-              <section className="pb-card p-4">
-                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Variant</h2>
-                <div className="grid grid-cols-3 gap-2">
-                  {tabTemplates.map(t => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTemplateId(t.id)}
-                      className={`text-left p-2.5 rounded border transition-colors ${templateId === t.id ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
-                      style={templateId === t.id ? { borderColor: 'var(--pb-accent)' } : {}}
-                    >
-                      <div className="font-mono text-[9px] text-pb-faintest mb-0.5">{t.id}</div>
-                      <div className="font-medium text-pb-text text-xs leading-tight">{t.name}</div>
-                      <div className="text-[10px] text-pb-faint leading-tight mt-0.5">{t.desc}</div>
-                    </button>
-                  ))}
+            {tool === 'design' && (<>
+            {/* Templates — collapsible. Built-in variants for this tab stacked
+                so they're all visible at once, plus a "Custom" group of saved
+                templates. Saving works on every tab (captures base template +
+                Style, and the Blank Canvas layout). */}
+            <section className="pb-card p-4">
+              <button onClick={() => setTemplatesOpen(o => !o)} className="w-full flex items-center justify-between">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Templates</h2>
+                <span className="font-mono text-[11px] text-pb-faint">{templatesOpen ? '▾' : '▸'}</span>
+              </button>
+              {templatesOpen && (
+                <div className="mt-3 flex flex-col gap-4">
+                  {!isBlankTab && (
+                    <div className="flex flex-col gap-1 self-start">
+                      <button
+                        onClick={customEdit ? stopCustomEdit : beginCustomEdit}
+                        className="px-3 py-1.5 rounded text-[11px] font-mono border transition-colors self-start"
+                        style={customEdit
+                          ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }
+                          : { borderColor: 'var(--pb-hairline)' }}>
+                        {customEdit
+                          ? '✎ Custom editing (overlay) — click to stop'
+                          : CUSTOM_EDITABLE.includes(templateId)
+                            ? '✎ Custom Edit — make every element movable'
+                            : '✎ Custom Edit — add blocks on top'}
+                      </button>
+                      <span className="text-pb-faintest text-[10px]">
+                        {CUSTOM_EDITABLE.includes(templateId)
+                          ? 'Opens this post as fully-editable blocks you can move, then save as a template.'
+                          : 'This layout keeps its content; you can add your own blocks on top.'}
+                      </span>
+                    </div>
+                  )}
+                  {tabTemplates.length > 1 && activeTab !== 'events' && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">This tab</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {tabTemplates.map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => selectTemplate(t.id)}
+                            className={`text-left p-2.5 rounded border transition-colors ${templateId === t.id ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
+                            style={templateId === t.id ? { borderColor: 'var(--pb-accent)' } : {}}
+                          >
+                            <div className="font-mono text-[9px] text-pb-faintest mb-0.5">{t.id}</div>
+                            <div className="font-medium text-pb-text text-xs leading-tight">{t.name}</div>
+                            <div className="text-[10px] text-pb-faint leading-tight mt-0.5">{t.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1.5">
+                    <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Custom</div>
+                    {savedTemplates.length === 0 && (
+                      <div className="text-pb-faintest text-[10px] font-mono">No saved templates yet — build a post, then save it below.</div>
+                    )}
+                    {savedTemplates.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {savedTemplates.map(t => (
+                          <div key={t.key}
+                            className={`relative p-2.5 rounded border transition-colors ${templateId === t.templateId ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}>
+                            <button onClick={() => applyTemplate(t)} className="text-left w-full pr-4">
+                              <div className="font-medium text-pb-text text-xs leading-tight truncate">{t.name}</div>
+                              <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{t.custom ? 'edit' : ''}{t.custom ? ' · ' : ''}{t.templateId}{t.blank ? ` · ${t.blank.length}` : ''}</div>
+                            </button>
+                            <button onClick={() => deleteTemplate(t.key)} title="Delete template" className="absolute top-1.5 right-1.5 text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2 mt-1">
+                      <input value={saveTemplateName} onChange={e => setSaveTemplateName(e.target.value)} placeholder="Template name..."
+                        className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] font-mono text-pb-text" />
+                      <button onClick={saveCurrentTemplate}
+                        className="px-3 py-1 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors whitespace-nowrap">
+                        Save current
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </section>
-            )}
+              )}
+            </section>
 
+            </>)}
+
+            {tool === 'content' && (<>
+            {isBlankTab && (
+              <div className="pb-card p-4">
+                <p className="text-[11px] text-pb-dim leading-relaxed">
+                  A blank canvas — use the tools on the left (<span className="text-pb-text">Text</span>, <span className="text-pb-text">Shapes</span>, <span className="text-pb-text">Photos</span>, <span className="text-pb-text">Club data</span>) to add blocks, then drag them on the canvas. Or pick a starting layout under <span className="text-pb-text">Design</span>.
+                </p>
+              </div>
+            )}
             {/* Match Info */}
             {showMatchInfo && (
               <section className="pb-card p-4">
@@ -2507,105 +3239,30 @@ export default function AdminSocialPost() {
               </section>
             )}
 
-            {/* Blank Canvas — freeform WYSIWYG builder */}
-            {activeTab === 'blank' && (
-              <BlankCanvasEditor
-                items={blankItems} selId={blankSelId} setSelId={setBlankSelId}
-                onAdd={addBlankItem} onUpdate={updateBlankItem} onRemove={removeBlankItem}
-                onDuplicate={duplicateBlankItem} onReorder={reorderBlankItem}
-                palette={themedPalette}
-                onPickImage={(itemId, file) => setEditor({ key: 'blankimg', itemId, source: file })}
-              />
-            )}
-
-            {/* Mobile preview (visible on small screens, hidden on xl) */}
-            <div className="xl:hidden pb-card p-4">
-              <div className="flex items-center justify-between mb-3 gap-2">
-                <span className="font-mono text-[10px] text-pb-faint uppercase">{tmpl.id}: {tmpl.name}</span>
-                <div className="flex items-center gap-2">
-                  {exportError && <span className="text-red-400 text-xs font-mono truncate max-w-[120px]">{exportError}</span>}
-                  <button onClick={handleExport} disabled={exporting}
-                    className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 disabled:opacity-60"
-                    style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? '...' : '↓ PNG'}
-                  </button>
-                  <button onClick={handleReset} className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
-                    ↺ Reset
-                  </button>
-                </div>
-              </div>
-              {(() => {
-                const mobileW = Math.min(window.innerWidth - 64, 480)
-                const scale = mobileW / W
-                return (
-                  <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                    <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
-                      {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-                    </div>
-                  </div>
-                )
-              })()}
-              <p className="text-pb-faintest text-[10px] font-mono mt-2">{W} × {H} px</p>
-            </div>
-
-          </div>{/* end left column */}
-
-          {/* ─── RIGHT: sticky preview (desktop only) ──────────────────────── */}
-          <div className="hidden xl:flex flex-1 min-w-0 sticky top-[64px] self-start flex-col gap-3">
-            <div className="pb-card p-4">
-              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                <span className="font-mono text-[10px] text-pb-faint uppercase shrink-0">{tmpl.id}: {tmpl.name}</span>
-                <div className="flex items-center gap-2 shrink-0">
-                  {exportError && <span className="text-red-400 text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
-                  <button onClick={handleExport} disabled={exporting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono tracking-wide2 transition-colors disabled:opacity-60"
-                    style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD PNG'}
-                  </button>
-                  <button onClick={handleReset}
-                    className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
-                    title="Reset all fields for this tab">
-                    ↺ Reset
-                  </button>
-                </div>
-              </div>
-              {(() => {
-                const pw = Math.min(700, W)
-                const scale = pw / W
-                const ph = Math.round(H * scale)
-                return (
-                  <>
-                    <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: tmpl.kind === 'blank' ? 'auto' : 'none', position: 'relative' }}>
-                        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-                        {tmpl.kind === 'blank' ? (
-                          <BlankCanvas team={team} palette={templatePalette} items={blankItems}
-                            interactive scale={scale} selectedId={blankSelId}
-                            onSelect={setBlankSelId} onChange={updateBlankItem} />
-                        ) : (
-                          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-pb-faintest text-[10px] font-mono mt-2">
-                      {W} × {H} px · shown at {Math.round(scale * 100)}%{tmpl.kind === 'blank' ? ' · drag items to move, corner handle to resize' : ''}
-                    </p>
-                  </>
-                )
-              })()}
-            </div>
+            </>)}
           </div>
-
-        </div>
-      </div>
+        )}
+      />
 
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-        <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-          {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-        </div>
+        {isBlankTab && pages.count > 1 ? (
+          // One full-size node per carousel page, captured in turn on export.
+          pages.all().map((pageItems, i) => (
+            <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
+            </div>
+          ))
+        ) : (
+          <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+            <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+            {customEdit && !isBlankTab && (
+              <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+            )}
+          </div>
+        )}
       </div>
 
       <ImageEditorModal
@@ -2624,12 +3281,13 @@ export default function AdminSocialPost() {
             if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
             setHeroImage({ blobUrl: URL.createObjectURL(file) })
           } else if (e.key === 'blankimg' && e.itemId) {
-            updateBlankItem(e.itemId, { src: URL.createObjectURL(file) })
+            record('Replace image')
+            layer.update(e.itemId, { src: URL.createObjectURL(file) })
           } else if (typeof e.sponsorIdx === 'number') {
             applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
           }
         }}
       />
-    </BetterSocialsLayout>
+    </>
   )
 }

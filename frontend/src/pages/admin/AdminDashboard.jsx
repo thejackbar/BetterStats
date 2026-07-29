@@ -24,8 +24,14 @@ function ModuleName({ name }) {
   return <span className="font-display font-bold text-lg">{name}</span>
 }
 
-function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, requesting, error, onStartTrial }) {
+function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscribe, requesting, error, onStartTrial }) {
   const brand = moduleBrand(mod.key)
+  // SUBSCRIBE deep-links to the Account page with this module pre-ticked. An
+  // add-on requires BetterStats (Core) too, so when Core isn't live we tick it
+  // as well (Core is CORE — always required). ?subscribe= is read by AdminAccount.
+  const billingKey = mod.billingKey || mod.key
+  const subscribeKeys = billingKey !== 'core' && !coreLive ? `${billingKey},core` : billingKey
+  const subscribeHref = `/admin/account?subscribe=${subscribeKeys}`
   // Scope the module's accent colour to this tile only — every var(--pb-accent)
   // inside (the name suffix, arrow, tint, border) becomes the module colour.
   const brandVars = { '--pb-accent': brand.accent, '--pb-accent-rgb': brand.accentRgb }
@@ -90,12 +96,16 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, request
           <ModuleName name={mod.name} />
         </div>
         <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">
-          Add-on
+          {mod.core ? 'Expired' : 'Add-on'}
         </span>
       </div>
       <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
       <div className="text-pb-faintest text-xs mt-2">
-        Available as an add-on. <Link to="/pricing" className="underline hover:text-pb-faint">See pricing</Link>.
+        {mod.core ? (
+          <>Your BetterStats access has ended — subscribe to restore your stats tools and public site.</>
+        ) : (
+          <>Available as an add-on. <Link to="/pricing" className="underline hover:text-pb-faint">See pricing</Link>.</>
+        )}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {pendingKind ? (
@@ -117,7 +127,7 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, request
             )}
             {canSubscribe && (
               <Link
-                to="/admin/account"
+                to={subscribeHref}
                 className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
               >
                 SUBSCRIBE
@@ -193,7 +203,7 @@ function SetupCard({ flow }) {
 }
 
 export default function AdminDashboard() {
-  const { user, hasModule, refetch } = useAuth()
+  const { user, hasModule, coreLive, refetch } = useAuth()
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [myRequests, setMyRequests] = useState([])
@@ -221,6 +231,15 @@ export default function AdminDashboard() {
   }, [])
 
   const planByModule = Object.fromEntries(plan.map(r => [r.module, r]))
+
+  // Gentle reminder when EVERYTHING has lapsed — Core isn't live and no add-on
+  // is entitled either. Shown on the dashboard the club lands on at login (so
+  // it surfaces each time they log in), dismissible for the current view. Never
+  // for a super admin (cross-club, never gated), and never for a legacy club
+  // with no Core row (coreLive fails open to true).
+  const [remindDismissed, setRemindDismissed] = useState(false)
+  const allExpired = !!user && user.role !== 'super_admin' && !coreLive &&
+    !(user.entitlements?.modules || []).length
 
   // Live sync progress — driven entirely by re-fetching sync_runs, so it's
   // correct on every fresh page load / re-login with no client-side state to
@@ -348,6 +367,37 @@ export default function AdminDashboard() {
           )}
         </p>
 
+        {allExpired && !remindDismissed && (
+          <div className="pb-card p-4 mb-6 border border-amber-500/30 bg-amber-500/5">
+            <div className="flex items-start gap-3">
+              <span className="text-lg leading-none mt-0.5">🏏</span>
+              <div className="min-w-0 flex-1">
+                <p className="font-display font-bold text-sm text-pb-text">Your trials have ended</p>
+                <p className="text-pb-faint text-xs mt-1">
+                  Every module’s trial has finished, so BetterStats and your club’s public
+                  page are paused for now. Subscribe whenever you’re ready to pick up where
+                  you left off — your data is safe.
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <Link
+                    to="/admin/account"
+                    className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border border-amber-500/40 text-amber-200 hover:bg-amber-500/10 transition-colors"
+                  >
+                    VIEW PLANS
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setRemindDismissed(true)}
+                    className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+                  >
+                    DISMISS
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Better modules — entitled tiles open; locked tiles upsell. */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
@@ -364,9 +414,15 @@ export default function AdminDashboard() {
               <ModuleTile
                 key={tile.key}
                 mod={tile}
-                entitled={tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key))}
+                // Core (BetterStats) being live is a hard prerequisite for the
+                // whole platform: when it's not, EVERY tile locks — including the
+                // alwaysOpen ones (BetterStats itself and the BetterSocials hub,
+                // whose Core website is dark anyway). While Core is live,
+                // alwaysOpen keeps those two open and add-ons gate on their own.
+                entitled={coreLive && (tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)))}
                 planRow={planByModule[billingKey]}
                 pendingKind={pending?.kind}
+                coreLive={coreLive}
                 canSubscribe={!!user?.is_primary_admin}
                 requesting={requesting === billingKey}
                 error={tileErrors[billingKey]}

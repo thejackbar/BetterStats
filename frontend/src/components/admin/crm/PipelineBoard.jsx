@@ -7,6 +7,22 @@ const BETTERSTATS_LOGO = moduleBrand('stats').logo
 
 export const TIER_TONE = { HOT: 'red', WARM: 'amber', COLD: 'faint', NOT_INTERESTED: 'faint' }
 
+// A small solid arrow showing whether a club's engagement score moved since the
+// previous calendar day: green up if it rose, red down if it fell, nothing if
+// unchanged / not enough history (deal.engagement_delta_dir, set server-side
+// from marketing_clubs.engagement_score_prev). Rendered right beside the score.
+export function EngagementArrow({ dir }) {
+  if (dir !== 'up' && dir !== 'down') return null
+  const up = dir === 'up'
+  return (
+    <span title={`Engagement score ${up ? 'up' : 'down'} since yesterday`}
+      className="text-[11px] leading-none font-bold select-none"
+      style={{ color: up ? '#16c784' : '#ef4444' }}>
+      {up ? '▲' : '▼'}
+    </span>
+  )
+}
+
 // A Kanban-style pipeline board — one column per stage, drag-and-drop
 // enabled (native HTML5 DnD, no library) between any two columns. `client`
 // (the same scope-specific api.js bundle DealDetailModal takes) is what
@@ -195,9 +211,12 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                     )}
                   </div>
                   {(deal.module_keys?.length > 0 || deal.engagement_score != null) && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
+                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
                       {deal.engagement_score != null && (
-                        <Pill tone={TIER_TONE[deal.engagement_tier] || 'faint'}>{deal.engagement_score}</Pill>
+                        <span className="inline-flex items-center gap-0.5">
+                          <Pill tone={TIER_TONE[deal.engagement_tier] || 'faint'}>{deal.engagement_score}</Pill>
+                          <EngagementArrow dir={deal.engagement_delta_dir} />
+                        </span>
                       )}
                       {sortModuleKeys(deal.module_keys).map(k => {
                         const isSubscribed = (deal.subscribed_modules || []).includes(k)

@@ -40,6 +40,8 @@ MANAGE_MANUAL_ENTRIES = "manage_manual_entries"  # historical manual stat entry 
 MANAGE_FEES = "manage_fees"                   # fee tracking: members, schedule, match days
 MANAGE_FIXTURES = "manage_fixtures"           # BetterSelect: fixtures (partner sync + manual create/edit)
 MANAGE_SELECTIONS = "manage_selections"       # BetterSelect: teams, availability, team selection
+MANAGE_VOTES = "manage_votes"                 # BetterSelect: vote collection — config, ballots, lock/reopen
+VIEW_VOTE_RESULTS = "view_vote_results"       # BetterSelect: see vote tallies + the season leaderboard
 MANAGE_IQ = "manage_iq"                       # BetterIQ: opposition analysis + scouting dossiers
 MANAGE_COMMS = "manage_comms"                 # BetterComms: contacts + bulk email campaigns
 MANAGE_MERCH = "manage_merch"                 # BetterMerch: stock register (apparel, equipment, food/drink)
@@ -70,6 +72,8 @@ ALL_CAPABILITIES = (
     MANAGE_FEES,
     MANAGE_FIXTURES,
     MANAGE_SELECTIONS,
+    MANAGE_VOTES,
+    VIEW_VOTE_RESULTS,
     MANAGE_IQ,
     MANAGE_COMMS,
     MANAGE_MERCH,
@@ -129,6 +133,35 @@ def require_cap(capability: str):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing capability: {capability}",
+            )
+        return current_user
+
+    return _dep
+
+
+def require_any_cap(*capabilities: str):
+    """Like require_cap, but passes if the membership holds ANY of the given
+    capabilities — e.g. a page a manager or a designated viewer can both open."""
+    from app.routers.auth import get_current_user
+    from app.models.db import ClubMembership, User, get_db
+
+    async def _dep(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        row = await db.execute(
+            select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+        )
+        membership = row.scalar_one_or_none()
+        if not membership:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
+        if not any(
+            membership_has_capability(membership.role, membership.capabilities, cap)
+            for cap in capabilities
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing capability: one of {', '.join(capabilities)}",
             )
         return current_user
 

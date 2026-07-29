@@ -251,8 +251,10 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               {deal.marketing_club_id && (
                 <label className="flex items-start gap-2 text-[12px] text-pb-faint">
                   <input type="checkbox" checked={resetClub} onChange={e => setResetClub(e.target.checked)} className="mt-0.5" />
-                  <span>Also reset this club's engagement score and trial/demo flags — use this only
-                    if this was test activity, so a real future enquiry starts fresh.</span>
+                  <span>This was test activity — also permanently delete the club: remove it from
+                    All Clubs (seasons, games, players, stats), delete its admin user login and its
+                    Stripe customer, and reset its Club Directory record so a real future enquiry
+                    starts fresh. The Club Directory entry itself is kept. Cannot be undone.</span>
                 </label>
               )}
               <div className="flex justify-end gap-2">

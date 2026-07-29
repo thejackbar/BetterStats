@@ -94,6 +94,63 @@ function InsightRow({ insight }) {
   )
 }
 
+// One row of the "Clubs selected in the wizard" table. `hidden` renders it as a
+// dimmed, flagged-as-test row with a Restore action; otherwise it shows a
+// "Flag as test" action that hides it (table-only — never touches the pipeline).
+function SelectionRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
+  return (
+    <tr className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${hidden ? 'opacity-50' : ''}`}>
+      <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
+        {c.slug ? <a href={`/${c.slug}`} className="hover:underline">{c.name}</a> : c.name}
+      </td>
+      <td className="px-2 py-2">
+        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+          c.via_meta
+            ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
+            : 'border-pb-hairline text-pb-faint'
+        }`}>
+          {c.via_meta ? 'Meta' : 'Other'}
+        </span>
+      </td>
+      <td className="px-2 py-2">
+        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+          c.furthest_step === 'Registration completed'
+            ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+            : c.furthest_step === 'Reached Terms & privacy'
+              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+              : 'border-pb-hairline text-pb-faint'
+        }`}>
+          {c.furthest_step}
+        </span>
+      </td>
+      <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{c.email || '–'}</td>
+      <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
+      <td className="px-2 py-2 text-right whitespace-nowrap">
+        {hidden ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRestore}
+            className="font-mono text-[9px] uppercase text-pb-faint hover:text-pb-text disabled:opacity-40"
+          >
+            Restore
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onFlag}
+            title="Hide this row from the table (doesn't affect the Sales Pipeline)"
+            className="font-mono text-[9px] uppercase text-pb-faint hover:text-red-300 disabled:opacity-40"
+          >
+            Flag as test
+          </button>
+        )}
+      </td>
+    </tr>
+  )
+}
+
 function FunnelChart({ stages, title = 'Funnel: impressions to a completed registration' }) {
   if (!stages?.length) return null
   const top = stages[0]?.value || 0
@@ -277,6 +334,8 @@ export default function SuperMetaAds() {
   const [adSignups, setAdSignups] = useState(null)
   const [registrationFunnel, setRegistrationFunnel] = useState(null)
   const [selectedClubs, setSelectedClubs] = useState(null)
+  const [showHiddenSelections, setShowHiddenSelections] = useState(false)
+  const [busySelectionKey, setBusySelectionKey] = useState('')
 
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
@@ -303,6 +362,22 @@ export default function SuperMetaAds() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const hideSelection = useCallback((c) => {
+    setBusySelectionKey(c.key || c.name)
+    api.metaAdsHideSelection(c.key || c.name)
+      .then(setSelectedClubs)
+      .catch(() => {})
+      .finally(() => setBusySelectionKey(''))
+  }, [])
+
+  const unhideSelection = useCallback((c) => {
+    setBusySelectionKey(c.key || c.name)
+    api.metaAdsUnhideSelection(c.key || c.name)
+      .then(setSelectedClubs)
+      .catch(() => {})
+      .finally(() => setBusySelectionKey(''))
+  }, [])
 
   useEffect(() => {
     setHistoryLoading(true)
@@ -586,19 +661,32 @@ export default function SuperMetaAds() {
             {/* Which clubs are behind the "Club selected" count — named wherever
                 we can identify them (beacon metadata, Terms-step name, or a
                 completed registration). */}
-            {selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0) && (
+            {selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0
+                || (selectedClubs.hidden_count || 0) > 0) && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
                     Clubs selected in the wizard (last 30 days)
                   </div>
-                  <span className="font-mono text-[10px] text-pb-faintest">
-                    {selectedClubs.identified} identified
-                    {selectedClubs.anonymous > 0 && <> &middot; {selectedClubs.anonymous} not captured</>}
+                  <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
+                    <span>
+                      {selectedClubs.identified} identified
+                      {selectedClubs.anonymous > 0 && <> &middot; {selectedClubs.anonymous} not captured</>}
+                    </span>
+                    {(selectedClubs.hidden_count || 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowHiddenSelections((v) => !v)}
+                        className="px-1.5 py-0.5 rounded-full border border-pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-dim uppercase"
+                      >
+                        {showHiddenSelections ? 'Hide' : 'Show'} {selectedClubs.hidden_count} test{selectedClubs.hidden_count === 1 ? '' : 's'}
+                      </button>
+                    )}
                   </span>
                 </div>
 
-                {selectedClubs.clubs.length === 0 ? (
+                {selectedClubs.clubs.length === 0
+                  && !(showHiddenSelections && (selectedClubs.hidden_clubs || []).length) ? (
                   <p className="text-xs text-pb-faint">
                     {selectedClubs.anonymous} club selection{selectedClubs.anonymous === 1 ? '' : 's'} in
                     this window, but none can be named yet — they were picked before the club was captured
@@ -615,37 +703,26 @@ export default function SuperMetaAds() {
                           <th className="px-2 py-2">Furthest step</th>
                           <th className="px-2 py-2">Contact email</th>
                           <th className="px-2 py-2">Last seen</th>
+                          <th className="px-2 py-2"></th>
                         </tr>
                       </thead>
                       <tbody>
                         {selectedClubs.clubs.map((c) => (
-                          <tr key={c.name + (c.org_id || '')} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
-                            <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
-                              {c.slug ? <a href={`/${c.slug}`} className="hover:underline">{c.name}</a> : c.name}
-                            </td>
-                            <td className="px-2 py-2">
-                              <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-                                c.via_meta
-                                  ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
-                                  : 'border-pb-hairline text-pb-faint'
-                              }`}>
-                                {c.via_meta ? 'Meta' : 'Other'}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2">
-                              <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-                                c.furthest_step === 'Registration completed'
-                                  ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
-                                  : c.furthest_step === 'Reached Terms & privacy'
-                                    ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
-                                    : 'border-pb-hairline text-pb-faint'
-                              }`}>
-                                {c.furthest_step}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{c.email || '–'}</td>
-                            <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
-                          </tr>
+                          <SelectionRow
+                            key={c.name + (c.org_id || '')}
+                            c={c}
+                            busy={busySelectionKey === (c.key || c.name)}
+                            onFlag={() => hideSelection(c)}
+                          />
+                        ))}
+                        {showHiddenSelections && (selectedClubs.hidden_clubs || []).map((c) => (
+                          <SelectionRow
+                            key={'hidden-' + c.name + (c.org_id || '')}
+                            c={c}
+                            hidden
+                            busy={busySelectionKey === (c.key || c.name)}
+                            onRestore={() => unhideSelection(c)}
+                          />
                         ))}
                       </tbody>
                     </table>
@@ -655,6 +732,8 @@ export default function SuperMetaAds() {
                   The step funnel above counts anonymous visitors; this names the clubs behind them. A club
                   is identified from the selection beacon (captured from this release on), the club name on
                   a Terms-step acknowledgement, or a completed registration &mdash; whichever it reached furthest.
+                  A club that reaches the Terms step is added to the Sales Pipeline as a lead automatically.
+                  &ldquo;Flag as test&rdquo; only hides a row from this table &mdash; it doesn&rsquo;t touch the pipeline.
                 </p>
               </div>
             )}

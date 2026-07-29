@@ -60,7 +60,7 @@ const NAV_SECTIONS = [
 // of truth.
 
 export default function AdminLayout({ children }) {
-  const { user, logout, switchClub, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
+  const { user, logout, switchClub, hasCapability, hasModule, coreLive, justLoggedIn, clearJustLoggedIn } = useAuth()
 
   // Super-admin module-request queue badge — refreshed on mount.
   useEffect(() => {
@@ -516,7 +516,13 @@ export default function AdminLayout({ children }) {
             <div className="pb-2 mb-1 border-b pb-hairline-b">
               <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Modules</div>
               {dashboardTiles().map(mod => {
-                const entitled = mod.alwaysOpen || (mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key))
+                // Core (BetterStats) being live is a hard prerequisite for the
+                // whole platform: when it's not, EVERYTHING locks — including the
+                // alwaysOpen tiles (BetterStats itself and the BetterSocials hub,
+                // whose Core website is dark anyway). While Core is live,
+                // alwaysOpen keeps those two reachable and add-ons gate on their
+                // own entitlement.
+                const entitled = coreLive && (mod.alwaysOpen || (mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key)))
                 const brand = moduleBrand(mod.key)
                 const suffix = mod.name.startsWith('Better') ? mod.name.slice('Better'.length) : null
                 const Label = ({ muted }) => (
@@ -545,7 +551,7 @@ export default function AdminLayout({ children }) {
                 return (
                   <div
                     key={mod.key}
-                    title={locked ? 'Available as an add-on' : 'Coming soon'}
+                    title={!coreLive && mod.built ? 'Subscribe to BetterStats to reactivate' : locked ? 'Available as an add-on' : 'Coming soon'}
                     className="flex items-center gap-2 px-2 py-1.5 rounded font-display font-bold text-[13px] text-pb-faintest cursor-default select-none"
                   >
                     <img src={brand.logo} alt="" className="w-4 h-4 rounded shrink-0 grayscale opacity-50" />

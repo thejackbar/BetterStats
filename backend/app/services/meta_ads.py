@@ -663,11 +663,27 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     _floor = datetime.min.replace(tzinfo=timezone.utc)
     rows = sorted(clubs.values(), key=lambda c: c["last_at"] or _floor, reverse=True)
     for c in rows:
+        # The normalised name is exactly the dict key get_selected_clubs grouped
+        # by (name is already .strip()'d in _upsert) — hide/unhide is keyed on it.
+        c["key"] = (c["name"] or "").strip().lower()
         c["first_at"] = c["first_at"].isoformat() if c["first_at"] else None
         c["last_at"] = c["last_at"].isoformat() if c["last_at"] else None
         c.pop("furthest_rank", None)
 
-    return {"clubs": rows, "identified": len(rows), "anonymous": int(anon)}
+    # A super admin flags test noise (e.g. their own stripetest run) as hidden —
+    # a display-only tidy-up of this table, never touching the Sales Pipeline.
+    from app.services import platform_settings
+    hidden_keys = await platform_settings.get_hidden_meta_selections(db)
+    visible = [c for c in rows if c["key"] not in hidden_keys]
+    hidden = [c for c in rows if c["key"] in hidden_keys]
+
+    return {
+        "clubs": visible,
+        "hidden_clubs": hidden,
+        "identified": len(visible),
+        "hidden_count": len(hidden),
+        "anonymous": int(anon),
+    }
 
 
 def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],

@@ -1,11 +1,19 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { clearAttribution } from '../lib/visitor'
+import { coreLiveFromPlan } from '../lib/modules'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined) // undefined = loading, null = not authed
   const [justLoggedIn, setJustLoggedIn] = useState(false)
+  // Per-module account plan, fetched once per club — the reliable source for
+  // coreLive below. account_plan_status reflects a lapsed BetterStats (Core) as
+  // 'trial_expired' on ANY backend version, so this doesn't depend on the
+  // /auth/me `core_live` flag (which a pre-upgrade backend or a stale /auth/me
+  // may omit). ProtectedRoute, the admin sidebar and the dashboard all gate on
+  // the resulting coreLive, so all three agree and self-heal.
+  const [accountPlan, setAccountPlan] = useState(null)
 
   const fetchMe = useCallback(async () => {
     try {
@@ -32,6 +40,16 @@ export function AuthProvider({ children }) {
   }, [])
 
   useEffect(() => { fetchMe() }, [fetchMe])
+
+  useEffect(() => {
+    if (!user || user.role === 'super_admin' || !user.club_id) { setAccountPlan(null); return }
+    let alive = true
+    fetch('/api/club-admin/account/plan', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive) setAccountPlan(Array.isArray(d?.modules) ? d.modules : null) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [user?.club_id, user?.role])
 
   const login = async (username, password) => {
     const res = await fetch('/api/auth/login', {
@@ -146,6 +164,11 @@ export function AuthProvider({ children }) {
   const hasModule = useCallback((moduleKey) => {
     if (!user) return false
     if (user.role === 'super_admin') return true
+    // Core is a hard prerequisite: if BetterStats isn't live, no add-on is
+    // usable either, whatever its own state. The backend already drops modules
+    // to an empty list in this case (org_entitled_modules), so this is belt-and-
+    // braces — but it also gates instantly, before entitlements are re-fetched.
+    if (user.entitlements?.core_live === false) return false
     // Backward-compat / fail-open: an older backend (or a not-yet-migrated one)
     // doesn't send `entitlements` at all. Don't hide the modules in that case —
     // only gate when the backend explicitly provides the modules list. A club
@@ -156,8 +179,24 @@ export function AuthProvider({ children }) {
     return mods.includes(moduleKey)
   }, [user])
 
+  // Whether BetterStats (Core) is live — gates the club's BetterStats admin
+  // surfaces (routes + dashboard tile). A lapsed Core trial / cancelled Core
+  // subscription reads false. Super admins act cross-club and are never gated.
+  // Fail-open when the backend doesn't send the flag (older/not-migrated) or
+  // before entitlements arrive, so we never wrongly lock a live club.
+  const coreLive = (() => {
+    if (!user) return false
+    if (user.role === 'super_admin') return true
+    // Prefer the account-plan-derived signal (reliable across backend versions
+    // / a stale /auth/me); fall back to the /auth/me flag, then fail open so a
+    // legacy club or an unloaded plan is never wrongly locked.
+    const fromPlan = coreLiveFromPlan(accountPlan)
+    if (fromPlan !== null) return fromPlan
+    return user.entitlements?.core_live ?? true
+  })()
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule, coreLive }}>
       {children}
     </AuthContext.Provider>
   )

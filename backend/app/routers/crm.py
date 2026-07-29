@@ -14,9 +14,10 @@ Two routers sharing one service layer (``services/crm.py``):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,6 +31,7 @@ from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
 from app.services import crm_targets
 from app.services import crm_rules
+from app.services import stripe_client
 
 logger = logging.getLogger(__name__)
 
@@ -674,6 +676,11 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: club_stats_by_club failed")
         stats_by_club = {}
+    try:
+        activity_by_deal = await crm_service.last_activity_at_by_deal(db, deals, club_by_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: last_activity_at_by_deal failed")
+        activity_by_deal = {}
 
     out = []
     for d in deals:
@@ -691,8 +698,61 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         # the Kanban card's state line — only present for a linked, onboarded
         # club (a subscriber or trialing club); absent for a bare prospect.
         row["club_stats"] = stats_by_club.get(d.marketing_club_id) if d.marketing_club_id else None
+        # Latest activity of any tracked kind (deal edit, subscription change,
+        # onboarding step, page view) — powers the "New Deal Activity" filter.
+        act = activity_by_deal.get(d.id)
+        row["last_activity_at"] = act.isoformat() if act else None
         out.append(row)
     return {"deals": out}
+
+
+# ─── Manual full engagement recompute (the "Recalculate" board button) ────────
+# Runs the SAME logic as `python -m app.scripts.recalc_engagement`: recompute and
+# re-cache every club's engagement score (twenty_sync._engagement, a local
+# read/compute — no Twenty calls) and re-run the score-based CRM auto-promotion,
+# so the board reflects the current scoring rules immediately instead of waiting
+# on the nightly (Twenty-gated) refresh or lazy per-event recomputes. A full
+# sweep takes minutes, well past nginx's 60s proxy timeout, so it runs as a
+# detached background task with a status the button polls — same pattern as the
+# marketing page's "Refresh Twenty" buttons.
+_engagement_recalc: dict = {
+    "running": False, "started_at": None, "finished_at": None, "result": None, "error": None,
+}
+_recalc_tasks: set = set()
+
+
+async def _run_engagement_recalc() -> None:
+    from app.scripts.recalc_engagement import recalc
+    try:
+        _engagement_recalc["result"] = await recalc()
+        _engagement_recalc["error"] = None
+    except Exception as e:  # noqa: BLE001 - background task; surface via status, never crash
+        logger.exception("manual engagement recalc failed")
+        _engagement_recalc["error"] = str(e) or "Recalculation failed"
+    finally:
+        _engagement_recalc["running"] = False
+        _engagement_recalc["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@super_router.post("/recalc-engagement", dependencies=[_super])
+async def super_recalc_engagement():
+    """Kick off a full engagement recompute across every club in the background
+    and return immediately. A no-op (returns the live state) if one is already
+    running, so a double-click can't launch two concurrent sweeps."""
+    if _engagement_recalc["running"]:
+        return {"status": "already_running", **_engagement_recalc}
+    _engagement_recalc.update(
+        running=True, started_at=datetime.now(timezone.utc).isoformat(),
+        finished_at=None, result=None, error=None)
+    task = asyncio.create_task(_run_engagement_recalc())
+    _recalc_tasks.add(task)
+    task.add_done_callback(_recalc_tasks.discard)
+    return {"status": "started"}
+
+
+@super_router.get("/recalc-engagement/status", dependencies=[_super])
+async def super_recalc_engagement_status():
+    return {"status": "running" if _engagement_recalc["running"] else "idle", **_engagement_recalc}
 
 
 @super_router.post("/deals", dependencies=[_super])
@@ -769,20 +829,51 @@ async def super_archive_deal(deal_id: str, db: AsyncSession = Depends(get_db)):
 @super_router.delete("/deals/{deal_id}/permanent", dependencies=[_super])
 async def super_delete_deal_permanent(deal_id: str, reset_club: bool = False,
                                       db: AsyncSession = Depends(get_db)):
-    """Permanently removes a platform deal — for purging test Leads/
-    Opportunities, not routine cleanup (that's Archive). `reset_club=true`
-    also wipes the linked prospect's sales-pipeline/engagement state (see
-    reset_marketing_club_engagement) so a later genuine self-serve signup or
-    enquiry from the SAME real club starts completely fresh, rather than
-    inheriting whatever test trial/demo flags were set on it — the club's
-    own directory row is never deleted, only its CRM-set state."""
+    """Permanently removes a platform deal. Two modes:
+
+    - `reset_club=false` (default): just deletes the deal — for tidying a real
+      Lead/Opportunity out of the pipeline without touching the club. (Archive
+      is the reversible option; this is the permanent one.)
+    - `reset_club=true` (the "this was test activity" checkbox): a FULL test-data
+      PURGE. It deletes the deal AND, when the deal is linked to a registered
+      club, HARD-DELETES that club from All Clubs (its seasons/games/players/
+      stats/memberships/module subscriptions), deletes the club's own admin user
+      login(s) (only those whose sole membership was this club — never a super
+      admin, never a user who also belongs to another club), and deletes the
+      club's Stripe customer (which cancels any subscription). The club's Club
+      Directory (marketing_clubs) row is KEPT — its engagement/trial/demo state
+      is reset so a genuine future enquiry starts fresh, but the directory entry
+      itself is NEVER removed. The All-Clubs Archive flow is untouched by this.
+    """
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    org_id = deal.organisation_id or (club.existing_org_id if club is not None else None)
+
     if reset_club and club is not None:
         await crm_service.reset_marketing_club_engagement(db, club)
+
+    # Delete the deal explicitly and flush it, so the club hard-delete below
+    # (which cascade-deletes deals via crm_deals.organisation_id ON DELETE
+    # CASCADE) can't race its own cascade against this row.
     await crm_service.delete_deal(db, deal)
+    await db.flush()
+
+    purged_org = False
+    if reset_club and org_id is not None:
+        org = await db.get(Organisation, org_id)
+        # Stripe is external — do it first (while we still hold the id) and never
+        # let it block the DB purge; a missing/already-deleted customer is fine.
+        if org is not None and org.stripe_customer_id:
+            try:
+                await stripe_client.delete_customer(org.stripe_customer_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("crm purge: could not delete Stripe customer for org %s", org_id)
+        await crm_service.hard_delete_registered_club(db, org_id)
+        purged_org = True
+
     await db.commit()
-    return {"deleted": True, "club_reset": bool(reset_club and club is not None)}
+    return {"deleted": True, "club_reset": bool(reset_club and club is not None),
+            "club_purged": purged_org}
 
 
 @super_router.get("/deals/{deal_id}/activities", dependencies=[_super])

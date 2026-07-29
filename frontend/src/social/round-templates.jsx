@@ -8,7 +8,7 @@
 // cricket-templates; the few extra atoms this set needs (Slab, Kicker, Bug,
 // SponsorFooter, AutoFit, Monogram) are defined locally.
 import { useRef, useState, useLayoutEffect } from 'react'
-import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup } from './cricket-templates'
+import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark } from './cricket-templates'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -51,12 +51,7 @@ function Kicker({ children, color, size = 13, style = {} }) {
 }
 
 function Bug({ ink }) {
-  return (
-    <div style={{
-      padding: '6px 12px', border: `1.5px solid ${ink}55`, fontFamily: DISPLAY,
-      fontSize: 12, letterSpacing: 2, color: ink, opacity: 0.82,
-    }}>BETTERSTATS</div>
-  )
+  return <CreditMark ink={ink} h={40} />
 }
 
 // Presented-by footer — renders real sponsor logos when present, the sponsor
@@ -793,7 +788,7 @@ export function ResultTicket({ palette: pal, result: r, sponsors }) {
           <div style={{ display: 'flex', gap: 3, alignItems: 'center', height: 40 }}>
             {Array.from({ length: 30 }).map((_, i) => (<div key={i} style={{ width: i % 4 === 0 ? 4 : 2, height: 30, background: pal.ink, opacity: 0.8 }} />))}
           </div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.ink, opacity: 0.85 }}>BETTERSTATS · ADMIT ONE</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.ink, opacity: 0.85 }}>BETTERCRICKET · ADMIT ONE</div>
         </div>
       </div>
       <div style={{ position: 'absolute', left: 80, right: 80, bottom: 44 }}>

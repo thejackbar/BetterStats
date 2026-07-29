@@ -33,10 +33,10 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select, func, text, update as sa_update
+from sqlalchemy import bindparam, select, func, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -467,6 +467,23 @@ def _effective_value_cents(deal: CrmDeal) -> int:
     return base
 
 
+def _engagement_delta_dir(club: Optional[MarketingClub]) -> Optional[str]:
+    """'up' / 'down' / None for a club's engagement score vs the last value it
+    held on an earlier calendar day (marketing_clubs.engagement_score_prev, set
+    by twenty_sync._apply_engagement_cache). None when either side is missing
+    (never scored, or no prior day recorded yet) or the score is unchanged."""
+    if club is None:
+        return None
+    cur, prev = club.engagement_score, club.engagement_score_prev
+    if cur is None or prev is None:
+        return None
+    if cur > prev:
+        return "up"
+    if cur < prev:
+        return "down"
+    return None
+
+
 def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
                club: Optional[MarketingClub] = None) -> dict:
     eff = _effective_probability(deal, stage)
@@ -484,6 +501,11 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         # so this is always None there.
         "engagement_score": club.engagement_score if club else None,
         "engagement_tier": club.engagement_tier if club else None,
+        # Day-over-day direction for the pipeline card's up/down arrow: 'up' if
+        # today's score is higher than the last score recorded on an earlier
+        # calendar day, 'down' if lower, None if unchanged / no prior day / not
+        # scored (marketing_clubs.engagement_score_prev, migration 192).
+        "engagement_delta_dir": _engagement_delta_dir(club),
         "marketing_club_name": club.name if club else None,
         "is_customer": bool(club.existing_org_id) if club else None,
         "pipeline_id": str(deal.pipeline_id),
@@ -772,6 +794,40 @@ async def delete_deal(session: AsyncSession, deal: CrmDeal) -> None:
     await session.delete(deal)
 
 
+async def hard_delete_registered_club(session: AsyncSession, org_id) -> None:
+    """Permanently removes a REGISTERED club (Organisation) and its own login
+    accounts — the club side of the super-admin CRM test-club purge (see
+    routers/crm.py::super_delete_deal_permanent). Deliberately does NOT commit;
+    the caller owns the transaction.
+
+    - Deletes any user whose ONLY club membership was this club — never a super
+      admin, and never a user who also belongs to another club (their other
+      membership survives, so we leave the account alone).
+    - Deletes the Organisation. Its FK ON DELETE CASCADE children (seasons /
+      grades / games / players / per-game stats / memberships / module
+      subscriptions / …) go with it; the handful of org-keyed tables that carry
+      no FK are cleaned explicitly — this list MUST stay in sync with
+      club_admin.py::delete_club, which does the same (migration 142 fixed the
+      FK-cascade drift that used to 500 this on a club with real data).
+    - marketing_clubs.existing_org_id is ON DELETE SET NULL, so the club's Club
+      Directory row is UNLINKED but KEPT — a delete of this kind must never
+      remove the club from the Club Directory.
+    """
+    oid = str(org_id)
+    await session.execute(text("""
+        DELETE FROM users u
+        WHERE EXISTS (SELECT 1 FROM club_memberships m
+                      WHERE m.user_id = u.id AND m.club_id = CAST(:id AS UUID))
+          AND NOT EXISTS (SELECT 1 FROM club_memberships m2
+                          WHERE m2.user_id = u.id AND m2.club_id <> CAST(:id AS UUID))
+          AND NOT EXISTS (SELECT 1 FROM club_memberships ms
+                          WHERE ms.user_id = u.id AND ms.role = 'super_admin')
+    """), {"id": oid})
+    for table in ("merge_logs", "merge_pair_ignores", "grade_merge_logs", "player_achievements"):
+        await session.execute(text(f"DELETE FROM {table} WHERE org_id = CAST(:id AS UUID)"), {"id": oid})
+    await session.execute(text("DELETE FROM organisations WHERE id = CAST(:id AS UUID)"), {"id": oid})
+
+
 async def reset_marketing_club_engagement(session: AsyncSession, club: MarketingClub) -> None:
     """Wipe every sales-pipeline/engagement signal a super admin can have set
     on a prospect club (see twenty_sync._engagement — this clears every
@@ -781,17 +837,30 @@ async def reset_marketing_club_engagement(session: AsyncSession, club: Marketing
     so a later genuine self-serve signup or enquiry scores itself fresh
     rather than inheriting stale test state. Does NOT delete the
     MarketingClub row itself — it's the club's real directory entry, not
-    test data."""
-    from app.services import club_directory
-    await club_directory.set_sales_state(
-        session, str(club.id), trial_modules=[], requested_trial_modules=[],
-        demo_status=None, not_interested=False)
+    test data.
+
+    Sets the fields DIRECTLY and does NOT commit — the caller owns the unit of
+    work (super_delete_deal_permanent deletes the deal in the same
+    transaction). This used to delegate to club_directory.set_sales_state,
+    which runs its OWN session.commit() mid-flow; that committed (and expired)
+    the caller's already-loaded deal object before it was deleted, which broke
+    the delete and surfaced as a 500 with nothing removed. set_sales_state's
+    trial-request / Twenty-push side effects only fire when a module is ADDED,
+    so a reset (which only clears) never triggered them anyway — nothing is
+    lost by setting the same fields here directly."""
+    club.trial_modules = []
+    club.requested_trial_modules = []
+    club.demo_status = None
+    club.not_interested = False
     club.emailed_at = None
     club.emailed_via = None
     club.emailed_note = None
     club.engagement_score = None
     club.engagement_tier = None
     club.engagement_scored_at = None
+    club.engagement_score_prev = None
+    club.engagement_score_prev_date = None
+    club.updated_at = func.now()
 
 
 # ─── People / contacts ───────────────────────────────────────────────────────
@@ -1043,6 +1112,143 @@ async def subscribed_modules_by_club(session: AsyncSession, club_by_id: dict) ->
             continue
         out.setdefault(cid, set()).add(billing_key_for(module_key))
     return {cid: sorted(keys) for cid, keys in out.items()}
+
+
+# Page-view activity is recency-focused (the "New Deal Activity" filter only
+# asks Today / a date range), so the resolved-visit scan is bounded to a recent
+# window rather than the whole usage_events history — an old prospect visit
+# doesn't count as "recent activity" and the durable signals (deal edits,
+# subscription changes, onboarding steps, logged activities) carry full history
+# regardless.
+_ACTIVITY_PAGEVIEW_LOOKBACK_DAYS = 90
+
+
+async def last_activity_at_by_deal(session: AsyncSession, deals, club_by_id: dict) -> dict:
+    """deal_id (UUID) -> the most recent 'activity' datetime for the deal, for
+    the CRM pipeline's "New Deal Activity" recency filter. Aggregates, per deal,
+    the latest of:
+      - the deal's own created_at / updated_at — covers manual edits and every
+        stage promotion, whether done by hand (super/club move_stage) or
+        automatically (engagement-score promotion, sync_platform_deal_for_club
+        from an enquiry / wizard lead / self-serve or super-admin trial), all of
+        which bump updated_at;
+      - its latest CrmActivity (logged notes + auto-promotion system rows);
+      - for a linked/onboarded org: the latest module-subscription change
+        (trial start, new subscription, cancel, pause — all maintain updated_at,
+        see services/module_subscriptions.py) and the latest onboarding-wizard
+        update (a setup step completed/skipped/marked N-A);
+      - the club's latest tracked page view — the club's own org traffic
+        (customer branch) plus, for a prospect, resolved marketing-page/UTM
+        visits, both bounded to the last _ACTIVITY_PAGEVIEW_LOOKBACK_DAYS.
+
+    Batched (no N+1). Each DB step is individually guarded so one slow/failing
+    query (e.g. the heavier prospect page-view resolution) degrades that one
+    signal rather than losing the durable deal/subscription/wizard timestamps —
+    the deal's own updated_at is always present."""
+    out: dict = {}
+
+    def bump(deal_id, dt):
+        if dt is None:
+            return
+        cur = out.get(deal_id)
+        if cur is None or dt > cur:
+            out[deal_id] = dt
+
+    deals = list(deals)
+    for d in deals:
+        bump(d.id, d.updated_at)
+        bump(d.id, d.created_at)
+    deal_ids = [d.id for d in deals]
+    if not deal_ids:
+        return out
+
+    since = datetime.now(timezone.utc) - timedelta(days=_ACTIVITY_PAGEVIEW_LOOKBACK_DAYS)
+
+    # Latest logged/automatic activity per deal.
+    try:
+        for deal_id, last_at in (await session.execute(
+            select(CrmActivity.deal_id, func.max(CrmActivity.occurred_at))
+            .where(CrmActivity.deal_id.in_(deal_ids))
+            .group_by(CrmActivity.deal_id)
+        )).all():
+            bump(deal_id, last_at)
+    except Exception:  # noqa: BLE001
+        logger.exception("last_activity_at_by_deal: CrmActivity max failed")
+
+    # Org-linked signals — map each linked org to the deals whose club uses it.
+    deals_by_org: dict = {}
+    for d in deals:
+        club = club_by_id.get(d.marketing_club_id) if d.marketing_club_id else None
+        if club is not None and club.existing_org_id:
+            deals_by_org.setdefault(club.existing_org_id, []).append(d.id)
+    org_ids = list(deals_by_org.keys())
+
+    if org_ids:
+        try:
+            for org_id, last_at in (await session.execute(
+                select(OrgModuleSubscription.organisation_id,
+                       func.max(OrgModuleSubscription.updated_at))
+                .where(OrgModuleSubscription.organisation_id.in_(org_ids))
+                .group_by(OrgModuleSubscription.organisation_id)
+            )).all():
+                for did in deals_by_org.get(org_id, ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: module-subscription max failed")
+        try:
+            for org_id, last_at in (await session.execute(
+                select(OnboardingWizardState.organisation_id, OnboardingWizardState.updated_at)
+                .where(OnboardingWizardState.organisation_id.in_(org_ids))
+            )).all():
+                for did in deals_by_org.get(org_id, ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: onboarding-wizard update failed")
+        # Customer page views — the club's own (org-attributed) traffic.
+        try:
+            rows = (await session.execute(
+                text("SELECT org_id, MAX(created_at) AS last_at FROM usage_events "
+                     "WHERE org_id IN :orgs AND created_at >= :since GROUP BY org_id")
+                .bindparams(bindparam("orgs", expanding=True), bindparam("since")),
+                {"orgs": org_ids, "since": since},
+            )).all()
+            for org_id, last_at in rows:
+                for did in deals_by_org.get(org_id, ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: customer page-view max failed")
+
+    # Prospect page views — resolved marketing-page/UTM visits (a prospect has
+    # no org, so its browsing never lands in the org-attributed branch above).
+    deals_by_club_str: dict = {}
+    for d in deals:
+        if d.marketing_club_id:
+            deals_by_club_str.setdefault(str(d.marketing_club_id), []).append(d.id)
+    prospect_club_ids = [
+        str(cid) for cid, c in club_by_id.items()
+        if c is not None and not c.existing_org_id and str(cid) in deals_by_club_str
+    ]
+    if prospect_club_ids:
+        try:
+            from app.services.club_directory import _RESOLVED_VISITS
+            # The `AND ue.created_at >= :since` is pushed INSIDE _RESOLVED_VISITS
+            # (its own WHERE clause) so the window filters the scan before the
+            # per-row correlated club resolution runs — that ordering is what
+            # keeps this bounded rather than resolving the whole history.
+            rows = (await session.execute(
+                text(f"SELECT v.cid, MAX(v.created_at) AS last_at "
+                     f"FROM ({_RESOLVED_VISITS} AND ue.created_at >= :since) v "
+                     "WHERE v.cid IN :cids GROUP BY v.cid")
+                .bindparams(bindparam("cids", expanding=True), bindparam("since")),
+                {"cids": prospect_club_ids, "since": since},
+            )).all()
+            for cid, last_at in rows:
+                for did in deals_by_club_str.get(str(cid), ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: prospect page-view resolution failed")
+
+    return out
 
 
 async def club_stats_by_club(session: AsyncSession, club_by_id: dict) -> dict:
@@ -1597,6 +1803,56 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
             return {"deal_id": str(deal.id) if deal else None, "onboarding_request_count": count}
     except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
         logger.exception("crm: failed to sync deal for enquiry (%s)", club_name)
+        return {"error": "failed"}
+
+
+async def sync_deal_for_wizard_lead(*, club_name: str, email: str = "",
+                                    contact_name: str = "", phone: Optional[str] = None,
+                                    furthest_step: str = "Reached Terms & privacy") -> dict:
+    """A prospect who started the self-serve trial wizard and got as far as the
+    Terms & Privacy step — but hasn't (yet) completed registration — is a real,
+    contactable lead (they've supplied a club name AND an email), not the
+    anonymous/crawler noise a bare 'club selected' beacon can be. A completed
+    registration already lands a deal (sync_self_serve_trial_registration); this
+    closes the gap for the ones that stall mid-wizard, so a salesperson can
+    follow up from the Sales Pipeline instead of only the Meta Ads table.
+
+    Get-or-creates the club's ONE open platform deal at Target (advance_only, so
+    it never demotes a warmer deal) valued at the Core default, and logs a CRM
+    activity naming the furthest wizard step reached. Opens its own session;
+    best-effort; never raises. Fires from routers/self_serve_trial.py::acknowledge
+    (both the internal and public self-serve routers register that handler)."""
+    from app.models.db import async_session_maker
+    from app.services.twenty_sync import _resolve_onboarding_club
+    if not (club_name or "").strip():
+        return {"skipped": "no club name"}
+    try:
+        async with async_session_maker() as session:
+            club, contact = await _resolve_onboarding_club(
+                session, club_name=club_name, contact_name=contact_name, email=email, phone=phone)
+            if club is None:
+                return {"skipped": "no club"}
+            person = await resolve_person(
+                session, marketing_club_id=club.id,
+                full_name=contact_name or (contact.full_name if contact else "") or club_name,
+                email=email, phone=phone)
+            deal = await sync_platform_deal_for_club(
+                session, club, stage_key="target", source="wizard_lead",
+                module_keys=_DEFAULT_DEAL_MODULES, person_id=person.id, advance_only=True)
+            await log_activity(
+                session, deal_id=deal.id, person_id=person.id, type="system",
+                body=f"Started the self-serve trial wizard — {furthest_step}"
+                     + (f" ({email})" if email else ""))
+            # This touch may be enough to promote the freshly-recomputed score;
+            # check now in the same session/commit (harmless no-op otherwise).
+            org = (await session.get(Organisation, club.existing_org_id,
+                                     options=[selectinload(Organisation.module_subscriptions)])
+                   if club.existing_org_id else None)
+            await sync_engagement_promotion(session, club, org)
+            await session.commit()
+            return {"deal_id": str(deal.id)}
+    except Exception:  # noqa: BLE001 - best-effort, mirrors sync_deal_for_enquiry
+        logger.exception("crm: failed to sync deal for wizard lead (%s)", club_name)
         return {"error": "failed"}
 
 

@@ -23,8 +23,10 @@ function ConditionalNavbar() {
   const { pathname } = useLocation()
   const isMarketing = isMarketingPath(pathname)
   // The public self-service availability page is a standalone, white-labelled
-  // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/')
+  // mobile page — it renders its own minimal header, no club nav. The BetterPosts
+  // editor is a full-viewport takeover with its own header, so suppress the club
+  // nav there too.
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -152,6 +154,7 @@ const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminS
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
+const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
 const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionPlayer'))
@@ -212,6 +215,7 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
+const PublicVoting = lazy(() => import('./pages/PublicVoting'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
 const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
 // Public, login-free event registration (Events/Ticketing — event-id link)
@@ -272,6 +276,7 @@ export default function App() {
 
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
+          <Route path="/vote/:token" element={<PublicVoting />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />
           {/* Public event registration (no login — event-id link) */}
@@ -283,19 +288,19 @@ export default function App() {
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/betterstats" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
-          <Route path="/admin/betterstats/:group" element={<ProtectedRoute><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterstats" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
+          <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
           <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
-          <Route path="/admin/setup" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
-          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute><SetupWizard /></ProtectedRoute>} />
-          <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
-          <Route path="/admin/players/import" element={<ProtectedRoute><AdminPlayerImport /></ProtectedRoute>} />
-          <Route path="/admin/games" element={<ProtectedRoute><AdminGames /></ProtectedRoute>} />
-          <Route path="/admin/seasons" element={<ProtectedRoute><AdminSeasons /></ProtectedRoute>} />
-          <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
-          <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
-          <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
+          <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
+          <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
+          <Route path="/admin/players/import" element={<ProtectedRoute requireCore><AdminPlayerImport /></ProtectedRoute>} />
+          <Route path="/admin/games" element={<ProtectedRoute requireCore><AdminGames /></ProtectedRoute>} />
+          <Route path="/admin/seasons" element={<ProtectedRoute requireCore><AdminSeasons /></ProtectedRoute>} />
+          <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
+          <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
+          <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
           <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
           <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
           <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
@@ -304,17 +309,17 @@ export default function App() {
           <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/member-portal" element={<ProtectedRoute requireRole="super_admin"><AdminMemberPortal /></ProtectedRoute>} />
           <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><AdminClubDiary /></ProtectedRoute>} />
-          <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
-          <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
-          <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
-          <Route path="/admin/manual-entries" element={<ProtectedRoute><AdminManualEntries /></ProtectedRoute>} />
-          <Route path="/admin/upload-scorecard" element={<ProtectedRoute><AdminScorecardUpload /></ProtectedRoute>} />
-          <Route path="/admin/import" element={<ProtectedRoute><AdminImport /></ProtectedRoute>} />
-          <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
-          <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
+          <Route path="/admin/grades" element={<ProtectedRoute requireCore><AdminGrades /></ProtectedRoute>} />
+          <Route path="/admin/sync" element={<ProtectedRoute requireCore><AdminSync /></ProtectedRoute>} />
+          <Route path="/admin/partnerships" element={<ProtectedRoute requireCore><AdminPartnershipRecords /></ProtectedRoute>} />
+          <Route path="/admin/manual-entries" element={<ProtectedRoute requireCore><AdminManualEntries /></ProtectedRoute>} />
+          <Route path="/admin/upload-scorecard" element={<ProtectedRoute requireCore><AdminScorecardUpload /></ProtectedRoute>} />
+          <Route path="/admin/import" element={<ProtectedRoute requireCore><AdminImport /></ProtectedRoute>} />
+          <Route path="/admin/milestones" element={<ProtectedRoute requireCore><AdminMilestones /></ProtectedRoute>} />
+          <Route path="/admin/activity" element={<ProtectedRoute requireActivePlan><AdminActivityLog /></ProtectedRoute>} />
           <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
-          <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
+          <Route path="/admin/reports" element={<ProtectedRoute requireCore><AdminReports /></ProtectedRoute>} />
           <Route path="/admin/fees" element={<ProtectedRoute requireModule="fees"><AdminFeesMembers /></ProtectedRoute>} />
           <Route path="/admin/fees/schedule" element={<ProtectedRoute requireModule="fees"><AdminFeeSchedule /></ProtectedRoute>} />
           <Route path="/admin/fees/payments" element={<ProtectedRoute requireModule="fees"><AdminFeePayments /></ProtectedRoute>} />
@@ -344,13 +349,13 @@ export default function App() {
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
-          <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
-          <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
-          <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />
+          <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
+          <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
-          <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
-          <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
+          <Route path="/admin/yearbook" element={<ProtectedRoute requireCore><AdminYearbook /></ProtectedRoute>} />
+          <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute requireCore><AdminYearbookDetail /></ProtectedRoute>} />
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
           <Route path="/admin/super" element={<ProtectedRoute requireRole="super_admin"><SuperOverview /></ProtectedRoute>} />
           <Route path="/admin/super/hub/:sectionKey" element={<ProtectedRoute requireRole="super_admin"><SuperHub /></ProtectedRoute>} />
@@ -382,6 +387,7 @@ export default function App() {
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/votes" element={<ProtectedRoute requireModule="select"><BsVotes /></ProtectedRoute>} />
 
           {/* BetterIQ module */}
           <Route path="/admin/betteriq" element={<ProtectedRoute requireModule="iq"><BetterIQHome /></ProtectedRoute>} />
@@ -398,7 +404,7 @@ export default function App() {
           <Route path="/admin/betteriq/preview" element={<ProtectedRoute requireModule="iq"><IqPreview /></ProtectedRoute>} />
 
           {/* BetterSocials umbrella (Website + Post Designer) — Website is Core, so the hub is open to all */}
-          <Route path="/admin/bettersocials" element={<ProtectedRoute><BetterSocialsHome /></ProtectedRoute>} />
+          <Route path="/admin/bettersocials" element={<ProtectedRoute requireCore><BetterSocialsHome /></ProtectedRoute>} />
 
           {/* BetterAdmin umbrella + BetterComms (bulk email) */}
           <Route path="/admin/betteradmin" element={<ProtectedRoute><BetterAdminHome /></ProtectedRoute>} />

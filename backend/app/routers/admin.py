@@ -362,6 +362,38 @@ async def _merge_players_core(
         await db.execute(text("UPDATE player_season_grade_stats SET player_id = :kid WHERE player_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
         await db.execute(text("UPDATE game_appearances SET player_id = :kid WHERE player_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
 
+        # --- Vote collection rows (migration 193) ---
+        # Both FKs are ON DELETE CASCADE, so without this reassignment deleting
+        # the removed player would silently destroy their ballots and every vote
+        # cast FOR them. De-dup first (one ballot per voter per fixture; one pick
+        # per player per ballot — both records are the same physical person, so
+        # keep's row wins), then move the rest. Not recorded in the undo log —
+        # an undone merge leaves votes attributed to the kept player, which is
+        # still the same human and never loses a vote.
+        await db.execute(
+            text(
+                "DELETE FROM vote_ballots r USING vote_ballots k "
+                "WHERE r.voter_player_id = :rid AND k.voter_player_id = :kid "
+                "AND k.fixture_id = r.fixture_id"
+            ),
+            {"rid": str(remove_id), "kid": str(keep_id)},
+        )
+        await db.execute(
+            text("UPDATE vote_ballots SET voter_player_id = :kid WHERE voter_player_id = :rid"),
+            {"kid": str(keep_id), "rid": str(remove_id)},
+        )
+        await db.execute(
+            text(
+                "DELETE FROM vote_ballot_picks r USING vote_ballot_picks k "
+                "WHERE r.player_id = :rid AND k.player_id = :kid AND k.ballot_id = r.ballot_id"
+            ),
+            {"rid": str(remove_id), "kid": str(keep_id)},
+        )
+        await db.execute(
+            text("UPDATE vote_ballot_picks SET player_id = :kid WHERE player_id = :rid"),
+            {"kid": str(keep_id), "rid": str(remove_id)},
+        )
+
         # --- Handle PlayerSeasonStats ---
         for stat in remove_stats:
             if stat.season_id not in keep_season_ids:

@@ -332,6 +332,10 @@ class Organisation(Base):
     # style control away from the defaults (the default palette already
     # derives from the club's own colours).
     socials_style = Column(JSONB, nullable=True)
+    # ─── BetterSocials brand kit (migration 191) ──────────────────────────────
+    # Opaque JSON blob the BetterSocials editor uses as the club's reusable
+    # brand palette/fonts/crest/sponsors set. NULL until an admin saves one.
+    social_brand_kit = Column(JSONB, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only
@@ -457,6 +461,30 @@ class Sponsor(Base):
     contact_name = Column(Text, nullable=True)
     email = Column(Text, nullable=True)
     klubpro_sponsor_id = Column(Text, nullable=True)
+
+
+# ─── BetterSocials media library (migration 191) ─────────────────────────────
+# A per-club pool of uploaded images the BetterSocials editor can drop into a
+# post. Bytes live in-table (like club logos / sponsor logos / yearbook images)
+# so they survive container recreation. Served via GET /images/social-media/{id}.
+
+class SocialMediaAsset(Base):
+    __tablename__ = "social_media_asset"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organisations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename = Column(Text, nullable=True)
+    mime = Column(Text, nullable=True)
+    image_data = Column(LargeBinary, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 # ─── Front-end Website CMS (migration 069) ───────────────────────────────────
@@ -1179,6 +1207,83 @@ class PlayerAvailabilityPeriod(Base):
     recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     recorded_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class VoteSettings(Base):
+    """BetterSelect — best-player vote collection config (one row per club).
+
+    The whole feature is derived-on-read: ballots store ranked POSITIONS only,
+    and every weekly result / season leaderboard is recomputed from this config
+    at query time — so changing the ballot values, counting method or tie
+    policy mid-season restates the season consistently with no backfill.
+    """
+    __tablename__ = "vote_settings"
+
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Public voting link token — rotatable, same low-trust posture as the
+    # availability link (identifies the club only; a player still needs a PIN).
+    link_token = Column(Text, nullable=True)
+    require_pin = Column(Boolean, nullable=False, default=True, server_default="true")
+    voter_mode = Column(Text, nullable=False, default="players", server_default="players")  # 'players' | 'captain'
+    ballot_values = Column(JSONB, nullable=False, default=[3, 2, 1])  # descending, position 1 first
+    counting_method = Column(Text, nullable=False, default="rank", server_default="rank")  # 'rank' | 'tally'
+    tie_policy = Column(Text, nullable=False, default="share", server_default="share")  # 'share' | 'countback'
+    allow_self_vote = Column(Boolean, nullable=False, default=False, server_default="false")
+    allow_non_participants = Column(Boolean, nullable=False, default=False, server_default="false")
+    auto_close_days = Column(Integer, nullable=False, default=7, server_default="7")
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class VoteBallot(Base):
+    """One voter's ballot for one fixture.
+
+    Voter identity is exactly one of: voter_player_id (a club player — PIN
+    verified on the public page, or admin-entered) or voter_name (a
+    non-participant: coach / president / supporter, name typed on the public
+    page). Partial unique indexes (see migration 193) enforce one live ballot
+    per voter per fixture in each identity space.
+    """
+    __tablename__ = "vote_ballots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
+    voter_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    voter_name = Column(Text, nullable=True)
+    voter_kind = Column(Text, nullable=False, default="player", server_default="player")  # 'player' | 'non_player'
+    source = Column(Text, nullable=False, default="self", server_default="self")  # 'self' | 'admin'
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    picks = relationship("VoteBallotPick", cascade="all, delete-orphan", lazy="selectin")
+
+
+class VoteBallotPick(Base):
+    """A ballot's ranked pick — position 1 is the voter's best player. The
+    pick's point value is derived from VoteSettings.ballot_values on read."""
+    __tablename__ = "vote_ballot_picks"
+    __table_args__ = (
+        UniqueConstraint("ballot_id", "player_id", name="uq_vote_pick_player"),
+    )
+
+    ballot_id = Column(UUID(as_uuid=True), ForeignKey("vote_ballots.id", ondelete="CASCADE"), primary_key=True)
+    position = Column(Integer, primary_key=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+
+
+class VoteFixtureOverride(Base):
+    """Manual lock/reopen for a fixture's voting, layered over the auto-close
+    window (game end + auto_close_days). 'locked' closes voting immediately;
+    'reopened' holds it open past auto-close until locked again."""
+    __tablename__ = "vote_fixture_overrides"
+
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), primary_key=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False)  # 'locked' | 'reopened'
+    set_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    set_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class NetSession(Base):
@@ -3447,6 +3552,14 @@ class MarketingClub(Base):
     engagement_score = Column(Integer, nullable=True)
     engagement_tier = Column(Text, nullable=True)
     engagement_scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Day-over-day baseline for the CRM pipeline's engagement up/down arrow
+    # (migration 192). There is no score-history table — _apply_engagement_cache
+    # (twenty_sync.py) rolls the then-current engagement_score into _prev the
+    # first time it writes on a NEW calendar day, so _prev holds the last score
+    # recorded on an earlier day and (current vs _prev) is the day-over-day
+    # direction. _prev_date is the calendar day that _prev value belongs to.
+    engagement_score_prev = Column(Integer, nullable=True)
+    engagement_score_prev_date = Column(Date, nullable=True)
     # Suburb-level admin boundary polygon (from OpenStreetMap/Nominatim), fetched
     # lazily and cached forever — the closest free approximation to a real
     # postcode-area shape (no AU postcode boundary dataset is bundled here).

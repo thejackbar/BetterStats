@@ -87,6 +87,26 @@ export const api = {
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   getSocialFixtures: () => request('/admin/social/fixtures'),
   getSocialResults: () => request('/admin/social/results'),
+
+  // BetterSocials — media library
+  listSocialMedia: () => request('/admin/social/media'),
+  uploadSocialMedia: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/admin/social/media`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  deleteSocialMedia: (id) => request(`/admin/social/media/${id}`, { method: 'DELETE' }),
+  // BetterSocials — brand kit
+  getSocialBrandKit: () => request('/admin/social/brand-kit'),
+  saveSocialBrandKit: (kit) =>
+    request('/admin/social/brand-kit', { method: 'PUT', body: JSON.stringify(kit) }),
   onboard: (orgId, orgName = '') =>
     request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
   listOrgs: () => request('/organisations'),
@@ -773,6 +793,8 @@ export const api = {
     const qs = p.toString()
     return request(`/club-admin/super/crm/deals${qs ? `?${qs}` : ''}`)
   },
+  superCrmRecalcEngagement: () => request('/club-admin/super/crm/recalc-engagement', { method: 'POST' }),
+  superCrmRecalcEngagementStatus: () => request('/club-admin/super/crm/recalc-engagement/status'),
   superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
   superCrmGetDeal: (id) => request(`/club-admin/super/crm/deals/${id}`),
   superCrmUpdateDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -1324,6 +1346,10 @@ export const api = {
   metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   metaAdsRegistrationFunnel: (days = 30) => request(`/club-admin/meta-ads/registration-funnel?days=${days}`),
   metaAdsSelectedClubs: (days = 30) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
+  metaAdsHideSelection: (name, days = 30) =>
+    request(`/club-admin/meta-ads/selected-clubs/hide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
+  metaAdsUnhideSelection: (name, days = 30) =>
+    request(`/club-admin/meta-ads/selected-clubs/unhide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
   // Campaign picker — list the ad account's campaigns + which one the dashboard
   // is scoped to, and switch it (stored in the DB, no .env edit / redeploy).
   metaAdsCampaigns: () => request('/club-admin/meta-ads/campaigns'),
@@ -2036,6 +2062,37 @@ export const api = {
   availPublicMe: (token) => request(`/public/availability/${token}/me`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // ─── BetterSelect: vote collection (admin) ───
+  votesGetSettings: () => request('/votes/settings'),
+  votesSetSettings: (data) =>
+    request('/votes/settings', { method: 'POST', body: JSON.stringify(data) }),
+  votesRegenerateLink: () => request('/votes/settings/regenerate', { method: 'POST' }),
+  votesFixtures: (year) => request(`/votes/fixtures${year ? `?year=${year}` : ''}`),
+  votesFixtureDetail: (fixtureId) => request(`/votes/fixtures/${fixtureId}`),
+  votesAdminBallot: (fixtureId, data) =>
+    request(`/votes/fixtures/${fixtureId}/ballots`, { method: 'POST', body: JSON.stringify(data) }),
+  votesDeleteBallot: (ballotId) => request(`/votes/ballots/${ballotId}`, { method: 'DELETE' }),
+  votesLockFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/lock`, { method: 'POST' }),
+  votesReopenFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/reopen`, { method: 'POST' }),
+  votesLeaderboard: ({ year, grade_id, through_round } = {}) => {
+    const q = new URLSearchParams()
+    if (year) q.set('year', year)
+    if (grade_id) q.set('grade_id', grade_id)
+    if (through_round) q.set('through_round', through_round)
+    const qs = q.toString()
+    return request(`/votes/leaderboard${qs ? `?${qs}` : ''}`)
+  },
+
+  // ─── Public: vote collection (no admin auth; player cookie or typed name) ───
+  votePublicLanding: (token) => request(`/public/votes/${token}`),
+  votePublicVerify: (token, player_id, pin) =>
+    request(`/public/votes/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
+  votePublicSwitch: (token) =>
+    request(`/public/votes/${token}/switch`, { method: 'POST' }),
+  votePublicFixture: (token, fixtureId) => request(`/public/votes/${token}/fixtures/${fixtureId}`),
+  votePublicSubmit: (token, fixtureId, data) =>
+    request(`/public/votes/${token}/fixtures/${fixtureId}/ballot`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ─── BetterFantasyCricket: public member play ───────────
   fanLanding: (token) => request(`/public/fantasy/${token}`),

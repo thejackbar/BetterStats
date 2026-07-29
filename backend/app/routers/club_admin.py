@@ -2489,6 +2489,31 @@ class ModuleUpdate(BaseModel):
     trial_ends_at: Optional[_datetime] = None
 
 
+def _cascade_core_to_addons(org, *, now, remove: bool) -> list:
+    """Cascade a Core (BetterStats) cancel/remove to every add-on the club
+    holds — Core is the prerequisite for the whole platform (see
+    org_entitled_modules), so a super admin cancelling or removing Core takes
+    every add-on with it. ``remove`` deletes the add-on rows (Core was removed
+    outright); otherwise each held add-on billable module is set to cancelled.
+    Only touches modules the club actually holds a row for, so it never mints a
+    spurious cancelled row. Deliberately NOT triggered on a PAUSE — a pause is a
+    reversible hold, and the Core-is-required read gate already disables every
+    add-on while Core is paused, with the rows preserved so they return on
+    reactivation. Returns the billable add-on keys it affected."""
+    from app.auth.modules import BILLABLE_MODULES, MODULE_CORE as _CORE, STATUS_CANCELLED, billing_key_for
+    present = {billing_key_for(s.module_key) for s in (org.module_subscriptions or [])}
+    affected = []
+    for bk in BILLABLE_MODULES:
+        if bk == _CORE or bk not in present:
+            continue
+        if remove:
+            mod_subs.remove_billing(org, bk, now=now)
+        else:
+            mod_subs.set_status_billing(org, bk, STATUS_CANCELLED, now=now)
+        affected.append(bk)
+    return affected
+
+
 @router.patch("/super/clubs/{club_id}/modules/{module_key}")
 async def patch_module_subscription(
     club_id: str,
@@ -2512,6 +2537,11 @@ async def patch_module_subscription(
             renewal_date=fields["renewal_date"] if "renewal_date" in fields else ...,
             now=now,
         )
+        # Cancelling Core cancels every add-on the club holds (Core is the
+        # platform prerequisite). Not on pause — see _cascade_core_to_addons.
+        from app.auth.modules import MODULE_CORE as _CORE, STATUS_CANCELLED
+        if module_key == _CORE and fields["status"] == STATUS_CANCELLED:
+            _cascade_core_to_addons(org, now=now, remove=False)
     elif "renewal_date" in fields:
         mod_subs.set_status_billing(
             org, module_key,
@@ -2533,11 +2563,16 @@ async def remove_module_subscription(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Drop a module entirely (delete its subscription row(s))."""
+    """Drop a module entirely (delete its subscription row(s)). Removing Core
+    (BetterStats) removes every add-on the club holds too — Core is the
+    platform prerequisite (see _cascade_core_to_addons / org_entitled_modules)."""
     _validate_module(module_key)
     org = await _load_club_with_subs(db, club_id)
     if not mod_subs.remove_billing(org, module_key):
         raise HTTPException(status_code=404, detail="Module not held by this club")
+    from app.auth.modules import MODULE_CORE as _CORE
+    if module_key == _CORE:
+        _cascade_core_to_addons(org, now=_datetime.now(_timezone.utc), remove=True)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return _club_payload(org)
@@ -2807,7 +2842,12 @@ async def cancel_own_module(
     now = _datetime.now(_timezone.utc)
     targets = [module_key]
     if module_key == MODULE_CORE:
-        targets = [r["module"] for r in account_plan_status(club) if r["status"] == "subscribed"]
+        # Cancelling Core tears down the whole platform, so cancel every module
+        # the club currently HOLDS — a paid subscription OR a live trial. A
+        # trial add-on would otherwise linger as a row (disabled by the
+        # Core-is-required gate but never actually cancelled); include it here
+        # so nothing is left behind.
+        targets = [r["module"] for r in account_plan_status(club) if r["status"] in ("subscribed", "trial")]
     for key in targets:
         mod_subs.remove_billing(club, key, now=now)
     await _cancel_stripe_subscription_if_nothing_held(club)
@@ -3278,20 +3318,22 @@ async def delete_club(
             detail="Archive the club first (this permanently destroys its data and is not reversible).",
         )
 
-    # These tables key on org_id but have no FK constraint, so the
-    # organisations cascade won't reach them — clean them up explicitly.
-    for table in ("merge_logs", "merge_pair_ignores", "grade_merge_logs", "player_achievements"):
-        await db.execute(
-            _text(f"DELETE FROM {table} WHERE org_id = CAST(:id AS UUID)"),
-            {"id": club_id},
-        )
+    # Stripe customer (external, best-effort — never block the DB purge): deleting
+    # it also cancels any subscription. A missing/already-deleted customer is fine.
+    if org.stripe_customer_id:
+        try:
+            await stripe_client.delete_customer(org.stripe_customer_id)
+        except Exception:  # noqa: BLE001
+            _logging.getLogger(__name__).exception("delete_club: could not delete Stripe customer for org %s", club_id)
 
-    # The rest (seasons, grades, games, players, stats, memberships, …) all
-    # FK to organisations ON DELETE CASCADE, so the DB handles them.
-    await db.execute(
-        _text("DELETE FROM organisations WHERE id = CAST(:id AS UUID)"),
-        {"id": club_id},
-    )
+    # Shared purge: deletes the org (FK ON DELETE CASCADE handles seasons/grades/
+    # games/players/stats/memberships/subscriptions), cleans the org-keyed no-FK
+    # tables, and deletes the club's own admin user login(s) — only those whose
+    # sole membership was this club (never a super admin / multi-club user).
+    # marketing_clubs.existing_org_id is ON DELETE SET NULL, so the Club
+    # Directory row is kept. Same helper the CRM test-club purge uses.
+    from app.services import crm as crm_service
+    await crm_service.hard_delete_registered_club(db, club_id)
     await db.commit()
     return {"status": "deleted", "id": club_id}
 
