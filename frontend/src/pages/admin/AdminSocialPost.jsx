@@ -1939,6 +1939,31 @@ export default function AdminSocialPost() {
             )}
             {tool === 'brand' && (<>
 
+            {/* Brand kit banner — the club's crest + sponsor marks, with a note
+                that the look below saves to the club automatically. */}
+            <section className="pb-card p-4">
+              <div className="flex items-center gap-2.5">
+                {team.logo
+                  ? <img src={team.logo} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 shrink-0" />
+                  : <span className="w-9 h-9 rounded grid place-items-center font-mono text-[12px] shrink-0" style={{ background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent)' }}>{deriveShort(settings?.name || 'C').slice(0, 2)}</span>}
+                <div className="min-w-0">
+                  <div className="text-pb-text text-[13px] font-semibold truncate">{settings?.name || 'Your club'}</div>
+                  <div className="font-mono text-[9px] text-pb-faintest">Saved to the club automatically</div>
+                </div>
+              </div>
+              {adminSponsors.length > 0 && (
+                <div className="mt-3 pt-3 border-t pb-hairline">
+                  <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Sponsors</div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {adminSponsors.map((s) => (
+                      <img key={s.id} src={`${BASE_URL}/images/sponsors/${s.id}/logo`} alt={s.name} title={s.name}
+                        className="h-8 max-w-[72px] object-contain rounded bg-pb-surface2 px-1" onError={(e) => { e.target.style.display = 'none' }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+
             {/* Style: palette + dark/light + font */}
             <section className="pb-card p-4">
               <div className="flex items-center justify-between mb-3">
