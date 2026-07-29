@@ -126,6 +126,38 @@ export default function AdminAccount() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Deep-linked from a dashboard SUBSCRIBE tile (?subscribe=select,core) —
+  // pre-tick those modules' checkboxes once the plan has loaded. An add-on
+  // requires BetterStats (Core), so if Core isn't already live we add it too
+  // (the dashboard link usually already includes it; enforced here regardless).
+  // Only the primary admin can select (matches toggle()); applied once, then
+  // the param is cleared so a later manual untick isn't undone on re-render.
+  const [subscribeApplied, setSubscribeApplied] = useState(false)
+  useEffect(() => {
+    if (subscribeApplied) return
+    const param = searchParams.get('subscribe')
+    if (!param) return
+    if (!Array.isArray(plan?.modules) || !plan.modules.length) return  // wait for plan
+    if (!plan.is_primary_admin) { setSubscribeApplied(true); return }
+    const byModule = Object.fromEntries(plan.modules.map((r) => [r.module, r]))
+    const next = new Set()
+    let needCore = false
+    for (const key of param.split(',').map((s) => s.trim()).filter(Boolean)) {
+      const row = byModule[key]
+      if (row && row.can_subscribe) {
+        next.add(key)
+        if (key !== 'core') needCore = true
+      }
+    }
+    if (needCore && !coreLiveNow && byModule.core?.can_subscribe) next.add('core')
+    if (next.size) setSelected(next)
+    setSubscribeApplied(true)
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('subscribe')
+    setSearchParams(nextParams, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, subscribeApplied])
+
   useEffect(() => {
     api.billingListInvoices().then(setInvoices).catch(() => {})
   }, [])
@@ -185,6 +217,11 @@ export default function AdminAccount() {
   }, [])
 
   const rows = plan?.modules || []
+  // BetterStats (Core) is a hard prerequisite: a club can't subscribe to any
+  // add-on unless Core is also in trial or subscribed. coreLiveNow is whether
+  // Core already satisfies that (so an add-on checkout needn't include it).
+  const coreRow = rows.find((r) => r.module === 'core')
+  const coreLiveNow = !!coreRow && (coreRow.status === 'subscribed' || coreRow.status === 'trial')
   const selectedRows = rows.filter((r) => selected.has(r.module))
   // "Redeem a discount code" only ever discounts a module the club is
   // ALREADY paying for (redeem_for_existing_subscription only looks at
@@ -221,6 +258,10 @@ export default function AdminAccount() {
       const next = new Set(s)
       if (next.has(row.module)) next.delete(row.module)
       else next.add(row.module)
+      // Any add-on selection requires BetterStats (Core) — if it isn't already
+      // live, force Core into the checkout too (it's CORE, always required).
+      const hasAddon = [...next].some((k) => k !== 'core')
+      if (hasAddon && !coreLiveNow && coreRow?.can_subscribe) next.add('core')
       return next
     })
   }

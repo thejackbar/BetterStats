@@ -167,6 +167,25 @@ export function dashboardTiles() {
   return [CORE_TILES[0], ...tiles]
 }
 
+// Is BetterStats (Core) live, derived from the account-plan rows
+// (GET /club-admin/account/plan) rather than the /auth/me `core_live` flag.
+// This is the reliable signal across backend versions and against a stale
+// /auth/me: account_plan_status computes each module's status directly from
+// the subscription rows, so a Core that has lapsed reads 'trial_expired' here
+// even on a backend that never learned to send `core_live`.
+//   true  → Core is subscribed or in a live trial
+//   false → Core has definitively lapsed (trial_expired)
+//   null  → unknown (no plan yet, no core row/legacy) → caller falls back to
+//           the AuthContext coreLive flag, which fail-opens for legacy clubs.
+export function coreLiveFromPlan(plan) {
+  if (!Array.isArray(plan) || !plan.length) return null
+  const core = plan.find(r => r.module === 'core')
+  if (!core) return null
+  if (core.status === 'subscribed' || core.status === 'trial') return true
+  if (core.status === 'trial_expired') return false
+  return null
+}
+
 // The modular toggles a super admin grants per club. BetterAdmin is the
 // back-office umbrella, so its toggle covers all three backend module keys (fees
 // + comms + merch). `modules` are the backend entitlement keys (app/auth/modules.py

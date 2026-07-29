@@ -24,8 +24,14 @@ function ModuleName({ name }) {
   return <span className="font-display font-bold text-lg">{name}</span>
 }
 
-function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, requesting, error, onStartTrial }) {
+function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscribe, requesting, error, onStartTrial }) {
   const brand = moduleBrand(mod.key)
+  // SUBSCRIBE deep-links to the Account page with this module pre-ticked. An
+  // add-on requires BetterStats (Core) too, so when Core isn't live we tick it
+  // as well (Core is CORE — always required). ?subscribe= is read by AdminAccount.
+  const billingKey = mod.billingKey || mod.key
+  const subscribeKeys = billingKey !== 'core' && !coreLive ? `${billingKey},core` : billingKey
+  const subscribeHref = `/admin/account?subscribe=${subscribeKeys}`
   // Scope the module's accent colour to this tile only — every var(--pb-accent)
   // inside (the name suffix, arrow, tint, border) becomes the module colour.
   const brandVars = { '--pb-accent': brand.accent, '--pb-accent-rgb': brand.accentRgb }
@@ -121,7 +127,7 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, canSubscribe, request
             )}
             {canSubscribe && (
               <Link
-                to="/admin/account"
+                to={subscribeHref}
                 className="font-mono text-[10px] tracking-wide2 px-2.5 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
               >
                 SUBSCRIBE
@@ -416,6 +422,7 @@ export default function AdminDashboard() {
                 entitled={coreLive && (tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)))}
                 planRow={planByModule[billingKey]}
                 pendingKind={pending?.kind}
+                coreLive={coreLive}
                 canSubscribe={!!user?.is_primary_admin}
                 requesting={requesting === billingKey}
                 error={tileErrors[billingKey]}
