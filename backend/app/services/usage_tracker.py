@@ -283,7 +283,7 @@ async def record_event(
             asyncio.get_running_loop().create_task(
                 check_web_signal_promotion(
                     org_id=org_id, utm_id=utm_id, utm_source=utm_source,
-                    path=path, user_id=user_id)
+                    path=path, user_id=user_id, event_id=row_id)
             )
         except RuntimeError:
             pass

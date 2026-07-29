@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, func, update as sa_update
+from sqlalchemy import select, func, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1390,7 +1391,8 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
 async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
                                     org: Optional[Organisation] = None,
                                     web_stats: Optional[dict] = None,
-                                    email_stats: Optional[dict] = None) -> Optional[CrmDeal]:
+                                    email_stats: Optional[dict] = None,
+                                    fast_web: bool = False) -> Optional[CrmDeal]:
     """Recompute one club's engagement score, ensure it's on the pipeline once
     the score is above zero, and immediately check the score-based
     Target/Contacted -> Engaged promotion, right now, in the caller's own
@@ -1402,7 +1404,8 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     a session+club in hand (an enquiry, a trial request/grant, a subscription
     change) rather than waiting for a scheduled sweep. Caller commits."""
     from app.services.twenty_sync import _engagement
-    await _engagement(session, club, org, web_stats=web_stats, email_stats=email_stats)
+    await _engagement(session, club, org, web_stats=web_stats,
+                      email_stats=email_stats, fast_web=fast_web)
     membership = await sync_pipeline_membership(session, club)
     promoted = await maybe_promote_by_engagement_score(session, club)
     return promoted or membership
@@ -1445,33 +1448,49 @@ async def reset_auto_promoted_engaged(session: AsyncSession) -> int:
     return len(deals)
 
 
+# Per-club debounce for the live recompute below: {club_id_str -> monotonic ts of
+# last recompute}. In-process (single-uvicorn deploy, same as the rate limiter),
+# bounded by club count, never persisted — a lost entry just means one extra
+# recompute after a restart. The FIRST signal after quiet always fires (no entry
+# yet), so a genuinely new bit of activity is still scored effectively instantly.
+_LAST_SCORE_RECOMPUTE: dict = {}
+_SCORE_RECOMPUTE_DEBOUNCE_S = 20.0
+
+
 async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=None,
-                                     path=None, email=None, user_id=None) -> dict:
+                                     path=None, email=None, user_id=None,
+                                     event_id=None) -> dict:
     """Fully event-driven — fired directly from the write path of a web
     page-view/API event (usage_tracker.record_event) or an email open/click
     (ses_events), in place of any periodic sweep. No polling anywhere: this
-    IS the check, run at the moment the signal happens.
+    IS the check, run at the moment the signal happens, so a club's cached
+    engagement score is refreshed live on ANY activity that could change it.
 
-    Two cheap gates before the real (pricier) engagement recompute ever
-    runs, so this is safe to fire on a genuinely hot path:
-      1. ``club_directory.resolve_marketing_club_id`` — does this event's
-         org/utm/path/email even match a known prospect club? Most traffic
-         (unrecognised visitors, an onboarded club's routine authenticated
-         admin use once org_id resolves but see gate 2, a real customer's
-         public fan traffic) resolves to nothing or is filtered right here.
-      2. Does that club currently have an open, non-``stage_auto_locked``
-         platform deal sitting at Target or Contacted? A single indexed
-         query. A customer or trial club's deal is already past Engaged, so
-         this is what actually filters out the high-volume authenticated
-         traffic case gate 1's org_id match lets through.
-    Only a club that clears BOTH gates pays for the full
-    ``sync_engagement_promotion`` (the ``twenty_sync._engagement`` scan +
-    the promotion check). Opens its own session; never raises — this must
-    never be allowed to affect the request it was fired alongside."""
+    Cheap and safe to fire on a genuinely hot path:
+      1. ``resolve_marketing_club_id`` — does this event's org/utm/path/email
+         match a known club at all? Unrecognised traffic stops here.
+      2. Stamp this event's row with its resolved club
+         (``resolved_marketing_club_id``) so future recomputes read an indexed
+         column instead of re-resolving the whole table.
+      3. A per-club debounce (``_SCORE_RECOMPUTE_DEBOUNCE_S``) collapses a burst
+         of activity into one recompute, so "recompute on every signal" can
+         never become a recompute storm.
+      4. The recompute itself uses ``fast_web=True`` — the indexed-column path,
+         milliseconds not the ~6s table scan — which is what makes firing this
+         per-event actually viable (the slow scan holding a row lock per event
+         is what wedged the table before).
+
+    The SCORE is always refreshed for a matched club (that's the point — any
+    activity keeps it current); ``sync_pipeline_membership`` / promotion still
+    apply their own stage gates, so a won/lost or already-advanced club is
+    never dragged backward, only its cached number is kept live. Opens its own
+    session; never raises — this must never affect the request it fired
+    alongside."""
     if not (org_id or utm_id or utm_source or path or email):
         return {"skipped": "no signal"}
     from app.models.db import async_session_maker
-    from app.services.club_directory import resolve_marketing_club_id
+    from app.services.club_directory import (resolve_marketing_club_id,
+                                             resolve_prospect_club_id)
     try:
         async with async_session_maker() as session:
             club_id = await resolve_marketing_club_id(
@@ -1479,32 +1498,35 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
                 path=path, email=email, user_id=user_id)
             if club_id is None:
                 return {"skipped": "no club match"}
-            pipeline = await ensure_platform_pipeline(session)
-            stage_ids = [s.id for s in pipeline.stages if s.key in ("target", "contacted")]
-            if not stage_ids:
-                return {"skipped": "no stages"}
-            has_open = (await session.execute(
-                select(CrmDeal.id).where(
-                    CrmDeal.pipeline_id == pipeline.id, CrmDeal.marketing_club_id == club_id,
-                    CrmDeal.status == "open", CrmDeal.archived_at.is_(None),
-                    CrmDeal.stage_id.in_(stage_ids), CrmDeal.stage_auto_locked.is_(False),
-                ).limit(1)
-            )).scalar_one_or_none()
-            if has_open is None:
-                # No early-stage deal to promote. But a club with NO deal at all
-                # should ENTER the pipeline the moment it has a score (> 0) — so
-                # fall through to the recompute only in that case. A club that
-                # already has a deal past the early stages (or closed) is left
-                # alone: web activity mustn't drag a won/lost club back on.
-                any_deal = (await session.execute(
-                    select(CrmDeal.id).where(
-                        CrmDeal.pipeline_id == pipeline.id,
-                        CrmDeal.marketing_club_id == club_id,
-                        CrmDeal.archived_at.is_(None),
-                    ).limit(1)
-                )).scalar_one_or_none()
-                if any_deal is not None:
-                    return {"skipped": "deal past early stage or closed"}
+
+            # Materialise this event's prospect attribution onto its own row, so
+            # the fast_web recompute (and every future one) reads an indexed
+            # column. Uses the utm/path resolution (== _RESOLVED_CID), which can
+            # differ from the gate's club_id (that prefers org_id/email): a web
+            # prospect visit resolves the same either way; an in-app/org event
+            # stamps NULL here (its attribution is the org_id branch, not this
+            # column) which is exactly right.
+            stamped = False
+            if event_id is not None and (utm_id or utm_source or path):
+                stamp_cid = await resolve_prospect_club_id(
+                    session, utm_id=utm_id, utm_source=utm_source, path=path)
+                if stamp_cid is not None:
+                    await session.execute(text(
+                        "UPDATE usage_events SET resolved_marketing_club_id = CAST(:cid AS uuid) "
+                        "WHERE id = :eid AND resolved_marketing_club_id IS NULL"
+                    ), {"cid": stamp_cid, "eid": event_id})
+                    stamped = True
+
+            # Debounce: at most one recompute per club per window. First signal
+            # after quiet fires immediately (no prior entry).
+            now = time.monotonic()
+            last = _LAST_SCORE_RECOMPUTE.get(club_id)
+            if last is not None and (now - last) < _SCORE_RECOMPUTE_DEBOUNCE_S:
+                if stamped:
+                    await session.commit()  # keep the stamp even when debounced
+                return {"skipped": "debounced"}
+            _LAST_SCORE_RECOMPUTE[club_id] = now
+
             club = await session.get(MarketingClub, club_id)
             if club is None:
                 return {"skipped": "no club row"}
@@ -1512,7 +1534,7 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
                         Organisation, club.existing_org_id,
                         options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
-            deal = await sync_engagement_promotion(session, club, org)
+            deal = await sync_engagement_promotion(session, club, org, fast_web=True)
             await session.commit()
             return {"promoted": bool(deal)}
     except Exception:  # noqa: BLE001 - fired from a hot path, must never raise

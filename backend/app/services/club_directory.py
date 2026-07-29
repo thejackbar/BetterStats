@@ -1645,22 +1645,59 @@ _PATH_CODE = "split_part(split_part(ue.path, '?', 1), '/', 2)"
 # engagement score (twenty_sync._engagement) attributes a visit the SAME way this
 # panel does — resolving each visit to ONE club rather than the old any-overlap
 # match that credited every club whose code merely collided with the path/UTM.
-_RESOLVED_CID = (
-    "COALESCE("
-    "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
-    "     WHERE a.utm_value = ue.utm_id AND a.marketing_club_id IS NOT NULL LIMIT 1), "
-    "  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
-    "     WHERE a.utm_value = ue.utm_source AND a.marketing_club_id IS NOT NULL LIMIT 1), "
-    f"  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
-    f"     WHERE a.utm_value = {_PATH_CODE} AND a.marketing_club_id IS NOT NULL LIMIT 1), "
-    "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = ue.utm_id LIMIT 1), "
-    "  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = ue.utm_source LIMIT 1), "
-    f"  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = {_PATH_CODE} "
-    f"     AND {_PATH_CODE} <> '' LIMIT 1), "
-    f"  (SELECT mc.id FROM marketing_clubs mc JOIN organisations o ON o.id = mc.existing_org_id "
-    f"     WHERE o.slug = {_PATH_CODE} AND {_PATH_CODE} <> '' LIMIT 1)"
-    ")::text"
-)
+def _resolved_cid_sql(utm_id: str, utm_source: str, path_code: str) -> str:
+    """The 7-branch single-attribution COALESCE, given the three SQL expressions
+    for a row's utm_id / utm_source / first-path-segment. Built once so the two
+    call shapes can never drift: the bulk correlated form (``ue.utm_id`` etc.,
+    ``_RESOLVED_CID``) that scans usage_events, and the parameterised single-event
+    form (``:binds``, ``_RESOLVED_CID_PARAM``) used to stamp one row's resolved
+    club at write time. Priority: outreach alias by utm_id -> utm_source -> path,
+    then marketing_clubs.utm_code the same three ways, then an onboarded club's
+    own slug in the path."""
+    return (
+        "COALESCE("
+        f"  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        f"     WHERE a.utm_value = {utm_id} AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        f"  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        f"     WHERE a.utm_value = {utm_source} AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        f"  (SELECT a.marketing_club_id FROM marketing_utm_aliases a "
+        f"     WHERE a.utm_value = {path_code} AND a.marketing_club_id IS NOT NULL LIMIT 1), "
+        f"  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = {utm_id} LIMIT 1), "
+        f"  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = {utm_source} LIMIT 1), "
+        f"  (SELECT mc.id FROM marketing_clubs mc WHERE mc.utm_code = {path_code} "
+        f"     AND {path_code} <> '' LIMIT 1), "
+        f"  (SELECT mc.id FROM marketing_clubs mc JOIN organisations o ON o.id = mc.existing_org_id "
+        f"     WHERE o.slug = {path_code} AND {path_code} <> '' LIMIT 1)"
+        ")::text"
+    )
+
+
+_RESOLVED_CID = _resolved_cid_sql("ue.utm_id", "ue.utm_source", _PATH_CODE)
+
+# Single-event form of the SAME resolution, parameterised on binds — used to stamp
+# usage_events.resolved_marketing_club_id at write time (see resolve_prospect_club_id).
+_RESOLVED_CID_PARAM = _resolved_cid_sql(":r_utm_id", ":r_utm_source", ":r_path_code")
+
+
+async def resolve_prospect_club_id(session, *, utm_id=None, utm_source=None,
+                                   path=None) -> Optional[str]:
+    """Resolve ONE event's utm/path to its prospect marketing_club id, using the
+    exact 7-branch logic ``_RESOLVED_CID`` applies in bulk — so a value stamped
+    onto ``usage_events.resolved_marketing_club_id`` equals what the score's bulk
+    query would compute for that row, and the fast single-club recompute is
+    identical to the slow one. utm/path only (no org_id/email branch — those are
+    the customer/email attribution the score handles separately). Returns the club
+    id as text, or None if nothing matches."""
+    path_code = ""
+    if path:
+        parts = path.split("?", 1)[0].split("/")
+        path_code = parts[1] if len(parts) > 1 else ""
+    if not (utm_id or utm_source or path_code):
+        return None
+    return (await session.execute(
+        text(f"SELECT {_RESOLVED_CID_PARAM} AS cid"),
+        {"r_utm_id": utm_id, "r_utm_source": utm_source, "r_path_code": path_code},
+    )).scalar_one_or_none()
 _RESOLVED_VISITS = (
     "SELECT " + _RESOLVED_CID + " AS cid, "
     "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, ue.ip_hash AS ip_hash, "
