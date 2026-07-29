@@ -3172,6 +3172,36 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_deal ON crm_activities(deal_id, occurred_at DESC)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_person ON crm_activities(person_id, occurred_at DESC)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_activities_org ON crm_activities(organisation_id, occurred_at DESC)"))
+        # CRM Sales Pipeline scheduled events (migration 196) — Call/Demo/
+        # Meeting/Review Deal/Other planned for a future date & time, with an
+        # optional Owner, Club Contact, Location, Title and up to two alerts.
+        # Created from a deal's card detail (deal_id set) or standalone from
+        # the Events page. deal_id SET NULL so an event survives a deal delete.
+        # See models/db.py::CrmEvent and routers/crm.py. (Placed here — after
+        # crm_deals/crm_people exist — since it FKs both.)
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS crm_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                deal_id UUID REFERENCES crm_deals(id) ON DELETE SET NULL,
+                marketing_club_id UUID REFERENCES marketing_clubs(id) ON DELETE SET NULL,
+                contact_person_id UUID REFERENCES crm_people(id) ON DELETE SET NULL,
+                owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                event_type TEXT NOT NULL DEFAULT 'meeting',
+                title TEXT,
+                location TEXT,
+                body TEXT,
+                starts_at TIMESTAMPTZ NOT NULL,
+                first_alert TEXT,
+                second_alert TEXT,
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_events_starts_at ON crm_events(starts_at)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_events_deal ON crm_events(deal_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_events_marketing_club ON crm_events(marketing_club_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_crm_events_owner ON crm_events(owner_user_id)"))
 
     # Migration 174: BetterCRM optional trackers — a club adds pipelines from
     # a preset catalogue (or a fully custom one) rather than getting one

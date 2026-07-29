@@ -3857,6 +3857,41 @@ class CrmActivity(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CrmEvent(Base):
+    """A scheduled calendar event on the platform Sales Pipeline (migration
+    196) — a Call/Demo/Meeting/Review Deal/Other planned for a future date &
+    time. Richer than a ``CrmActivity`` note (which only records something that
+    already happened): an event carries a ``starts_at``, an optional Title,
+    Location, an Owner (a super-admin ``User``), an associated Club Contact
+    (``CrmPerson``) and up to two alert offsets. ``body`` is the free-text note
+    that a Note-of-type-Event still carries. Created either from a Deal's card
+    detail (``deal_id`` set, ``marketing_club_id`` copied from the deal) or
+    standalone from the Events page (``deal_id`` NULL, club optional). Deleting
+    the deal SET NULLs ``deal_id`` so the event survives on the calendar."""
+    __tablename__ = "crm_events"
+
+    # First Alert / Second Alert offsets — stored as a stable code, the actual
+    # alert time is starts_at minus this offset (computed on read).
+    ALERT_CODES = ("at_time", "5m", "10m", "15m", "30m", "1h", "2h", "1d", "2d", "1w")
+    EVENT_TYPES = ("call", "demo", "meeting", "review_deal", "other")
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("crm_deals.id", ondelete="SET NULL"), nullable=True)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
+    contact_person_id = Column(UUID(as_uuid=True), ForeignKey("crm_people.id", ondelete="SET NULL"), nullable=True)
+    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(Text, nullable=False, server_default="meeting", default="meeting")
+    title = Column(Text, nullable=True)
+    location = Column(Text, nullable=True)
+    body = Column(Text, nullable=True)
+    starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    first_alert = Column(Text, nullable=True)
+    second_alert = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CrmTarget(Base):
     """One sales target for a period (migration 185) — BetterCricket's own
     platform pipeline only (there is no club-scope equivalent). ``period_type``

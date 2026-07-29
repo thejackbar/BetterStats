@@ -840,7 +840,25 @@ export const api = {
   superCrmUnlinkContact: (dealId, personId) => request(`/club-admin/super/crm/deals/${dealId}/contacts/${personId}`, { method: 'DELETE' }),
   superCrmSetPointOfContact: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/point-of-contact`, { method: 'POST', body: JSON.stringify(data) }),
   superCrmOwners: () => request('/club-admin/super/crm/owners'),
-  superCrmListPeople: (q) => request(`/club-admin/super/crm/people${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  superCrmListPeople: (q, marketingClubId) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (marketingClubId) p.set('marketing_club_id', marketingClubId)
+    const qs = p.toString()
+    return request(`/club-admin/super/crm/people${qs ? `?${qs}` : ''}`)
+  },
+  // ─── CRM calendar events ─────────────────────────────────────────────────────
+  superCrmListDealEvents: (dealId) => request(`/club-admin/super/crm/deals/${dealId}/events`),
+  superCrmAddDealEvent: (dealId, data) => request(`/club-admin/super/crm/deals/${dealId}/events`, { method: 'POST', body: JSON.stringify(data) }),
+  superCrmListEvents: (params = {}) => {
+    const p = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v != null && v !== '') p.set(k, v)
+    const qs = p.toString()
+    return request(`/club-admin/super/crm/events${qs ? `?${qs}` : ''}`)
+  },
+  superCrmCreateEvent: (data) => request('/club-admin/super/crm/events', { method: 'POST', body: JSON.stringify(data) }),
+  superCrmUpdateEvent: (id, data) => request(`/club-admin/super/crm/events/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superCrmDeleteEvent: (id) => request(`/club-admin/super/crm/events/${id}`, { method: 'DELETE' }),
   superCrmConvertClub: (marketingClubId, data) =>
     request(`/club-admin/super/crm/from-club/${marketingClubId}`, { method: 'POST', body: JSON.stringify(data) }),
   // ─── BetterImport — overlap-safe historical CSV/XLSX import ──────────────────

@@ -7,6 +7,7 @@ import {
   WebsiteAnalyticsPanel, EngagementBreakdownPanel,
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
+import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
 
 // Deliberately narrow — these fields sit in an `max-w-3xl` modal (~730px of
 // content width) and don't need anywhere near half of it each; the shared
@@ -32,10 +33,13 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const [deal, setDeal] = useState(null)
   const [activities, setActivities] = useState([])
   const [contacts, setContacts] = useState([])
+  const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState('')
   const [noteType, setNoteType] = useState('note')
+  const [editingEventId, setEditingEventId] = useState(null)
+  const eventsEnabled = !!client.addEvent  // platform (super admin) scope only
   const [lostReason, setLostReason] = useState('')
   const [showLostBox, setShowLostBox] = useState(false)
   const [contactName, setContactName] = useState('')
@@ -52,8 +56,13 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const load = useCallback(() => {
     if (!dealId) return
     setLoading(true)
-    Promise.all([client.getDeal(dealId), client.listActivities(dealId), client.listContacts(dealId)])
-      .then(([d, a, c]) => { setDeal(d); setActivities(a.activities || []); setContacts(c.contacts || []) })
+    const calls = [client.getDeal(dealId), client.listActivities(dealId), client.listContacts(dealId)]
+    calls.push(client.listEvents ? client.listEvents(dealId) : Promise.resolve({ events: [] }))
+    Promise.all(calls)
+      .then(([d, a, c, ev]) => {
+        setDeal(d); setActivities(a.activities || []); setContacts(c.contacts || [])
+        setEvents(ev?.events || [])
+      })
       .catch(e => toast.error(e.message || `Could not load ${t.itemSingular}`))
       .finally(() => setLoading(false))
   }, [dealId, client, toast])
@@ -125,6 +134,33 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
       setNote('')
       await refresh()
     } catch (e2) { toast.error(e2.message || 'Could not add note') }
+  }
+
+  const contactOptions = contacts.map(c => ({ id: c.id, name: c.full_name }))
+
+  const addEvent = async (payload) => {
+    if (!payload.starts_at) { toast.error('Pick a date & time for the event'); return }
+    setSaving(true)
+    try {
+      await client.addEvent(dealId, payload)
+      setNoteType('note')
+      await refresh()
+    } catch (e2) { toast.error(e2.message || 'Could not add event') } finally { setSaving(false) }
+  }
+
+  const saveEvent = async (eventId, payload) => {
+    setSaving(true)
+    try {
+      await client.updateEvent(eventId, payload)
+      setEditingEventId(null)
+      await refresh()
+    } catch (e2) { toast.error(e2.message || 'Could not save event') } finally { setSaving(false) }
+  }
+
+  const deleteEvent = async (eventId) => {
+    if (!window.confirm('Delete this event?')) return
+    try { await client.deleteEvent(eventId); await refresh() }
+    catch (e2) { toast.error(e2.message || 'Could not delete event') }
   }
 
   const addContact = async (e) => {
@@ -480,6 +516,26 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
           <WebsiteAnalyticsPanel marketingClubId={deal.marketing_club_id} />
 
+          {eventsEnabled && (
+            <div>
+              <h3 className="font-display font-bold text-[13px] mb-2 flex items-center gap-1.5">
+                <CalendarIcon className="text-pb-accent" /> Scheduled events
+              </h3>
+              <div className="space-y-2">
+                {events.length === 0 && <p className="text-[12px] text-pb-faintest">No events scheduled.</p>}
+                {events.map(ev => editingEventId === ev.id ? (
+                  <div key={ev.id} className="pb-card px-3 py-3 border-pb-accent/40">
+                    <EventForm initial={ev} ownerOptions={ownerOptions || []} contactOptions={contactOptions}
+                      onSubmit={(payload) => saveEvent(ev.id, payload)} onCancel={() => setEditingEventId(null)}
+                      saving={saving} submitLabel="Save changes" />
+                  </div>
+                ) : (
+                  <EventRow key={ev.id} ev={ev} onEdit={() => setEditingEventId(ev.id)} onDelete={() => deleteEvent(ev.id)} />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Notes &amp; activity</h3>
             <div className="space-y-2 mb-2 max-h-48 overflow-y-auto">
@@ -494,25 +550,72 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                 </div>
               ))}
             </div>
-            <form onSubmit={addActivity} className="space-y-2">
-              <TextArea placeholder="Log an update…" value={note} onChange={e => setNote(e.target.value)}
-                style={{ minHeight: '110px' }} />
-              <div className="flex items-center justify-between gap-2">
-                {/* Sized to fit the widest option ("Meeting"), not a fixed
-                    Tailwind width — the inline style wins over the shared
-                    Select's w-full so the box hugs its content. */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-pb-faint">Type</span>
+                {/* Sized to fit the widest option, not a fixed Tailwind width —
+                    the inline style wins over the shared Select's w-full. */}
                 <Select value={noteType} onChange={e => setNoteType(e.target.value)} style={{ width: 'auto' }}>
                   <option value="note">Note</option>
                   <option value="call">Call</option>
                   <option value="email">Email</option>
                   <option value="meeting">Meeting</option>
+                  {eventsEnabled && <option value="event">Event</option>}
                 </Select>
-                <Btn type="submit" variant="ghost" sm>Add</Btn>
               </div>
-            </form>
+              {noteType === 'event' && eventsEnabled ? (
+                <div className="pb-card px-3 py-3">
+                  <EventForm ownerOptions={ownerOptions || []} contactOptions={contactOptions}
+                    onSubmit={addEvent} saving={saving} submitLabel="Add event" />
+                </div>
+              ) : (
+                <form onSubmit={addActivity} className="space-y-2">
+                  <TextArea placeholder="Log an update…" value={note} onChange={e => setNote(e.target.value)}
+                    style={{ minHeight: '110px' }} />
+                  <div className="flex justify-end">
+                    <Btn type="submit" variant="ghost" sm>Add</Btn>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}
     </Modal>
+  )
+}
+
+// A scheduled event, read-only, with Edit/Delete — shown in the deal detail's
+// "Scheduled events" list. The accent-tinted card + calendar icon match the
+// board card's event summary line.
+function EventRow({ ev, onEdit, onDelete }) {
+  const when = ev.starts_at ? new Date(ev.starts_at).toLocaleString('en-AU', {
+    weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+  }) : ''
+  const alerts = [ev.first_alert, ev.second_alert].filter(Boolean).map(alertLabel)
+  return (
+    <div className="text-[12.5px] pb-card px-2.5 py-2 border-pb-accent/40">
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <CalendarIcon className="text-pb-accent" />
+          <Pill tone="accent">{eventTypeLabel(ev.event_type)}</Pill>
+          {ev.title && <span className="font-medium truncate">{ev.title}</span>}
+        </span>
+        <span className="flex items-center gap-2 shrink-0">
+          <button onClick={onEdit} className="text-pb-faint hover:text-pb-accent text-[11px]">Edit</button>
+          <button onClick={onDelete} className="text-pb-faint hover:text-pb-red text-[11px]">Delete</button>
+        </span>
+      </div>
+      <div className="text-pb-text" style={{ color: 'var(--pb-accent)' }}>{when}</div>
+      <div className="text-pb-faint text-[11px] flex flex-wrap gap-x-2">
+        {ev.location && <span>📍 {ev.location}</span>}
+        {ev.owner_name && <span>· {ev.owner_name}</span>}
+        {ev.contact_name && <span>· {ev.contact_name}</span>}
+      </div>
+      {alerts.length > 0 && (
+        <div className="text-pb-faintest text-[10.5px] mt-0.5">Alerts: {alerts.join(', ')}</div>
+      )}
+      {ev.body && <p className="text-pb-text mt-1">{ev.body}</p>}
+    </div>
   )
 }

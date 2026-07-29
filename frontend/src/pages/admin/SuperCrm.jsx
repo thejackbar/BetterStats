@@ -10,6 +10,7 @@ import { PbSpinner } from '../../lib/presskit'
 import PipelineBoard, { TIER_TONE, EngagementArrow } from '../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
+import CrmEventsView from '../../components/admin/crm/CrmEventsView'
 import {
   Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
   LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel,
@@ -196,6 +197,10 @@ const superClient = {
   archiveDeal: api.superCrmArchiveDeal,
   listActivities: api.superCrmListActivities,
   addActivity: api.superCrmAddActivity,
+  listEvents: api.superCrmListDealEvents,
+  addEvent: api.superCrmAddDealEvent,
+  updateEvent: api.superCrmUpdateEvent,
+  deleteEvent: api.superCrmDeleteEvent,
   listContacts: api.superCrmListDealContacts,
   linkContact: api.superCrmLinkContact,
   unlinkContact: api.superCrmUnlinkContact,
@@ -1048,6 +1053,8 @@ export default function SuperCrm() {
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'board' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Board</button>
           <button onClick={() => setView('list')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'list' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>List</button>
+          <button onClick={() => setView('events')}
+            className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'events' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Events</button>
           <button onClick={() => setView('dashboard')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'dashboard' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Dashboard</button>
           <span title="Recompute every club's engagement score now and re-run auto-promotions, then refresh the board (runs in the background — takes a few minutes)">
@@ -1060,7 +1067,9 @@ export default function SuperCrm() {
         </div>
       </div>
 
-      {loading ? <PbSpinner message="Loading pipeline…" /> : view === 'dashboard' ? (
+      {loading ? <PbSpinner message="Loading pipeline…" /> : view === 'events' ? (
+        <CrmEventsView owners={owners} />
+      ) : view === 'dashboard' ? (
         <CrmDashboard deals={deals} stages={stages} />
       ) : (
         <>

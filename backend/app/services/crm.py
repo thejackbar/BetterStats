@@ -43,8 +43,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import (
     CrmPerson, CrmPersonRole, CrmPipeline, CrmStage, CrmDeal, CrmDealContact, CrmActivity,
-    MarketingClub, MarketingClubContact, User, ClubMembership, Organisation, ClubOnboardingRequest,
-    OrgModuleSubscription, Season, Grade, Player, OnboardingWizardState,
+    CrmEvent, MarketingClub, MarketingClubContact, User, ClubMembership, Organisation,
+    ClubOnboardingRequest, OrgModuleSubscription, Season, Grade, Player, OnboardingWizardState,
 )
 from app.services.billing_pricing import price_for
 
@@ -1537,6 +1537,198 @@ async def list_activities(session: AsyncSession, *, deal_id=None, person_id=None
     if person_id is not None:
         stmt = stmt.where(CrmActivity.person_id == person_id)
     return (await session.execute(stmt)).scalars().all()
+
+
+# ─── Calendar events (scheduled, richer than an activity note) ───────────────
+
+EVENT_TYPES = ("call", "demo", "meeting", "review_deal", "other")
+ALERT_CODES = ("at_time", "5m", "10m", "15m", "30m", "1h", "2h", "1d", "2d", "1w")
+
+# Minutes-before-start each alert code represents (for computing the alert time
+# on read; "at_time" is 0). Kept here alongside the codes so the API can return
+# a concrete alert_at without the frontend re-deriving it.
+_ALERT_MINUTES = {
+    "at_time": 0, "5m": 5, "10m": 10, "15m": 15, "30m": 30,
+    "1h": 60, "2h": 120, "1d": 1440, "2d": 2880, "1w": 10080,
+}
+
+
+def _clean_event_type(value: Optional[str]) -> str:
+    return value if value in EVENT_TYPES else "meeting"
+
+
+def _clean_alert(value: Optional[str]) -> Optional[str]:
+    return value if value in ALERT_CODES else None
+
+
+def _alert_at(starts_at, code: Optional[str]):
+    """The datetime an alert fires — starts_at minus the code's offset."""
+    if not starts_at or code not in _ALERT_MINUTES:
+        return None
+    return starts_at - timedelta(minutes=_ALERT_MINUTES[code])
+
+
+def _event_dict(event: CrmEvent, *, club=None, owner=None, contact=None, deal=None) -> dict:
+    """Serialize an event. The optional related objects (already-loaded to
+    avoid N+1) enrich it with display names; each is looked up by the caller."""
+    return {
+        "id": str(event.id),
+        "deal_id": str(event.deal_id) if event.deal_id else None,
+        "deal_title": deal.title if deal is not None else None,
+        "marketing_club_id": str(event.marketing_club_id) if event.marketing_club_id else None,
+        "marketing_club_name": club.name if club is not None else None,
+        "contact_person_id": str(event.contact_person_id) if event.contact_person_id else None,
+        "contact_name": contact.full_name if contact is not None else None,
+        "owner_user_id": str(event.owner_user_id) if event.owner_user_id else None,
+        "owner_name": (owner.display_name or owner.username) if owner is not None else None,
+        "event_type": event.event_type,
+        "title": event.title,
+        "location": event.location,
+        "body": event.body,
+        "starts_at": event.starts_at.isoformat() if event.starts_at else None,
+        "first_alert": event.first_alert,
+        "second_alert": event.second_alert,
+        "first_alert_at": _iso(_alert_at(event.starts_at, event.first_alert)),
+        "second_alert_at": _iso(_alert_at(event.starts_at, event.second_alert)),
+        "created_by_user_id": str(event.created_by_user_id) if event.created_by_user_id else None,
+        "created_at": _iso(event.created_at),
+        "updated_at": _iso(event.updated_at),
+    }
+
+
+def _iso(dt):
+    return dt.isoformat() if dt else None
+
+
+async def create_event(session: AsyncSession, *, deal_id=None, marketing_club_id=None,
+                       contact_person_id=None, owner_user_id=None, event_type="meeting",
+                       title=None, location=None, body=None, starts_at=None,
+                       first_alert=None, second_alert=None, created_by_user_id=None) -> CrmEvent:
+    event = CrmEvent(
+        deal_id=deal_id, marketing_club_id=marketing_club_id, contact_person_id=contact_person_id,
+        owner_user_id=owner_user_id, event_type=_clean_event_type(event_type),
+        title=(title or None), location=(location or None), body=(body or None),
+        starts_at=starts_at, first_alert=_clean_alert(first_alert), second_alert=_clean_alert(second_alert),
+        created_by_user_id=created_by_user_id,
+    )
+    session.add(event)
+    await session.flush()
+    return event
+
+
+async def get_event(session: AsyncSession, event_id) -> Optional[CrmEvent]:
+    return (await session.execute(
+        select(CrmEvent).where(CrmEvent.id == event_id))).scalars().first()
+
+
+async def serialize_event(session: AsyncSession, event: CrmEvent) -> dict:
+    """One event with its display names resolved (club/owner/contact/deal) —
+    the single-event equivalent of what list_events does in batch."""
+    club = await session.get(MarketingClub, event.marketing_club_id) if event.marketing_club_id else None
+    owner = await session.get(User, event.owner_user_id) if event.owner_user_id else None
+    contact = await session.get(CrmPerson, event.contact_person_id) if event.contact_person_id else None
+    deal = await session.get(CrmDeal, event.deal_id) if event.deal_id else None
+    return _event_dict(event, club=club, owner=owner, contact=contact, deal=deal)
+
+
+async def update_event(session: AsyncSession, event: CrmEvent, **fields) -> CrmEvent:
+    if "event_type" in fields:
+        event.event_type = _clean_event_type(fields["event_type"])
+    if "first_alert" in fields:
+        event.first_alert = _clean_alert(fields["first_alert"])
+    if "second_alert" in fields:
+        event.second_alert = _clean_alert(fields["second_alert"])
+    for f in ("marketing_club_id", "contact_person_id", "owner_user_id",
+              "title", "location", "body", "starts_at"):
+        if f in fields:
+            setattr(event, f, fields[f] or None if f in ("title", "location", "body") else fields[f])
+    event.updated_at = func.now()
+    await session.flush()
+    return event
+
+
+async def delete_event(session: AsyncSession, event: CrmEvent) -> None:
+    await session.delete(event)
+    await session.flush()
+
+
+async def list_events(session: AsyncSession, *, deal_id=None, marketing_club_id=None,
+                      owner_user_id=None, created_by_user_id=None, date_from=None, date_to=None,
+                      q=None, limit: int = 1000) -> list[dict]:
+    """Events with their display names resolved in-batch (club / owner / contact
+    / deal), newest-first is wrong for a calendar so this returns them sorted by
+    ``starts_at`` ascending. All filters are optional and combine (AND)."""
+    stmt = select(CrmEvent)
+    if deal_id is not None:
+        stmt = stmt.where(CrmEvent.deal_id == deal_id)
+    if marketing_club_id is not None:
+        stmt = stmt.where(CrmEvent.marketing_club_id == marketing_club_id)
+    if owner_user_id is not None:
+        stmt = stmt.where(CrmEvent.owner_user_id == owner_user_id)
+    if created_by_user_id is not None:
+        stmt = stmt.where(CrmEvent.created_by_user_id == created_by_user_id)
+    if date_from is not None:
+        stmt = stmt.where(CrmEvent.starts_at >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(CrmEvent.starts_at <= date_to)
+    stmt = stmt.order_by(CrmEvent.starts_at.asc()).limit(limit)
+    events = (await session.execute(stmt)).scalars().all()
+
+    club_ids = {e.marketing_club_id for e in events if e.marketing_club_id}
+    owner_ids = {e.owner_user_id for e in events if e.owner_user_id}
+    contact_ids = {e.contact_person_id for e in events if e.contact_person_id}
+    deal_ids = {e.deal_id for e in events if e.deal_id}
+    clubs = {c.id: c for c in ((await session.execute(
+        select(MarketingClub).where(MarketingClub.id.in_(club_ids)))).scalars().all() if club_ids else [])}
+    owners = {u.id: u for u in ((await session.execute(
+        select(User).where(User.id.in_(owner_ids)))).scalars().all() if owner_ids else [])}
+    contacts = {p.id: p for p in ((await session.execute(
+        select(CrmPerson).where(CrmPerson.id.in_(contact_ids)))).scalars().all() if contact_ids else [])}
+    deals = {d.id: d for d in ((await session.execute(
+        select(CrmDeal).where(CrmDeal.id.in_(deal_ids)))).scalars().all() if deal_ids else [])}
+
+    out = []
+    needle = (q or "").strip().lower()
+    for e in events:
+        club = clubs.get(e.marketing_club_id)
+        deal = deals.get(e.deal_id)
+        row = _event_dict(e, club=club, owner=owners.get(e.owner_user_id),
+                          contact=contacts.get(e.contact_person_id), deal=deal)
+        if needle:
+            hay = " ".join(filter(None, [
+                row.get("title"), row.get("marketing_club_name"), row.get("deal_title"),
+                row.get("contact_name"), row.get("body"),
+            ])).lower()
+            if needle not in hay:
+                continue
+        out.append(row)
+    return out
+
+
+async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> dict:
+    """Map deal_id -> its soonest upcoming (or, if none upcoming, most recent
+    past) event, as a lean dict for the Kanban card summary. One query."""
+    ids = [d for d in deal_ids if d]
+    if not ids:
+        return {}
+    now = now or datetime.now(timezone.utc)
+    rows = (await session.execute(
+        select(CrmEvent).where(CrmEvent.deal_id.in_(ids)).order_by(CrmEvent.starts_at.asc())
+    )).scalars().all()
+    upcoming, past = {}, {}
+    for e in rows:
+        summary = {
+            "id": str(e.id), "event_type": e.event_type, "title": e.title,
+            "starts_at": _iso(e.starts_at),
+        }
+        if e.starts_at and e.starts_at >= now:
+            upcoming.setdefault(e.deal_id, summary)  # first (soonest) upcoming wins
+        else:
+            past[e.deal_id] = summary  # keep overwriting → last (most recent) past wins
+    out = {}
+    for did in ids:
+        out[did] = upcoming.get(did) or past.get(did)
+    return out
 
 
 # ─── Auto-creation: platform deals from existing engagement/trial signals ───
