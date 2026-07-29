@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
 import { money, Pill, DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_LABELS } from './ui'
+import { CalendarIcon, eventSummaryText } from './EventForm'
 import { moduleBrand } from '../../../lib/moduleBrand'
 
 const BETTERSTATS_LOGO = moduleBrand('stats').logo
@@ -237,6 +238,16 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   )}
                   {stateLine && (
                     <div className="font-mono text-[9.5px] text-pb-faintest mt-1.5 leading-snug">{stateLine}</div>
+                  )}
+                  {/* Next scheduled event — a calendar/date-based summary, set
+                      apart from the rest of the card in its own indigo colour
+                      with a small calendar icon. */}
+                  {deal.next_event && (
+                    <div className="flex items-center gap-1 mt-1.5 text-[10.5px] leading-snug font-medium"
+                      style={{ color: '#8b7cf6' }} title="Next scheduled event">
+                      <CalendarIcon />
+                      <span className="truncate">{eventSummaryText(deal.next_event)}</span>
+                    </div>
                   )}
                   {deal.status === 'won' && <Pill tone="green">{t.won}</Pill>}
                   {deal.status === 'lost' && <Pill tone="red">{t.lost}</Pill>}

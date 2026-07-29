@@ -89,6 +89,32 @@ class ActivityCreate(BaseModel):
     body: Optional[str] = None
 
 
+class EventCreate(BaseModel):
+    event_type: str = "meeting"          # call | demo | meeting | review_deal | other
+    starts_at: datetime                  # future date & time (ISO)
+    title: Optional[str] = None
+    location: Optional[str] = None
+    body: Optional[str] = None           # the free-text note
+    owner_user_id: Optional[str] = None  # a super-admin User
+    contact_person_id: Optional[str] = None
+    marketing_club_id: Optional[str] = None  # standalone events only; deal events copy it from the deal
+    first_alert: Optional[str] = None    # at_time | 5m | 10m | 15m | 30m | 1h | 2h | 1d | 2d | 1w
+    second_alert: Optional[str] = None
+
+
+class EventUpdate(BaseModel):
+    event_type: Optional[str] = None
+    starts_at: Optional[datetime] = None
+    title: Optional[str] = None
+    location: Optional[str] = None
+    body: Optional[str] = None
+    owner_user_id: Optional[str] = None
+    contact_person_id: Optional[str] = None
+    marketing_club_id: Optional[str] = None
+    first_alert: Optional[str] = None
+    second_alert: Optional[str] = None
+
+
 class PersonCreate(BaseModel):
     full_name: str
     email: Optional[str] = None
@@ -681,6 +707,11 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: last_activity_at_by_deal failed")
         activity_by_deal = {}
+    try:
+        next_event_by_deal = await crm_service.next_events_by_deal(db, (d.id for d in deals))
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: next_events_by_deal failed")
+        next_event_by_deal = {}
 
     out = []
     for d in deals:
@@ -702,6 +733,9 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         # onboarding step, page view) — powers the "New Deal Activity" filter.
         act = activity_by_deal.get(d.id)
         row["last_activity_at"] = act.isoformat() if act else None
+        # Soonest upcoming (else most recent) scheduled event — the calendar
+        # summary line at the bottom of the Kanban card.
+        row["next_event"] = next_event_by_deal.get(d.id)
         out.append(row)
     return {"deals": out}
 
@@ -950,6 +984,90 @@ async def super_log_activity(deal_id: str, body: ActivityCreate, current_user=De
         db, deal_id=deal.id, type=body.type, body=body.body, created_by_user_id=current_user.id)
     await db.commit()
     return crm_service._activity_dict(activity)
+
+
+# ─── Calendar events ──────────────────────────────────────────────────────────
+
+def _event_fields(body, *, is_update: bool) -> dict:
+    """Shared field-mapping for create/update — resolves the string ids to
+    UUIDs (a bad id is a 404, matching the rest of this router)."""
+    out = {}
+    src = body.model_dump(exclude_unset=True) if is_update else body.model_dump()
+    for f in ("event_type", "title", "location", "body", "first_alert", "second_alert", "starts_at"):
+        if f in src:
+            out[f] = src[f]
+    for f in ("owner_user_id", "contact_person_id", "marketing_club_id"):
+        if f in src:
+            out[f] = _uuid_or_404(src[f]) if src[f] else None
+    return out
+
+
+@super_router.get("/deals/{deal_id}/events", dependencies=[_super])
+async def super_list_deal_events(deal_id: str, db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
+    return {"events": await crm_service.list_events(db, deal_id=deal.id)}
+
+
+@super_router.post("/deals/{deal_id}/events", dependencies=[_super])
+async def super_create_deal_event(deal_id: str, body: EventCreate, current_user=Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
+    fields = _event_fields(body, is_update=False)
+    # A deal event is automatically linked to the deal's own club — the body's
+    # marketing_club_id (only meaningful for a standalone event) is ignored.
+    fields["marketing_club_id"] = deal.marketing_club_id
+    event = await crm_service.create_event(
+        db, deal_id=deal.id, created_by_user_id=current_user.id, **fields)
+    await db.commit()
+    return await _event_response(db, event)
+
+
+@super_router.get("/events", dependencies=[_super])
+async def super_list_events(q: Optional[str] = None, owner_user_id: Optional[str] = None,
+                            created_by_user_id: Optional[str] = None, marketing_club_id: Optional[str] = None,
+                            date_from: Optional[datetime] = None, date_to: Optional[datetime] = None,
+                            db: AsyncSession = Depends(get_db)):
+    events = await crm_service.list_events(
+        db, q=q,
+        owner_user_id=_uuid_or_404(owner_user_id) if owner_user_id else None,
+        created_by_user_id=_uuid_or_404(created_by_user_id) if created_by_user_id else None,
+        marketing_club_id=_uuid_or_404(marketing_club_id) if marketing_club_id else None,
+        date_from=date_from, date_to=date_to)
+    return {"events": events}
+
+
+@super_router.post("/events", dependencies=[_super])
+async def super_create_event(body: EventCreate, current_user=Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    event = await crm_service.create_event(
+        db, created_by_user_id=current_user.id, **_event_fields(body, is_update=False))
+    await db.commit()
+    return await _event_response(db, event)
+
+
+@super_router.patch("/events/{event_id}", dependencies=[_super])
+async def super_update_event(event_id: str, body: EventUpdate, db: AsyncSession = Depends(get_db)):
+    event = await crm_service.get_event(db, _uuid_or_404(event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    await crm_service.update_event(db, event, **_event_fields(body, is_update=True))
+    await db.commit()
+    return await _event_response(db, event)
+
+
+@super_router.delete("/events/{event_id}", dependencies=[_super])
+async def super_delete_event(event_id: str, db: AsyncSession = Depends(get_db)):
+    event = await crm_service.get_event(db, _uuid_or_404(event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    await crm_service.delete_event(db, event)
+    await db.commit()
+    return {"deleted": True}
+
+
+async def _event_response(db: AsyncSession, event) -> dict:
+    await db.refresh(event)
+    return await crm_service.serialize_event(db, event)
 
 
 @super_router.get("/deals/{deal_id}/contacts", dependencies=[_super])
