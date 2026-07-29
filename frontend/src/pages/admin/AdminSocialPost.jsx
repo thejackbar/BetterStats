@@ -34,6 +34,8 @@ import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useEditHistory } from '../../social/useEditHistory'
+import { usePages } from '../../social/usePages'
+import PageStrip from '../../components/admin/socialpost/PageStrip'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
@@ -785,6 +787,10 @@ export default function AdminSocialPost() {
   // Undo/redo + action log, one per layer (history is per page/layer).
   const canvasHistory = useEditHistory(canvas)
   const overlayHistory = useEditHistory(overlay)
+  // Carousel pages ride the freeform canvas layer (Blank tab). Switching a page
+  // starts a fresh undo history — snapshots belong to a single page.
+  const pages = usePages(canvas, { onPageChange: () => canvasHistory.clear() })
+  const pageRefs = useRef([])
   // Coalesces a burst of same-label edits (e.g. slider ticks) into one snapshot.
   const lastRec = useRef({ label: '', t: 0 })
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
@@ -1283,17 +1289,23 @@ export default function AdminSocialPost() {
   // with Google Fonts embedded so the display face survives the capture). The
   // render target is already mounted off-screen at full W×H.
   const handleExport = async () => {
-    if (!renderRef.current) return
     setExporting(true)
     setExportError(null)
     try {
       const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
       const H = tmpl.h || 1080
-      await exportNodeToPng(renderRef.current, {
-        width: W,
-        height: H,
-        fileName: `betterstats-${templateId.toLowerCase()}-${Date.now()}.png`,
-      })
+      const stamp = Date.now()
+      // A Blank-tab carousel exports every page as its own PNG (slideN).
+      if (tmpl.kind === 'blank' && pages.count > 1) {
+        for (let i = 0; i < pages.count; i++) {
+          const node = pageRefs.current[i]
+          if (!node) continue
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-carousel-${stamp}-slide${i + 1}.png` })
+        }
+      } else {
+        if (!renderRef.current) return
+        await exportNodeToPng(renderRef.current, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}.png` })
+      }
     } catch (e) {
       setExportError(e.message || 'Export failed')
     } finally {
@@ -1732,7 +1744,7 @@ export default function AdminSocialPost() {
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
       <button onClick={handleExport} disabled={exporting}
         className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
-        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : '↓ DOWNLOAD PNG'}</button>
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : '↓ DOWNLOAD PNG')}</button>
     </>
   )
 
@@ -1747,6 +1759,10 @@ export default function AdminSocialPost() {
     const pw = Math.round(W * scale), ph = Math.round(H * scale)
     return (
       <div className="relative">
+        {isBlankTab && (
+          <PageStrip count={pages.count} index={pages.index}
+            onGoTo={pages.goTo} onAdd={pages.add} onDuplicate={pages.duplicate} onRemove={pages.remove} />
+        )}
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
@@ -1768,7 +1784,7 @@ export default function AdminSocialPost() {
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
-          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · SINGLE POST</span>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : 'SINGLE POST'}</span>
           <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{showBlankTools ? 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL' : ''}</span>
         </div>
       </div>
@@ -2917,13 +2933,23 @@ export default function AdminSocialPost() {
 
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-        <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-          {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-          {customEdit && !isBlankTab && (
-            <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
-          )}
-        </div>
+        {isBlankTab && pages.count > 1 ? (
+          // One full-size node per carousel page, captured in turn on export.
+          pages.all().map((pageItems, i) => (
+            <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
+            </div>
+          ))
+        ) : (
+          <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+            <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+            {customEdit && !isBlankTab && (
+              <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+            )}
+          </div>
+        )}
       </div>
 
       <ImageEditorModal
