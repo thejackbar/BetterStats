@@ -59,6 +59,11 @@ function fmtDate(d) {
 const seasonLabel = (y) => `${y}/${String((y + 1) % 100).padStart(2, '0')}`
 const ballotLabel = (values) => (values || []).join('-')
 
+async function copyToClipboard(toast, text, label) {
+  try { await navigator.clipboard.writeText(text); toast.success(`${label} copied`) }
+  catch { toast.error('Copy failed. Select and copy manually.') }
+}
+
 /* ── Settings tab ────────────────────────────────────────────────────────── */
 
 function SettingsTab({ canManage }) {
@@ -459,6 +464,11 @@ function FixtureDetail({ fixtureId, onBack }) {
         <span className="text-pb-faint text-sm">{fmtDate(fx.date)}</span>
         <StateBadge state={fx.state} />
         <div className="ml-auto flex gap-2">
+          {detail.settings?.enabled && detail.settings?.token && (
+            <Btn sm variant="ghost" onClick={() => copyToClipboard(toast, `${window.location.origin}/vote/${detail.settings.token}?fixture=${fx.id}`, 'Voting link')}>
+              Copy link
+            </Btn>
+          )}
           {fx.state === 'open'
             ? <Btn sm variant="ghost" onClick={() => setLock(true)}>Lock voting</Btn>
             : (fx.state === 'locked' || fx.state === 'closed') &&
@@ -597,6 +607,13 @@ function FixturesTab({ canManage, openFixture, setOpenFixture }) {
         )}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search opponent…"
           className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm w-40 focus:outline-none focus:border-pb-accent" />
+        {gradeId && data.settings?.enabled && data.settings?.token && (
+          <button
+            onClick={() => copyToClipboard(toast, `${window.location.origin}/vote/${data.settings.token}?team=${gradeId}`, 'Team link')}
+            className="font-mono text-[10.5px] text-pb-faint hover:text-pb-text underline shrink-0">
+            Copy this team's link
+          </button>
+        )}
         {!data.settings?.enabled && (
           <span className="text-[12.5px] text-pb-amber">
             The voting link is off, so players can't vote yet. Turn it on under Settings (admins can still enter ballots here).

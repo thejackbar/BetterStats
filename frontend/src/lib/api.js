@@ -2130,7 +2130,14 @@ export const api = {
   },
 
   // ─── Public: vote collection (no admin auth; player cookie or typed name) ───
-  votePublicLanding: (token) => request(`/public/votes/${token}`),
+  votePublicLanding: (token, { team, round_key, q } = {}) => {
+    const params = new URLSearchParams()
+    if (team) params.set('team', team)
+    if (round_key) params.set('round_key', round_key)
+    if (q) params.set('q', q)
+    const qs = params.toString()
+    return request(`/public/votes/${token}${qs ? `?${qs}` : ''}`)
+  },
   votePublicVerify: (token, player_id, pin) =>
     request(`/public/votes/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
   votePublicSwitch: (token) =>
