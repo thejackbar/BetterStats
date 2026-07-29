@@ -270,6 +270,14 @@ function BallotEntryForm({ detail, onSaved }) {
   const toast = useToast()
   const eligible = detail.eligible || []
   const values = detail.settings?.ballot_values || [3, 2, 1]
+  const captainOnly = detail.settings?.voter_mode === 'captain'
+  const captains = eligible.filter((p) => p.is_captain)
+  // "Who votes: Captain only" means only the captain's ballot should count —
+  // default the voter picker to just them so a paper-vote transcription can't
+  // accidentally record a non-captain's votes. Escape hatch for the genuine
+  // edge case (vice-captain filled in, the captain flag missed a sync).
+  const [showAllVoters, setShowAllVoters] = useState(!captainOnly)
+  const voterOptions = (captainOnly && !showAllVoters && captains.length > 0) ? captains : eligible
   const [voterId, setVoterId] = useState('')
   const [voterName, setVoterName] = useState('')
   const [picks, setPicks] = useState(values.map(() => ''))
@@ -300,6 +308,7 @@ function BallotEntryForm({ detail, onSaved }) {
       <div className="font-display font-bold text-[15px] mb-1">Enter a ballot</div>
       <p className="text-[12px] text-pb-faint mb-3">
         Paper votes, or the captain texting theirs in. Entering again for the same voter replaces their ballot.
+        {captainOnly && ' This club only counts the captain\'s votes.'}
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -307,9 +316,15 @@ function BallotEntryForm({ detail, onSaved }) {
           <select value={voterId} onChange={(e) => setVoterId(e.target.value)}
             className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-pb-accent min-w-[180px]">
             <option value="">— who's voting? —</option>
-            {eligible.map((p) => <option key={p.id} value={p.id}>{p.name}{p.is_captain ? ' (c)' : ''}</option>)}
+            {voterOptions.map((p) => <option key={p.id} value={p.id}>{p.name}{p.is_captain ? ' (c)' : ''}</option>)}
             <option value="__other__">Someone else (coach, supporter…)</option>
           </select>
+          {captainOnly && captains.length > 0 && (
+            <button type="button" onClick={() => setShowAllVoters((v) => !v)}
+              className="block mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text underline">
+              {showAllVoters ? 'Only show the captain' : 'Show all players'}
+            </button>
+          )}
         </div>
         {voterId === '__other__' && (
           <div>

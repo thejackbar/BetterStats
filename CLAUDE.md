@@ -1022,6 +1022,19 @@ BetterFees' derived allocation.
   the current selection. `AdminVotes.jsx`'s Fixtures tab grew Team/Grade,
   Round and a search box alongside the existing season-year picker; picking
   a grade resets the round filter, since round options are scoped to it.
+- **Ballot entry now respects "Captain only" voting (v8.94.6)**: reported
+  live — with "Who votes" set to Captain only, the "Enter a ballot" voter
+  dropdown still listed every player who played, not just the captain.
+  `admin_enter_ballot` was always deliberately looser than the public page on
+  who it lets vote (any named voter, so an admin can transcribe paper votes
+  from any source) — nothing server-side actually enforces `voter_mode`
+  there, so this is a frontend-only default, not a new backend restriction.
+  `BallotEntryForm` now defaults the voter picker to just the fixture's
+  captain(s) when `settings.voter_mode === 'captain'` and any are known,
+  with a "Show all players" link for the edge case (vice-captain filling in,
+  a sync predating the captain flag leaving `eligible[].is_captain` all
+  false, in which case it falls back to showing everyone rather than an
+  empty list).
 
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 
