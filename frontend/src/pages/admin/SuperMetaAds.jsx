@@ -151,6 +151,67 @@ function SelectionRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
   )
 }
 
+// One row of the "Clubs searched" table — a club that got typed into the
+// search box (results loaded) whether or not it was then selected. `selected`
+// tells the two apart; the whole point is surfacing the searched-only ones.
+function SearchRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
+  const terms = (c.queries || []).filter(Boolean)
+  return (
+    <tr className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${hidden ? 'opacity-50' : ''}`}>
+      <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">{c.name}</td>
+      <td className="px-2 py-2">
+        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+          c.via_meta
+            ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
+            : 'border-pb-hairline text-pb-faint'
+        }`}>
+          {c.via_meta ? 'Meta' : 'Other'}
+        </span>
+      </td>
+      <td className="px-2 py-2">
+        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
+          c.selected
+            ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+            : 'border-sky-500/40 text-sky-300 bg-sky-500/10'
+        }`}>
+          {c.selected ? 'Selected' : 'Searched only'}
+        </span>
+      </td>
+      <td className="px-2 py-2 text-pb-dim font-mono whitespace-nowrap" title={`${fmtNum(c.searches)} search${c.searches === 1 ? '' : 'es'}`}>
+        {fmtNum(c.visitors)}
+      </td>
+      <td className="px-2 py-2 text-pb-dim max-w-[16rem]">
+        <span className="block truncate" title={terms.join(' · ')}>
+          {terms.length ? terms.map((t) => `“${t}”`).join(' · ') : '–'}
+        </span>
+      </td>
+      <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
+      <td className="px-2 py-2 text-right whitespace-nowrap">
+        {hidden ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRestore}
+            className="font-mono text-[9px] uppercase text-pb-faint hover:text-pb-text disabled:opacity-40"
+          >
+            Restore
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onFlag}
+            title="Hide this row from the table (doesn't affect the Sales Pipeline)"
+            className="font-mono text-[9px] uppercase text-pb-faint hover:text-red-300 disabled:opacity-40"
+          >
+            Flag as test
+          </button>
+        )}
+      </td>
+    </tr>
+  )
+}
+
 function FunnelChart({ stages, title = 'Funnel: impressions to a completed registration' }) {
   if (!stages?.length) return null
   const top = stages[0]?.value || 0
@@ -334,7 +395,9 @@ export default function SuperMetaAds() {
   const [adSignups, setAdSignups] = useState(null)
   const [registrationFunnel, setRegistrationFunnel] = useState(null)
   const [selectedClubs, setSelectedClubs] = useState(null)
+  const [searchedClubs, setSearchedClubs] = useState(null)
   const [showHiddenSelections, setShowHiddenSelections] = useState(false)
+  const [showSearchedOnly, setShowSearchedOnly] = useState(false)
   const [busySelectionKey, setBusySelectionKey] = useState('')
 
   const [trendDays, setTrendDays] = useState(14)
@@ -356,6 +419,7 @@ export default function SuperMetaAds() {
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
     api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
     api.metaAdsSelectedClubs().then(setSelectedClubs).catch(() => {})
+    api.metaAdsSearchedClubs().then(setSearchedClubs).catch(() => {})
     api.metaAdsCampaigns()
       .then((d) => { setCampaigns(d.campaigns || []); setActiveCampaignId(d.active_campaign_id || '') })
       .catch(() => {})
@@ -363,10 +427,13 @@ export default function SuperMetaAds() {
 
   useEffect(() => { load() }, [load])
 
+  // Hide/unhide is keyed on the normalised club name and shared by both the
+  // "selected" and "searched" tables, so refresh both after toggling one.
   const hideSelection = useCallback((c) => {
     setBusySelectionKey(c.key || c.name)
     api.metaAdsHideSelection(c.key || c.name)
       .then(setSelectedClubs)
+      .then(() => api.metaAdsSearchedClubs().then(setSearchedClubs))
       .catch(() => {})
       .finally(() => setBusySelectionKey(''))
   }, [])
@@ -375,6 +442,7 @@ export default function SuperMetaAds() {
     setBusySelectionKey(c.key || c.name)
     api.metaAdsUnhideSelection(c.key || c.name)
       .then(setSelectedClubs)
+      .then(() => api.metaAdsSearchedClubs().then(setSearchedClubs))
       .catch(() => {})
       .finally(() => setBusySelectionKey(''))
   }, [])
@@ -734,6 +802,80 @@ export default function SuperMetaAds() {
                   a Terms-step acknowledgement, or a completed registration &mdash; whichever it reached furthest.
                   A club that reaches the Terms step is added to the Sales Pipeline as a lead automatically.
                   &ldquo;Flag as test&rdquo; only hides a row from this table &mdash; it doesn&rsquo;t touch the pipeline.
+                </p>
+              </div>
+            )}
+
+            {/* Clubs typed into the search box (results loaded) even when no
+                club was clicked — the interest signal one step before a
+                selection. "Searched only" = searched but never selected. */}
+            {searchedClubs && (searchedClubs.clubs.length > 0
+                || (searchedClubs.hidden_count || 0) > 0) && (
+              <div className="pb-card p-4 mb-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+                    Clubs searched in the wizard (last 30 days)
+                  </div>
+                  <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
+                    <span>
+                      {searchedClubs.identified} club{searchedClubs.identified === 1 ? '' : 's'}
+                      {searchedClubs.searched_only_count > 0
+                        && <> &middot; {searchedClubs.searched_only_count} not selected</>}
+                    </span>
+                    {searchedClubs.searched_only_count > 0 && searchedClubs.converted_count > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSearchedOnly((v) => !v)}
+                        className="px-1.5 py-0.5 rounded-full border border-pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-dim uppercase"
+                      >
+                        {showSearchedOnly ? 'Show all' : 'Not selected only'}
+                      </button>
+                    )}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
+                        <th className="px-2 py-2">Top match</th>
+                        <th className="px-2 py-2">Source</th>
+                        <th className="px-2 py-2">Status</th>
+                        <th className="px-2 py-2">Visitors</th>
+                        <th className="px-2 py-2">Search terms</th>
+                        <th className="px-2 py-2">Last seen</th>
+                        <th className="px-2 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {searchedClubs.clubs
+                        .filter((c) => !showSearchedOnly || !c.selected)
+                        .map((c) => (
+                          <SearchRow
+                            key={c.name + (c.org_id || '')}
+                            c={c}
+                            busy={busySelectionKey === (c.key || c.name)}
+                            onFlag={() => hideSelection(c)}
+                          />
+                        ))}
+                      {(searchedClubs.hidden_clubs || []).map((c) => (
+                        <SearchRow
+                          key={'hidden-' + c.name + (c.org_id || '')}
+                          c={c}
+                          hidden
+                          busy={busySelectionKey === (c.key || c.name)}
+                          onRestore={() => unhideSelection(c)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="font-mono text-[9px] text-pb-faintest mt-3">
+                  A row is logged when a visitor&rsquo;s search returns a result, whether or not they then
+                  click one &mdash; the top match is recorded along with the text they typed. &ldquo;Searched
+                  only&rdquo; means the club showed up in a search but was never selected. &ldquo;Visitors&rdquo;
+                  counts distinct people; hover it for the raw search count. Meta-tagged rows came through the
+                  ad. &ldquo;Flag as test&rdquo; hides the row here and in the selected-clubs table.
                 </p>
               </div>
             )}

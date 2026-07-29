@@ -130,6 +130,9 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   const [selectedClub, setSelectedClub] = useState(null)
   const [duplicateClub, setDuplicateClub] = useState(null)
   const debounceRef = useRef(null)
+  // Last club we beaconed a `club_searched` step for — dedupes a settling
+  // search so typing a club name logs its top match once, not per keystroke.
+  const searchedOrgRef = useRef(null)
 
   // ─── Step 1b: club identity preview (Phase 3) ───────────────────────────
   // Prepared server-side (name, short name, slug) the same way the existing
@@ -194,9 +197,19 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
       setSearching(true)
       setSearchError('')
       try {
-        const data = await calls.search(query.trim())
-        setResults(Array.isArray(data) ? data : [])
+        const q = query.trim()
+        const data = await calls.search(q)
+        const list = Array.isArray(data) ? data : []
+        setResults(list)
         setShowResults(true)
+        // Interest-without-a-click: beacon the top match (+ raw text) so a
+        // searched-but-not-selected club still shows on the Meta Ads page.
+        // Public mode only (trackFunnelStep no-ops internally otherwise).
+        const top = list[0]
+        if (top && searchedOrgRef.current !== (top.id || orgName(top))) {
+          searchedOrgRef.current = top.id || orgName(top)
+          trackFunnelStep('club_searched', { name: orgName(top), org_id: top.id, query: q })
+        }
       } catch (e) {
         setResults([])
         setSearchError(e?.message || 'Club search failed.')

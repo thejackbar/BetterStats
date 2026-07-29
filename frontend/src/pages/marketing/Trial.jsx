@@ -251,6 +251,9 @@ export default function Trial() {
   const [searchError, setSearchError] = useState('')
   const [searched, setSearched] = useState(false)
   const debounceRef = useRef(null)
+  // Last club we fired a `club_searched` beacon for, so typing out a club name
+  // ("appl" → "applecross") logs its top match once, not once per keystroke.
+  const searchedOrgRef = useRef(null)
 
   useEffect(() => {
     let alive = true
@@ -294,8 +297,20 @@ export default function Trial() {
       setSearchError('')
       try {
         const data = await api.publicSelfServeSearch(q)
-        setResults(Array.isArray(data) ? data : [])
+        const list = Array.isArray(data) ? data : []
+        setResults(list)
         setSearched(true)
+        // A search that surfaced a club is an interest signal even with no
+        // click — beacon the top match (+ the raw text typed) so the Meta Ads
+        // page can show clubs that got searched but never selected. Deduped by
+        // the top result so a settling search fires once, not per keystroke.
+        const top = list[0]
+        if (top && searchedOrgRef.current !== (top.id || orgName(top))) {
+          searchedOrgRef.current = top.id || orgName(top)
+          api.publicSelfServeTrackStep('club_searched', getVisitorId(), {
+            name: orgName(top), org_id: top.id, query: q,
+          }).catch(() => {})
+        }
       } catch (e) {
         setResults([])
         setSearchError(e?.message || 'Club search failed. Try again in a moment.')
