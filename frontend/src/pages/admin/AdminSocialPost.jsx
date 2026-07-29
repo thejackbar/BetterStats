@@ -10,6 +10,7 @@ import SelectionInspector from '../../components/admin/socialpost/SelectionInspe
 import MediaLibraryPanel from '../../components/admin/socialpost/MediaLibraryPanel'
 import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
 import StartScreen from '../../components/admin/socialpost/StartScreen'
+import MobileQuickPost from '../../components/admin/socialpost/MobileQuickPost'
 import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
@@ -640,6 +641,15 @@ export default function AdminSocialPost() {
   const pendingImgItem = useRef(null)
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
+  // Below md the editor drops its drag canvas for a guided phone quick-post
+  // (unless the user taps "Full editor").
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false))
+  const [forceFullEditor, setForceFullEditor] = useState(false)
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
   const [adminSponsors, setAdminSponsors] = useState([])
@@ -1671,6 +1681,64 @@ export default function AdminSocialPost() {
   const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
+
+  // ─── Mobile quick post ────────────────────────────────────────────────────
+  if (isMobile && !forceFullEditor) {
+    const previewContent = (
+      <>
+        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+        {isBlankTab
+          ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
+          : <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />}
+        {customEdit && !isBlankTab && (
+          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+        )}
+      </>
+    )
+    // The three details that matter most for the active post type.
+    let mFields = []
+    if (activeTab === 'lineup') mFields = [
+      { label: 'Headline', value: headline, onChange: setHeadline, placeholder: 'SQUAD' },
+      { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    else if (activeTab === 'result') mFields = [
+      { label: 'Our score', value: result.teamScore, onChange: (v) => setResult((r) => ({ ...r, teamScore: v })), placeholder: '6/188' },
+      { label: 'Their score', value: result.oppScore, onChange: (v) => setResult((r) => ({ ...r, oppScore: v })), placeholder: '184' },
+      { label: 'Margin', value: result.margin, onChange: (v) => setResult((r) => ({ ...r, margin: v })), placeholder: 'BY 4 WICKETS' },
+    ]
+    else if (activeTab === 'announcement') mFields = [
+      { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
+      { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
+    ]
+    else if (activeTab === 'fixtures' || activeTab === 'results') mFields = [
+      { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    else if (isBlankTab) mFields = canvas.items.filter((it) => it.type === 'text').slice(0, 3)
+      .map((it, i) => ({ label: `Text ${i + 1}`, value: it.text, onChange: (v) => canvas.update(it.id, { text: v }) }))
+    else mFields = [
+      { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    const mPalettes = [
+      { key: 'club', label: 'Club', color: orgAccent(settings) },
+      ...Object.entries(PALETTES).map(([key, pal]) => ({ key, label: pal.name, color: pal.accent })),
+    ]
+    return (
+      <>
+        <SocialBackgroundDefs />
+        <MobileQuickPost
+          moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
+          W={W} H={H} content={previewContent} fontStyle={fontStyle}
+          types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
+          fields={mFields} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
+          onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
+          onFullEditor={() => setForceFullEditor(true)}
+        />
+      </>
+    )
+  }
 
   // ─── Start screen ─────────────────────────────────────────────────────────
   // A bare /admin/social-post (no ?type / ?template) shows the first-run post
