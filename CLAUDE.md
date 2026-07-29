@@ -827,6 +827,36 @@ live off the Grassroots feed — nothing new is persisted.
   initials. Both pages were verified visually against live Darwin CC (in-season)
   and Applecross (off-season/past) data before shipping — see the v8.79.0 note
   for the local-dev-proxy-to-production technique.
+- **Player name aliases (v8.94.2, migration 195)** — a renamed player (a
+  preferred/married name) broke matching on this page and on the live
+  scorecard merge, in a way the existing GUID-mismatch fallbacks couldn't
+  catch: a live feed still using their OLD name shares literally no words
+  with their new stored name, so even the surname-and-initial heuristic
+  misses (confirmed live: Applecross's Shaylyn Wijesinghe — formerly Johnson
+  — showed unresolved on the Lineups page, AND her already-synced
+  `batting_innings`/`bowling_spells` rows for that competition were ALSO
+  never linked to her player id at all, a pre-existing sync gap this doesn't
+  retroactively fix). `player_name_aliases` (org-scoped, `alias_key ->
+  player_id`, `services/player_aliases.py`'s `normalise_name_key` — lowercased,
+  comma/word-order-independent, so "Wijesinghe, Shaylyn" and "Shaylyn
+  Wijesinghe" key identically) is checked as an explicit tier, ahead of the
+  loose surname+initial fallback, in BOTH `lineups.resolve_participants` and
+  `games.py::get_scorecard`'s `_resolve_linked_id` (display-only there — never
+  touches which team a row is on or its stats). **Auto-seeded** the moment a
+  player is renamed (`players.py`'s `rename_player` and
+  `update_player_profile`'s `display_name_override` change both call
+  `seed_alias_on_rename`, `ON CONFLICT DO NOTHING` so it never blocks the
+  rename itself) — so this self-heals for every FUTURE rename with no admin
+  action. A rename that happened before this shipped needs the alias added by
+  hand: new "Also known as" panel on the player profile edit view
+  (`PlayerProfilePanel.jsx`'s `AliasManager`, `GET/POST/DELETE
+  /players/{id}/aliases`, cap `MANAGE_PLAYERS`) — self-contained, saves
+  immediately, not part of the "Save changes" draft flow. **Deliberately NOT
+  wired into `sync.py`'s `_team_pid`** (the function that gates every
+  batting/bowling/fielding/appearance INSERT) — that's the actual stats-writing
+  path, a much higher-stakes surface than a display-only hyperlink, and out of
+  scope for this fix; a player whose stats are missing because of this needs a
+  Full Rebuild AFTER an admin adds the alias by hand (not automatic).
 - **Not built (deliberate)**: nothing here is persisted, so there's no lineup
   history beyond what the feed still serves. Also noticed while investigating:
   `matchSummary.teams` carries `wonToss`/`battedFirst`, which contradicts the

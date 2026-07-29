@@ -130,13 +130,17 @@ async def resolve_participants(db: AsyncSession, org_id, participants: list[dict
     """Map CA participants (``{participant_id, name}``) → our own player rows,
     org-scoped.
 
-    Three-step match, same priority as the scorecard merge: the literal id,
-    then the stored raw GUID alias (``grassroots_id`` — the per-club ``uuid5``
-    scheme), then a name-key match for the GUID-mismatch case above. Loads the
-    whole roster rather than filtering by the incoming GUIDs, since the name
-    fallback needs every player's name in scope regardless of which GUIDs were
-    asked for.
+    Four-step match: the literal id, then the stored raw GUID alias
+    (``grassroots_id`` — the per-club ``uuid5`` scheme), then an explicit
+    admin-recorded name alias (``player_name_aliases`` — a rename means the
+    live feed's name and the player's own name may share no words at all, so
+    only an explicit mapping catches it), then a loose surname-and-initial
+    match for the ordinary GUID-mismatch case. Loads the whole roster rather
+    than filtering by the incoming GUIDs, since the name fallbacks need every
+    player's name in scope regardless of which GUIDs were asked for.
     """
+    from app.services.player_aliases import normalise_name_key, org_alias_map
+
     res = await db.execute(
         text(
             "SELECT id, grassroots_id, COALESCE(display_name_override, name) AS name, photo_url "
@@ -146,6 +150,7 @@ async def resolve_participants(db: AsyncSession, org_id, participants: list[dict
     )
     by_guid: dict[str, dict] = {}
     by_name: dict[tuple, dict] = {}
+    by_id: dict[str, dict] = {}
     for pid, guid, name, photo in res.fetchall():
         hit = {"player_id": str(pid), "name": name, "photo_url": photo}
         by_guid[str(pid)] = hit
@@ -153,15 +158,23 @@ async def resolve_participants(db: AsyncSession, org_id, participants: list[dict
             by_guid[str(guid)] = hit
         if name and not looks_redacted(name):
             by_name.setdefault(_name_key(name), hit)
+        by_id[str(pid)] = hit
+
+    alias_map = await org_alias_map(db, org_id)
 
     out: dict[str, dict] = {}
     for p in participants:
         pid = p.get("participant_id")
         if not pid:
             continue
+        name = p.get("name")
         hit = by_guid.get(pid)
-        if not hit and not looks_redacted(p.get("name")):
-            hit = by_name.get(_name_key(p.get("name")))
+        if not hit and name:
+            alias_pid = alias_map.get(normalise_name_key(name))
+            if alias_pid:
+                hit = by_id.get(alias_pid)
+        if not hit and name and not looks_redacted(name):
+            hit = by_name.get(_name_key(name))
         if hit:
             out[pid] = hit
     return out

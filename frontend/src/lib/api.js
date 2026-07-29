@@ -2206,6 +2206,14 @@ export const api = {
   bsUpdatePlayerProfile: (id, data) =>
     request(`/players/${id}/profile`, { method: 'PATCH', body: JSON.stringify(data) }),
 
+  // Former/alternate names — so a live feed (Play.Cricket, a Grassroots
+  // scorecard) using an old name still resolves to this player.
+  playerAliases: (id) => request(`/players/${id}/aliases`),
+  addPlayerAlias: (id, alias_name) =>
+    request(`/players/${id}/aliases`, { method: 'POST', body: JSON.stringify({ alias_name }) }),
+  deletePlayerAlias: (id, aliasId) =>
+    request(`/players/${id}/aliases/${aliasId}`, { method: 'DELETE' }),
+
   // ─── BetterIQ: Opposition analysis ──────────────────────
   // Opponents we have history against + upcoming fixtures to scout.
   iqListOpponents: () => request('/iq/opposition/opponents'),

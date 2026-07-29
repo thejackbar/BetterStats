@@ -514,6 +514,25 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE vote_fixture_overrides ADD COLUMN IF NOT EXISTS eligibility_source TEXT"))
         await conn.execute(text(
             "ALTER TABLE vote_fixture_overrides ALTER COLUMN status DROP NOT NULL"))
+        # Player name aliases (migration 195) — a former/alternate name that
+        # still resolves to the right player after a rename.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS player_name_aliases (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                alias_name TEXT NOT NULL,
+                alias_key TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_name_alias_key "
+            "ON player_name_aliases(organisation_id, alias_key)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_player_name_aliases_player "
+            "ON player_name_aliases(player_id)"))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "

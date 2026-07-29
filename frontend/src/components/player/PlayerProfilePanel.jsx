@@ -262,6 +262,83 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
 }
 
 /* ── Details (right column, right half) — inline editable ─────────────────── */
+/* ── Also known as — former/alternate names, so a live feed (Play.Cricket, a
+   Grassroots scorecard) still using an old name resolves to this player.
+   Self-contained: saves immediately on add/remove, independent of the
+   "Save changes" draft flow (same posture as PhotoRow below). ────────────── */
+function AliasManager({ playerId }) {
+  const [aliases, setAliases] = useState(null)
+  const [adding, setAdding] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    api.playerAliases(playerId).then((a) => { if (alive) setAliases(a) }).catch(() => { if (alive) setAliases([]) })
+    return () => { alive = false }
+  }, [playerId])
+
+  const add = async (e) => {
+    e.preventDefault()
+    const name = adding.trim()
+    if (!name || busy) return
+    setBusy(true); setErr('')
+    try {
+      await api.addPlayerAlias(playerId, name)
+      setAdding('')
+      setAliases(await api.playerAliases(playerId))
+    } catch (e2) {
+      setErr(e2.message || 'Could not add alias')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (aliasId) => {
+    setBusy(true)
+    try {
+      await api.deletePlayerAlias(playerId, aliasId)
+      setAliases((prev) => prev.filter((a) => a.id !== aliasId))
+    } catch { /* leave the chip in place on a failed delete */ }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-pb-hairline">
+      <div className="text-[11.5px] text-pb-faint mb-1.5">
+        Also known as
+      </div>
+      <p className="text-[11px] text-pb-faintest mb-2">
+        Former or alternate names — a live feed still using one of these still matches this player.
+        Renaming this player above adds their old name here automatically.
+      </p>
+      {aliases === null ? (
+        <div className="text-[11px] text-pb-faintest">Loading…</div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {aliases.length === 0 && <span className="text-[11px] text-pb-faintest">None yet.</span>}
+          {aliases.map((a) => (
+            <span key={a.id}
+              className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full text-[11.5px] bg-pb-surface2 border border-pb-hairline2">
+              {a.alias_name}
+              <button type="button" onClick={() => remove(a.id)} disabled={busy}
+                className="text-pb-faintest hover:text-pb-red disabled:opacity-50" title="Remove alias">
+                <Icon name="close" size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <form onSubmit={add} className="flex items-center gap-2">
+        <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="Add a former name…"
+          className="flex-1 min-w-0 bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-pb-accent" />
+        <Btn sm disabled={!adding.trim() || busy} type="submit">Add</Btn>
+      </form>
+      {err && <div className="text-[11px] text-pb-red mt-1.5">{err}</div>}
+    </div>
+  )
+}
+
 function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
   return (
@@ -329,6 +406,8 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
           Non-player (coach/scorer)
         </label>
       </div>
+
+      {canEdit && playerId && <AliasManager playerId={playerId} />}
     </div>
   )
 }

@@ -1024,6 +1024,28 @@ class Player(Base):
         return self.display_name_override or self.name
 
 
+class PlayerNameAlias(Base):
+    """A former/alternate name for a player, so a live feed (Play.Cricket team
+    list, a Grassroots scorecard) still resolving by NAME finds the right
+    player after a rename — a marriage/preferred-name change, or CA's own
+    inconsistent spelling. Auto-seeded with the OLD name whenever a player is
+    renamed (source='rename'); an admin can also add one by hand
+    (source='manual') for a rename that predates this table, or any other
+    name variant. Matched by ``alias_key`` (services/player_aliases.py's
+    ``normalise_name_key`` — lowercased, order-independent tokens), org-scoped
+    so one alias resolves to exactly one player.
+    """
+    __tablename__ = "player_name_aliases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    alias_name = Column(Text, nullable=False)
+    alias_key = Column(Text, nullable=False)
+    source = Column(Text, nullable=False, default="manual", server_default="manual")  # 'manual' | 'rename'
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class Game(Base):
     __tablename__ = "games"
 

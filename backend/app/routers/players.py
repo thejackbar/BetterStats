@@ -30,6 +30,7 @@ from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
 from app.services import iq_teammates
+from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 
 router = APIRouter(prefix="/players", tags=["players"])
 
@@ -601,6 +602,10 @@ async def rename_player(
         text("UPDATE player_achievements SET player_name = :new WHERE player_id = :pid"),
         {"new": name, "pid": player_id},
     )
+    # Record the old name as an alias so a live feed (Play.Cricket, a
+    # Grassroots scorecard) still using it keeps resolving to this player —
+    # see services/player_aliases.py.
+    await seed_alias_on_rename(db, player.organisation_id, player.id, old_name)
     await db.commit()
     return {"status": "renamed", "old_name": old_name, "new_name": name}
 
@@ -842,6 +847,10 @@ async def update_player_profile(
     data = body.model_dump(exclude_unset=True)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
+    # Capture the effective display name before display_name_override changes,
+    # so a rename via this route also gets remembered as an alias — same as
+    # the plain-name rename_player endpoint above.
+    old_display_name = player.display_name if "display_name_override" in data else None
     # squad_team_id arrives as a string (or None to unassign) — coerce to UUID,
     # then mirror the change into team_members so "Squad" resolves to the same
     # set on every BetterSelect screen.
@@ -858,9 +867,101 @@ async def update_player_profile(
                 await sync_squad_membership(db, player.organisation_id, player.id, old_team_id, new_team_id, user.id)
     for key, value in data.items():
         setattr(player, key, value)
+    if old_display_name and old_display_name != player.display_name:
+        await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
     await db.commit()
     await db.refresh(player)
     return await _full_profile(db, player)
+
+
+class PlayerAliasCreate(BaseModel):
+    alias_name: str
+
+
+@router.get("/{player_id}/aliases")
+async def list_player_aliases(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_PLAYERS)),
+):
+    """Former/alternate names recorded for this player (see
+    services/player_aliases.py) — auto-seeded whenever the player is renamed,
+    or added by hand here for a rename that predates that feature."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    res = await db.execute(
+        text(
+            "SELECT id, alias_name, source, created_at FROM player_name_aliases "
+            "WHERE player_id = :pid ORDER BY created_at DESC"
+        ),
+        {"pid": player_id},
+    )
+    return [
+        {"id": str(r[0]), "alias_name": r[1], "source": r[2], "created_at": r[3].isoformat() if r[3] else None}
+        for r in res.fetchall()
+    ]
+
+
+@router.post("/{player_id}/aliases")
+async def add_player_alias(
+    player_id: str,
+    body: PlayerAliasCreate,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_PLAYERS)),
+):
+    """Manually record a former/alternate name for this player — the fix for
+    a rename that happened before this table existed, or any other name a
+    live feed (Play.Cricket, a Grassroots scorecard) uses for them that
+    doesn't textually match their current name."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    alias_name = (body.alias_name or "").strip()
+    key = normalise_name_key(alias_name)
+    if not key:
+        raise HTTPException(status_code=400, detail="Alias name cannot be empty")
+
+    existing = await db.execute(
+        text("SELECT player_id FROM player_name_aliases WHERE organisation_id = :org AND alias_key = :key"),
+        {"org": club.id, "key": key},
+    )
+    row = existing.fetchone()
+    if row and str(row[0]) != player_id:
+        raise HTTPException(status_code=409, detail="That name is already an alias for a different player")
+    if row:
+        return {"status": "ok"}
+
+    await db.execute(
+        text(
+            "INSERT INTO player_name_aliases (organisation_id, player_id, alias_name, alias_key, source) "
+            "VALUES (:org, :pid, :name, :key, 'manual')"
+        ),
+        {"org": club.id, "pid": player_id, "name": alias_name, "key": key},
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/{player_id}/aliases/{alias_id}")
+async def delete_player_alias(
+    player_id: str,
+    alias_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_PLAYERS)),
+):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    await db.execute(
+        text("DELETE FROM player_name_aliases WHERE id = :id AND player_id = :pid"),
+        {"id": alias_id, "pid": player_id},
+    )
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/{player_id}/claim")

@@ -667,15 +667,19 @@ async def get_scorecard(
             # which is how this got past a syntax check). Select the two real
             # columns behind it and compute the same fallback in Python.
             player_rows = []
+            alias_map: dict[str, str] = {}
             if org:
                 player_res = await db.execute(
                     select(Player.id, Player.grassroots_id, Player.display_name_override, Player.name)
                     .where(Player.organisation_id == org.id)
                 )
                 player_rows = player_res.all()
+                from app.services.player_aliases import normalise_name_key, org_alias_map
+                alias_map = await org_alias_map(db, org.id)
             known_ids: set = {r[0] for r in player_rows}
             guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
             id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
+            id_by_str: dict[str, uuid.UUID] = {str(r[0]): r[0] for r in player_rows}
             nk_to_pid: dict[tuple, uuid.UUID] = {}
             for _pid, _guid, _override, _name in player_rows:
                 _dname = _override or _name
@@ -686,7 +690,9 @@ async def get_scorecard(
                 """Which of our own players (if any) this GR participant is —
                 purely for a hyperlink, never for deciding a row's stats or
                 which team it's on. Tries the literal id, then the stored raw
-                GUID alias, then a name match for the GUID-mismatch case above."""
+                GUID alias, then an explicit admin-recorded name alias (a
+                rename — see services/player_aliases.py), then a loose
+                surname-and-initial match for the ordinary GUID-mismatch case."""
                 try:
                     pid = uuid.UUID(pid_str)
                 except (TypeError, ValueError):
@@ -695,6 +701,10 @@ async def get_scorecard(
                     return pid
                 if pid_str in guid_to_pid:
                     return guid_to_pid[pid_str]
+                if name:
+                    alias_pid = alias_map.get(normalise_name_key(name))
+                    if alias_pid:
+                        return id_by_str.get(alias_pid)
                 if name and not _looks_redacted(name):
                     return nk_to_pid.get(_name_key(name))
                 return None
