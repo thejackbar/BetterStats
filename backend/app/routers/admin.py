@@ -20,6 +20,7 @@ from app.models.db import (
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERGES
 from app.services.grade_labels import suggest_category, normalise_category
+from app.services.player_aliases import seed_alias_on_rename
 from app.auth.modules import require_module
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -407,6 +408,15 @@ async def _merge_players_core(
         keep_original_playhq_id = keep.playhq_id
         removed_playhq_id = remove.playhq_id
         removed_name = remove.name
+        removed_display_name = remove.display_name_override or remove.name
+
+        # A merge is a rename in disguise from a live feed's point of view: the
+        # removed player's name no longer has ANY row to resolve to once
+        # they're gone, so a Play.Cricket team list or a scorecard still using
+        # it would go from "matched via the normal fallback" to "unresolved"
+        # the moment this merge lands. Seed it as an alias onto the kept
+        # player — same mechanism a plain rename uses (services/player_aliases.py).
+        await seed_alias_on_rename(db, org_id, keep_id, removed_display_name)
 
         # --- Delete remove player FIRST (avoids unique constraint violation on playhq_id) ---
         await db.execute(delete(Player).where(Player.id == remove_id))

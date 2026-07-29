@@ -857,6 +857,20 @@ live off the Grassroots feed — nothing new is persisted.
   path, a much higher-stakes surface than a display-only hyperlink, and out of
   scope for this fix; a player whose stats are missing because of this needs a
   Full Rebuild AFTER an admin adds the alias by hand (not automatic).
+- **`merge_players` also auto-seeds an alias** (v8.94.3, `admin.py::_merge_players_core`):
+  a merge is a rename in disguise from a live feed's point of view — the
+  removed player's name has NO row to resolve to at all once they're gone, so
+  a Play.Cricket team list or scorecard still using it would go from
+  "resolves via the normal fallback" to "unresolved" the moment the merge
+  lands. The removed player's effective display name (`display_name_override
+  or name`, captured before the delete, same point the undo-log fields
+  already are) is seeded onto the KEPT player via the same
+  `seed_alias_on_rename`. **Known gap**: undoing a merge doesn't remove this
+  alias — matches the same accepted trade-off the vote-reassignment note
+  above already makes for this function ("no data lost, but not
+  reference-perfect on an undo"); a stale alias after an undo is a rare,
+  low-stakes case an admin can delete by hand via "Also known as" if it ever
+  comes up.
 - **Not built (deliberate)**: nothing here is persisted, so there's no lineup
   history beyond what the feed still serves. Also noticed while investigating:
   `matchSummary.teams` carries `wonToss`/`battedFirst`, which contradicts the
