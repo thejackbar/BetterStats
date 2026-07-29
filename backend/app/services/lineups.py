@@ -101,34 +101,69 @@ def our_team_index(teams: list[dict], org) -> Optional[int]:
     return None
 
 
-async def resolve_participants(db: AsyncSession, org_id, participant_ids: list[str]) -> dict[str, dict]:
-    """Map CA participant GUIDs → our own player rows, org-scoped.
+def _name_key(n: Optional[str]) -> tuple[str, str]:
+    """Match on (surname, first_initial) — handles "Surname, First" (our
+    stored `name` format) vs "First Surname" (GR's `name`/`shortName`).
 
-    ``players.id`` is the raw participant GUID for an ordinary player, or a
-    per-club ``uuid5`` whose ``grassroots_id`` holds the raw GUID (the
-    shared-GUID scheme in CLAUDE.md) — so both are checked. Org-scoped so a
-    participant who plays for two synced clubs never resolves to the other
-    club's row.
+    The fallback for when GR's participant GUID for THIS match doesn't match
+    anything we have stored at all: CA is known to issue a different GUID for
+    the same real person across a MyCricket/PlayHQ migration boundary (see the
+    dual-GUID notes in CLAUDE.md) — confirmed live on this exact route: a
+    club's own registered player can appear in `/scores/matches/{id}`'s team
+    list under a participantId that matches neither their `players.id` nor
+    `grassroots_id`, even though the SAME id resolves correctly on the
+    scorecard-sync path for other games. Mirrors `games.py::get_scorecard`'s
+    identical fallback (`_name_key`/`nk_to_pid`) so the two code paths agree.
     """
-    ids = [p for p in participant_ids if p]
-    if not ids:
-        return {}
+    n = (n or "").strip()
+    if "," in n:
+        surname, _, first = n.partition(",")
+        first = first.strip()
+        return (surname.strip().lower(), first[0].lower() if first else "")
+    words = n.split()
+    if not words:
+        return ("", "")
+    return (words[-1].lower(), words[0][0].lower())
+
+
+async def resolve_participants(db: AsyncSession, org_id, participants: list[dict]) -> dict[str, dict]:
+    """Map CA participants (``{participant_id, name}``) → our own player rows,
+    org-scoped.
+
+    Three-step match, same priority as the scorecard merge: the literal id,
+    then the stored raw GUID alias (``grassroots_id`` — the per-club ``uuid5``
+    scheme), then a name-key match for the GUID-mismatch case above. Loads the
+    whole roster rather than filtering by the incoming GUIDs, since the name
+    fallback needs every player's name in scope regardless of which GUIDs were
+    asked for.
+    """
     res = await db.execute(
         text(
-            """
-            SELECT COALESCE(grassroots_id, id::text) AS guid, id,
-                   COALESCE(display_name_override, name) AS name,
-                   photo_url
-            FROM players
-            WHERE organisation_id = :org
-              AND (id::text = ANY(:ids) OR grassroots_id = ANY(:ids))
-            """
+            "SELECT id, grassroots_id, COALESCE(display_name_override, name) AS name, photo_url "
+            "FROM players WHERE organisation_id = :org"
         ),
-        {"org": org_id, "ids": ids},
+        {"org": org_id},
     )
+    by_guid: dict[str, dict] = {}
+    by_name: dict[tuple, dict] = {}
+    for pid, guid, name, photo in res.fetchall():
+        hit = {"player_id": str(pid), "name": name, "photo_url": photo}
+        by_guid[str(pid)] = hit
+        if guid:
+            by_guid[str(guid)] = hit
+        if name and not looks_redacted(name):
+            by_name.setdefault(_name_key(name), hit)
+
     out: dict[str, dict] = {}
-    for guid, pid, name, photo in res.fetchall():
-        out[str(guid)] = {"player_id": str(pid), "name": name, "photo_url": photo}
+    for p in participants:
+        pid = p.get("participant_id")
+        if not pid:
+            continue
+        hit = by_guid.get(pid)
+        if not hit and not looks_redacted(p.get("name")):
+            hit = by_name.get(_name_key(p.get("name")))
+        if hit:
+            out[pid] = hit
     return out
 
 
@@ -147,8 +182,7 @@ async def match_lineups(db: AsyncSession, org, match_id: str, detail: Optional[d
     ours = our_team_index(teams, org)
 
     if ours is not None:
-        guids = [p["participant_id"] for p in teams[ours]["players"]]
-        known = await resolve_participants(db, org.id, guids)
+        known = await resolve_participants(db, org.id, teams[ours]["players"])
         for p in teams[ours]["players"]:
             hit = known.get(p["participant_id"])
             p["player_id"] = hit["player_id"] if hit else None

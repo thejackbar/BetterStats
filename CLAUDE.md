@@ -755,6 +755,19 @@ live off the Grassroots feed — nothing new is persisted.
   per-club uuid5 scheme). A redacted junior (`********`) gets their real name
   back when we hold the player. `our_lineup_players` returns
   `(players, unmatched)` for the vote engine.
+- **Name-fallback fix (same day)**: two real, long-registered Applecross
+  players (100+ games each) showed on the Lineups page with no photo and no
+  profile link. Root cause: CA issues a **different participant GUID** for
+  the same real person on this plain match-list route than the GUID our
+  scorecard sync resolved them under for that exact game (verified live —
+  their own scorecard endpoint correctly links them via a GUID that matches
+  neither `players.id` nor `grassroots_id` on the lineup route's payload) —
+  the same MyCricket/PlayHQ dual-GUID class of issue the scorecard rewrite
+  documents above, just hit on a different endpoint. `resolve_participants`
+  was GUID-only; it now adds the identical third-step fallback
+  `games.py::get_scorecard` already uses — a `(surname, first_initial)`
+  name-key match — after the id/`grassroots_id` checks fail. Confirmed against
+  the real payload for both players before shipping.
 - **`GET /organisations/{id}/lineups`** (public): `mode=upcoming` (falls back to
   recent games when nothing is scheduled, so the page is never blank in the
   off-season) or `mode=past` with `season_id`/`grade_id`/`offset`/`limit`
