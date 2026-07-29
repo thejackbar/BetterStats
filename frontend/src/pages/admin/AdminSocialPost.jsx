@@ -33,6 +33,7 @@ import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPalet
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { useBlankLayer } from '../../social/useBlankLayer'
+import { useEditHistory } from '../../social/useEditHistory'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
@@ -781,6 +782,11 @@ export default function AdminSocialPost() {
   // template. Both share the same block model + editor (via useBlankLayer).
   const canvas = useBlankLayer(defaultBlankItems)
   const overlay = useBlankLayer(EMPTY_LAYER)
+  // Undo/redo + action log, one per layer (history is per page/layer).
+  const canvasHistory = useEditHistory(canvas)
+  const overlayHistory = useEditHistory(overlay)
+  // Coalesces a burst of same-label edits (e.g. slider ticks) into one snapshot.
+  const lastRec = useRef({ label: '', t: 0 })
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
   // template so it can be tweaked and saved as a custom template.
   const [customEdit, setCustomEdit] = useState(false)
@@ -1340,6 +1346,48 @@ export default function AdminSocialPost() {
   // Blank tab, else the overlay that floats on top of a real template. (Adding
   // a block to a real template turns Custom Edit on so the overlay shows.)
   const layer = isBlankTab ? canvas : overlay
+  const history = isBlankTab ? canvasHistory : overlayHistory
+
+  // Snapshot the current layer BEFORE a mutation so undo restores it. A burst of
+  // the same label within 400ms coalesces into one snapshot (slider drags).
+  const record = (label) => {
+    const t = Date.now()
+    if (label === lastRec.current.label && t - lastRec.current.t < 400) { lastRec.current.t = t; return }
+    lastRec.current = { label, t }
+    history.commit(label)
+  }
+  // History-aware wrappers around the layer mutators the inspector/panels drive.
+  const hUpdate = (id, patch) => { record('Edit block'); layer.update(id, patch) }
+  const hReorder = (id, dir) => { record('Reorder'); layer.reorder(id, dir) }
+  const hDuplicate = (id) => { record('Duplicate'); layer.duplicate(id) }
+  const hRemove = (id) => { record('Delete'); layer.remove(id) }
+  const hAlign = (mode) => { record('Align'); layer.align(mode) }
+  const hMoveBefore = (a, b) => { record('Reorder'); layer.moveBefore(a, b) }
+
+  // Keyboard: delete removes the selection; ⌘/Ctrl-Z undo, ⇧⌘Z redo. Ignored
+  // while typing in a field.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return
+      const meta = e.metaKey || e.ctrlKey
+      if (meta && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) history.redo(); else history.undo()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && layer.selIds.length) {
+        e.preventDefault()
+        record('Delete')
+        layer.selIds.forEach((id) => layer.remove(id))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, layer])
+
+  // A template switch starts a fresh undo history (the old snapshots belong to a
+  // different layout).
+  useEffect(() => { canvasHistory.clear(); overlayHistory.clear() }, [templateId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Light-surface event layouts (Ticket, Gazette, Sticker, Swiss, Polaroid) want
   // a paper/ink pair rather than the dark-mode palette; eventPaletteFor is a
@@ -1613,6 +1661,7 @@ export default function AdminSocialPost() {
   const addBlock = (type, opts = {}) => {
     if (!isBlankTab && !customEdit) setCustomEdit(true)
     const target = isBlankTab ? canvas : overlay
+    record(`Add ${type}`)
     return target.add(type, opts)
   }
 
@@ -1631,7 +1680,7 @@ export default function AdminSocialPost() {
   }
   const useMediaAsset = (asset) => {
     const sel = layer.selIds.length === 1 ? layer.items.find((it) => it.id === layer.selIds[0]) : null
-    if (sel && sel.type === 'image') layer.update(sel.id, { src: asset.url, srcName: asset.name })
+    if (sel && sel.type === 'image') { record('Replace image'); layer.update(sel.id, { src: asset.url, srcName: asset.name }) }
     else addBlock('image', { src: asset.url, srcName: asset.name })
   }
   const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
@@ -1668,6 +1717,14 @@ export default function AdminSocialPost() {
   )
   const headerRight = (
     <>
+      <span className="flex items-center gap-1">
+        <button onClick={history.undo} disabled={!history.canUndo} title="Undo (⌘Z)"
+          className="w-7 h-7 grid place-items-center rounded-md text-pb-dim hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-dim transition-colors"><Icon name="reset" size={15} /></button>
+        <button onClick={history.redo} disabled={!history.canRedo} title="Redo (⇧⌘Z)"
+          className="w-7 h-7 grid place-items-center rounded-md text-pb-dim hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-dim transition-colors"><Icon name="reset" size={15} style={{ transform: 'scaleX(-1)' }} /></button>
+        <span className="font-mono text-[8px] tracking-wide2 uppercase text-pb-faintest w-11 leading-tight">{history.depth} step{history.depth === 1 ? '' : 's'}</span>
+      </span>
+      <span className="w-px h-5 bg-pb-hairline" />
       {exportError && <span className="text-pb-red text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
       <button onClick={handleReset} title="Reset the fields for this post type"
         className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
@@ -1696,7 +1753,8 @@ export default function AdminSocialPost() {
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
-                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany} />
+                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
+                onGestureStart={() => record('Move block')} />
             ) : (
               <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
             )}
@@ -1704,6 +1762,7 @@ export default function AdminSocialPost() {
               <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
                 interactive scale={scale} selectedIds={overlay.selIds}
                 onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
+                onGestureStart={() => record('Move block')}
                 style={{ position: 'absolute', inset: 0 }} />
             )}
           </div>
@@ -1719,8 +1778,8 @@ export default function AdminSocialPost() {
   const inspectorNode = (
     <SelectionInspector
       items={layer.items} selIds={layer.selIds}
-      onUpdate={layer.update} onReorder={layer.reorder}
-      onDuplicate={layer.duplicate} onRemove={layer.remove} onAlign={layer.align}
+      onUpdate={hUpdate} onReorder={hReorder}
+      onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
       palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem}
     />
   )
@@ -1759,9 +1818,9 @@ export default function AdminSocialPost() {
             {tool === 'layers' && (
               <LayersPanel
                 items={layer.items} selIds={layer.selIds}
-                onSelect={layer.select} onReorder={layer.reorder}
-                onDuplicate={layer.duplicate} onRemove={layer.remove}
-                onMoveLayerBefore={layer.moveBefore} historyLog={[]}
+                onSelect={layer.select} onReorder={hReorder}
+                onDuplicate={hDuplicate} onRemove={hRemove}
+                onMoveLayerBefore={hMoveBefore} historyLog={history.log}
               />
             )}
             {tool === 'brand' && (<>
@@ -2901,6 +2960,7 @@ export default function AdminSocialPost() {
             if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
             setHeroImage({ blobUrl: URL.createObjectURL(file) })
           } else if (e.key === 'blankimg' && e.itemId) {
+            record('Replace image')
             layer.update(e.itemId, { src: URL.createObjectURL(file) })
           } else if (typeof e.sponsorIdx === 'number') {
             applySponsorBlob(e.sponsorIdx, file, e.sponsorName)

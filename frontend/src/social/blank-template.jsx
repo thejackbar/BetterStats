@@ -488,7 +488,7 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
 export function BlankCanvas({
   items = [], palette = {}, team = {}, data = {},
   interactive = false, scale = 1, selectedIds = [],
-  onSelect, onDeselect, onPatchMany, onCommit,
+  onSelect, onDeselect, onPatchMany, onCommit, onGestureStart,
   transparent = false, width = 1080, height = 1080, style = {},
 }) {
   const rootRef = useRef(null)
@@ -508,7 +508,9 @@ export function BlankCanvas({
     const starts = {}
     active.forEach((aid) => { const it = items.find((x) => x.id === aid); if (it) starts[aid] = { x: it.x, y: it.y } })
     const sx = e.clientX, sy = e.clientY
+    let started = false
     const move = (ev) => {
+      if (!started) { started = true; onGestureStart && onGestureStart() }
       const dx = (ev.clientX - sx) / s, dy = (ev.clientY - sy) / s
       const patch = {}
       Object.entries(starts).forEach(([aid, st]) => { patch[aid] = { x: Math.round(st.x + dx), y: Math.round(st.y + dy) } })
@@ -523,7 +525,9 @@ export function BlankCanvas({
     e.stopPropagation(); e.preventDefault()
     const sx = e.clientX, sy = e.clientY
     const w0 = item.w, h0 = item.h, sz0 = item.size, fs0 = item.fontSize
+    let started = false
     const move = (ev) => {
+      if (!started) { started = true; onGestureStart && onGestureStart() }
       const dx = (ev.clientX - sx) / s, dy = (ev.clientY - sy) / s
       if (item.type === 'text' || item.type === 'data') onPatchMany({ [item.id]: { w: Math.max(40, Math.round(w0 + dx)) } })
       else if (item.type === 'image') { const nw = Math.max(30, Math.round(w0 + dx)); const r = h0 && w0 ? h0 / w0 : 1; onPatchMany({ [item.id]: { w: nw, h: Math.max(30, Math.round(nw * r)) } }) }
@@ -540,7 +544,9 @@ export function BlankCanvas({
     const starts = {}
     selectedIds.forEach((id) => { const it = items.find((x) => x.id === id); if (it) starts[id] = { ...it } })
     const sx = e.clientX, w0 = Math.max(bb.w, 1)
+    let started = false
     const move = (ev) => {
+      if (!started) { started = true; onGestureStart && onGestureStart() }
       const dx = (ev.clientX - sx) / s
       let f = (w0 + dx) / w0; f = Math.max(0.2, Math.min(4, f))
       const patch = {}
