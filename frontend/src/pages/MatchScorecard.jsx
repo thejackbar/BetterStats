@@ -6,6 +6,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
+import TeamBadge from '../components/TeamBadge'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -84,33 +85,6 @@ function marginText(game, innings1, innings2) {
 // org logo. Neither is guaranteed present, and a hotlinked CA/Cloudinary URL
 // can 404 — falls back to an initials badge either way, same as BetterSocials'
 // share-card templates do for the same reason.
-function TeamBadge({ name, logoUrl, size = 36 }) {
-  const [failed, setFailed] = useState(false)
-  const initials = (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
-  if (logoUrl && !failed) {
-    return (
-      <img
-        src={logoUrl}
-        alt=""
-        onError={() => setFailed(true)}
-        className="shrink-0 rounded-lg object-contain bg-pb-surface2"
-        style={{ width: size, height: size }}
-      />
-    )
-  }
-  return (
-    <div
-      className="shrink-0 rounded-lg grid place-items-center font-display font-bold tracking-tight"
-      style={{
-        width: size, height: size, fontSize: Math.round(size * 0.36),
-        background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)',
-      }}
-    >
-      {initials}
-    </div>
-  )
-}
-
 // Small accent-green pill marking the winning side — echoed in both the
 // header and each team's own card, so the winner reads at a glance no
 // matter where on the page you're looking (not just the very top).

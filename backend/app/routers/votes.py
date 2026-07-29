@@ -50,6 +50,7 @@ class SettingsUpdate(BaseModel):
     allow_self_vote: Optional[bool] = None
     allow_non_participants: Optional[bool] = None
     auto_close_days: Optional[int] = None
+    eligibility_source: Optional[str] = None
 
 
 def _settings_payload(s: Optional[VoteSettings]) -> dict:
@@ -91,6 +92,10 @@ async def update_settings(
         if body.tie_policy not in vote_svc.TIE_POLICIES:
             raise HTTPException(status_code=400, detail="Invalid tie policy")
         s.tie_policy = body.tie_policy
+    if body.eligibility_source is not None:
+        if body.eligibility_source not in vote_svc.ELIGIBILITY_SOURCES:
+            raise HTTPException(status_code=400, detail="Invalid eligibility source")
+        s.eligibility_source = body.eligibility_source
     if body.ballot_values is not None:
         if not body.ballot_values:
             raise HTTPException(status_code=400, detail="The ballot needs at least one position")
@@ -181,13 +186,20 @@ async def list_vote_fixtures(
     fids = [f.id for f in fixtures]
 
     synced: set[str] = set()
+    lineup_saved: set[str] = set()
     counts: dict[str, int] = {}
-    overrides: dict[str, str] = {}
+    overrides: dict[str, VoteFixtureOverride] = {}
     grade_names: dict[str, str] = {}
     if fids:
         from sqlalchemy import text
         g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": fids})
         synced = {str(r[0]) for r in g_res.fetchall()}
+        l_res = await db.execute(
+            text("SELECT DISTINCT fixture_id FROM fixture_lineups "
+                 "WHERE organisation_id = :org AND fixture_id = ANY(:ids)"),
+            {"org": club.id, "ids": fids},
+        )
+        lineup_saved = {str(r[0]) for r in l_res.fetchall()}
         c_res = await db.execute(
             text("SELECT fixture_id, COUNT(*) FROM vote_ballots "
                  "WHERE organisation_id = :org AND fixture_id = ANY(:ids) GROUP BY fixture_id"),
@@ -197,7 +209,7 @@ async def list_vote_fixtures(
         o_res = await db.execute(
             select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id.in_(fids))
         )
-        overrides = {str(o.fixture_id): o.status for o in o_res.scalars().all()}
+        overrides = {str(o.fixture_id): o for o in o_res.scalars().all()}
         gids = {f.grade_id for f in fixtures if f.grade_id}
         if gids:
             gn_res = await db.execute(
@@ -208,7 +220,16 @@ async def list_vote_fixtures(
     out = []
     for f in fixtures:
         fid = str(f.id)
-        state = vote_svc.fixture_vote_state(f, cfg, overrides.get(fid), fid in synced, today)
+        ov = overrides.get(fid)
+        source = vote_svc.effective_source(cfg, ov.eligibility_source if ov else None)
+        # Cheap readiness for the list: a live Play.Cricket check per row would
+        # mean one upstream call per fixture, so a 'playhq' fixture reads as
+        # ready once played and the ballot page reports an unpublished side.
+        ready = (
+            fid in synced or fid in lineup_saved
+            or (source == "playhq" and f.played_on is not None and f.played_on <= today)
+        )
+        state = vote_svc.fixture_vote_state(f, cfg, ov.status if ov else None, ready, today)
         close = vote_svc.fixture_close_date(f, cfg)
         out.append({
             "id": fid,
@@ -219,6 +240,10 @@ async def list_vote_fixtures(
             "grade_id": str(f.grade_id) if f.grade_id else None,
             "home_away": f.home_away,
             "state": state,
+            "source": source,
+            "source_override": ov.eligibility_source if ov else None,
+            "has_lineup": fid in lineup_saved,
+            "synced": fid in synced,
             "closes_on": close.isoformat() if close and state == "open" else None,
             "ballots": counts.get(fid, 0),
         })
@@ -238,11 +263,14 @@ async def fixture_detail(
     fx = await _org_fixture(db, club, fixture_id)
     s = await vote_svc.get_settings(db, club.id)
     cfg = vote_svc.effective_config(s)
-    has_game = await vote_svc.game_exists(db, fx.id)
-    override = await vote_svc.get_override(db, fx.id)
-    state = vote_svc.fixture_vote_state(fx, cfg, override, has_game)
-
-    eligible = await vote_svc.eligible_players(db, club.id, fx.id) if has_game else []
+    ov = await vote_svc.get_override(db, fx.id)
+    # check_all so the admin can see what each source would give them before
+    # switching this fixture over.
+    elig = await vote_svc.resolve_eligibility(
+        db, club, fx, cfg, ov.eligibility_source if ov else None, check_all=True,
+    )
+    eligible = elig["players"]
+    state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     ballots_by_fx = await vote_svc.load_ballots_by_fixture(db, club.id, [fx.id])
     ballots = ballots_by_fx.get(str(fx.id), [])
 
@@ -271,9 +299,18 @@ async def fixture_detail(
             "round": vote_svc.round_label_for(fx),
             "date": fx.played_on.isoformat() if fx.played_on else None,
             "state": state,
-            "override": override,
+            "override": ov.status if ov else None,
         },
         "settings": _settings_payload(s),
+        "eligibility": {
+            "requested": elig["requested"],
+            "used": elig["used"],
+            "fell_back": elig["fell_back"],
+            "counts": elig["counts"],
+            "unmatched": elig["unmatched"],
+            "override": ov.eligibility_source if ov else None,
+            "labels": elig["labels"],
+        },
         "eligible": eligible,
         "ballots": [
             {
@@ -344,11 +381,18 @@ async def admin_enter_ballot(
     but picks are still restricted to who actually played, and the club's
     self-vote rule still applies."""
     fx = await _org_fixture(db, club, fixture_id)
-    if not await vote_svc.game_exists(db, fx.id):
-        raise HTTPException(status_code=409, detail="This game's scorecard hasn't synced yet. Votes open once it has")
     s = await vote_svc.get_settings(db, club.id)
     cfg = vote_svc.effective_config(s)
-    eligible = await vote_svc.eligible_players(db, club.id, fx.id)
+    ov = await vote_svc.get_override(db, fx.id)
+    elig = await vote_svc.resolve_eligibility(
+        db, club, fx, cfg, ov.eligibility_source if ov else None,
+    )
+    eligible = elig["players"]
+    if not eligible:
+        raise HTTPException(
+            status_code=409,
+            detail="No team list for this game yet — save a BetterSelect XI, publish the side on Play.Cricket, or wait for the scorecard to sync",
+        )
     eligible_ids = {p["id"] for p in eligible}
 
     voter_pid: Optional[uuid.UUID] = None
@@ -428,18 +472,23 @@ async def delete_ballot(
 # ─── Lock / reopen ───────────────────────────────────────────────────────────
 
 async def _set_override(db: AsyncSession, club: Organisation, fx: Fixture,
-                        status: str, user_id) -> None:
+                        user_id, *, status: str | None = None,
+                        source: str | None = None) -> None:
+    """Upsert the fixture's override row. Only the field(s) passed are touched,
+    so setting a source never disturbs a lock (and vice versa)."""
     res = await db.execute(
         select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id == fx.id)
     )
     row = res.scalar_one_or_none()
-    if row:
+    if not row:
+        row = VoteFixtureOverride(fixture_id=fx.id, organisation_id=club.id)
+        db.add(row)
+    if status is not None:
         row.status = status
-        row.set_by = user_id
-    else:
-        db.add(VoteFixtureOverride(
-            fixture_id=fx.id, organisation_id=club.id, status=status, set_by=user_id,
-        ))
+    if source is not None:
+        # "" clears the override and falls back to the club default.
+        row.eligibility_source = source or None
+    row.set_by = user_id
     await db.commit()
 
 
@@ -451,7 +500,7 @@ async def lock_fixture(
     user: User = Depends(require_cap(MANAGE_VOTES)),
 ):
     fx = await _org_fixture(db, club, fixture_id)
-    await _set_override(db, club, fx, "locked", user.id)
+    await _set_override(db, club, fx, user.id, status="locked")
     return {"status": "ok", "state": "locked"}
 
 
@@ -463,8 +512,30 @@ async def reopen_fixture(
     user: User = Depends(require_cap(MANAGE_VOTES)),
 ):
     fx = await _org_fixture(db, club, fixture_id)
-    await _set_override(db, club, fx, "reopened", user.id)
+    await _set_override(db, club, fx, user.id, status="reopened")
     return {"status": "ok", "state": "open"}
+
+
+class SourceBody(BaseModel):
+    eligibility_source: Optional[str] = None  # None/"" clears back to the club default
+
+
+@router.post("/fixtures/{fixture_id}/source")
+async def set_fixture_source(
+    fixture_id: str,
+    body: SourceBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_VOTES)),
+):
+    """Override which team list this one fixture's votes run off — e.g. a club
+    that normally waits for the scorecard voting on the night of a final."""
+    fx = await _org_fixture(db, club, fixture_id)
+    src = body.eligibility_source or ""
+    if src and src not in vote_svc.ELIGIBILITY_SOURCES:
+        raise HTTPException(status_code=400, detail="Invalid eligibility source")
+    await _set_override(db, club, fx, user.id, source=src)
+    return {"status": "ok", "eligibility_source": src or None}
 
 
 # ─── Leaderboard ─────────────────────────────────────────────────────────────

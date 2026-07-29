@@ -46,7 +46,7 @@ function Banner({ tone = 'error', children }) {
 
 const STATE_LABEL = {
   open: null, // votable — no caption needed
-  awaiting_sync: 'Scorecard not in yet',
+  awaiting_team: 'Team list not in yet',
   closed: 'Voting closed',
   locked: 'Voting closed',
 }

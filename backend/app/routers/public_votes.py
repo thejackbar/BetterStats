@@ -168,13 +168,29 @@ async def _open_fixtures(db: AsyncSession, club: Organisation, cfg: dict) -> lis
     fids = [f.id for f in fixtures]
     g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": fids})
     synced = {str(r[0]) for r in g_res.fetchall()}
+    l_res = await db.execute(
+        text("SELECT DISTINCT fixture_id FROM fixture_lineups "
+             "WHERE organisation_id = :org AND fixture_id = ANY(:ids)"),
+        {"org": club.id, "ids": fids},
+    )
+    lineup_saved = {str(r[0]) for r in l_res.fetchall()}
     o_res = await db.execute(
         select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id.in_(fids))
     )
-    overrides = {str(o.fixture_id): o.status for o in o_res.scalars().all()}
+    overrides = {str(o.fixture_id): o for o in o_res.scalars().all()}
     out = []
     for f in fixtures:
-        state = vote_svc.fixture_vote_state(f, cfg, overrides.get(str(f.id)), str(f.id) in synced, today)
+        fid = str(f.id)
+        ov = overrides.get(fid)
+        source = vote_svc.effective_source(cfg, ov.eligibility_source if ov else None)
+        # Cheap readiness (see the same note on the admin list): a per-fixture
+        # live Play.Cricket check would be one upstream call per row, so the
+        # ballot page does that check when a game is actually opened.
+        ready = (
+            fid in synced or fid in lineup_saved
+            or (source == "playhq" and f.played_on is not None and f.played_on <= today)
+        )
+        state = vote_svc.fixture_vote_state(f, cfg, ov.status if ov else None, ready, today)
         out.append((f, state))
     return out
 
@@ -211,7 +227,7 @@ async def get_landing(token: str, request: Request, db: AsyncSession = Depends(g
                 "state": state,
             }
             for f, state in fixtures
-            if state in ("open", "awaiting_sync", "closed", "locked")
+            if state in ("open", "awaiting_team", "closed", "locked")
         ],
     }
 
@@ -305,10 +321,12 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
     if not fx or fx.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    has_game = await vote_svc.game_exists(db, fx.id)
-    override = await vote_svc.get_override(db, fx.id)
-    state = vote_svc.fixture_vote_state(fx, cfg, override, has_game)
-    eligible = await vote_svc.eligible_players(db, club.id, fx.id) if has_game else []
+    ov = await vote_svc.get_override(db, fx.id)
+    elig = await vote_svc.resolve_eligibility(
+        db, club, fx, cfg, ov.eligibility_source if ov else None,
+    )
+    eligible = elig["players"]
+    state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     me = await _verified_player(db, request, club)
     role, reason = _voter_role(cfg, me, eligible)
 
@@ -359,17 +377,19 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
     if not fx or fx.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    has_game = await vote_svc.game_exists(db, fx.id)
-    override = await vote_svc.get_override(db, fx.id)
-    state = vote_svc.fixture_vote_state(fx, cfg, override, has_game)
+    ov = await vote_svc.get_override(db, fx.id)
+    elig = await vote_svc.resolve_eligibility(
+        db, club, fx, cfg, ov.eligibility_source if ov else None,
+    )
+    eligible = elig["players"]
+    state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     if state != "open":
         detail = {
-            "awaiting_sync": "Voting opens once this game's scorecard has synced.",
+            "awaiting_team": "Voting opens once the team list for this game is in.",
             "upcoming": "This game hasn't been played yet.",
         }.get(state, "Voting has closed for this game.")
         raise HTTPException(status_code=409, detail=detail)
 
-    eligible = await vote_svc.eligible_players(db, club.id, fx.id)
     me = await _verified_player(db, request, club)
     role, reason = _voter_role(cfg, me, eligible)
     if role == "none":

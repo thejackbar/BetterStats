@@ -381,6 +381,84 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
     return upcoming[:20]
 
 
+@router.get("/{org_id}/lineups")
+async def get_org_lineups(
+    org_id: str,
+    mode: str = Query("upcoming", pattern="^(upcoming|past)$"),
+    season_id: str | None = None,
+    grade_id: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(6, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Published team lists, live from the Grassroots feed (public).
+
+    Clubs publish their side on play.cricket.com.au ahead of the game and
+    Grassroots serves it on the plain match record — see services/lineups.py.
+    ``mode=upcoming`` reads the club's scheduled fixtures (falling back to its
+    most recent games when nothing is scheduled, so the page is never blank in
+    the off-season); ``mode=past`` walks back through played games, optionally
+    filtered by season and grade, with ``offset``/``limit`` paging.
+
+    A side its club hasn't published yet comes back with an empty player list
+    and ``published: false`` rather than being hidden — "not named yet" is the
+    normal state early in the week and worth showing as such.
+
+    Bounded on purpose: each match is a live upstream fetch (short-TTL cached),
+    so a page asks for a handful at a time rather than a whole season.
+    """
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    from app.services.lineups import org_lineups
+
+    async def _played(off: int, lim: int) -> list[str]:
+        """Synced games, newest first. Only 'api' games have a Grassroots match
+        behind them — a manually-uploaded scorecard has no upstream team list."""
+        where = ["g.organisation_id = :org", "g.source = 'api'", "g.played_at IS NOT NULL"]
+        params: dict = {"org": org.id, "lim": lim, "off": off}
+        if season_id:
+            # Expand to the season's aliases so a merged-away season id still
+            # matches its canonical games.
+            season_ids = await resolve_season_filter(db, org.id, season_id)
+            where.append("g.season_id = ANY(:season_ids)")
+            params["season_ids"] = [uuid.UUID(s) for s in (season_ids or [season_id])]
+        if grade_id:
+            where.append("g.grade_id = :grade_id")
+            params["grade_id"] = uuid.UUID(grade_id)
+        res = await db.execute(
+            text(
+                f"SELECT g.id::text FROM v_effective_games g WHERE {' AND '.join(where)} "
+                "ORDER BY g.played_at DESC, g.id LIMIT :lim OFFSET :off"
+            ),
+            params,
+        )
+        return [r[0] for r in res.fetchall()]
+
+    if mode == "past":
+        # One extra row tells the page whether a "load more" is worth offering.
+        ids = await _played(offset, limit + 1)
+        has_more = len(ids) > limit
+        match_ids, source = ids[:limit], "past"
+    else:
+        fixtures = await org_grassroots_fixtures(db, org)
+        match_ids = [fx["id"] for fx in fixtures if fx.get("id")][:limit]
+        has_more = False
+        source = "fixtures"
+        if not match_ids:
+            ids = await _played(0, limit + 1)
+            has_more = len(ids) > limit
+            match_ids, source = ids[:limit], "recent"
+
+    return {
+        "source": source,
+        "offset": offset,
+        "has_more": has_more,
+        "matches": await org_lineups(db, org, match_ids) if match_ids else [],
+    }
+
+
 async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False):
     from app.services.sync import finish_sync_run, pause_sync_run, cancel_sync_run, SyncControlSignal
     import logging

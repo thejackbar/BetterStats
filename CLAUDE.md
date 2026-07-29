@@ -728,6 +728,51 @@ design note: `docs/betterselect-self-availability.md`.
   the public club `Navbar.jsx` (→ `/login`, or "Admin" → `/admin` when signed in);
   "View Public Page" in `AdminLayout.jsx` header (→ `/{club_slug}`).
 
+## Public Fixtures + Lineups pages, and the CA team-list route (v8.93.0, Jul 2026)
+
+The public club site's **Games** dropdown was Results + Ladders; it now also has
+**Fixtures** (`/{slug}/fixtures`) and **Lineups** (`/{slug}/lineups`). Both are
+live off the Grassroots feed — nothing new is persisted.
+
+- **The lineup route is the PLAIN match record**: `GET /scores/matches/{id}`
+  **without** `responseModifier=includeScorecard`. It carries
+  `teams[].players[]` (`{participantId, name, shortName, roles}` — roles being
+  `Captain` / `Wicket Keeper`), `teams[].nonPlayingMembers[]` (coach/manager)
+  and top-level `officials` (umpires). **Verified live against an in-season
+  winter fixture: an UPCOMING match returns a side as soon as its club
+  publishes it**, and an empty `players` list for a side that hasn't — so "not
+  named yet" is a normal state, not an error. `matchSummary.teams` (not the
+  top-level `teams`) is where `isHome`/`isWinner`/`scoreText` live — the same
+  gotcha the scorecard parser already documents.
+- **`get_match_detail` / `get_matches_detail`** (`grassroots_scores_client`)
+  are kept SEPARATE from `get_match_scorecard` with their own `_MATCH_TTL` of
+  **5 minutes** (vs the scorecard's 15): a pre-game team list is edited right
+  up to the first ball, whereas a finished scorecard is settled.
+- **`services/lineups.py`** normalises a match, decides which side is ours
+  (`owningOrganisation.id` against the org id first — our `organisations.id` IS
+  the CA org GUID — then `club_match_keys` name matching), and resolves
+  `participantId` → our players by `id` OR `grassroots_id`, **org-scoped** (the
+  per-club uuid5 scheme). A redacted junior (`********`) gets their real name
+  back when we hold the player. `our_lineup_players` returns
+  `(players, unmatched)` for the vote engine.
+- **`GET /organisations/{id}/lineups`** (public): `mode=upcoming` (falls back to
+  recent games when nothing is scheduled, so the page is never blank in the
+  off-season) or `mode=past` with `season_id`/`grade_id`/`offset`/`limit`
+  paging. Bounded on purpose — every match is a live upstream fetch.
+- **Frontend**: `FixturesPage.jsx` (grouped by date, Today/Tomorrow/In-N-days
+  chips) and `LineupsPage.jsx` (Upcoming/Past toggle, `SeasonSelector` on Past,
+  Load more). `TeamBadge` was **extracted from `MatchScorecard.jsx` into
+  `components/TeamBadge.jsx`** so the lineup match header matches the
+  scorecard's; a player shows their club photo, else the club crest, else
+  initials. Both pages were verified visually against live Darwin CC (in-season)
+  and Applecross (off-season/past) data before shipping — see the v8.79.0 note
+  for the local-dev-proxy-to-production technique.
+- **Not built (deliberate)**: nothing here is persisted, so there's no lineup
+  history beyond what the feed still serves. Also noticed while investigating:
+  `matchSummary.teams` carries `wonToss`/`battedFirst`, which contradicts the
+  older "the GR path can't see the toss" note elsewhere in this file — a real
+  opening for the BetterIQ toss/captaincy analysis, not chased here.
+
 ## BetterSelect — Vote collection (v8.92.0, migration 193, Jul 2026)
 
 Brownlow-style best-player votes per fixture, its own "Votes" menu item in
@@ -793,6 +838,26 @@ BetterFees' derived allocation.
   standalone/no-navbar like `/avail/`): pick game → verify (or "I didn't
   play" name entry when allowed) → assign positions one at a time ("Who gets
   your 3?") → review → submit; resubmitting updates the same ballot.
+- **Eligibility source is a club choice** (v8.93.0, **migration 194**): the
+  votable list comes from `vote_settings.eligibility_source` —
+  **`scorecard`** (default, who actually played) | **`lineup`** (the saved
+  BetterSelect `fixture_lineups` XI) | **`playhq`** (the team list the club
+  published on Play.Cricket, live via `services/lineups.our_lineup_players`).
+  The last two are ready on match day, so a club can vote on the night instead
+  of waiting for the weekly sync. Per-fixture override on
+  `vote_fixture_overrides.eligibility_source` (its `status` went nullable so a
+  row can carry a source alone); `POST /votes/fixtures/{id}/source` ('' clears
+  back to the club default). `votes.resolve_eligibility` picks the requested
+  source and **falls back to the first other source that has players**,
+  reporting `requested`/`used`/`fell_back`/`counts`/`unmatched` so the admin
+  page shows which list is really in play; `check_all=True` (admin detail only)
+  also counts the unused sources, which costs one live Play.Cricket fetch.
+  `fixture_vote_state`'s old `awaiting_sync` is now **`awaiting_team`** (no
+  votable list from ANY source yet) and takes `ready` rather than `has_game`.
+  **The list views compute `ready` cheaply** (`has_game or has_lineup`, or
+  played-and-`playhq`) — a live per-fixture upstream call per row would be one
+  request per fixture, so an unpublished Play.Cricket side is reported when the
+  ballot page is actually opened.
 - **`merge_players` reassigns vote rows** (`admin.py::_merge_players_core`):
   both vote FKs are ON DELETE CASCADE, so without the reassignment a routine
   merge would silently destroy the removed record's ballots and every vote

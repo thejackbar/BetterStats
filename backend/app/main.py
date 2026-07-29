@@ -501,11 +501,19 @@ async def lifespan(app: FastAPI):
             CREATE TABLE IF NOT EXISTS vote_fixture_overrides (
                 fixture_id UUID PRIMARY KEY REFERENCES fixtures(id) ON DELETE CASCADE,
                 organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-                status TEXT NOT NULL,
+                status TEXT,
                 set_by UUID REFERENCES users(id) ON DELETE SET NULL,
                 set_at TIMESTAMPTZ DEFAULT now()
             )
         """))
+        # Vote eligibility source (migration 194) — scorecard | lineup | playhq.
+        await conn.execute(text(
+            "ALTER TABLE vote_settings ADD COLUMN IF NOT EXISTS "
+            "eligibility_source TEXT NOT NULL DEFAULT 'scorecard'"))
+        await conn.execute(text(
+            "ALTER TABLE vote_fixture_overrides ADD COLUMN IF NOT EXISTS eligibility_source TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE vote_fixture_overrides ALTER COLUMN status DROP NOT NULL"))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "

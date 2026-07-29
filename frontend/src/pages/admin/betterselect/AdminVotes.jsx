@@ -26,9 +26,18 @@ const STATE_META = {
   open: { label: 'OPEN', color: 'var(--pb-positive)' },
   closed: { label: 'CLOSED', color: 'var(--pb-faintest)' },
   locked: { label: 'LOCKED', color: 'var(--pb-red)' },
-  awaiting_sync: { label: 'AWAITING SYNC', color: 'var(--pb-amber)' },
+  awaiting_team: { label: 'NEEDS TEAM LIST', color: 'var(--pb-amber)' },
   upcoming: { label: 'UPCOMING', color: 'var(--pb-faintest)' },
 }
+
+// Where the votable list comes from. Mirrors ELIGIBILITY_SOURCES in
+// backend/app/services/votes.py.
+const SOURCES = [
+  { value: 'scorecard', label: 'Match scorecard', hint: 'Who actually played. The most accurate, but only once the weekly sync lands.' },
+  { value: 'lineup', label: 'BetterSelect XI', hint: 'The side you picked in Selection. Ready as soon as you save it.' },
+  { value: 'playhq', label: 'Play.Cricket team list', hint: 'The side your club published on Play.Cricket. Ready on match day.' },
+]
+const sourceLabel = (v) => SOURCES.find((s) => s.value === v)?.label || v
 
 function StateBadge({ state }) {
   const m = STATE_META[state] || STATE_META.upcoming
@@ -222,6 +231,16 @@ function SettingsTab({ canManage }) {
             </div>
           </Row>
         )}
+        <Row label="Who can be voted for" hint="Which team list decides who's on the ballot. You can override this on any single game.">
+          <select value={cfg.eligibility_source} onChange={(e) => update({ eligibility_source: e.target.value })} disabled={!canManage}
+            className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
+            {SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <div className="text-[11px] text-pb-faintest mt-1.5">
+            {SOURCES.find((s) => s.value === cfg.eligibility_source)?.hint}
+            {' '}If it's empty when voting opens, the next list that has players is used instead.
+          </div>
+        </Row>
         <Row label="Voting closes" hint="Days after the match before voting closes automatically. You can also lock or reopen any game yourself.">
           <select value={cfg.auto_close_days} onChange={(e) => update({ auto_close_days: parseInt(e.target.value, 10) })} disabled={!canManage}
             className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
@@ -317,6 +336,79 @@ function BallotEntryForm({ detail, onSaved }) {
   )
 }
 
+// Which team list this fixture's ballot is built from, what each of the other
+// lists would give, and a per-fixture override.
+function EligibilityPanel({ detail, onChanged }) {
+  const toast = useToast()
+  const e = detail.eligibility
+  const [busy, setBusy] = useState(false)
+  if (!e) return null
+
+  const setSource = async (value) => {
+    setBusy(true)
+    try {
+      await api.votesSetFixtureSource(detail.fixture.id, value)
+      toast.success(value ? `Voting on the ${sourceLabel(value).toLowerCase()}` : 'Back to the club default')
+      onChanged()
+    } catch (err) { toast.error(err.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card px-4 py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+        <div className="font-display font-bold text-[15px]">Who can be voted for</div>
+        <div className="text-[12px] text-pb-faint">
+          {e.used ? <>Using the <b className="text-pb-text">{sourceLabel(e.used)}</b></> : 'No team list yet'}
+        </div>
+      </div>
+
+      {e.fell_back && (
+        <div className="text-[12.5px] mb-2" style={{ color: 'var(--pb-amber)' }}>
+          The {sourceLabel(e.requested).toLowerCase()} is empty for this game, so the {sourceLabel(e.used).toLowerCase()} is being used instead.
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        {SOURCES.map((s) => {
+          const n = e.counts?.[s.value]
+          const active = (e.override || e.requested) === s.value
+          return (
+            <button key={s.value} onClick={() => setSource(s.value)} disabled={busy || active}
+              className={`px-3 py-1.5 rounded-lg text-[12.5px] border transition-colors ${active
+                ? 'border-pb-accent text-pb-accent bg-pb-accent/10'
+                : 'pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-50'}`}>
+              {s.label}
+              <span className="font-mono text-[10px] text-pb-faint ml-1.5">
+                {n == null ? '—' : `${n}`}
+              </span>
+            </button>
+          )
+        })}
+        {e.override && (
+          <button onClick={() => setSource('')} disabled={busy}
+            className="text-[11.5px] text-pb-faint hover:text-pb-text underline">
+            Use the club default ({sourceLabel(e.requested === e.override ? 'scorecard' : e.requested)})
+          </button>
+        )}
+      </div>
+
+      <div className="text-[11px] text-pb-faintest mt-2">
+        The number is how many players each list would put on the ballot.
+        {e.override ? ' This game overrides the club default.' : ' Changing it here only affects this game.'}
+      </div>
+
+      {e.unmatched?.length > 0 && (
+        <div className="mt-2.5 text-[12px] rounded-lg px-3 py-2"
+          style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', color: 'var(--pb-amber)' }}>
+          Not on the ballot (no player record at your club): {e.unmatched.join(', ')}.
+          Claim them from the match scorecard to make them votable.
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FixtureDetail({ fixtureId, onBack }) {
   const toast = useToast()
   const [detail, setDetail] = useState(null)
@@ -359,12 +451,16 @@ function FixtureDetail({ fixtureId, onBack }) {
         </div>
       </div>
 
-      {fx.state === 'awaiting_sync' && (
+      {fx.state === 'awaiting_team' && (
         <div className="rounded-lg px-4 py-3 text-sm bg-pb-amber/10 border border-pb-amber/30 text-pb-amber">
-          This game's scorecard hasn't synced yet. Voting (and the eligible player list) opens once it has.
-          Run <Link to="/admin/sync" className="underline">Sync Now</Link> after the weekend's results are in.
+          No team list for this game yet, so there's nobody to vote for.
+          Save an XI on the <Link to="/admin/betterselect/selection" className="underline">Selection</Link> page,
+          publish the side on Play.Cricket, or run <Link to="/admin/sync" className="underline">Sync Now</Link> once
+          the weekend's results are in.
         </div>
       )}
+
+      <EligibilityPanel detail={detail} onChanged={load} />
 
       {/* Weekly result */}
       <div className="pb-card px-4 py-4">
@@ -395,7 +491,7 @@ function FixtureDetail({ fixtureId, onBack }) {
         )}
       </div>
 
-      {fx.state !== 'awaiting_sync' && <BallotEntryForm detail={detail} onSaved={load} />}
+      {detail.eligible.length > 0 && <BallotEntryForm detail={detail} onSaved={load} />}
 
       {/* Ballots */}
       <div className="pb-card px-4 py-4">

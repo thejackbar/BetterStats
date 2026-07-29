@@ -142,6 +142,8 @@ export default function Navbar() {
     ],
     games: [
       { label: "Results",  href: `/${slug}/games` },
+      { label: "Fixtures", href: `/${slug}/fixtures` },
+      { label: "Lineups",  href: `/${slug}/lineups` },
       { label: "Ladders",  href: `/${slug}/ladders` },
     ],
   } : {};
@@ -149,7 +151,7 @@ export default function Navbar() {
   const statsActive = slug && ['leaderboard', 'records', 'statlab'].some(s =>
     pathname === `/${slug}/${s}` || pathname.startsWith(`/${slug}/${s}/`)
   );
-  const gamesActive = slug && ['games', 'ladders'].some(s =>
+  const gamesActive = slug && ['games', 'fixtures', 'lineups', 'ladders'].some(s =>
     pathname === `/${slug}/${s}` || pathname.startsWith(`/${slug}/${s}/`)
   );
 

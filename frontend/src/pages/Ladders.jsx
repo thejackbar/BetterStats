@@ -10,7 +10,8 @@ import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 
 // Contextual links from a grade ladder to its results / leaderboard for the
-// same season. (No public Fixtures page exists yet, so it's omitted.)
+// same season, plus the club-wide fixture list (which is live from the CA feed
+// and so isn't season/grade scoped).
 function gradeNav(slug, seasonId, gradeId, gradeName) {
   const results = new URLSearchParams()
   if (seasonId) results.set('season', seasonId)
@@ -21,6 +22,7 @@ function gradeNav(slug, seasonId, gradeId, gradeName) {
   const cls = 'font-mono text-[10px] px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 transition-colors'
   return [
     <Link key="r" to={`/${slug}/games?${results}`} className={cls}>↗ Results</Link>,
+    <Link key="f" to={`/${slug}/fixtures`} className={cls}>↗ Fixtures</Link>,
     <Link key="l" to={`/${slug}/leaderboard?${lb}`} className={cls}>↗ Leaderboard</Link>,
   ]
 }

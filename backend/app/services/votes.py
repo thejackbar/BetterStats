@@ -16,6 +16,7 @@ see the cross-club leak notes in CLAUDE.md).
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, timedelta
 from typing import Optional
@@ -25,11 +26,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Fixture, VoteBallot, VoteFixtureOverride, VoteSettings
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_BALLOT = [3, 2, 1]
 VOTER_MODES = {"players", "captain"}
 COUNTING_METHODS = {"rank", "tally"}
 TIE_POLICIES = {"share", "countback"}
 MAX_POSITIONS = 10
+
+# Where the votable list comes from. 'scorecard' is the truth of who played but
+# only exists after the weekly sync; the other two are available on the night.
+ELIGIBILITY_SOURCES = ("scorecard", "lineup", "playhq")
+SOURCE_LABELS = {
+    "scorecard": "Match scorecard",
+    "lineup": "BetterSelect XI",
+    "playhq": "Play.Cricket team list",
+}
 
 
 # ─── Config ──────────────────────────────────────────────────────────────────
@@ -67,6 +79,11 @@ def effective_config(s: Optional[VoteSettings]) -> dict:
         "allow_self_vote": bool(s.allow_self_vote) if s else False,
         "allow_non_participants": bool(s.allow_non_participants) if s else False,
         "auto_close_days": int(s.auto_close_days) if s and s.auto_close_days else 7,
+        "eligibility_source": (
+            s.eligibility_source
+            if s and getattr(s, "eligibility_source", None) in ELIGIBILITY_SOURCES
+            else "scorecard"
+        ),
     }
 
 
@@ -124,6 +141,104 @@ async def eligible_players(db: AsyncSession, org_id, game_id) -> list[dict]:
     return players
 
 
+async def lineup_players(db: AsyncSession, org_id, fixture_id) -> list[dict]:
+    """The XI saved in BetterSelect selection for this fixture, in batting
+    order. Org-scoped through players like every other votable list."""
+    res = await db.execute(
+        text(
+            """
+            SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, fl.is_captain
+            FROM fixture_lineups fl
+            JOIN players p ON p.id = fl.player_id
+            WHERE fl.fixture_id = :fid AND p.organisation_id = :org
+            ORDER BY fl.batting_order NULLS LAST, 2
+            """
+        ),
+        {"fid": fixture_id, "org": org_id},
+    )
+    return [
+        {"id": str(pid), "name": name, "is_captain": bool(cap)}
+        for pid, name, cap in res.fetchall()
+    ]
+
+
+async def eligible_from_source(db: AsyncSession, club, fixture, source: str) -> tuple[list[dict], list[str]]:
+    """``(players, unmatched)`` for one source.
+
+    ``unmatched`` only ever comes from the Play.Cricket team list — a published
+    name we hold no player row for (a genuine fill-in, or a junior whose name CA
+    redacts). It's surfaced rather than silently dropped so an admin can see why
+    the votable list is short. Votes still can't be cast for them: a ballot pick
+    is a real player FK.
+    """
+    if source == "lineup":
+        return await lineup_players(db, club.id, fixture.id), []
+    if source == "playhq":
+        from app.services.lineups import our_lineup_players
+        try:
+            return await our_lineup_players(db, club, str(fixture.id))
+        except Exception:
+            # A live upstream fetch must never take the vote page down.
+            logger.warning("vote eligibility: Play.Cricket lineup fetch failed for %s", fixture.id)
+            return [], []
+    if await game_exists(db, fixture.id):
+        return await eligible_players(db, club.id, fixture.id), []
+    return [], []
+
+
+def effective_source(cfg: dict, override: Optional[str]) -> str:
+    """The fixture's own source override, else the club default."""
+    if override in ELIGIBILITY_SOURCES:
+        return override
+    return cfg.get("eligibility_source") or "scorecard"
+
+
+async def resolve_eligibility(
+    db: AsyncSession, club, fixture, cfg: dict, override: Optional[str] = None,
+    *, check_all: bool = False,
+) -> dict:
+    """Who can be voted for, and where that list came from.
+
+    Uses the fixture's chosen source. When that source has nothing yet (no XI
+    saved, team list not published, scorecard not synced) it falls back to the
+    first other source that does, rather than leaving a club unable to vote —
+    and says so via ``used``/``fell_back`` so the admin page can show which list
+    is actually in play.
+
+    ``check_all=True`` also counts the sources not in use, so the admin can see
+    what switching would give them. It costs a live upstream call, so the public
+    ballot page leaves it off.
+    """
+    requested = effective_source(cfg, override)
+    order = [requested] + [s for s in ELIGIBILITY_SOURCES if s != requested]
+
+    players: list[dict] = []
+    unmatched: list[str] = []
+    used: Optional[str] = None
+    counts: dict[str, Optional[int]] = {}
+
+    for src in order:
+        # Without check_all we stop at the first source that yields a list, so
+        # a fallback source (and its live Play.Cricket fetch) is only ever paid
+        # for when the chosen one is genuinely empty.
+        if players and not check_all:
+            break
+        found, unres = await eligible_from_source(db, club, fixture, src)
+        counts[src] = len(found)
+        if found and used is None:
+            players, unmatched, used = found, unres, src
+
+    return {
+        "requested": requested,
+        "used": used,
+        "fell_back": bool(used and used != requested),
+        "players": players,
+        "unmatched": unmatched,
+        "counts": counts,
+        "labels": SOURCE_LABELS,
+    }
+
+
 # ─── Voting state ────────────────────────────────────────────────────────────
 
 def fixture_close_date(fixture: Fixture, cfg: dict) -> Optional[date]:
@@ -134,17 +249,19 @@ def fixture_close_date(fixture: Fixture, cfg: dict) -> Optional[date]:
     return end + timedelta(days=int(cfg["auto_close_days"]))
 
 
-def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], has_game: bool,
+def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], ready: bool,
                        today: Optional[date] = None) -> str:
-    """One of: 'upcoming' (not played yet), 'awaiting_sync' (played, scorecard
-    not synced), 'open', 'closed' (auto-close passed), 'locked' (admin lock).
-    A manual override always wins over the auto window."""
+    """One of: 'upcoming' (not played yet), 'awaiting_team' (played, but no
+    votable list from the club's chosen source yet — an unsynced scorecard, an
+    unsaved XI, an unpublished team list), 'open', 'closed' (auto-close passed),
+    'locked' (admin lock). A manual lock/reopen always wins over the auto
+    window."""
     today = today or date.today()
     start = fixture.played_on
     if start and start > today:
         return "upcoming"
-    if not has_game:
-        return "awaiting_sync"
+    if not ready:
+        return "awaiting_team"
     if override == "locked":
         return "locked"
     if override == "reopened":
@@ -155,12 +272,13 @@ def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], has
     return "open"
 
 
-async def get_override(db: AsyncSession, fixture_id) -> Optional[str]:
+async def get_override(db: AsyncSession, fixture_id) -> Optional[VoteFixtureOverride]:
+    """The fixture's override row (lock/reopen status and/or an eligibility
+    source), or None. Callers read ``.status`` / ``.eligibility_source``."""
     res = await db.execute(
-        select(VoteFixtureOverride.status).where(VoteFixtureOverride.fixture_id == fixture_id)
+        select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id == fixture_id)
     )
-    row = res.first()
-    return row[0] if row else None
+    return res.scalar_one_or_none()
 
 
 # ─── Counting ────────────────────────────────────────────────────────────────

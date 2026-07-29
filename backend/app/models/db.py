@@ -1232,6 +1232,10 @@ class VoteSettings(Base):
     allow_self_vote = Column(Boolean, nullable=False, default=False, server_default="false")
     allow_non_participants = Column(Boolean, nullable=False, default=False, server_default="false")
     auto_close_days = Column(Integer, nullable=False, default=7, server_default="7")
+    # Which team list decides who can be voted for (migration 194):
+    # 'scorecard' (who actually played) | 'lineup' (the BetterSelect XI) |
+    # 'playhq' (the side published on Play.Cricket). Overridable per fixture.
+    eligibility_source = Column(Text, nullable=False, default="scorecard", server_default="scorecard")
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
@@ -1281,7 +1285,10 @@ class VoteFixtureOverride(Base):
 
     fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), primary_key=True)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
-    status = Column(Text, nullable=False)  # 'locked' | 'reopened'
+    # Nullable since migration 194: a row may exist to carry an eligibility
+    # override alone, without also locking or reopening the fixture.
+    status = Column(Text, nullable=True)  # 'locked' | 'reopened' | NULL
+    eligibility_source = Column(Text, nullable=True)  # overrides the club default
     set_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     set_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

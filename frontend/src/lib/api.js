@@ -132,6 +132,17 @@ export const api = {
   getRecentlyAchievedMilestones: (orgId) =>
     request(`/organisations/${orgId}/recently-achieved-milestones`),
   getOrgFixtures: (orgId) => request(`/organisations/${orgId}/fixtures`),
+  // Published team lists (live from the CA feed). mode 'upcoming' | 'past'.
+  getOrgLineups: (orgId, { mode, seasonId, gradeId, offset, limit } = {}) => {
+    const q = new URLSearchParams()
+    if (mode) q.set('mode', mode)
+    if (seasonId) q.set('season_id', seasonId)
+    if (gradeId) q.set('grade_id', gradeId)
+    if (offset) q.set('offset', offset)
+    if (limit) q.set('limit', limit)
+    const qs = q.toString()
+    return request(`/organisations/${orgId}/lineups${qs ? `?${qs}` : ''}`)
+  },
 
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
@@ -2073,6 +2084,8 @@ export const api = {
   votesAdminBallot: (fixtureId, data) =>
     request(`/votes/fixtures/${fixtureId}/ballots`, { method: 'POST', body: JSON.stringify(data) }),
   votesDeleteBallot: (ballotId) => request(`/votes/ballots/${ballotId}`, { method: 'DELETE' }),
+  votesSetFixtureSource: (fixtureId, eligibility_source) =>
+    request(`/votes/fixtures/${fixtureId}/source`, { method: 'POST', body: JSON.stringify({ eligibility_source }) }),
   votesLockFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/lock`, { method: 'POST' }),
   votesReopenFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/reopen`, { method: 'POST' }),
   votesLeaderboard: ({ year, grade_id, through_round } = {}) => {

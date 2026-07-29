@@ -47,6 +47,11 @@ _LADDER_TTL = 3600  # ladders move ~weekly; an hour keeps the proxy happy
 # proxy happy for the common case (an old, settled match) while letting a
 # recently-edited scorecard catch up within one reload.
 _SCORECARD_TTL = 900
+# Plain match record (team lists / officials), cached separately from the
+# scorecard: a published pre-game lineup is edited right up to the first ball,
+# so this is deliberately short.
+_match_cache: dict[str, tuple] = {}  # match_id -> (fetched_at, detail | None)
+_MATCH_TTL = 300
 
 
 async def _get(url: str, params: dict | None = None) -> httpx.Response:
@@ -223,6 +228,65 @@ async def get_match_scorecard(match_id: str, *, force: bool = False) -> Optional
         if hit:
             return hit[1]
         return None
+
+
+async def get_match_detail(match_id: str, *, force: bool = False) -> Optional[dict]:
+    """Return the plain match record — teams, published team lists, officials.
+
+    ``/scores/matches/{id}`` WITHOUT ``responseModifier=includeScorecard``. The
+    payload carries ``teams[].players[]`` (each ``{participantId, name,
+    shortName, roles}``, roles being Captain / Wicket Keeper),
+    ``teams[].nonPlayingMembers[]`` (coach, manager) and ``officials``
+    (umpires/scorers) — i.e. the **team list**, which clubs publish on
+    play.cricket.com.au ahead of the game. Verified live against an in-season
+    winter fixture: an UPCOMING match returns its selected side as soon as the
+    club publishes it (and an empty ``players`` list for a side that hasn't).
+
+    Kept separate from ``get_match_scorecard`` on purpose: this is a smaller
+    payload with a much shorter TTL, because a pre-game team list changes right
+    up to the first ball, whereas a scorecard is settled once the match ends.
+    204 (a PlayHQ-namespace id Grassroots doesn't own) returns None.
+    """
+    now = time.time()
+    hit = _match_cache.get(match_id)
+    if not force and hit and now - hit[0] < _MATCH_TTL:
+        return hit[1]
+    try:
+        r = await _get(f"{BASE_URL}/scores/matches/{match_id}")
+        if r.status_code == 204:
+            _match_cache[match_id] = (now, None)
+            return None
+        if r.status_code != 200:
+            logger.warning(f"GR scores: /matches/{match_id} (detail) → {r.status_code}")
+            # Don't cache a transient failure — same reasoning as the scorecard
+            # and grade-match fetches above.
+            return hit[1] if hit else None
+        data = r.json()
+        _match_cache[match_id] = (now, data)
+        return data
+    except Exception as e:
+        logger.warning(f"GR scores: /matches/{match_id} (detail) failed: {e}")
+        return hit[1] if hit else None
+
+
+async def get_matches_detail(match_ids: list[str]) -> dict[str, dict]:
+    """``get_match_detail`` across several matches concurrently, keyed by id.
+
+    Bounded by the module semaphore (6) and the per-match cache, so a page that
+    lists a round's worth of fixtures costs one burst of requests per TTL.
+    """
+    if not match_ids:
+        return {}
+    results = await asyncio.gather(
+        *[get_match_detail(m) for m in match_ids], return_exceptions=True
+    )
+    out: dict[str, dict] = {}
+    for mid, res in zip(match_ids, results):
+        if isinstance(res, dict):
+            out[mid] = res
+        elif isinstance(res, Exception):
+            logger.warning(f"GR scores: match detail {mid} failed: {res}")
+    return out
 
 
 def _scorecard_looks_incomplete(data: dict) -> bool:
