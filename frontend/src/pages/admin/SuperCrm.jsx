@@ -7,7 +7,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { PbSpinner } from '../../lib/presskit'
-import PipelineBoard, { TIER_TONE } from '../../components/admin/crm/PipelineBoard'
+import PipelineBoard, { TIER_TONE, EngagementArrow } from '../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
 import {
@@ -229,7 +229,41 @@ const channelLabel = (v) => CHANNEL_LABELS[v] || v
 const EMPTY_FILTERS = {
   q: '', ownerId: '', modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', leadSource: '',
-  onboarding: '', minTrialDays: '', maxTrialDays: '', trialExpired: false, customersOnly: false,
+  onboarding: '', minTrialDays: '', maxTrialDays: '',
+  activeTrials: false, trialExpired: false, customersOnly: false,
+  // "New Deals" (deal-card creation date) + "New Deal Activity" (latest tracked
+  // change) recency windows: 'any' (no filter) | 'today' | 'range'.
+  newDealsMode: 'any', newDealsFrom: '', newDealsTo: '',
+  activityMode: 'any', activityFrom: '', activityTo: '',
+}
+
+// A deal has at least one ACTIVE (not-yet-expired) module trial. trial_days_
+// remaining is {billing_key: signed_days} for trial-status modules only, so any
+// value >= 0 is a live trial (a negative value is an already-expired one — the
+// same signed convention the per-module chip + "Expired Trials" filter use).
+const hasActiveTrial = (d) =>
+  Object.values(d.trial_days_remaining || {}).some(v => v != null && v >= 0)
+
+// Is an ISO timestamp within a recency window? mode 'any' never filters (the
+// caller skips this); 'today' is the local calendar day; 'range' is the
+// inclusive [from, to] local-date span (either bound optional).
+function inDateWindow(iso, mode, from, to) {
+  if (mode === 'any') return true
+  if (!iso) return false
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return false
+  if (mode === 'today') {
+    const now = new Date()
+    return d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate()
+  }
+  if (mode === 'range') {
+    if (from && d < new Date(`${from}T00:00:00`)) return false
+    if (to && d > new Date(`${to}T23:59:59.999`)) return false
+    return true
+  }
+  return true
 }
 
 const ONBOARDING_OPTIONS = [
@@ -513,7 +547,34 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
 // one control per line.
 // State pinned to the same width as Owner (was narrower); Association
 // doubled — both per direct instruction.
-const FBW = { search: '210px', owner: '120px', state: '120px', assoc: '240px', source: '130px', onboarding: '140px', num: '64px' }
+const FBW = { search: '210px', owner: '120px', state: '120px', assoc: '240px', source: '130px', onboarding: '140px', num: '64px', window: '116px' }
+
+// Compact date input matching the shared inputCls (ui.jsx) but without its
+// `w-full` — the filter bar sizes these tightly, not full-width.
+const DATE_INPUT_CLS = 'bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2 py-1 text-[12px] outline-none focus:border-pb-accent'
+
+// A labelled "Any time / Today / Date range…" recency dropdown (New Deals,
+// New Deal Activity) — the same three-option shape the All Clubs "Newly
+// registered" filter uses, inline on the filter bar with the date inputs
+// revealed only for the range option.
+function DateWindowFilter({ label, title, mode, from, to, onChange }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] text-pb-faint" title={title}>{label}</span>
+      <Select value={mode} onChange={e => onChange({ mode: e.target.value })} style={{ width: FBW.window }}>
+        <option value="any">Any time</option>
+        <option value="today">Today</option>
+        <option value="range">Date range…</option>
+      </Select>
+      {mode === 'range' && (
+        <>
+          <input type="date" value={from} onChange={e => onChange({ from: e.target.value })} className={DATE_INPUT_CLS} />
+          <input type="date" value={to} onChange={e => onChange({ to: e.target.value })} className={DATE_INPUT_CLS} />
+        </>
+      )}
+    </div>
+  )
+}
 
 function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, resultCount, sortBy, sortDir, onSortChange }) {
   // Open by default — a filter bar that starts collapsed hides the very
@@ -524,8 +585,11 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
     ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
   }))
   const toggleBool = (key) => setFilters(f => ({ ...f, [key]: !f[key] }))
-  const active = Object.entries(filters).some(([k, v]) =>
-    typeof v === 'boolean' ? v : Array.isArray(v) ? v.length > 0 : v !== '')
+  // Any deviation from the cleared state counts as active. A plain field-by-
+  // field truthiness check can't tell the recency dropdowns' 'any' default
+  // (a non-empty string) from an applied value, so compare to EMPTY_FILTERS
+  // directly (setFilters only ever spreads onto it, so key order is stable).
+  const active = JSON.stringify(filters) !== JSON.stringify(EMPTY_FILTERS)
 
   return (
     <div className="pb-card px-4 py-3 mb-4">
@@ -587,12 +651,36 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
               <span className="text-[11px] text-pb-faint">to</span>
               <NumberInput min={0} placeholder="max" value={filters.maxTrialDays} onChange={set('maxTrialDays')} style={{ width: FBW.num }} />
             </div>
+            <button type="button" onClick={() => toggleBool('activeTrials')}
+              title="At least one module currently on a live trial — any stage"
+              className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                filters.activeTrials ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+              Active Trials
+            </button>
             <button type="button" onClick={() => toggleBool('trialExpired')}
               title="At least one module's trial has run out"
               className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
                 filters.trialExpired ? 'bg-pb-amber/15 border-pb-amber/50 text-pb-amber' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
-              Trial expired
+              Expired Trials
             </button>
+            <DateWindowFilter label="New Deals"
+              title="Deal cards created in this window (page-view, contact, self-serve or super-admin trial signup)"
+              mode={filters.newDealsMode} from={filters.newDealsFrom} to={filters.newDealsTo}
+              onChange={patch => setFilters(f => ({
+                ...f,
+                ...(patch.mode !== undefined ? { newDealsMode: patch.mode } : {}),
+                ...(patch.from !== undefined ? { newDealsFrom: patch.from } : {}),
+                ...(patch.to !== undefined ? { newDealsTo: patch.to } : {}),
+              }))} />
+            <DateWindowFilter label="New Deal Activity"
+              title="Deals with activity in this window — page views, trial/subscription changes (start, cancel, pause), or onboarding steps completed"
+              mode={filters.activityMode} from={filters.activityFrom} to={filters.activityTo}
+              onChange={patch => setFilters(f => ({
+                ...f,
+                ...(patch.mode !== undefined ? { activityMode: patch.mode } : {}),
+                ...(patch.from !== undefined ? { activityFrom: patch.from } : {}),
+                ...(patch.to !== undefined ? { activityTo: patch.to } : {}),
+              }))} />
             <button type="button" onClick={() => toggleBool('customersOnly')}
               title="Club is a paying subscriber for at least one module"
               className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
@@ -721,10 +809,18 @@ export default function SuperCrm() {
         && (d.min_trial_days_remaining == null
           || (minTrialDays != null && d.min_trial_days_remaining < minTrialDays)
           || (maxTrialDays != null && d.min_trial_days_remaining > maxTrialDays))) return false
+      // At least one module currently on a live (not-yet-expired) trial,
+      // regardless of which stage/column the deal sits in.
+      if (filters.activeTrials && !hasActiveTrial(d)) return false
       // trial_days_remaining_by_club is signed (negative = past its end
       // date) — 0 means "due today", not yet expired.
       if (filters.trialExpired && !(d.min_trial_days_remaining < 0)) return false
       if (filters.customersOnly && !(d.subscribed_modules && d.subscribed_modules.length > 0)) return false
+      // New Deals — deal-card creation date within the chosen window.
+      if (!inDateWindow(d.created_at, filters.newDealsMode, filters.newDealsFrom, filters.newDealsTo)) return false
+      // New Deal Activity — latest tracked change (deal edit, trial/subscription
+      // change, onboarding step, page view) within the chosen window.
+      if (!inDateWindow(d.last_activity_at, filters.activityMode, filters.activityFrom, filters.activityTo)) return false
       return true
     })
   }, [deals, filters])
@@ -849,7 +945,12 @@ export default function SuperCrm() {
                         <td className="px-3 py-2.5 text-right">{money(d.effective_value_cents ?? d.value_cents)}</td>
                         <td className="px-3 py-2.5 text-right text-pb-faint">{money(d.weighted_value_cents)}</td>
                         <td className="px-3 py-2.5">
-                          {d.engagement_score != null && <Pill tone={TIER_TONE[d.engagement_tier] || 'faint'}>{d.engagement_score}</Pill>}
+                          {d.engagement_score != null && (
+                            <span className="inline-flex items-center gap-1">
+                              <Pill tone={TIER_TONE[d.engagement_tier] || 'faint'}>{d.engagement_score}</Pill>
+                              <EngagementArrow dir={d.engagement_delta_dir} />
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2.5 text-pb-faint">{channelLabel(d.acquisition_channel) || '—'}</td>
                         <td className="px-3 py-2.5">

@@ -3475,6 +3475,14 @@ class MarketingClub(Base):
     engagement_score = Column(Integer, nullable=True)
     engagement_tier = Column(Text, nullable=True)
     engagement_scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Day-over-day baseline for the CRM pipeline's engagement up/down arrow
+    # (migration 192). There is no score-history table — _apply_engagement_cache
+    # (twenty_sync.py) rolls the then-current engagement_score into _prev the
+    # first time it writes on a NEW calendar day, so _prev holds the last score
+    # recorded on an earlier day and (current vs _prev) is the day-over-day
+    # direction. _prev_date is the calendar day that _prev value belongs to.
+    engagement_score_prev = Column(Integer, nullable=True)
+    engagement_score_prev_date = Column(Date, nullable=True)
     # Suburb-level admin boundary polygon (from OpenStreetMap/Nominatim), fetched
     # lazily and cached forever — the closest free approximation to a real
     # postcode-area shape (no AU postcode boundary dataset is bundled here).

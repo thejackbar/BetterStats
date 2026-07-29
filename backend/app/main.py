@@ -334,6 +334,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_scored_at "
             "TIMESTAMPTZ"))
+        # Migration 192: day-over-day engagement baseline for the CRM pipeline's
+        # up/down arrow — see the column comments in models/db.py.
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score_prev INTEGER"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score_prev_date DATE"))
         # Migration 166: cached suburb boundary polygon for the directory's location
         # map, fetched on demand from OpenStreetMap/Nominatim and cached forever —
         # see services/nominatim_client.py.

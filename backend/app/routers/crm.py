@@ -675,6 +675,11 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: club_stats_by_club failed")
         stats_by_club = {}
+    try:
+        activity_by_deal = await crm_service.last_activity_at_by_deal(db, deals, club_by_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: last_activity_at_by_deal failed")
+        activity_by_deal = {}
 
     out = []
     for d in deals:
@@ -692,6 +697,10 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         # the Kanban card's state line — only present for a linked, onboarded
         # club (a subscriber or trialing club); absent for a bare prospect.
         row["club_stats"] = stats_by_club.get(d.marketing_club_id) if d.marketing_club_id else None
+        # Latest activity of any tracked kind (deal edit, subscription change,
+        # onboarding step, page view) — powers the "New Deal Activity" filter.
+        act = activity_by_deal.get(d.id)
+        row["last_activity_at"] = act.isoformat() if act else None
         out.append(row)
     return {"deals": out}
 

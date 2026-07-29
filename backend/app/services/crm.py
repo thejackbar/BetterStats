@@ -32,10 +32,10 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select, func, text, update as sa_update
+from sqlalchemy import bindparam, select, func, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -466,6 +466,23 @@ def _effective_value_cents(deal: CrmDeal) -> int:
     return base
 
 
+def _engagement_delta_dir(club: Optional[MarketingClub]) -> Optional[str]:
+    """'up' / 'down' / None for a club's engagement score vs the last value it
+    held on an earlier calendar day (marketing_clubs.engagement_score_prev, set
+    by twenty_sync._apply_engagement_cache). None when either side is missing
+    (never scored, or no prior day recorded yet) or the score is unchanged."""
+    if club is None:
+        return None
+    cur, prev = club.engagement_score, club.engagement_score_prev
+    if cur is None or prev is None:
+        return None
+    if cur > prev:
+        return "up"
+    if cur < prev:
+        return "down"
+    return None
+
+
 def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
                club: Optional[MarketingClub] = None) -> dict:
     eff = _effective_probability(deal, stage)
@@ -483,6 +500,11 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         # so this is always None there.
         "engagement_score": club.engagement_score if club else None,
         "engagement_tier": club.engagement_tier if club else None,
+        # Day-over-day direction for the pipeline card's up/down arrow: 'up' if
+        # today's score is higher than the last score recorded on an earlier
+        # calendar day, 'down' if lower, None if unchanged / no prior day / not
+        # scored (marketing_clubs.engagement_score_prev, migration 192).
+        "engagement_delta_dir": _engagement_delta_dir(club),
         "marketing_club_name": club.name if club else None,
         "is_customer": bool(club.existing_org_id) if club else None,
         "pipeline_id": str(deal.pipeline_id),
@@ -835,6 +857,8 @@ async def reset_marketing_club_engagement(session: AsyncSession, club: Marketing
     club.engagement_score = None
     club.engagement_tier = None
     club.engagement_scored_at = None
+    club.engagement_score_prev = None
+    club.engagement_score_prev_date = None
     club.updated_at = func.now()
 
 
@@ -1087,6 +1111,142 @@ async def subscribed_modules_by_club(session: AsyncSession, club_by_id: dict) ->
             continue
         out.setdefault(cid, set()).add(billing_key_for(module_key))
     return {cid: sorted(keys) for cid, keys in out.items()}
+
+
+# Page-view activity is recency-focused (the "New Deal Activity" filter only
+# asks Today / a date range), so the resolved-visit scan is bounded to a recent
+# window rather than the whole usage_events history — an old prospect visit
+# doesn't count as "recent activity" and the durable signals (deal edits,
+# subscription changes, onboarding steps, logged activities) carry full history
+# regardless.
+_ACTIVITY_PAGEVIEW_LOOKBACK_DAYS = 90
+
+
+async def last_activity_at_by_deal(session: AsyncSession, deals, club_by_id: dict) -> dict:
+    """deal_id (UUID) -> the most recent 'activity' datetime for the deal, for
+    the CRM pipeline's "New Deal Activity" recency filter. Aggregates, per deal,
+    the latest of:
+      - the deal's own created_at / updated_at — covers manual edits, stage
+        moves, and every automatic sync_platform_deal_for_club touch (enquiry,
+        wizard lead, self-serve/super-admin trial, engagement-score promotion),
+        all of which bump updated_at;
+      - its latest CrmActivity (logged notes + auto-promotion system rows);
+      - for a linked/onboarded org: the latest module-subscription change
+        (trial start, new subscription, cancel, pause — all maintain updated_at,
+        see services/module_subscriptions.py) and the latest onboarding-wizard
+        update (a setup step completed/skipped/marked N-A);
+      - the club's latest tracked page view — the club's own org traffic
+        (customer branch) plus, for a prospect, resolved marketing-page/UTM
+        visits, both bounded to the last _ACTIVITY_PAGEVIEW_LOOKBACK_DAYS.
+
+    Batched (no N+1). Each DB step is individually guarded so one slow/failing
+    query (e.g. the heavier prospect page-view resolution) degrades that one
+    signal rather than losing the durable deal/subscription/wizard timestamps —
+    the deal's own updated_at is always present."""
+    out: dict = {}
+
+    def bump(deal_id, dt):
+        if dt is None:
+            return
+        cur = out.get(deal_id)
+        if cur is None or dt > cur:
+            out[deal_id] = dt
+
+    deals = list(deals)
+    for d in deals:
+        bump(d.id, d.updated_at)
+        bump(d.id, d.created_at)
+    deal_ids = [d.id for d in deals]
+    if not deal_ids:
+        return out
+
+    since = datetime.now(timezone.utc) - timedelta(days=_ACTIVITY_PAGEVIEW_LOOKBACK_DAYS)
+
+    # Latest logged/automatic activity per deal.
+    try:
+        for deal_id, last_at in (await session.execute(
+            select(CrmActivity.deal_id, func.max(CrmActivity.occurred_at))
+            .where(CrmActivity.deal_id.in_(deal_ids))
+            .group_by(CrmActivity.deal_id)
+        )).all():
+            bump(deal_id, last_at)
+    except Exception:  # noqa: BLE001
+        logger.exception("last_activity_at_by_deal: CrmActivity max failed")
+
+    # Org-linked signals — map each linked org to the deals whose club uses it.
+    deals_by_org: dict = {}
+    for d in deals:
+        club = club_by_id.get(d.marketing_club_id) if d.marketing_club_id else None
+        if club is not None and club.existing_org_id:
+            deals_by_org.setdefault(club.existing_org_id, []).append(d.id)
+    org_ids = list(deals_by_org.keys())
+
+    if org_ids:
+        try:
+            for org_id, last_at in (await session.execute(
+                select(OrgModuleSubscription.organisation_id,
+                       func.max(OrgModuleSubscription.updated_at))
+                .where(OrgModuleSubscription.organisation_id.in_(org_ids))
+                .group_by(OrgModuleSubscription.organisation_id)
+            )).all():
+                for did in deals_by_org.get(org_id, ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: module-subscription max failed")
+        try:
+            for org_id, last_at in (await session.execute(
+                select(OnboardingWizardState.organisation_id, OnboardingWizardState.updated_at)
+                .where(OnboardingWizardState.organisation_id.in_(org_ids))
+            )).all():
+                for did in deals_by_org.get(org_id, ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: onboarding-wizard update failed")
+        # Customer page views — the club's own (org-attributed) traffic.
+        try:
+            rows = (await session.execute(
+                text("SELECT org_id, MAX(created_at) AS last_at FROM usage_events "
+                     "WHERE org_id IN :orgs AND created_at >= :since GROUP BY org_id")
+                .bindparams(bindparam("orgs", expanding=True), bindparam("since")),
+                {"orgs": org_ids, "since": since},
+            )).all()
+            for org_id, last_at in rows:
+                for did in deals_by_org.get(org_id, ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: customer page-view max failed")
+
+    # Prospect page views — resolved marketing-page/UTM visits (a prospect has
+    # no org, so its browsing never lands in the org-attributed branch above).
+    deals_by_club_str: dict = {}
+    for d in deals:
+        if d.marketing_club_id:
+            deals_by_club_str.setdefault(str(d.marketing_club_id), []).append(d.id)
+    prospect_club_ids = [
+        str(cid) for cid, c in club_by_id.items()
+        if c is not None and not c.existing_org_id and str(cid) in deals_by_club_str
+    ]
+    if prospect_club_ids:
+        try:
+            from app.services.club_directory import _RESOLVED_VISITS
+            # The `AND ue.created_at >= :since` is pushed INSIDE _RESOLVED_VISITS
+            # (its own WHERE clause) so the window filters the scan before the
+            # per-row correlated club resolution runs — that ordering is what
+            # keeps this bounded rather than resolving the whole history.
+            rows = (await session.execute(
+                text(f"SELECT v.cid, MAX(v.created_at) AS last_at "
+                     f"FROM ({_RESOLVED_VISITS} AND ue.created_at >= :since) v "
+                     "WHERE v.cid IN :cids GROUP BY v.cid")
+                .bindparams(bindparam("cids", expanding=True), bindparam("since")),
+                {"cids": prospect_club_ids, "since": since},
+            )).all()
+            for cid, last_at in rows:
+                for did in deals_by_club_str.get(str(cid), ()):
+                    bump(did, last_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("last_activity_at_by_deal: prospect page-view resolution failed")
+
+    return out
 
 
 async def club_stats_by_club(session: AsyncSession, club_by_id: dict) -> dict:
