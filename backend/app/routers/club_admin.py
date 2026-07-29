@@ -1947,7 +1947,7 @@ class SyncControlRequest(BaseModel):
 async def super_club_sync_control(
     club_id: str,
     body: SyncControlRequest,
-    _: User = Depends(require_super_admin),
+    current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Pause Sync / Cancel Sync / Continue Sync for a club's current Full
@@ -2008,7 +2008,7 @@ async def super_club_sync_control(
     from app.routers.organisations import _org_sync_running, _sync_safe
     if club_id in _org_sync_running or club_id in _hard_refresh_running:
         return {"status": "already_running", "org_id": club_id}
-    new_run_id = await start_sync_run(club.id, "org_full")
+    new_run_id = await start_sync_run(club.id, "org_full", triggered_by_user_id=current_user.id)
     _org_sync_running.add(club_id)
     task = asyncio.create_task(_sync_safe(club_id, new_run_id, "org_full"))
     _background_tasks.add(task)
@@ -3760,7 +3760,10 @@ async def action_sync_request(
         _logger = _logging.getLogger(__name__)
         org_id_str = str(club.id)
         _player_sync_running.add(player_id_str)
-        run_id = await start_sync_run(club.id, "player_deep", player_id=player.id)
+        run_id = await start_sync_run(
+            club.id, "player_deep", player_id=player.id,
+            triggered_by_user_id=current_user.id,
+        )
 
         async def _run_and_log():
             _logger.info(f"DeepSync: background task started for player {player_id_str}")
@@ -3842,7 +3845,7 @@ async def hard_refresh_org(
     if org_id_str in _hard_refresh_running:
         return {"status": "already_running", "org_id": org_id_str}
 
-    run_id = await start_sync_run(club.id, "org_hard_refresh")
+    run_id = await start_sync_run(club.id, "org_hard_refresh", triggered_by_user_id=current_user.id)
     _hard_refresh_running.add(org_id_str)
     _logger = _logging.getLogger(__name__)
 

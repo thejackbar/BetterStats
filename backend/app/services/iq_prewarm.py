@@ -80,6 +80,19 @@ def status(org_id: str) -> dict:
     return dict(st) if st else {"status": "idle"}
 
 
+def snapshot_all() -> list[dict]:
+    """Every prewarm currently in the 'running' state, org_id included — read by
+    the Super Admin Usage page's Current Background Processes panel. In-process
+    only (single backend container), so this is exact for this process, and lost
+    on a restart (a prewarm is cheap to re-run and holds no cross-request state
+    worth persisting)."""
+    out = []
+    for oid, st in list(_STATE.items()):
+        if (st or {}).get("status") == "running":
+            out.append({"org_id": oid, **st})
+    return out
+
+
 async def start(session: AsyncSession, org_id: str, grade_ids: list[str]) -> dict:
     """Kick off a background prewarm over the chosen grades. No-op (returns the
     live progress) if one is already running for this club."""
