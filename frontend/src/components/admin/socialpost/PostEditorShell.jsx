@@ -17,7 +17,7 @@ import ToolRail from './ToolRail'
 
 export default function PostEditorShell({
   headerLeft, headerRight, tool, onTool,
-  panelTitle, panelMeta, panel, renderCanvas, inspector,
+  panelTitle, panelMeta, panel, renderCanvas, inspector, tabBar,
 }) {
   const wellRef = useRef(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
@@ -47,6 +47,13 @@ export default function PostEditorShell({
         <div className="flex-1" />
         <div className="flex items-center gap-2.5 shrink-0">{headerRight}</div>
       </header>
+
+      {/* Post-type bar — every type across the top */}
+      {tabBar && (
+        <div className="shrink-0 bg-pb-surface border-b pb-hairline overflow-x-auto">
+          <div className="flex items-stretch gap-1 px-2 py-1.5 min-w-max">{tabBar}</div>
+        </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 flex min-h-0">

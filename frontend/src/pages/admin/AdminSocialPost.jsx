@@ -120,6 +120,13 @@ const TAB_FIRST = {
   lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
+// Icon per post type (from the app's own kit) for the post-type bar and the
+// Start-screen cards.
+const TAB_ICON = {
+  lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
+  motm: 'player', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
+  events: 'availability', blank: 'plus',
+}
 
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
 // Print / Geometric), in first-seen order from SOCIAL_BACKGROUNDS itself so
@@ -633,8 +640,6 @@ export default function AdminSocialPost() {
   // Which rail tool's panel is showing. 'content' is the default (the per-type
   // fields most posts start with).
   const [tool, setTool] = useState('content')
-  const [typeMenuOpen, setTypeMenuOpen] = useState(false)
-  const typeBtnRef = useRef(null)
   // Hidden file input the inspector's "Replace" drives; remembers which image
   // block to fill.
   const blankImgInputRef = useRef(null)
@@ -798,7 +803,15 @@ export default function AdminSocialPost() {
   // Two freeform layers of blocks: `canvas` is the standalone Blank Canvas
   // template; `overlay` is the "Custom Edit" layer that sits on top of any real
   // template. Both share the same block model + editor (via useBlankLayer).
-  const canvas = useBlankLayer(defaultBlankItems)
+  // The Blank canvas resumes from the last session so freeform work isn't lost
+  // on a reload (blob-URL images don't survive, same as saved templates).
+  const canvas = useBlankLayer(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('bs_social_canvas') || 'null')
+      if (Array.isArray(s) && s.length) return s
+    } catch { /* fall back to the default starter */ }
+    return defaultBlankItems()
+  })
   const overlay = useBlankLayer(EMPTY_LAYER)
   // Undo/redo + action log, one per layer (history is per page/layer).
   const canvasHistory = useEditHistory(canvas)
@@ -886,6 +899,16 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
+  // Debounced persistence of the Blank canvas so it resumes after a reload.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        const clean = canvas.items.map((it) => (it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:') ? { ...it, src: null } : it))
+        localStorage.setItem('bs_social_canvas', JSON.stringify(clean))
+      } catch { /* quota or serialisation issue — skip */ }
+    }, 500)
+    return () => clearTimeout(id)
+  }, [canvas.items])
 
   // Server persistence of the Style choices (organisations.socials_style,
   // migration 162) — the club's look survives browser changes and second
@@ -1747,19 +1770,24 @@ export default function AdminSocialPost() {
   const showStart = !entryParams.has('type') && !entryParams.has('template')
   if (showStart) {
     const startTypes = TABS.map((t) => ({
-      key: t.key, label: t.label,
+      key: t.key, label: t.label, icon: TAB_ICON[t.key],
       count: TEMPLATES.filter((x) => TAB_MAP[x.id] === t.key).length,
     }))
     const openType = (typeKey) => { switchTab(typeKey); navigate(`/admin/social-post?type=${typeKey}`) }
+    // "Continue" resumes the post type you had open last (its in-session work is
+    // still in state; the type + look also persist across reloads).
+    const lastType = TABS.find((t) => t.key === activeTab)
     return (
       <StartScreen
         types={startTypes}
         club={{ name: settings?.name, subtitle: settings?.home_ground || settings?.home_venue || '', logo: team.logo }}
         moduleLogo={moduleBrand('socials').logo}
         savedTemplates={savedTemplates}
+        lastType={lastType ? { key: lastType.key, label: lastType.label } : null}
         onPick={openType}
-        onOpenEditor={() => navigate(`/admin/social-post?type=${activeTab}`)}
+        onResume={() => navigate(`/admin/social-post?type=${activeTab}`)}
         onApplyTemplate={(tpl) => { applyTemplate(tpl); navigate(`/admin/social-post?template=${tpl.key}`) }}
+        onExit={() => navigate('/admin')}
       />
     )
   }
@@ -1798,33 +1826,36 @@ export default function AdminSocialPost() {
   const clubName = settings?.name || 'Club'
   const headerLeft = (
     <>
-      <button onClick={() => navigate('/admin')} title="Back to admin" className="w-7 h-7 grid place-items-center rounded-md text-pb-faint hover:text-pb-text transition-colors"><Icon name="back" size={16} /></button>
+      <button onClick={() => navigate('/admin')} title="Exit to admin" className="w-7 h-7 grid place-items-center rounded-md text-pb-faint hover:text-pb-text transition-colors"><Icon name="back" size={16} /></button>
+      <button onClick={() => navigate('/admin/social-post')} title="What are you posting? — start over"
+        className="hidden sm:flex items-center gap-1.5 px-2.5 h-8 rounded-md border pb-hairline2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">
+        <Icon name="overview" size={14} /><span className="font-mono text-[9px] tracking-wide2 uppercase">Posts</span>
+      </button>
+      <span className="w-px h-5 bg-pb-hairline" />
       <span className="flex items-center gap-2 min-w-0">
         {team.logo
           ? <img src={team.logo} alt="" className="w-[26px] h-[26px] rounded object-contain shrink-0 bg-pb-surface2" />
           : <span className="w-[26px] h-[26px] rounded grid place-items-center font-mono text-[11px] bg-pb-surface2 text-pb-dim shrink-0">{deriveShort(clubName).slice(0, 2)}</span>}
-        <span className="font-mono text-[9px] text-pb-faint uppercase truncate max-w-[110px] hidden sm:block">{clubName}</span>
+        <span className="font-mono text-[9px] text-pb-faint uppercase truncate max-w-[110px] hidden lg:block">{clubName}</span>
       </span>
-      <span className="w-px h-5 bg-pb-hairline" />
+      <span className="w-px h-5 bg-pb-hairline hidden sm:block" />
       <ModuleLockup name="BetterPosts" logo={moduleBrand('socials').logo} accent="#EC4899" />
-      <span className="w-px h-5 bg-pb-hairline" />
-      <button ref={typeBtnRef} onClick={() => setTypeMenuOpen((o) => !o)}
-        className="flex items-center gap-2 px-2.5 h-8 rounded-md border pb-hairline2 bg-pb-surface2 hover:border-pb-accent transition-colors">
-        <span className="font-mono text-[8px] tracking-wide2 uppercase text-pb-faint">Post</span>
-        <span className="text-pb-text text-[12px]">{TABS.find((t) => t.key === activeTab)?.label}</span>
-        <Icon name="chevron" size={12} className="text-pb-faint rotate-90" />
-      </button>
-      <Dropdown anchorRef={typeBtnRef} open={typeMenuOpen} onClose={() => setTypeMenuOpen(false)}
-        className="bg-pb-surface border pb-hairline2 rounded-lg shadow-xl p-2">
-        <div className="grid grid-cols-2 gap-1 w-[420px]">
-          {TABS.map((t) => (
-            <button key={t.key} onClick={() => { switchTab(t.key); setTypeMenuOpen(false) }}
-              className={`text-left px-3 py-2 rounded-md text-[12px] transition-colors ${activeTab === t.key ? 'text-pb-accent bg-pb-surface2' : 'text-pb-dim hover:bg-pb-surface2'}`}>{t.label}</button>
-          ))}
-        </div>
-      </Dropdown>
     </>
   )
+
+  // Every post type across the top — replaces the old dropdown.
+  const tabBar = TABS.map((t) => {
+    const on = activeTab === t.key
+    return (
+      <button key={t.key} onClick={() => switchTab(t.key)}
+        className={`shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-md font-mono text-[10px] tracking-wide2 uppercase whitespace-nowrap transition-colors ${
+          on ? 'text-pb-accent' : 'text-pb-faint hover:text-pb-dim'
+        }`}
+        style={on ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
+        <Icon name={TAB_ICON[t.key] || 'sheet'} size={14} />{t.label}
+      </button>
+    )
+  })
   const headerRight = (
     <>
       <span className="flex items-center gap-1">
@@ -1919,6 +1950,7 @@ export default function AdminSocialPost() {
         headerRight={headerRight}
         tool={tool}
         onTool={setTool}
+        tabBar={tabBar}
         panelTitle={TOOL_TITLE[tool]}
         panelMeta={panelMeta}
         renderCanvas={renderCanvas}
