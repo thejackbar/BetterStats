@@ -763,20 +763,99 @@ export default function SuperCrm() {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [sortBy, setSortBy] = useState('')
   const [sortDir, setSortDir] = useState('asc')
+  const [recalcRunning, setRecalcRunning] = useState(false)
+  const recalcPollRef = useRef(null)
 
-  const load = useCallback(() => {
+  // opts.silent — used by the background live-refresh below, so a transient
+  // network blip mid-poll never pops an error toast (a user-initiated load
+  // still surfaces the error).
+  const load = useCallback((opts) => {
+    const silent = opts?.silent === true
     if (!loadedOnce.current) setLoading(true)
-    Promise.all([
+    return Promise.all([
       api.superCrmStages(),
       api.superCrmListDeals({ status: status || undefined }),
     ])
       .then(([s, d]) => { setStages(s.stages || []); setDeals(d.deals || []) })
-      .catch(e => toast.error(e.message || 'Could not load the sales pipeline'))
+      .catch(e => { if (!silent) toast.error(e.message || 'Could not load the sales pipeline') })
       .finally(() => { setLoading(false); loadedOnce.current = true })
   }, [status, toast])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.superCrmOwners().then(r => setOwners(r.owners || [])).catch(() => {}) }, [])
+
+  // Live refresh — the board/list is otherwise refetch-on-load only, so a deal,
+  // stage promotion or engagement score changed in the background (a trial
+  // firing, an auto-promotion, a subscription webhook) wouldn't appear until a
+  // manual reload. Poll every 45s and refetch the instant the tab regains
+  // focus; both reuse `load` (silent — a poll never toasts — and it keeps the
+  // board mounted underneath, so scroll position isn't disturbed). Paused while
+  // a modal is open (don't swap data out from under an edit) or the tab is
+  // hidden (pointless). super_list_deals is a super-admin-only, cached-score
+  // read, so a 45s cadence is cheap.
+  const pausePollRef = useRef(false)
+  useEffect(() => {
+    pausePollRef.current = !!(openDealId || showNew || showStages || showSettings)
+  }, [openDealId, showNew, showStages, showSettings])
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && !pausePollRef.current) load({ silent: true })
+    }
+    const id = setInterval(refresh, 45000)
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [load])
+
+  // "Recalculate" button — runs the same full engagement recompute as
+  // `python -m app.scripts.recalc_engagement` in the background (recompute +
+  // re-cache every club's score, re-run score-based auto-promotions), then
+  // polls its status, refreshing the board as scores land and once more when it
+  // finishes. A full sweep takes minutes, so it can't be a plain awaited call.
+  const startRecalcPolling = useCallback(() => {
+    if (recalcPollRef.current) return
+    recalcPollRef.current = setInterval(async () => {
+      try {
+        const s = await api.superCrmRecalcEngagementStatus()
+        if (s.status === 'running') { load({ silent: true }); return }
+        clearInterval(recalcPollRef.current); recalcPollRef.current = null
+        setRecalcRunning(false)
+        load({ silent: true })
+        if (s.error) toast.error(`Engagement recalculation failed: ${s.error}`)
+        else if (s.result) toast.success(
+          `Engagement recalculated: ${s.result.processed} club${s.result.processed === 1 ? '' : 's'} scored, `
+          + `${s.result.promoted} deal${s.result.promoted === 1 ? '' : 's'} promoted.`)
+      } catch { /* transient — keep polling */ }
+    }, 4000)
+  }, [load, toast])
+
+  const runRecalc = useCallback(async () => {
+    setRecalcRunning(true)
+    try {
+      const r = await api.superCrmRecalcEngagement()
+      toast.info(r.status === 'already_running'
+        ? 'A recalculation is already running — the board updates as it finishes.'
+        : 'Recalculating engagement scores in the background. This can take a few minutes; the board updates as it runs.')
+      startRecalcPolling()
+    } catch (e) {
+      setRecalcRunning(false)
+      toast.error(e.message || 'Could not start the recalculation')
+    }
+  }, [startRecalcPolling, toast])
+
+  // Resume the running/polling state if a recalc is already in flight (navigated
+  // away and back, or another super admin started one); stop polling on unmount.
+  useEffect(() => {
+    let alive = true
+    api.superCrmRecalcEngagementStatus().then(s => {
+      if (alive && s.status === 'running') { setRecalcRunning(true); startRecalcPolling() }
+    }).catch(() => {})
+    return () => { alive = false; if (recalcPollRef.current) { clearInterval(recalcPollRef.current); recalcPollRef.current = null } }
+  }, [startRecalcPolling])
 
   const stateOptions = useMemo(() => [...new Set(deals.map(d => d.marketing_club_state).filter(Boolean))].sort(), [deals])
   const associationOptions = useMemo(() => [...new Set(deals.map(d => d.marketing_club_association).filter(Boolean))].sort(), [deals])
@@ -889,6 +968,11 @@ export default function SuperCrm() {
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'list' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>List</button>
           <button onClick={() => setView('dashboard')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'dashboard' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Dashboard</button>
+          <span title="Recompute every club's engagement score now and re-run auto-promotions, then refresh the board (runs in the background — takes a few minutes)">
+            <Btn variant="ghost" sm onClick={runRecalc} disabled={recalcRunning}>
+              {recalcRunning ? 'Recalculating…' : 'Recalculate'}
+            </Btn>
+          </span>
           <Btn variant="ghost" sm onClick={() => setShowSettings(true)}>Settings</Btn>
           <Btn variant="primary" sm onClick={() => setShowNew(true)}>New deal</Btn>
         </div>

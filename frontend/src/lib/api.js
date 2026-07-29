@@ -793,6 +793,8 @@ export const api = {
     const qs = p.toString()
     return request(`/club-admin/super/crm/deals${qs ? `?${qs}` : ''}`)
   },
+  superCrmRecalcEngagement: () => request('/club-admin/super/crm/recalc-engagement', { method: 'POST' }),
+  superCrmRecalcEngagementStatus: () => request('/club-admin/super/crm/recalc-engagement/status'),
   superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
   superCrmGetDeal: (id) => request(`/club-admin/super/crm/deals/${id}`),
   superCrmUpdateDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

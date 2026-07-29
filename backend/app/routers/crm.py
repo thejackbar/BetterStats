@@ -14,9 +14,10 @@ Two routers sharing one service layer (``services/crm.py``):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -703,6 +704,55 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         row["last_activity_at"] = act.isoformat() if act else None
         out.append(row)
     return {"deals": out}
+
+
+# ─── Manual full engagement recompute (the "Recalculate" board button) ────────
+# Runs the SAME logic as `python -m app.scripts.recalc_engagement`: recompute and
+# re-cache every club's engagement score (twenty_sync._engagement, a local
+# read/compute — no Twenty calls) and re-run the score-based CRM auto-promotion,
+# so the board reflects the current scoring rules immediately instead of waiting
+# on the nightly (Twenty-gated) refresh or lazy per-event recomputes. A full
+# sweep takes minutes, well past nginx's 60s proxy timeout, so it runs as a
+# detached background task with a status the button polls — same pattern as the
+# marketing page's "Refresh Twenty" buttons.
+_engagement_recalc: dict = {
+    "running": False, "started_at": None, "finished_at": None, "result": None, "error": None,
+}
+_recalc_tasks: set = set()
+
+
+async def _run_engagement_recalc() -> None:
+    from app.scripts.recalc_engagement import recalc
+    try:
+        _engagement_recalc["result"] = await recalc()
+        _engagement_recalc["error"] = None
+    except Exception as e:  # noqa: BLE001 - background task; surface via status, never crash
+        logger.exception("manual engagement recalc failed")
+        _engagement_recalc["error"] = str(e) or "Recalculation failed"
+    finally:
+        _engagement_recalc["running"] = False
+        _engagement_recalc["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@super_router.post("/recalc-engagement", dependencies=[_super])
+async def super_recalc_engagement():
+    """Kick off a full engagement recompute across every club in the background
+    and return immediately. A no-op (returns the live state) if one is already
+    running, so a double-click can't launch two concurrent sweeps."""
+    if _engagement_recalc["running"]:
+        return {"status": "already_running", **_engagement_recalc}
+    _engagement_recalc.update(
+        running=True, started_at=datetime.now(timezone.utc).isoformat(),
+        finished_at=None, result=None, error=None)
+    task = asyncio.create_task(_run_engagement_recalc())
+    _recalc_tasks.add(task)
+    task.add_done_callback(_recalc_tasks.discard)
+    return {"status": "started"}
+
+
+@super_router.get("/recalc-engagement/status", dependencies=[_super])
+async def super_recalc_engagement_status():
+    return {"status": "running" if _engagement_recalc["running"] else "idle", **_engagement_recalc}
 
 
 @super_router.post("/deals", dependencies=[_super])

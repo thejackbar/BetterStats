@@ -10,5 +10,7 @@ export default {
     'The "New Deals" and "New Deal Activity" date filters, and the engagement arrow\'s day-over-day comparison, all read calendar days in Perth (Western Australia) time.',
     'The "Trial expired" filter is now labelled "Expired Trials".',
     'Deal cards show a green up-arrow next to the engagement score when it rose from yesterday, or a red down-arrow when it fell. No arrow means it did not change.',
+    'The pipeline now refreshes on its own every 45 seconds and the moment you switch back to the tab, so a deal, promotion or score that changed in the background shows up without a manual reload.',
+    'New "Recalculate" button recomputes every club\'s engagement score and re-runs auto-promotions in the background, then updates the board as it goes.',
   ],
 }
