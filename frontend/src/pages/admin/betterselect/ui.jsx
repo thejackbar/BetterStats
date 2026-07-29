@@ -19,6 +19,7 @@ const ICON_PATHS = {
   availability: <><circle cx="12" cy="12" r="9" /><path d="M8.5 12.5l2.5 2.5 4.5-5" /></>,
   selection: <><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z" /></>,
   ladders: <><path d="M5 21V9M12 21V4M19 21v-8" /></>,
+  votes: <><rect x="4" y="9.5" width="16" height="10.5" rx="2" /><path d="M8.5 13.5h7" /><path d="M12 2v5M9.5 4.5L12 7l2.5-2.5" /></>,
   search: <><circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" /></>,
   filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
   close: <><path d="M6 6l12 12M18 6L6 18" /></>,

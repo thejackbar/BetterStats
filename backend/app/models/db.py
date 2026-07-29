@@ -1209,6 +1209,83 @@ class PlayerAvailabilityPeriod(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class VoteSettings(Base):
+    """BetterSelect — best-player vote collection config (one row per club).
+
+    The whole feature is derived-on-read: ballots store ranked POSITIONS only,
+    and every weekly result / season leaderboard is recomputed from this config
+    at query time — so changing the ballot values, counting method or tie
+    policy mid-season restates the season consistently with no backfill.
+    """
+    __tablename__ = "vote_settings"
+
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Public voting link token — rotatable, same low-trust posture as the
+    # availability link (identifies the club only; a player still needs a PIN).
+    link_token = Column(Text, nullable=True)
+    require_pin = Column(Boolean, nullable=False, default=True, server_default="true")
+    voter_mode = Column(Text, nullable=False, default="players", server_default="players")  # 'players' | 'captain'
+    ballot_values = Column(JSONB, nullable=False, default=[3, 2, 1])  # descending, position 1 first
+    counting_method = Column(Text, nullable=False, default="rank", server_default="rank")  # 'rank' | 'tally'
+    tie_policy = Column(Text, nullable=False, default="share", server_default="share")  # 'share' | 'countback'
+    allow_self_vote = Column(Boolean, nullable=False, default=False, server_default="false")
+    allow_non_participants = Column(Boolean, nullable=False, default=False, server_default="false")
+    auto_close_days = Column(Integer, nullable=False, default=7, server_default="7")
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class VoteBallot(Base):
+    """One voter's ballot for one fixture.
+
+    Voter identity is exactly one of: voter_player_id (a club player — PIN
+    verified on the public page, or admin-entered) or voter_name (a
+    non-participant: coach / president / supporter, name typed on the public
+    page). Partial unique indexes (see migration 193) enforce one live ballot
+    per voter per fixture in each identity space.
+    """
+    __tablename__ = "vote_ballots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
+    voter_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    voter_name = Column(Text, nullable=True)
+    voter_kind = Column(Text, nullable=False, default="player", server_default="player")  # 'player' | 'non_player'
+    source = Column(Text, nullable=False, default="self", server_default="self")  # 'self' | 'admin'
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    picks = relationship("VoteBallotPick", cascade="all, delete-orphan", lazy="selectin")
+
+
+class VoteBallotPick(Base):
+    """A ballot's ranked pick — position 1 is the voter's best player. The
+    pick's point value is derived from VoteSettings.ballot_values on read."""
+    __tablename__ = "vote_ballot_picks"
+    __table_args__ = (
+        UniqueConstraint("ballot_id", "player_id", name="uq_vote_pick_player"),
+    )
+
+    ballot_id = Column(UUID(as_uuid=True), ForeignKey("vote_ballots.id", ondelete="CASCADE"), primary_key=True)
+    position = Column(Integer, primary_key=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+
+
+class VoteFixtureOverride(Base):
+    """Manual lock/reopen for a fixture's voting, layered over the auto-close
+    window (game end + auto_close_days). 'locked' closes voting immediately;
+    'reopened' holds it open past auto-close until locked again."""
+    __tablename__ = "vote_fixture_overrides"
+
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), primary_key=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False)  # 'locked' | 'reopened'
+    set_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    set_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class NetSession(Base):
     """BetterSelect → Net Manager: one net/practice session.
 

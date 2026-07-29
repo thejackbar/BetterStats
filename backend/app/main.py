@@ -16,7 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary, social_media
+    club_diary, social_media, votes, public_votes
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -440,6 +440,72 @@ async def lifespan(app: FastAPI):
             "ON social_media_asset(organisation_id)"))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS social_brand_kit JSONB"))
+        # BetterSelect vote collection (migration 193) — defensive idempotent
+        # creates so the API boots even if alembic hasn't run yet.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS vote_settings (
+                organisation_id UUID PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT false,
+                link_token TEXT,
+                require_pin BOOLEAN NOT NULL DEFAULT true,
+                voter_mode TEXT NOT NULL DEFAULT 'players',
+                ballot_values JSONB NOT NULL DEFAULT '[3,2,1]'::jsonb,
+                counting_method TEXT NOT NULL DEFAULT 'rank',
+                tie_policy TEXT NOT NULL DEFAULT 'share',
+                allow_self_vote BOOLEAN NOT NULL DEFAULT false,
+                allow_non_participants BOOLEAN NOT NULL DEFAULT false,
+                auto_close_days INTEGER NOT NULL DEFAULT 7,
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_settings_link_token "
+            "ON vote_settings(link_token) WHERE link_token IS NOT NULL"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS vote_ballots (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                fixture_id UUID NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+                voter_player_id UUID REFERENCES players(id) ON DELETE CASCADE,
+                voter_name TEXT,
+                voter_kind TEXT NOT NULL DEFAULT 'player',
+                source TEXT NOT NULL DEFAULT 'self',
+                recorded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_ballot_player "
+            "ON vote_ballots(fixture_id, voter_player_id) WHERE voter_player_id IS NOT NULL"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_ballot_name "
+            "ON vote_ballots(fixture_id, lower(voter_name)) "
+            "WHERE voter_player_id IS NULL AND voter_name IS NOT NULL"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_vote_ballots_org_fixture "
+            "ON vote_ballots(organisation_id, fixture_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS vote_ballot_picks (
+                ballot_id UUID NOT NULL REFERENCES vote_ballots(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                PRIMARY KEY (ballot_id, position),
+                UNIQUE (ballot_id, player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_vote_ballot_picks_player "
+            "ON vote_ballot_picks(player_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS vote_fixture_overrides (
+                fixture_id UUID PRIMARY KEY REFERENCES fixtures(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                set_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                set_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "
@@ -3970,10 +4036,15 @@ app.include_router(teams.router, dependencies=[Depends(require_module("select"))
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
 app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
 app.include_router(net_manager.router, dependencies=[Depends(require_module("select"))])  # BetterSelect (Net Manager)
+app.include_router(votes.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (vote collection)
 # Player-facing self-service availability (magic link + PIN). Unauthenticated by
 # design — it resolves the club from the link token and enforces entitlement +
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
+# Player/supporter-facing vote collection (magic link + PIN). Unauthenticated by
+# necessity — resolves the club from its vote-link token and checks entitlement +
+# the enabled flag itself, so it is NOT wrapped in require_module.
+app.include_router(public_votes.router)                                                   # BetterSelect (public votes)
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)

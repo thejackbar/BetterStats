@@ -26,7 +26,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -154,6 +154,7 @@ const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminS
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
+const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
 const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionPlayer'))
@@ -214,6 +215,7 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
+const PublicVoting = lazy(() => import('./pages/PublicVoting'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
 const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
 // Public, login-free event registration (Events/Ticketing — event-id link)
@@ -274,6 +276,7 @@ export default function App() {
 
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
+          <Route path="/vote/:token" element={<PublicVoting />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />
           {/* Public event registration (no login — event-id link) */}
@@ -384,6 +387,7 @@ export default function App() {
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/votes" element={<ProtectedRoute requireModule="select"><BsVotes /></ProtectedRoute>} />
 
           {/* BetterIQ module */}
           <Route path="/admin/betteriq" element={<ProtectedRoute requireModule="iq"><BetterIQHome /></ProtectedRoute>} />

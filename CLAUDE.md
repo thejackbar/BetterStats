@@ -728,6 +728,81 @@ design note: `docs/betterselect-self-availability.md`.
   the public club `Navbar.jsx` (→ `/login`, or "Admin" → `/admin` when signed in);
   "View Public Page" in `AdminLayout.jsx` header (→ `/{club_slug}`).
 
+## BetterSelect — Vote collection (v8.92.0, migration 193, Jul 2026)
+
+Brownlow-style best-player votes per fixture, its own "Votes" menu item in
+BetterSelect. Everything is **derived on read** from raw ballots + the club's
+current `vote_settings` (no stored weekly results or season points), so a
+mid-season config change restates the whole season — same philosophy as
+BetterFees' derived allocation.
+
+- **Migration 193** (+ idempotent `main.py` lifespan mirror): `vote_settings`
+  (org singleton: `enabled`/`link_token`/`require_pin`, `voter_mode`
+  'players'|'captain', `ballot_values` JSONB default `[3,2,1]` — fully custom,
+  best-first, ≤10 positions — `counting_method` 'rank'|'tally', `tie_policy`
+  'share'|'countback', `allow_self_vote` default false,
+  `allow_non_participants` default false, `auto_close_days` default 7),
+  `vote_ballots` (one per voter per fixture — `voter_player_id` for a club
+  player OR bare `voter_name` for a non-participant; partial uniques per
+  identity space; `source` 'self'|'admin'), `vote_ballot_picks` (ranked
+  positions only — values derived from config at count time),
+  `vote_fixture_overrides` ('locked'|'reopened' on top of the auto-close
+  window).
+- **Eligibility = the synced scorecard** (per direct instruction, not the
+  saved lineup): a fixture is votable once `games.id == fixture.id` exists
+  (playhq fixtures share ids with their games; manual fixtures aren't votable
+  yet), and the votable/voter list is `services/votes.eligible_players` — the
+  union of `game_appearances` + batting/bowling/fielding rows, **org-scoped
+  through `players.organisation_id`** (the shared-game cross-club leak rule).
+  Captain-only mode uses `game_appearances.is_captain`, falling back to the
+  lineup's captain when the sync predates the flag.
+- **Counting** (`services/votes.py`, pure functions, unit-checked offline):
+  'tally' = season points are the raw sum (10 voters' 3s = 30). 'rank' =
+  weekly conversion — top raw vote-getter earns `ballot_values[0]`, etc.;
+  'share' ties use standard competition ranking (both take the higher value,
+  next value(s) consumed), 'countback' breaks on most-of-the-highest-value
+  then down the ballot, dead heats still share. Season year = Jul→Jun
+  (`season_year_for`); rounds group on `fixtures.round` (label else date) and
+  the leaderboard can replay standings "as at" any round (`through_round`).
+- **Two capabilities**: `MANAGE_VOTES` (settings/link, ballot entry + delete,
+  lock/reopen, per-fixture ballot detail — which shows who voted for whom) and
+  `VIEW_VOTE_RESULTS` (leaderboard) — the Main Admin hands the latter out per
+  user since many clubs keep the count secret (club_admins implicitly hold
+  both). New `require_any_cap(*caps)` factory in `auth/capabilities.py`;
+  `BetterSelectLayout` NAV gained `anyCaps` support. **No tallies on any
+  public surface** — leaderboard is admin-app only, by decision.
+- **Routers**: `routers/votes.py` (`/votes/*`, mounted with
+  `require_module("select")`) — settings GET/POST/regenerate, fixtures list
+  (season-year filter + state + ballot counts), fixture detail, admin ballot
+  upsert (paper votes / captain texting in — works after close, any named
+  voter, but picks still restricted to who played + the self-vote rule),
+  ballot delete (spoof moderation), lock/reopen, leaderboard.
+  `routers/public_votes.py` (`/public/votes/*`, unauthenticated — resolves
+  club from `vote_settings.link_token`, checks entitlement + enabled itself,
+  404-tells-nothing): landing, PIN verify (same lockout/rate limits as
+  availability, own `bs_vote` cookie), per-fixture state, ballot submit.
+  Verified players vote as themselves ('captain' mode restricts to the
+  captain); a typed name is accepted only when `allow_non_participants` — a
+  verified player who didn't play also counts as a non-player ballot (stronger
+  identity than a typed name). Self-vote + played-only + open-window all
+  enforced server-side.
+- **Frontend**: `pages/admin/betterselect/AdminVotes.jsx`
+  (`/admin/betterselect/votes` — Fixtures / Leaderboard / Settings tabs; the
+  settings tab has the link+QR panel and points at the Users page for
+  leaderboard access) and `pages/PublicVoting.jsx` (`/vote/:token`,
+  standalone/no-navbar like `/avail/`): pick game → verify (or "I didn't
+  play" name entry when allowed) → assign positions one at a time ("Who gets
+  your 3?") → review → submit; resubmitting updates the same ballot.
+- **`merge_players` reassigns vote rows** (`admin.py::_merge_players_core`):
+  both vote FKs are ON DELETE CASCADE, so without the reassignment a routine
+  merge would silently destroy the removed record's ballots and every vote
+  cast for them. De-dups (keep's ballot/pick wins) then moves; deliberately
+  NOT in the undo log — an undone merge leaves votes on the kept player
+  (same human, no vote lost).
+- **Known gap** (deliberate v1): manual fixtures/games aren't votable — the
+  votable probe is `games.id == fixture.id`, and manual games have no
+  fixture link.
+
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 
 Best-tier analytics module (master-plan Phase 4). Gated by `require_module("iq")` + the `MANAGE_IQ` cap. Module surface mirrors BetterSelect — own `IQLayout` (violet `--pb-accent` override), dashboard tile + sidebar entry flip on automatically once `MODULE_INFO`/`MODULE_META` have `built: true`. Routes under `/admin/betteriq` (Overview + Opposition + Selection + Player trends). **NL Q&A is the one remaining phase** (still needs an LLM-provider decision — open in the spec).
