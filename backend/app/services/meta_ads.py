@@ -450,6 +450,7 @@ def compute_funnel(campaign: dict) -> list[dict]:
 # routers/public_self_serve.py FUNNEL_STEPS, which this must stay in sync
 # with — each key here must also be in that allowlist or its beacon 422s).
 REGISTRATION_STEP_ORDER = [
+    ("club_searched", "Club searched"),
     ("club_prepared", "Club selected"),
     ("admin_details_completed", "Admin details completed"),
     ("email_code_sent", "Verification code sent"),
@@ -683,6 +684,98 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         "identified": len(visible),
         "hidden_count": len(hidden),
         "anonymous": int(anon),
+    }
+
+
+async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> dict:
+    """Name the clubs visitors TYPED into the search box — the step before a
+    club is actually clicked/selected.
+
+    The `/trial` search box (and the wizard's own) fire a `club_searched`
+    beacon whenever a search returns results, carrying the top-matching club
+    and the raw text typed (public_self_serve.py track_step). This surfaces the
+    interest-without-commitment those beacons capture: a club whose name got
+    searched but which was never selected is a warm prospect the "Clubs
+    selected" table would otherwise miss entirely.
+
+    Each row reports the top-matched club, how many distinct visitors searched
+    it, a sample of the literal search terms, whether the search came through a
+    Meta ad, and — the point of the table — whether it was ever `selected`
+    (clicked into the wizard). Test noise flagged on the selected-clubs table is
+    hidden here too, keyed on the same normalised club name."""
+    window = {"days": days}
+
+    # Clubs typed into the search box, grouped by the top result the search
+    # returned, tagged Meta-or-not, with a sample of the literal search terms.
+    search_rows = (await db.execute(text(f"""
+        SELECT metadata->>'club_name'   AS club_name,
+               metadata->>'club_org_id' AS org_id,
+               MIN(created_at)          AS first_at,
+               MAX(created_at)          AS last_at,
+               COUNT(DISTINCT visitor_id) AS visitors,
+               COUNT(*)                   AS searches,
+               bool_or({_META_VISITOR_SUBQUERY}) AS via_meta,
+               (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
+                  FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
+               )[1:5] AS queries
+        FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND route = 'club_searched'
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
+        GROUP BY 1, 2
+    """), window)).mappings().all()
+
+    # The set of clubs that went on to actually be SELECTED (clicked into the
+    # wizard) in the same window — a searched club present here converted, the
+    # rest are searched-only. Keyed by normalised name, so it lines up with the
+    # search rows' own grouping regardless of which org_id each side captured.
+    selected_keys = set((await db.execute(text("""
+        SELECT DISTINCT lower(TRIM(metadata->>'club_name')) AS k
+        FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND route = 'club_prepared'
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
+    """), window)).scalars().all())
+
+    rows: list[dict] = []
+    for r in search_rows:
+        name = (r["club_name"] or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        rows.append({
+            "name": name,
+            "key": key,
+            "org_id": r["org_id"],
+            "visitors": int(r["visitors"] or 0),
+            "searches": int(r["searches"] or 0),
+            "queries": list(r["queries"] or []),
+            "via_meta": bool(r["via_meta"]),
+            "selected": key in selected_keys,
+            "first_at": r["first_at"].isoformat() if r["first_at"] else None,
+            "last_at": r["last_at"].isoformat() if r["last_at"] else None,
+        })
+
+    _floor = datetime.min.replace(tzinfo=timezone.utc)
+    rows.sort(key=lambda c: c["last_at"] or _floor.isoformat(), reverse=True)
+
+    # Reuse the selected-clubs hidden list — a club flagged as test noise there
+    # is test noise here too (same normalised-name key).
+    from app.services import platform_settings
+    hidden_keys = await platform_settings.get_hidden_meta_selections(db)
+    visible = [c for c in rows if c["key"] not in hidden_keys]
+    hidden = [c for c in rows if c["key"] in hidden_keys]
+
+    searched_only = [c for c in visible if not c["selected"]]
+    return {
+        "clubs": visible,
+        "hidden_clubs": hidden,
+        "identified": len(visible),
+        "hidden_count": len(hidden),
+        "searched_only_count": len(searched_only),
+        "converted_count": len(visible) - len(searched_only),
     }
 
 

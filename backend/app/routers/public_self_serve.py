@@ -77,11 +77,13 @@ MIN_FILL_MS = 4000
 # Ordered checkpoints the wizard beacons through — see meta_ads.py
 # REGISTRATION_STEP_ORDER for the labels/ordering used to report on these.
 # Kept as an allowlist so /track-step can't be used to write arbitrary
-# strings into usage_events.
+# strings into usage_events. `club_searched` fires a step BEFORE club_prepared:
+# a visitor whose search returned results but who never clicked one (the
+# interest-without-commitment signal the Meta Ads page can now surface).
 FUNNEL_STEPS = {
-    "club_prepared", "admin_details_completed", "email_code_sent",
-    "email_verified", "acknowledgements_accepted", "submit_attempted",
-    "registration_completed",
+    "club_searched", "club_prepared", "admin_details_completed",
+    "email_code_sent", "email_verified", "acknowledgements_accepted",
+    "submit_attempted", "registration_completed",
 }
 
 # ─── Pass-throughs: public behaviour is identical, re-register the internal
@@ -120,10 +122,14 @@ class TrackStepRequest(BaseModel):
     visitor_id: Optional[str] = None
     # The club picked at step 1, sent alongside the `club_prepared` beacon so a
     # dropped-off visitor's chosen club is recoverable (the funnel otherwise
-    # only counts anonymous visitor_ids per step). Both optional — the beacon
-    # stays fire-and-forget and never blocks the wizard.
+    # only counts anonymous visitor_ids per step). All optional — the beacon
+    # stays fire-and-forget and never blocks the wizard. For a `club_searched`
+    # beacon these carry the TOP result the search returned; `query` carries the
+    # raw text the visitor typed, so the Meta Ads page can show both the club
+    # they were most likely after and the literal search term.
     club_name: Optional[str] = None
     club_org_id: Optional[str] = None
+    query: Optional[str] = None
 
 
 @router.post("/track-step")
@@ -145,11 +151,14 @@ async def track_step(data: TrackStepRequest, request: Request):
     # is answerable, not just "how many". Clipped, and only kept when present.
     club_name = (data.club_name or "").strip()[:200]
     club_org_id = (data.club_org_id or "").strip()[:64]
+    search_query = (data.query or "").strip()[:200]
     metadata = {}
     if club_name:
         metadata["club_name"] = club_name
     if club_org_id:
         metadata["club_org_id"] = club_org_id
+    if search_query:
+        metadata["search_query"] = search_query
     record_event_bg(
         event_type="self_serve_step",
         method="POST",

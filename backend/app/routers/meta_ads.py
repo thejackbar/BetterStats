@@ -198,6 +198,20 @@ async def unhide_selected_club(
     return await meta_ads.get_selected_clubs(db, days)
 
 
+@router.get("/searched-clubs")
+async def searched_clubs(
+    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Names the clubs visitors TYPED into the search box (whose search returned
+    results) — the step before a club is clicked/selected. Surfaces the
+    interest the "Clubs selected" table misses: a club searched but never
+    selected. Each row flags whether it went on to be selected. See
+    meta_ads.get_searched_clubs."""
+    return await meta_ads.get_searched_clubs(db, days)
+
+
 @router.get("/ad-signups")
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow

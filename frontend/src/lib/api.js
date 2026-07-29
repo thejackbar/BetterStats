@@ -1384,6 +1384,9 @@ export const api = {
   metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   metaAdsRegistrationFunnel: (days = 30) => request(`/club-admin/meta-ads/registration-funnel?days=${days}`),
   metaAdsSelectedClubs: (days = 30) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
+  // Clubs typed into the search box (results loaded) but not necessarily
+  // clicked — the interest before a selection. See searched-clubs endpoint.
+  metaAdsSearchedClubs: (days = 30) => request(`/club-admin/meta-ads/searched-clubs?days=${days}`),
   metaAdsHideSelection: (name, days = 30) =>
     request(`/club-admin/meta-ads/selected-clubs/hide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
   metaAdsUnhideSelection: (name, days = 30) =>
@@ -1472,10 +1475,13 @@ export const api = {
       body: JSON.stringify({
         step,
         visitor_id: visitorId,
-        // Only sent alongside the club_prepared step — names the picked club so
-        // a dropped-off visitor's selection is recoverable on the Meta Ads page.
+        // Sent with club_prepared (the picked club) and club_searched (the top
+        // result a search returned) so a dropped-off visitor's club is
+        // recoverable on the Meta Ads page. `query` is the raw text typed,
+        // sent only with club_searched.
         club_name: club?.name || undefined,
         club_org_id: club?.org_id || undefined,
+        query: club?.query || undefined,
       }),
     }),
   superCreateClub: (data) =>
