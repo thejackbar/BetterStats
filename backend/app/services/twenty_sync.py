@@ -78,9 +78,12 @@ BONUS_REQUESTED_TRIAL = 12
 BONUS_IN_TRIAL = 10
 BONUS_ONBOARDING = 20
 # A visit to the BetterCricket contact page — a real "get in touch" intent
-# signal, worth far more than plain browsing. This is the kind of action that
-# should earn HOT, so a club that only browsed (no contact page) stays cooler.
-BONUS_CONTACT_PAGE = 20
+# signal, worth more than plain browsing (a club that only browsed stays cooler).
+BONUS_CONTACT_PAGE = 10
+# A visit to the /trial signup page — the strongest pre-enquiry buying intent
+# (someone actively looking to start), so it's scored higher than a contact-page
+# visit. Both stack: a prospect who hit both pages earns both.
+BONUS_VISIT_TRIAL = 20
 # A club whose org was born from a Meta/paid ad (organisations.signup_source ==
 # 'self_serve_ad') converted a paid click all the way to a registration — score
 # that intent on top of the trial-depth registration credit it already earns.
@@ -367,6 +370,7 @@ async def batch_web_stats(session) -> dict:
                    COALESCE(ue.ip_hash, ue.visitor_id::text) AS ipk,
                    ({_META_CLICK}) AS is_meta,
                    (split_part(ue.path, '?', 1) ~* '^/contact(/|$)') AS is_contact,
+                   (split_part(ue.path, '?', 1) ~* '^/trial(/|$)') AS is_trial,
                    -- Only an anonymous, non-admin row can ever be prospect-attributed,
                    -- so only those need the (expensive, 7-subquery) _RESOLVED_CID
                    -- resolution — skipping it for the (majority) authenticated / api /
@@ -382,14 +386,14 @@ async def batch_web_stats(session) -> dict:
         attributed AS (
             -- Prospect marketing traffic: anonymous, non-admin, resolves to a club
             -- (all three conditions are baked into a non-NULL rcid above).
-            SELECT rcid AS club_id, eid, created_at, ipk, is_meta, is_contact
+            SELECT rcid AS club_id, eid, created_at, ipk, is_meta, is_contact, is_trial
             FROM ev
             WHERE rcid IS NOT NULL
           UNION
             -- Customer product use: the club's own (non-archived) org traffic,
             -- never a super admin's acting-as activity.
             SELECT mc.id::text AS club_id, ev.eid, ev.created_at, ev.ipk,
-                   ev.is_meta, ev.is_contact
+                   ev.is_meta, ev.is_contact, ev.is_trial
             FROM ev
             JOIN marketing_clubs mc ON mc.existing_org_id = ev.org_id
             JOIN organisations o ON o.id = ev.org_id AND o.archived_at IS NULL
@@ -420,7 +424,8 @@ async def batch_web_stats(session) -> dict:
                    ELSE 0.0
                END), 0.0)::float AS ad_decay_pts,
                COUNT(*) FILTER (WHERE is_meta) AS ad_clicks,
-               BOOL_OR(is_contact) AS visited_contact
+               BOOL_OR(is_contact) AS visited_contact,
+               BOOL_OR(is_trial) AS visited_trial
         FROM attributed
         GROUP BY club_id
     """))).all()
@@ -436,6 +441,7 @@ async def batch_web_stats(session) -> dict:
             "ad_decay_pts": float(r[5] or 0.0),
             "ad_clicks": r[6] or 0,
             "visited_contact": bool(r[7]),
+            "visited_trial": bool(r[8]),
         }
     return out
 
@@ -500,7 +506,8 @@ async def batch_email_stats(session) -> dict:
 async def _engagement(session, club: MarketingClub,
                       org: "Optional[Organisation]" = None,
                       web_stats: "Optional[dict]" = None,
-                      email_stats: "Optional[dict]" = None) -> dict:
+                      email_stats: "Optional[dict]" = None,
+                      fast_web: bool = False) -> dict:
     """A per-club engagement rollup pushed onto the Company so the CRM can score and
     sort without holding raw events. Signal sources, all attributed to the club: web
     breadcrumbs (``usage_events`` by outreach UTM code or org id, both distinct-visitor
@@ -569,6 +576,16 @@ async def _engagement(session, club: MarketingClub,
     # pages trickled over the full window, and the sum itself differentiates a quiet
     # club from a busy one far more than a flat 30-day count capped at 20 ever could
     # (many genuinely-different clubs were converging on the same capped value).
+    # Prospect attribution. Normally the 7-subquery _RESOLVED_CID resolution over
+    # the whole table (correct for any row, incl. ones not yet materialised — the
+    # batch recalc / breakdown path). ``fast_web`` swaps it for the pre-stamped
+    # usage_events.resolved_marketing_club_id column (an indexed equality), which
+    # turns a single-club recompute from ~6s into milliseconds so it's safe to
+    # fire on every live signal. Requires the column to be backfilled for the
+    # scoring window (app/scripts/backfill_resolved_club.py) to be equivalent —
+    # see recalc_engagement --verify-fast.
+    prospect_match = ("ue.resolved_marketing_club_id = CAST(:cid AS uuid)"
+                      if fast_web else f"({_RESOLVED_CID}) = CAST(:cid AS text)")
     if web_stats is None:
       web = (await session.execute(text(f"""
         SELECT MAX(ue.created_at) AS last_seen,
@@ -609,7 +626,10 @@ async def _engagement(session, club: MarketingClub,
                -- Did an attributed visit hit the BetterCricket contact page? A
                -- high-intent action ("I want to get in touch"), unlike plain
                -- browsing — this is what should earn HOT, not page volume.
-               BOOL_OR(split_part(ue.path, '?', 1) ~* '^/contact(/|$)') AS visited_contact
+               BOOL_OR(split_part(ue.path, '?', 1) ~* '^/contact(/|$)') AS visited_contact,
+               -- Did an attributed visit hit the /trial signup page? The strongest
+               -- pre-enquiry buying intent — someone actively looking to start.
+               BOOL_OR(split_part(ue.path, '?', 1) ~* '^/trial(/|$)') AS visited_trial
         FROM usage_events ue
         WHERE (
                 -- Prospect marketing traffic: resolve EACH visit to the ONE club it
@@ -621,8 +641,9 @@ async def _engagement(session, club: MarketingClub,
                 -- collided with the path/UTM — so a club with no page of its own
                 -- could inherit another same-named club's visitors. Anonymous +
                 -- non-/admin (a stale UTM riding a staff member's admin browsing
-                -- must not attribute).
-                (({_RESOLVED_CID}) = CAST(:cid AS text)
+                -- must not attribute). ``prospect_match`` is either the bulk
+                -- _RESOLVED_CID resolution or the pre-stamped column (fast_web).
+                ({prospect_match}
                  AND ue.user_id IS NULL
                  AND split_part(ue.path, '?', 1) !~* '^/admin')
                 -- A customer's own product use: their org's own traffic, keyed on
@@ -648,6 +669,7 @@ async def _engagement(session, club: MarketingClub,
       ad_decay_pts = float(web[4] or 0.0) if web else 0.0
       ad_clicks = (web[5] or 0) if web else 0
       visited_contact = bool(web[6]) if web else False
+      visited_trial = bool(web[7]) if web else False
     else:
       # Batch-precomputed by batch_web_stats() — identical fields, resolved once
       # for the whole table instead of a per-club scan (the full-recalc fast path).
@@ -659,6 +681,7 @@ async def _engagement(session, club: MarketingClub,
       ad_decay_pts = float(ws.get("ad_decay_pts") or 0.0)
       ad_clicks = ws.get("ad_clicks") or 0
       visited_contact = bool(ws.get("visited_contact"))
+      visited_trial = bool(ws.get("visited_trial"))
 
     # Email engagement (email_events opens/clicks) for this club's contact emails, or
     # org-scoped for a customer. Opens+clicks are real engagement; sends are not.
@@ -761,6 +784,9 @@ async def _engagement(session, club: MarketingClub,
         if visited_contact:
             # Hit the contact page — a real "get in touch" signal, not just browsing.
             score += BONUS_CONTACT_PAGE
+        if visited_trial:
+            # Hit the /trial signup page — the strongest pre-enquiry buying intent.
+            score += BONUS_VISIT_TRIAL
         if ad_signup:
             # Converted a paid ad click all the way to a self-serve registration.
             score += BONUS_AD_SIGNUP
@@ -819,7 +845,7 @@ async def _engagement(session, club: MarketingClub,
     in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
         or onboarding_count or sessions or eng_30d or ad_signup or visited_contact
-        or (trial_depth and trial_depth["score"] >= 70))
+        or visited_trial or (trial_depth and trial_depth["score"] >= 70))
 
     fields = {
         "engagementScore": score,
@@ -845,6 +871,7 @@ async def _engagement(session, club: MarketingClub,
         "_adClicks": ad_clicks,
         "_adSignup": ad_signup,
         "_visitedContact": visited_contact,
+        "_visitedTrial": visited_trial,
         "_freqPts": round(freq_pts, 1),
         "_directEnquiryHot": direct_enquiry_hot,
         "_trialDepth": trial_depth,

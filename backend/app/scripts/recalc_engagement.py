@@ -269,6 +269,48 @@ async def verify(sample: int, name: str | None = None) -> None:
                  if mismatches == 0 else f"{mismatches} MISMATCH(es) — do NOT trust the fast path yet."))
 
 
+async def verify_fast(sample: int, name: str | None = None) -> None:
+    """Prove the LIVE fast path (the pre-stamped resolved_marketing_club_id
+    column, fast_web=True) is equivalent to the original _RESOLVED_CID scan, on
+    real data — run this AFTER backfill_resolved_club.py so the column is
+    populated for the scoring window. For up to ``sample`` clubs, compute each
+    club's engagement with fast_web=True and with fast_web=False and report any
+    club whose score, tier, or underlying web aggregate differs. Never persists.
+    A clean pass means crm.check_web_signal_promotion's live per-event recompute
+    is trustworthy."""
+    from app.services.twenty_sync import _engagement
+    async with async_session_maker() as session:
+        idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
+        if name:
+            idq = idq.where(func.lower(MarketingClub.name).like(f"%{name.lower()}%"))
+        idq = idq.limit(sample)
+        rows = (await session.execute(idq)).all()
+        print(f"Verifying fast_web (materialised column) vs _RESOLVED_CID for "
+              f"{len(rows)} club(s) ...")
+        checked = 0
+        mismatches = 0
+        for cid, cname in rows:
+            club = await session.get(MarketingClub, cid)
+            if club is None:
+                continue
+            org = await _load_org(session, club.existing_org_id)
+            fast = await _engagement(session, club, org, fast_web=True)
+            slow = await _engagement(session, club, org, fast_web=False)
+            checked += 1
+            diffs = [(k, fast.get(k), slow.get(k))
+                     for k in _VERIFY_FIELDS if fast.get(k) != slow.get(k)]
+            if diffs:
+                mismatches += 1
+                print(f"  MISMATCH  {cname!r} ({cid})")
+                for k, f, s in diffs:
+                    print(f"      {k}: fast={f!r}  slow={s!r}")
+        await session.rollback()
+        print(f"\nChecked {checked} club(s): "
+              + ("ALL MATCH — the live fast path is equivalent, per-event recompute is safe."
+                 if mismatches == 0 else
+                 f"{mismatches} MISMATCH(es) — backfill may be incomplete; do NOT trust fast_web yet."))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Recalculate all engagement scores.")
     ap.add_argument("--dry-run", action="store_true",
@@ -278,10 +320,15 @@ def main() -> None:
     ap.add_argument("--verify", type=int, default=None, metavar="N",
                     help="compare the batch fast path against the original per-club "
                          "path for N clubs and report any divergence; changes nothing")
+    ap.add_argument("--verify-fast", type=int, default=None, metavar="N",
+                    help="compare the live fast_web column path against the _RESOLVED_CID "
+                         "scan for N clubs (run after backfill_resolved_club.py); changes nothing")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO)
     if args.verify is not None:
         asyncio.run(verify(args.verify, name=args.name))
+    elif args.verify_fast is not None:
+        asyncio.run(verify_fast(args.verify_fast, name=args.name))
     else:
         asyncio.run(recalc(dry_run=args.dry_run, name=args.name))
 

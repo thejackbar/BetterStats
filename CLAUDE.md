@@ -728,7 +728,7 @@ design note: `docs/betterselect-self-availability.md`.
   the public club `Navbar.jsx` (→ `/login`, or "Admin" → `/admin` when signed in);
   "View Public Page" in `AdminLayout.jsx` header (→ `/{club_slug}`).
 
-## Public Fixtures + Lineups pages, and the CA team-list route (v8.93.0, Jul 2026)
+## Public Fixtures + Lineups pages, and the CA team-list route (v8.94.0, Jul 2026)
 
 The public club site's **Games** dropdown was Results + Ladders; it now also has
 **Fixtures** (`/{slug}/fixtures`) and **Lineups** (`/{slug}/lineups`). Both are
@@ -838,7 +838,7 @@ BetterFees' derived allocation.
   standalone/no-navbar like `/avail/`): pick game → verify (or "I didn't
   play" name entry when allowed) → assign positions one at a time ("Who gets
   your 3?") → review → submit; resubmitting updates the same ballot.
-- **Eligibility source is a club choice** (v8.93.0, **migration 194**): the
+- **Eligibility source is a club choice** (v8.94.0, **migration 194**): the
   votable list comes from `vote_settings.eligibility_source` —
   **`scorecard`** (default, who actually played) | **`lineup`** (the saved
   BetterSelect `fixture_lineups` XI) | **`playhq`** (the team list the club

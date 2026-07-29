@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -1250,6 +1251,142 @@ async def last_activity_at_by_deal(session: AsyncSession, deals, club_by_id: dic
     return out
 
 
+# ─── Tier 2: incremental pipeline-card recompute (the ~1-min background sweep) ──
+# Re-score ONLY the clubs that currently have a deal card AND had new telemetry
+# in the last lookback window — cheap enough to run every minute. Tier 1
+# (check_web_signal_promotion) already re-scores a matched club instantly on
+# each event; this is the periodic backstop that guarantees freshness and
+# catches signals the web hook doesn't (a subscription/onboarding change), while
+# the full Club-Directory sweep (recalc_engagement, Tier 3) handles slow decay.
+
+async def _card_clubs_with_recent_activity(session: AsyncSession, card_clubs_by_id: dict, since) -> set:
+    """Of the clubs that currently hold a deal card, the subset whose telemetry
+    changed since ``since``: a page view (own org traffic, or a resolved
+    prospect/public visit via the pre-stamped resolved_marketing_club_id index),
+    a module-subscription change (trial/subscribe/cancel/pause), or an
+    onboarding-wizard update. Uses the indexed resolved_marketing_club_id column
+    the instant path already stamps (NOT the 7-subquery _RESOLVED_CID scan), so
+    it's cheap at a per-minute cadence. Email opens/clicks aren't scanned here —
+    they already fire the instant Tier-1 recompute via ses_events, and Tier 3 is
+    the backstop. Each sub-query is guarded so one failure can't abort the
+    sweep."""
+    changed: set = set()
+    if not card_clubs_by_id:
+        return changed
+    org_to_clubs: dict = {}
+    for cid, c in card_clubs_by_id.items():
+        if c is not None and c.existing_org_id:
+            org_to_clubs.setdefault(c.existing_org_id, []).append(cid)
+    org_ids = list(org_to_clubs.keys())
+    all_ids = list(card_clubs_by_id.keys())
+
+    if org_ids:
+        try:
+            for (org_id,) in (await session.execute(
+                select(OrgModuleSubscription.organisation_id).distinct()
+                .where(OrgModuleSubscription.organisation_id.in_(org_ids),
+                       OrgModuleSubscription.updated_at >= since)
+            )).all():
+                changed.update(org_to_clubs.get(org_id, ()))
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: module-subscription scan failed")
+        try:
+            for (org_id,) in (await session.execute(
+                select(OnboardingWizardState.organisation_id)
+                .where(OnboardingWizardState.organisation_id.in_(org_ids),
+                       OnboardingWizardState.updated_at >= since)
+            )).all():
+                changed.update(org_to_clubs.get(org_id, ()))
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: onboarding scan failed")
+        try:
+            for (org_id,) in (await session.execute(
+                text("SELECT DISTINCT org_id FROM usage_events "
+                     "WHERE org_id IN :orgs AND created_at >= :since")
+                .bindparams(bindparam("orgs", expanding=True), bindparam("since")),
+                {"orgs": org_ids, "since": since},
+            )).all():
+                changed.update(org_to_clubs.get(org_id, ()))
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: customer page-view scan failed")
+
+    # Resolved prospect/public page views — the indexed resolved_marketing_club_id
+    # column (stamped by the instant path for both a prospect visit AND a
+    # customer's own anonymous public traffic), so an equality on it is cheap.
+    if all_ids:
+        try:
+            for (cid,) in (await session.execute(
+                text("SELECT DISTINCT resolved_marketing_club_id FROM usage_events "
+                     "WHERE resolved_marketing_club_id IN :cids AND created_at >= :since")
+                .bindparams(bindparam("cids", expanding=True), bindparam("since")),
+                {"cids": all_ids, "since": since},
+            )).all():
+                if cid in card_clubs_by_id:
+                    changed.add(cid)
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: resolved page-view scan failed")
+    return changed
+
+
+async def recalc_pipeline_cards(lookback_seconds: int = 120) -> dict:
+    """Tier 2 — the frequent incremental sweep. Re-score ONLY the clubs that (a)
+    currently hold an open deal card on the platform pipeline and (b) had new
+    telemetry in the last ``lookback_seconds``, then re-run each one's pipeline
+    membership + score-based promotion (sync_engagement_promotion, fast_web).
+    Opens its own session, commits per club, and never raises — returns a small
+    summary. Cheap by construction: the activity scan is indexed and the
+    re-score runs only on the (usually few) changed clubs. recalc_engagement
+    (Tier 3) is the full-directory backstop for slow decay / anything missed."""
+    from app.models.db import async_session_maker
+    since = datetime.now(timezone.utc) - timedelta(seconds=max(1, lookback_seconds))
+    processed = promoted = errors = 0
+    try:
+        async with async_session_maker() as session:
+            pipeline = await ensure_platform_pipeline(session)
+            club_ids = [row[0] for row in (await session.execute(
+                select(CrmDeal.marketing_club_id).distinct().where(
+                    CrmDeal.pipeline_id == pipeline.id,
+                    CrmDeal.status == "open",
+                    CrmDeal.archived_at.is_(None),
+                    CrmDeal.marketing_club_id.isnot(None),
+                )
+            )).all()]
+            if not club_ids:
+                return {"candidates": 0, "changed": 0, "processed": 0, "promoted": 0, "errors": 0}
+            card_clubs = {c.id: c for c in (await session.execute(
+                select(MarketingClub).where(MarketingClub.id.in_(club_ids))
+            )).scalars().all()}
+            changed = await _card_clubs_with_recent_activity(session, card_clubs, since)
+            # Re-fetch each club FRESH inside the loop (never touch the pre-loaded
+            # card_clubs objects here): a commit/rollback below expires every
+            # attached ORM object, so reading a stale one's attribute would fire a
+            # lazy load and raise MissingGreenlet — the same trap recalc_engagement
+            # documents. `changed` holds plain UUIDs, so it's safe to iterate.
+            for cid in changed:
+                try:
+                    club = await session.get(MarketingClub, cid)
+                    if club is None:
+                        continue
+                    org = (await session.get(
+                        Organisation, club.existing_org_id,
+                        options=[selectinload(Organisation.module_subscriptions)])
+                        if club.existing_org_id else None)
+                    deal = await sync_engagement_promotion(session, club, org, fast_web=True)
+                    if deal is not None:
+                        promoted += 1
+                    processed += 1
+                    await session.commit()
+                except Exception:  # noqa: BLE001 — one club must not abort the sweep
+                    errors += 1
+                    await session.rollback()
+                    logger.exception("recalc_pipeline_cards: re-score failed for club %s", cid)
+            return {"candidates": len(card_clubs), "changed": len(changed),
+                    "processed": processed, "promoted": promoted, "errors": errors}
+    except Exception:  # noqa: BLE001
+        logger.exception("recalc_pipeline_cards failed")
+        return {"error": "failed", "processed": processed, "promoted": promoted, "errors": errors}
+
+
 async def club_stats_by_club(session: AsyncSession, club_by_id: dict) -> dict:
     """marketing_club_id -> onboarded-club facts for the Kanban card's state
     line (a subscriber/trialing club only): seasons/grades/players counts,
@@ -1596,7 +1733,8 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
 async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
                                     org: Optional[Organisation] = None,
                                     web_stats: Optional[dict] = None,
-                                    email_stats: Optional[dict] = None) -> Optional[CrmDeal]:
+                                    email_stats: Optional[dict] = None,
+                                    fast_web: bool = False) -> Optional[CrmDeal]:
     """Recompute one club's engagement score, ensure it's on the pipeline once
     the score is above zero, and immediately check the score-based
     Target/Contacted -> Engaged promotion, right now, in the caller's own
@@ -1608,7 +1746,8 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     a session+club in hand (an enquiry, a trial request/grant, a subscription
     change) rather than waiting for a scheduled sweep. Caller commits."""
     from app.services.twenty_sync import _engagement
-    await _engagement(session, club, org, web_stats=web_stats, email_stats=email_stats)
+    await _engagement(session, club, org, web_stats=web_stats,
+                      email_stats=email_stats, fast_web=fast_web)
     membership = await sync_pipeline_membership(session, club)
     promoted = await maybe_promote_by_engagement_score(session, club)
     return promoted or membership
@@ -1651,33 +1790,49 @@ async def reset_auto_promoted_engaged(session: AsyncSession) -> int:
     return len(deals)
 
 
+# Per-club debounce for the live recompute below: {club_id_str -> monotonic ts of
+# last recompute}. In-process (single-uvicorn deploy, same as the rate limiter),
+# bounded by club count, never persisted — a lost entry just means one extra
+# recompute after a restart. The FIRST signal after quiet always fires (no entry
+# yet), so a genuinely new bit of activity is still scored effectively instantly.
+_LAST_SCORE_RECOMPUTE: dict = {}
+_SCORE_RECOMPUTE_DEBOUNCE_S = 20.0
+
+
 async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=None,
-                                     path=None, email=None, user_id=None) -> dict:
+                                     path=None, email=None, user_id=None,
+                                     event_id=None) -> dict:
     """Fully event-driven — fired directly from the write path of a web
     page-view/API event (usage_tracker.record_event) or an email open/click
     (ses_events), in place of any periodic sweep. No polling anywhere: this
-    IS the check, run at the moment the signal happens.
+    IS the check, run at the moment the signal happens, so a club's cached
+    engagement score is refreshed live on ANY activity that could change it.
 
-    Two cheap gates before the real (pricier) engagement recompute ever
-    runs, so this is safe to fire on a genuinely hot path:
-      1. ``club_directory.resolve_marketing_club_id`` — does this event's
-         org/utm/path/email even match a known prospect club? Most traffic
-         (unrecognised visitors, an onboarded club's routine authenticated
-         admin use once org_id resolves but see gate 2, a real customer's
-         public fan traffic) resolves to nothing or is filtered right here.
-      2. Does that club currently have an open, non-``stage_auto_locked``
-         platform deal sitting at Target or Contacted? A single indexed
-         query. A customer or trial club's deal is already past Engaged, so
-         this is what actually filters out the high-volume authenticated
-         traffic case gate 1's org_id match lets through.
-    Only a club that clears BOTH gates pays for the full
-    ``sync_engagement_promotion`` (the ``twenty_sync._engagement`` scan +
-    the promotion check). Opens its own session; never raises — this must
-    never be allowed to affect the request it was fired alongside."""
+    Cheap and safe to fire on a genuinely hot path:
+      1. ``resolve_marketing_club_id`` — does this event's org/utm/path/email
+         match a known club at all? Unrecognised traffic stops here.
+      2. Stamp this event's row with its resolved club
+         (``resolved_marketing_club_id``) so future recomputes read an indexed
+         column instead of re-resolving the whole table.
+      3. A per-club debounce (``_SCORE_RECOMPUTE_DEBOUNCE_S``) collapses a burst
+         of activity into one recompute, so "recompute on every signal" can
+         never become a recompute storm.
+      4. The recompute itself uses ``fast_web=True`` — the indexed-column path,
+         milliseconds not the ~6s table scan — which is what makes firing this
+         per-event actually viable (the slow scan holding a row lock per event
+         is what wedged the table before).
+
+    The SCORE is always refreshed for a matched club (that's the point — any
+    activity keeps it current); ``sync_pipeline_membership`` / promotion still
+    apply their own stage gates, so a won/lost or already-advanced club is
+    never dragged backward, only its cached number is kept live. Opens its own
+    session; never raises — this must never affect the request it fired
+    alongside."""
     if not (org_id or utm_id or utm_source or path or email):
         return {"skipped": "no signal"}
     from app.models.db import async_session_maker
-    from app.services.club_directory import resolve_marketing_club_id
+    from app.services.club_directory import (resolve_marketing_club_id,
+                                             resolve_prospect_club_id)
     try:
         async with async_session_maker() as session:
             club_id = await resolve_marketing_club_id(
@@ -1685,32 +1840,35 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
                 path=path, email=email, user_id=user_id)
             if club_id is None:
                 return {"skipped": "no club match"}
-            pipeline = await ensure_platform_pipeline(session)
-            stage_ids = [s.id for s in pipeline.stages if s.key in ("target", "contacted")]
-            if not stage_ids:
-                return {"skipped": "no stages"}
-            has_open = (await session.execute(
-                select(CrmDeal.id).where(
-                    CrmDeal.pipeline_id == pipeline.id, CrmDeal.marketing_club_id == club_id,
-                    CrmDeal.status == "open", CrmDeal.archived_at.is_(None),
-                    CrmDeal.stage_id.in_(stage_ids), CrmDeal.stage_auto_locked.is_(False),
-                ).limit(1)
-            )).scalar_one_or_none()
-            if has_open is None:
-                # No early-stage deal to promote. But a club with NO deal at all
-                # should ENTER the pipeline the moment it has a score (> 0) — so
-                # fall through to the recompute only in that case. A club that
-                # already has a deal past the early stages (or closed) is left
-                # alone: web activity mustn't drag a won/lost club back on.
-                any_deal = (await session.execute(
-                    select(CrmDeal.id).where(
-                        CrmDeal.pipeline_id == pipeline.id,
-                        CrmDeal.marketing_club_id == club_id,
-                        CrmDeal.archived_at.is_(None),
-                    ).limit(1)
-                )).scalar_one_or_none()
-                if any_deal is not None:
-                    return {"skipped": "deal past early stage or closed"}
+
+            # Materialise this event's prospect attribution onto its own row, so
+            # the fast_web recompute (and every future one) reads an indexed
+            # column. Uses the utm/path resolution (== _RESOLVED_CID), which can
+            # differ from the gate's club_id (that prefers org_id/email): a web
+            # prospect visit resolves the same either way; an in-app/org event
+            # stamps NULL here (its attribution is the org_id branch, not this
+            # column) which is exactly right.
+            stamped = False
+            if event_id is not None and (utm_id or utm_source or path):
+                stamp_cid = await resolve_prospect_club_id(
+                    session, utm_id=utm_id, utm_source=utm_source, path=path)
+                if stamp_cid is not None:
+                    await session.execute(text(
+                        "UPDATE usage_events SET resolved_marketing_club_id = CAST(:cid AS uuid) "
+                        "WHERE id = :eid AND resolved_marketing_club_id IS NULL"
+                    ), {"cid": stamp_cid, "eid": event_id})
+                    stamped = True
+
+            # Debounce: at most one recompute per club per window. First signal
+            # after quiet fires immediately (no prior entry).
+            now = time.monotonic()
+            last = _LAST_SCORE_RECOMPUTE.get(club_id)
+            if last is not None and (now - last) < _SCORE_RECOMPUTE_DEBOUNCE_S:
+                if stamped:
+                    await session.commit()  # keep the stamp even when debounced
+                return {"skipped": "debounced"}
+            _LAST_SCORE_RECOMPUTE[club_id] = now
+
             club = await session.get(MarketingClub, club_id)
             if club is None:
                 return {"skipped": "no club row"}
@@ -1718,7 +1876,7 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
                         Organisation, club.existing_org_id,
                         options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
-            deal = await sync_engagement_promotion(session, club, org)
+            deal = await sync_engagement_promotion(session, club, org, fast_web=True)
             await session.commit()
             return {"promoted": bool(deal)}
     except Exception:  # noqa: BLE001 - fired from a hot path, must never raise

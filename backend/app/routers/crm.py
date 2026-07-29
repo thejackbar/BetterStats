@@ -755,6 +755,65 @@ async def super_recalc_engagement_status():
     return {"status": "running" if _engagement_recalc["running"] else "idle", **_engagement_recalc}
 
 
+# ─── CRM auto-recompute cadence settings (Tier 2 / Tier 3) ────────────────────
+
+class CrmSweepSettings(BaseModel):
+    incremental_sweep_seconds: Optional[int] = None
+    global_sweep_minutes: Optional[int] = None
+
+
+@super_router.get("/settings", dependencies=[_super])
+async def super_crm_settings(db: AsyncSession = Depends(get_db)):
+    """The super-admin-tunable pipeline auto-recompute cadences, with their
+    allowed bounds so the Settings UI can validate/label them."""
+    from app.services import platform_settings as ps
+    return {
+        "incremental_sweep_seconds": await ps.get_crm_incremental_sweep_seconds(db),
+        "global_sweep_minutes": await ps.get_crm_global_sweep_minutes(db),
+        "bounds": {
+            "incremental_seconds": {"min": ps.CRM_INCREMENTAL_SWEEP_MIN_SECONDS,
+                                    "max": ps.CRM_INCREMENTAL_SWEEP_MAX_SECONDS},
+            "global_minutes": {"min": ps.CRM_GLOBAL_SWEEP_MIN_MINUTES,
+                               "max": ps.CRM_GLOBAL_SWEEP_MAX_MINUTES},
+        },
+    }
+
+
+@super_router.patch("/settings", dependencies=[_super])
+async def super_update_crm_settings(body: CrmSweepSettings, db: AsyncSession = Depends(get_db)):
+    """Save new Tier-2 / Tier-3 cadences and apply them to the running scheduler
+    immediately (no restart). Each is range-checked before saving."""
+    from app.services import platform_settings as ps
+    patch: dict = {}
+    if body.incremental_sweep_seconds is not None:
+        v = body.incremental_sweep_seconds
+        if not (ps.CRM_INCREMENTAL_SWEEP_MIN_SECONDS <= v <= ps.CRM_INCREMENTAL_SWEEP_MAX_SECONDS):
+            raise HTTPException(status_code=422, detail=(
+                f"incremental_sweep_seconds must be {ps.CRM_INCREMENTAL_SWEEP_MIN_SECONDS}"
+                f"–{ps.CRM_INCREMENTAL_SWEEP_MAX_SECONDS}"))
+        patch["crm_incremental_sweep_seconds"] = v
+    if body.global_sweep_minutes is not None:
+        v = body.global_sweep_minutes
+        if not (ps.CRM_GLOBAL_SWEEP_MIN_MINUTES <= v <= ps.CRM_GLOBAL_SWEEP_MAX_MINUTES):
+            raise HTTPException(status_code=422, detail=(
+                f"global_sweep_minutes must be {ps.CRM_GLOBAL_SWEEP_MIN_MINUTES}"
+                f"–{ps.CRM_GLOBAL_SWEEP_MAX_MINUTES}"))
+        patch["crm_global_sweep_minutes"] = v
+    if patch:
+        try:
+            await ps.update_settings(db, patch)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    inc = await ps.get_crm_incremental_sweep_seconds(db)
+    glob = await ps.get_crm_global_sweep_minutes(db)
+    try:
+        from app.jobs.scheduler import reschedule_crm_sweeps
+        reschedule_crm_sweeps(incremental_seconds=inc, global_minutes=glob)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not reschedule CRM sweeps after settings update")
+    return {"incremental_sweep_seconds": inc, "global_sweep_minutes": glob}
+
+
 @super_router.post("/deals", dependencies=[_super])
 async def super_create_deal(body: DealCreate, db: AsyncSession = Depends(get_db)):
     pipeline = await crm_service.ensure_platform_pipeline(db)

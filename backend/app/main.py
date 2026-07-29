@@ -1122,6 +1122,25 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_type_created "
             "ON usage_events(visitor_id, event_type, created_at) WHERE visitor_id IS NOT NULL"
         ))
+        # Materialised prospect-club attribution. twenty_sync._engagement's web
+        # query resolves each event to a club via the 7-subquery _RESOLVED_CID
+        # expression; filtering on that computed value forces a full re-resolution
+        # of the table per club (~6s each) — fine for a batch sweep, far too slow
+        # to fire on every page view (it caused a lock pileup when it did). This
+        # column stores that resolution ONCE, stamped by the event's own
+        # background CRM task (crm.check_web_signal_promotion) right after it
+        # resolves the club for its gate — so a single-club recompute becomes an
+        # indexed lookup (ms) and the score can refresh instantly on every signal.
+        # Backfill the 90-day scoring window with app/scripts/backfill_resolved_club.py
+        # after deploy; new rows are stamped live. NULL = not yet resolved/attributed.
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS resolved_marketing_club_id UUID"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_resolved_club_created "
+            "ON usage_events(resolved_marketing_club_id, created_at DESC) "
+            "WHERE resolved_marketing_club_id IS NOT NULL"
+        ))
         # Backup/restore task tracking (migration 170) — one row per backup or
         # restore run (scheduled via the host systemd timer, or triggered on
         # demand from Super Admin), so the Backups page can show a history plus
@@ -3861,6 +3880,19 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_run_stripe_subscription_sweep())
 
     start_scheduler()
+    # Apply the super-admin-set CRM sweep cadences (Tier 2 / Tier 3) to the
+    # just-started scheduler — the jobs were registered with the defaults, this
+    # reconciles them to the persisted values so a restart keeps a custom cadence.
+    try:
+        from app.jobs.scheduler import reschedule_crm_sweeps
+        from app.services import platform_settings as _ps
+        from app.models.db import async_session_maker
+        async with async_session_maker() as _s:
+            _inc = await _ps.get_crm_incremental_sweep_seconds(_s)
+            _glob = await _ps.get_crm_global_sweep_minutes(_s)
+        reschedule_crm_sweeps(incremental_seconds=_inc, global_minutes=_glob)
+    except Exception:
+        logger.exception("could not apply persisted CRM sweep intervals")
     logger.info("BetterStats API started")
     yield
     stop_scheduler()
