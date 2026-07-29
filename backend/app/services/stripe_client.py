@@ -718,3 +718,208 @@ async def attach_discount_to_subscription(subscription_id: str, coupon_id: str) 
         subscription_id,
         discounts=[{"coupon": cid} for cid in all_ids],
     )
+
+
+# ─── Super-admin raised invoices (send-invoice subscriptions) ──────────────
+# The Super Admin financial page can raise a club a shareable, payable invoice
+# instead of walking them through Checkout. In Stripe terms that's a recurring
+# Subscription created directly (no Checkout Session) with
+# collection_method='send_invoice': Stripe issues the first invoice, we
+# finalize it immediately to get its number + hosted_invoice_url (the "pay this
+# invoice" page), and the club settles it at their leisure. Entitlement is
+# still granted only when the club actually pays (invoice.paid webhook reads
+# the subscription's metadata.billing_keys), identical to the Checkout path —
+# this just replaces "collect the card now" with "here's a link, pay when you
+# can".
+
+
+async def _one_discount_for_subscription(
+    db: AsyncSession, *, bundle_dollars: float,
+    extra_coupon_id: str | None, extra_stackable: bool,
+    extra_coupon_code: str | None, extra_coupon_off_dollars: float | None,
+) -> tuple[list[dict], dict]:
+    """Builds the single ``discounts`` entry (and the metadata breakdown) for a
+    send-invoice subscription, mirroring create_checkout_session's own rule so
+    the amount raised matches what /quote previewed: a non-stackable coupon
+    wins outright; a stacking coupon is folded together with the bundle
+    discount into one ad-hoc coupon; a pure bundle discount uses the cached
+    per-amount coupon. Returns (discounts, metadata_fragment)."""
+    metadata: dict = {}
+    if extra_coupon_id and not extra_stackable:
+        if extra_coupon_code:
+            metadata["coupon_code"] = extra_coupon_code
+            metadata["coupon_discount_cents"] = str(round((extra_coupon_off_dollars or 0) * 100))
+        return [{"coupon": extra_coupon_id}], metadata
+
+    if bundle_dollars > 0:
+        metadata["bundle_discount_cents"] = str(round(bundle_dollars * 100))
+    combined = bundle_dollars
+    if extra_coupon_id:
+        combined += extra_coupon_off_dollars or 0
+        if extra_coupon_code:
+            metadata["coupon_code"] = extra_coupon_code
+            metadata["coupon_discount_cents"] = str(round((extra_coupon_off_dollars or 0) * 100))
+    if combined <= 0:
+        return [], metadata
+    if extra_coupon_id and extra_coupon_code:
+        coupon_id = await _ensure_combined_discount_coupon(
+            bundle_dollars=bundle_dollars, coupon_code=extra_coupon_code,
+            coupon_dollars=extra_coupon_off_dollars or 0,
+        )
+    else:
+        coupon_id = await _ensure_bundle_coupon(db, combined)
+    return [{"coupon": coupon_id}], metadata
+
+
+async def create_subscription_send_invoice(
+    db: AsyncSession, *, org_id: str, billing_keys: list[str], club_name: str,
+    customer_id: str | None, customer_email: str | None, customer_address: dict | None,
+    days_until_due: int = 14, discount_schedule: dict | None = None,
+    extra_coupon_id: str | None = None, extra_stackable: bool = False,
+    extra_coupon_code: str | None = None, extra_coupon_off_dollars: float | None = None,
+    source: str = "super_invoice",
+) -> dict:
+    """Creates a recurring Subscription billed by emailed invoice
+    (collection_method='send_invoice') for the club's selected modules, priced
+    from billing_pricing.price_for (Core + selection, bundle discount), and
+    finalizes its first invoice so a payable hosted-invoice link exists right
+    away. Returns {"subscription": <sub>, "customer_id": str, "invoice":
+    {id, number, hosted_invoice_url, invoice_pdf, total, tax, amount_due,
+    status}}. The caller persists customer_id/subscription_id onto the org.
+
+    days_until_due is how long the club has to pay before the invoice is past
+    due (Stripe still keeps the link live). No card is collected up front —
+    entitlement is granted by the invoice.paid webhook once the club pays."""
+    _require_configured()
+    quote = billing_pricing.price_for(billing_keys, schedule=discount_schedule)
+
+    if not customer_id:
+        customer_id = await _ensure_customer(
+            org_id=org_id, club_name=club_name, email=customer_email, address=customer_address,
+        )
+    elif customer_address:
+        try:
+            await stripe.Customer.modify_async(customer_id, address=customer_address)
+        except stripe.error.StripeError:
+            logger.warning("Could not backfill address on Stripe customer %s", customer_id)
+
+    items = []
+    for item in quote["line_items"]:
+        product_id = await _ensure_product(db, item["key"])
+        items.append({
+            "price_data": {
+                "currency": settings.stripe_currency,
+                "product": product_id,
+                "unit_amount": item["price"] * 100,
+                "recurring": {"interval": "year"},
+                "tax_behavior": "exclusive",
+            },
+            "quantity": 1,
+        })
+
+    metadata = {
+        "org_id": str(org_id),
+        "billing_keys": ",".join(sorted(billing_keys)),
+        # Read back by stripe_billing._upsert_invoice so Billing History marks
+        # where the invoice came from (a super-admin raise vs a plain renewal).
+        "bs_invoice_source": source,
+    }
+    discounts, meta_frag = await _one_discount_for_subscription(
+        db, bundle_dollars=quote["discount"], extra_coupon_id=extra_coupon_id,
+        extra_stackable=extra_stackable, extra_coupon_code=extra_coupon_code,
+        extra_coupon_off_dollars=extra_coupon_off_dollars,
+    )
+    metadata.update(meta_frag)
+
+    params = {
+        "customer": customer_id,
+        "items": items,
+        "collection_method": "send_invoice",
+        "days_until_due": days_until_due,
+        "metadata": metadata,
+        "automatic_tax": {"enabled": True},
+        # Don't auto-finalize an hour later — we finalize the first invoice
+        # ourselves below so the payable link exists immediately.
+        "expand": ["latest_invoice"],
+    }
+    if discounts:
+        params["discounts"] = discounts
+
+    sub = await stripe.Subscription.create_async(**params)
+
+    invoice = sub.get("latest_invoice")
+    invoice_id = invoice.get("id") if isinstance(invoice, dict) else invoice
+    finalized = None
+    if invoice_id:
+        # A send-invoice subscription's first invoice starts as a draft;
+        # finalizing it assigns the number + hosted_invoice_url and makes it
+        # payable now instead of waiting for Stripe's ~1h auto-finalize.
+        try:
+            finalized = await stripe.Invoice.finalize_invoice_async(invoice_id)
+        except stripe.error.StripeError:
+            logger.exception("Could not finalize invoice %s for new subscription %s", invoice_id, sub.get("id"))
+            finalized = invoice if isinstance(invoice, dict) else None
+
+    inv_out = None
+    if isinstance(finalized, dict):
+        inv_out = {
+            "id": finalized.get("id"),
+            "number": finalized.get("number"),
+            "hosted_invoice_url": finalized.get("hosted_invoice_url"),
+            "invoice_pdf": finalized.get("invoice_pdf"),
+            "total": (finalized.get("total") or 0) / 100,
+            "tax": (finalized.get("tax") or 0) / 100,
+            "amount_due": (finalized.get("amount_due") or 0) / 100,
+            "status": finalized.get("status"),
+        }
+    # ``raw_invoice`` is the full finalized invoice dict (number, hosted_invoice_url,
+    # tax, lines) so the caller can pre-record it into billing_invoices without
+    # waiting for the invoice.finalized webhook. The subscription's own
+    # ``latest_invoice`` is still the pre-finalize draft, so don't use that.
+    return {
+        "subscription": sub, "customer_id": customer_id,
+        "invoice": inv_out, "raw_invoice": finalized if isinstance(finalized, dict) else None,
+    }
+
+
+async def retrieve_invoice(invoice_id: str) -> dict:
+    """Full live detail for one Stripe invoice, for the financial page's
+    invoice drilldown — covers unpaid/open invoices too (the stored
+    billing_invoices mirror only fills in fully once paid). Returns a flat,
+    already-dollar-scaled shape; ``discounts`` lists each applied
+    coupon's name and dollar amount off from total_discount_amounts."""
+    _require_configured()
+    inv = await stripe.Invoice.retrieve_async(
+        invoice_id, expand=["discounts", "total_discount_amounts.discount"],
+    )
+    discounts = []
+    for d in (inv.get("total_discount_amounts") or []):
+        amount = (d.get("amount") or 0) / 100
+        disc = d.get("discount")
+        name = None
+        if isinstance(disc, dict):
+            coupon = disc.get("coupon")
+            if isinstance(coupon, dict):
+                name = coupon.get("name")
+        discounts.append({"name": name, "amount": amount})
+    lines = [
+        {"name": ln.get("description") or "", "amount": (ln.get("amount") or 0) / 100}
+        for ln in ((inv.get("lines") or {}).get("data") or [])
+    ]
+    return {
+        "id": inv.get("id"),
+        "number": inv.get("number"),
+        "status": inv.get("status"),
+        "currency": inv.get("currency") or settings.stripe_currency,
+        "subtotal": (inv.get("subtotal") or 0) / 100,
+        "tax": (inv.get("tax") or 0) / 100,
+        "total": (inv.get("total") or 0) / 100,
+        "amount_due": (inv.get("amount_due") or 0) / 100,
+        "amount_paid": (inv.get("amount_paid") or 0) / 100,
+        "amount_remaining": (inv.get("amount_remaining") or 0) / 100,
+        "hosted_invoice_url": inv.get("hosted_invoice_url"),
+        "invoice_pdf": inv.get("invoice_pdf"),
+        "discounts": discounts,
+        "lines": lines,
+        "created": epoch_to_datetime(inv.get("created")).isoformat() if inv.get("created") else None,
+    }

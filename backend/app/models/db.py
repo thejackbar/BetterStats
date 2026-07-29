@@ -743,6 +743,15 @@ class BillingInvoice(Base):
     # •••• 4242", "PayTo (...0400)" — see stripe_client.describe_payment_method.
     payment_method_type = Column(Text, nullable=True)
     payment_method_summary = Column(Text, nullable=True)
+    # Stripe's own human invoice number (e.g. "BC-0001") and the GST it charged
+    # (migration 192) — both read straight off Stripe's invoice at upsert time
+    # so the Super Admin financial page can list them without a live Stripe call
+    # per row. ``source`` marks how the invoice came to exist: a normal
+    # subscription renewal, a super-admin shareable send-invoice, or a checkout
+    # a super admin entered on the club's behalf.
+    invoice_number = Column(Text, nullable=True)
+    tax_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    source = Column(Text, nullable=True)  # subscription | super_invoice | super_checkout
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

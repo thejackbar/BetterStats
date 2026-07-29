@@ -26,6 +26,7 @@ export const SUPER_SECTIONS = [
     label: 'Billing',
     blurb: 'Coupons, discounts and subscription requests.',
     items: [
+      { to: '/admin/super/financials', label: 'Club Financials', blurb: "Manage a club's trials, subscriptions, invoices and payments." },
       { to: '/admin/super/coupons', label: 'Discount Coupons', blurb: 'Create and manage discount codes.' },
       { to: '/admin/super/discount-report', label: 'Discount Report', blurb: 'Redemptions and discount totals.' },
       { to: '/admin/super/module-requests', label: 'Module Requests', blurb: 'Approve subscribe, trial and cancel requests.', badge: 'moduleRequests' },

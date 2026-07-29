@@ -2332,6 +2332,75 @@ judged valid.
   "already redeemed" check treats as used; a Super Admin can manually revoke
   it via the Redemptions modal as the recovery path today).
 
+## Super Admin per-club financial management (migration 192, v8.91.0, Jul 2026)
+
+One super-admin page that runs a single club's whole money side, gathering the
+already-built billing pieces (per-module subscriptions, Stripe checkout, coupons,
+payment methods, invoices) into a per-club surface plus a few new capabilities.
+Page `SuperClubFinancials.jsx` at **`/admin/super/financials`** (reads `?club=`,
+falls back to a club picker; a **"Financials"** button on each `SuperClubs` row
+deep-links it; listed in `superNav.js` **billing** section). All backend routes
+live in **`routers/billing.py`** under `/club-admin/billing/super/clubs/{org_id}/*`,
+`require_super_admin`, by org id (no "acting as" round trip) — same shape as the
+existing super payment-method routes there.
+
+- **Summary** (`GET .../summary`): `_financial_module_rows` returns, per billable
+  module (`BILLABLE_MODULES`, BetterAdmin rolled up), status + trial start/end +
+  first-subscription date (`min(started_at)` of PAID_STATUSES member rows) +
+  renewal date + days remaining (to trial end or renewal) + **prorated days** for
+  an add-on subscribed after Core (`renewal − add-on start`, only when its start
+  postdates Core's). Plus the primary admin's name/email/mobile (`User.
+  first_name/last_name/mobile_number`) and Stripe customer/subscription presence.
+- **Actions**: start/pause/cancel trial, pause/cancel subscription, resume — all
+  reuse the existing `club_admin.py` `superStartModuleTrial`/`superPatchModule`
+  (status `paused`/`cancelled`/`trial`/`active`). Resume restores to `active`
+  vs `trial` by whether the paused row still carries a `renewal_date` (a paused
+  trial has none). **BetterStats stays mandatory**: starting an add-on trial
+  starts a Core trial first if Core isn't live (frontend). **Reset trial
+  eligibility** is the one genuinely new entitlement route
+  (`POST .../modules/{key}/reset-trial-eligibility`): `remove_billing` for the
+  module (only when NOT a live paid sub) so `account_plan_status` reads it
+  never-trialed again — a deliberate super-admin override of the normal
+  one-trial-per-module rule.
+- **Subscribe / raise an invoice** (bundle discount + coupon aware, priced by the
+  same `billing_pricing.price_for`):
+  - `POST .../quote` — new_subscription (bundle + coupon, `force=True` on the
+    coupon) or Stripe's own add-to-existing prorated preview.
+  - `POST .../create-invoice` — the shareable-invoice path. `stripe_client.
+    create_subscription_send_invoice` creates the recurring Subscription up front
+    with `collection_method='send_invoice'`, finalizes its first invoice
+    immediately (number + `hosted_invoice_url` = the pay page), stamps
+    `metadata.bs_invoice_source='super_invoice'`, and emails the pay link to the
+    primary admin OR an alt name/email (`_send_invoice_email`, our own
+    `email_service`, not Stripe's). Entitlement is still granted only when the
+    club PAYS (the `invoice.paid` webhook reads `metadata.billing_keys`). New
+    subscriptions only (409 if already subscribed → use checkout-on-behalf).
+  - `POST .../checkout-session` — "enter payment on their behalf": returns a
+    Stripe Checkout URL the super admin opens to key the card in (or adds modules
+    to a live subscription, charging the card on file), mirroring the club
+    `/checkout-session` branches by org id.
+- **Invoices** (`GET .../invoices`, `GET .../invoices/{id}`, `POST .../invoices/{id}/send`):
+  list newest-first with invoice number, GST, coupon $ + `coupon_pct_of_invoice`,
+  bundle discount, payment method, and a `settled` flag; drilldown enriches from a
+  live `stripe_client.retrieve_invoice` (per-discount breakdown, amount remaining);
+  send emails the pay link. **Migration 192** adds `billing_invoices.invoice_number`
+  / `tax_cents` / `source` (mirrored in `main.py`), populated by
+  `stripe_billing._upsert_invoice` (`invoice.number`/`invoice.tax`/metadata source).
+  A new **`invoice.finalized`** webhook handler records a raised send-invoice as an
+  open/unpaid row before payment (registered in `public_stripe.py`).
+- **`discount_coupons.redeem_for_new_signup`** gained `force`/`applied_via` so a
+  super-admin raise skips redeem/new-signup/loyalty windows + max-redemption cap
+  (never the already-redeemed/coverage checks), consistent with the forced quote
+  preview.
+- **Gating note**: `/quote`+`/checkout-session`+`/create-invoice` all report a
+  clean 503 ("not configured") without Stripe keys, and everything stays behind
+  the same `billing_checkout_enabled` posture — the summary surfaces whether it's
+  on for that club. **Not built**: a real Stripe cancel (pause/cancel here only
+  set the entitlement status, matching the existing `SuperClubs` module editor —
+  the Stripe-side cancel still lives in the self-service/cancel-request flow's
+  `_cancel_stripe_subscription_if_nothing_held`); an invoice-flow add-on to an
+  already-live subscription (checkout-on-behalf covers that instead).
+
 ## Public self-serve trial signup + ad attribution (v8.72.0, Jul 2026)
 
 The Meta ad campaign's destination: the internal self-serve trial registration

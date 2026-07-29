@@ -135,6 +135,7 @@ const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
 const SuperBackups = lazy(() => import('./pages/admin/SuperBackups'))
 const SuperCoupons = lazy(() => import('./pages/admin/SuperCoupons'))
 const SuperDiscountReport = lazy(() => import('./pages/admin/SuperDiscountReport'))
+const SuperClubFinancials = lazy(() => import('./pages/admin/SuperClubFinancials'))
 const SuperWizardAnalytics = lazy(() => import('./pages/admin/SuperWizardAnalytics'))
 const SuperSelfServeTrial = lazy(() => import('./pages/admin/SuperSelfServeTrial'))
 const SuperMetaAds = lazy(() => import('./pages/admin/SuperMetaAds'))
@@ -363,6 +364,7 @@ export default function App() {
           <Route path="/admin/super/backups" element={<ProtectedRoute requireRole="super_admin"><SuperBackups /></ProtectedRoute>} />
           <Route path="/admin/super/coupons" element={<ProtectedRoute requireRole="super_admin"><SuperCoupons /></ProtectedRoute>} />
           <Route path="/admin/super/discount-report" element={<ProtectedRoute requireRole="super_admin"><SuperDiscountReport /></ProtectedRoute>} />
+          <Route path="/admin/super/financials" element={<ProtectedRoute requireRole="super_admin"><SuperClubFinancials /></ProtectedRoute>} />
           <Route path="/admin/super/wizard-analytics" element={<ProtectedRoute requireRole="super_admin"><SuperWizardAnalytics /></ProtectedRoute>} />
           <Route path="/admin/super/self-serve" element={<ProtectedRoute requireRole="super_admin"><SuperSelfServeTrial /></ProtectedRoute>} />
           <Route path="/admin/super/meta-ads" element={<ProtectedRoute requireRole="super_admin"><SuperMetaAds /></ProtectedRoute>} />

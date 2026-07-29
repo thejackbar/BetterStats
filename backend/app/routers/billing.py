@@ -41,10 +41,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from stripe import error as stripe_error
 
-from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
+from app.auth.modules import (
+    BILLABLE_MODULES, BILLABLE_MODULE_NAMES, MODULE_CORE, PAID_STATUSES, STATUS_ACTIVE,
+    account_plan_status, expand_billing_module,
+)
+from app.config.settings import settings
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
-from app.services import billing_pricing, discount_coupons, module_subscriptions, platform_settings, stripe_client
+from app.services import (
+    billing_pricing, discount_coupons, email_service, module_subscriptions,
+    platform_settings, stripe_billing, stripe_client,
+)
 from app.services.platform_settings import require_billing_checkout_enabled
 
 router = APIRouter(prefix="/club-admin/billing", tags=["club-admin-billing"])
@@ -695,3 +702,544 @@ async def discount_report(
             "total_count": sum(r["count"] for r in coupon_by_code),
         },
     }
+
+
+# ─── Super Admin per-club financial management ─────────────────────────────
+# One place a super admin manages a single club's whole money side: trial &
+# subscription status, subscribe/trial actions, coupons & bundle discounts,
+# payment methods, invoices, and raising a shareable invoice or entering a
+# checkout on the club's behalf. Every route is require_super_admin + a club
+# by org_id (no "acting as" round trip — mirrors the payment-method routes
+# above and the /super/clubs/{id}/modules routes in club_admin.py).
+
+
+async def _load_club_with_subs_or_404(db: AsyncSession, org_id: str) -> Organisation:
+    from sqlalchemy.orm import selectinload
+    club = await db.get(
+        Organisation, org_id, options=[selectinload(Organisation.module_subscriptions)],
+    )
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return club
+
+
+def _days_between(target, today) -> Optional[int]:
+    """Whole days from today until ``target`` (a date), or None. Negative when
+    the date has already passed (e.g. a lapsed trial)."""
+    if target is None:
+        return None
+    return (target - today).days
+
+
+async def _primary_admin_contact(db: AsyncSession, org_id) -> dict:
+    """The club's primary admin's name / email / mobile, for the financial
+    page's contact card. Falls back to the earliest club_admin if none is
+    flagged primary."""
+    row = (await db.execute(
+        select(User, ClubMembership)
+        .join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(ClubMembership.club_id == org_id, ClubMembership.role == "club_admin")
+        .order_by(ClubMembership.is_primary_admin.desc(), ClubMembership.created_at.asc())
+    )).first()
+    if not row:
+        return {"user_id": None, "name": None, "email": None, "mobile": None, "is_primary": False}
+    u, m = row
+    name = u.display_name or " ".join(p for p in (u.first_name, u.last_name) if p) or u.username
+    return {
+        "user_id": str(u.id),
+        "name": name,
+        "email": u.email,
+        "mobile": u.mobile_number,
+        "is_primary": bool(m.is_primary_admin),
+    }
+
+
+def _financial_module_rows(club: Organisation, now: datetime) -> list[dict]:
+    """Per billable module: current status plus the dates and day-counts the
+    summary section shows — trial window, first subscription date, renewal
+    date, days remaining, and (for an add-on subscribed after Core) the number
+    of prorated days in its first period."""
+    today = now.date()
+    subs = {s.module_key: s for s in (club.module_subscriptions or [])}
+    plan_by_key = {r["module"]: r for r in account_plan_status(club, now)}
+
+    # Core's first-subscription date anchors add-on proration below.
+    def _first_sub_date(billing_key: str) -> Optional[datetime]:
+        member_started = [
+            subs[m].started_at for m in expand_billing_module(billing_key)
+            if m in subs and subs[m].status in PAID_STATUSES and subs[m].started_at
+        ]
+        return min(member_started) if member_started else None
+
+    core_first = _first_sub_date(MODULE_CORE)
+    rows = []
+    for billing_key in BILLABLE_MODULES:
+        plan = plan_by_key.get(billing_key, {})
+        members = [subs[m] for m in expand_billing_module(billing_key) if m in subs]
+        best = members[0] if members else None
+        # The trial start is on any member row that has recorded one.
+        trial_started = next((s.trial_started_at for s in members if s.trial_started_at), None)
+        trial_ends = plan.get("trial_ends_at")
+        renewal = plan.get("renewal_date")
+        status = plan.get("status")
+        first_sub = _first_sub_date(billing_key)
+
+        days_remaining = None
+        if status == "trial" and trial_ends:
+            days_remaining = _days_between(datetime.fromisoformat(trial_ends).date(), today)
+        elif status == "subscribed" and renewal:
+            days_remaining = _days_between(date.fromisoformat(renewal), today)
+
+        # Prorated days: an add-on that was subscribed AFTER Core (a separate,
+        # later purchase) has a shortened first period, from its own start up
+        # to Core's shared renewal date. Only meaningful when this module and
+        # Core are both subscribed and this one started later than Core.
+        prorated_days = None
+        is_addon = billing_key != MODULE_CORE
+        if (is_addon and status == "subscribed" and first_sub and core_first
+                and renewal and first_sub.date() > core_first.date()):
+            pd = _days_between(date.fromisoformat(renewal), first_sub.date())
+            prorated_days = pd if pd and pd > 0 else None
+
+        rows.append({
+            "module": billing_key,
+            "name": BILLABLE_MODULE_NAMES.get(billing_key, billing_key),
+            "status": status,
+            "is_addon": is_addon,
+            "trial_eligible": plan.get("trial_eligible", False),
+            "can_subscribe": plan.get("can_subscribe", True),
+            "trial_started_at": trial_started.isoformat() if trial_started else None,
+            "trial_ends_at": trial_ends,
+            "first_subscription_date": first_sub.date().isoformat() if first_sub else None,
+            "renewal_date": renewal,
+            "days_remaining": days_remaining,
+            "prorated_days": prorated_days,
+            "member_status": best.status if best else None,
+        })
+    return rows
+
+
+@router.get("/super/clubs/{org_id}/summary", dependencies=[Depends(require_super_admin)])
+async def super_financial_summary(org_id: str, db: AsyncSession = Depends(get_db)):
+    """Everything the financial page's summary + contact sections need for one
+    club: per-module trial/subscription state with dates and day-counts, the
+    primary admin's contact details, and whether the club has a Stripe
+    customer/subscription and online billing enabled for it."""
+    club = await _load_club_with_subs_or_404(db, org_id)
+    now = datetime.now(timezone.utc)
+    sub_info = None
+    if club.stripe_subscription_id:
+        try:
+            sub = await stripe_client.retrieve_subscription(club.stripe_subscription_id)
+            sub_info = {
+                "id": sub.get("id"),
+                "status": sub.get("status"),
+                "current_period_end": stripe_client.epoch_to_date(sub.get("current_period_end")).isoformat()
+                if sub.get("current_period_end") else None,
+                "collection_method": sub.get("collection_method"),
+            }
+        except (stripe_client.StripeNotConfigured, stripe_error.StripeError):
+            sub_info = None
+    return {
+        "club": {"id": str(club.id), "name": club.name, "slug": club.slug},
+        "primary_admin": await _primary_admin_contact(db, club.id),
+        "modules": _financial_module_rows(club, now),
+        "stripe": {
+            "has_customer": bool(club.stripe_customer_id),
+            "has_subscription": bool(club.stripe_subscription_id),
+            "subscription": sub_info,
+        },
+        "billing_checkout_enabled": await platform_settings.billing_checkout_enabled_for_org(db, club),
+        "default_trial_days": await platform_settings.get_default_trial_days(db),
+    }
+
+
+class SuperQuoteIn(BaseModel):
+    module_keys: List[str] = []
+    coupon_code: Optional[str] = None
+
+
+@router.post("/super/clubs/{org_id}/quote", dependencies=[Depends(require_super_admin)])
+async def super_quote(org_id: str, body: SuperQuoteIn, db: AsyncSession = Depends(get_db)):
+    """Preview what subscribing a club to the selected modules would cost —
+    the by-org-id, super-admin twin of /quote. new_subscription math (bundle
+    discount + coupon) for a club with no live subscription; Stripe's own
+    prorated add-on preview when it already has one."""
+    club = await _load_club_with_subs_or_404(db, org_id)
+    keys = _validate_keys(body.module_keys)
+    if club.stripe_subscription_id:
+        try:
+            preview = await stripe_client.preview_add_modules(db, club.stripe_subscription_id, _addon_keys(keys))
+        except stripe_client.StripeNotConfigured:
+            raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+        except stripe_error.StripeError as e:
+            raise HTTPException(status_code=502, detail=str(e) or "Could not price this change")
+        return {"mode": "add_to_existing", **preview}
+    schedule = await platform_settings.get_bundle_discount_schedule(db)
+    quote = billing_pricing.price_for(keys, schedule=schedule)
+    if body.coupon_code:
+        try:
+            coupon = await discount_coupons.validate_redemption(
+                db, body.coupon_code, club, is_new_signup=True,
+                candidate_module_keys=_with_core(keys), force=True,
+            )
+        except discount_coupons.CouponError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        quote = _apply_coupon_to_quote(quote, coupon)
+    return {"mode": "new_subscription", **quote}
+
+
+class SuperCheckoutIn(BaseModel):
+    module_keys: List[str] = []
+    coupon_code: Optional[str] = None
+
+
+@router.post("/super/clubs/{org_id}/checkout-session", dependencies=[Depends(require_super_admin)])
+async def super_checkout_session(org_id: str, body: SuperCheckoutIn, db: AsyncSession = Depends(get_db)):
+    """"Enter payment on the club's behalf" — returns a Stripe-hosted Checkout
+    URL the super admin opens to key in the club's card and complete the
+    subscription there and then (entitlement lands via the checkout.session.
+    completed webhook, same as a club self-checkout). For a club that already
+    has a live subscription this instead adds the modules to it, charging the
+    prorated amount to the card on file (or returns a setup URL when there's no
+    card yet)."""
+    club = await _load_club_with_subs_or_404(db, org_id)
+    keys = _validate_keys(body.module_keys)
+    if not keys:
+        raise HTTPException(status_code=422, detail="Select at least one module")
+
+    plan_by_key = {row["module"]: row for row in account_plan_status(club)}
+    already = [k for k in keys if not plan_by_key.get(k, {}).get("can_subscribe", True)]
+    if already:
+        raise HTTPException(status_code=409, detail=f"Already subscribed: {', '.join(already)}")
+
+    if club.stripe_subscription_id:
+        addon_keys = _addon_keys(keys)
+        if not addon_keys:
+            raise HTTPException(status_code=422, detail="Select at least one module to add")
+        existing_keys = [k for k in BILLABLE_MODULES if plan_by_key.get(k, {}).get("status") == "subscribed"]
+        try:
+            sub = await stripe_client.add_modules_to_subscription(
+                db, club.stripe_subscription_id, existing_keys, addon_keys,
+            )
+        except stripe_client.StripeNotConfigured:
+            raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+        except stripe_error.StripeError as e:
+            if stripe_client.is_missing_payment_method_error(e):
+                setup = await stripe_client.create_setup_session(club.stripe_customer_id)
+                return {"needs_payment_method": True, "url": setup.url}
+            raise HTTPException(status_code=502, detail=str(e) or "Could not add the module(s)")
+        renewal_date = stripe_client.epoch_to_date(sub.get("current_period_end"))
+        now = datetime.now(timezone.utc)
+        for key in addon_keys:
+            module_subscriptions.set_status_billing(club, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+        return {"added": True, "modules": addon_keys}
+
+    schedule = await platform_settings.get_bundle_discount_schedule(db)
+    redemption_id = extra_coupon_id = extra_coupon_code = extra_coupon_off = None
+    extra_stackable = False
+    if body.coupon_code:
+        try:
+            redeemed = await discount_coupons.redeem_for_new_signup(
+                db, body.coupon_code, club, _with_core(keys), None,
+                force=True, applied_via="super_admin",
+            )
+        except discount_coupons.CouponError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        redemption_id = redeemed["redemption_id"]
+        extra_coupon_id = redeemed["stripe_coupon_id"]
+        extra_stackable = redeemed["stackable_with_bundle"]
+        extra_coupon_code = redeemed["coupon"].code
+        preview_quote = billing_pricing.price_for(keys, schedule=schedule)
+        extra_coupon_off = _apply_coupon_to_quote(preview_quote, redeemed["coupon"])["coupon"]["amount_off"]
+
+    try:
+        session = await stripe_client.create_checkout_session(
+            db, org_id=club.id, billing_keys=keys, club_name=club.name,
+            customer_id=club.stripe_customer_id,
+            customer_email=club.contact_email,
+            customer_address=_stripe_address(club),
+            discount_schedule=schedule,
+            extra_coupon_id=extra_coupon_id, extra_stackable=extra_stackable,
+            extra_coupon_code=extra_coupon_code, extra_coupon_off_dollars=extra_coupon_off,
+            coupon_redemption_id=redemption_id,
+        )
+    except stripe_client.StripeNotConfigured:
+        if redemption_id:
+            await discount_coupons.revoke_redemption(db, redemption_id)
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        if redemption_id:
+            await discount_coupons.revoke_redemption(db, redemption_id)
+        raise HTTPException(status_code=502, detail=str(e) or "Stripe checkout could not be started")
+    return {"url": session["url"]}
+
+
+class SuperCreateInvoiceIn(BaseModel):
+    module_keys: List[str] = []
+    coupon_code: Optional[str] = None
+    days_until_due: int = 14
+    send_email: bool = True
+    recipient_name: Optional[str] = None    # blank ⇒ the primary admin
+    recipient_email: Optional[str] = None   # blank ⇒ the primary admin's email
+
+
+def _compose_invoice_email(club_name: str, greeting: str, invoice: dict) -> tuple[str, str, str]:
+    pay_url = invoice.get("hosted_invoice_url") or ""
+    number = invoice.get("number") or ""
+    total = invoice.get("total")
+    total_line = f"${total:,.2f}" if isinstance(total, (int, float)) else ""
+    subject = f"Your BetterCricket invoice{f' {number}' if number else ''}"
+    paras = [
+        f"Hi {greeting},",
+        f"Here's your BetterCricket invoice for {club_name}{f' ({total_line} inc. GST)' if total_line else ''}.",
+        "You can view and pay it securely online using the button below.",
+    ]
+    body_html = "".join(f'<p style="margin:0 0 12px">{p}</p>' for p in paras)
+    html = f"""
+    <div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;color:#222">
+      {body_html}
+      <p style="margin:24px 0">
+        <a href="{pay_url}" style="display:inline-block;background:#16c784;color:#fff;text-decoration:none;
+           padding:11px 22px;border-radius:6px;font-size:14px;font-weight:bold">View &amp; pay invoice</a>
+      </p>
+      <p style="font-size:12px;color:#888;margin-top:24px">If the button doesn't work, copy this link:<br>{pay_url}</p>
+    </div>
+    """
+    text_body = "\n\n".join([*paras, f"View & pay: {pay_url}"])
+    return subject, html, text_body
+
+
+async def _send_invoice_email(club: Organisation, recipient_name: Optional[str],
+                               recipient_email: Optional[str], invoice: dict, db: AsyncSession) -> dict:
+    if not recipient_email:
+        contact = await _primary_admin_contact(db, club.id)
+        recipient_email = contact["email"]
+        recipient_name = recipient_name or contact["name"]
+    if not recipient_email:
+        raise HTTPException(status_code=422, detail="No recipient email — the club has no primary admin email on file.")
+    greeting = (recipient_name or "there").split(" ")[0]
+    subject, html, text_body = _compose_invoice_email(club.name, greeting, invoice)
+    msg = email_service.EmailMessage(
+        to_email=recipient_email, to_name=recipient_name, subject=subject,
+        html=html, text=text_body,
+        from_email=settings.email_from_address, from_name=settings.email_from_name,
+        reply_to=settings.email_reply_to,
+        configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+    )
+    result = await email_service.get_email_provider().send(msg)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=f"Invoice raised, but the email could not be sent: {result.error}")
+    return {"sent_to": recipient_email}
+
+
+@router.post("/super/clubs/{org_id}/create-invoice", dependencies=[Depends(require_super_admin)])
+async def super_create_invoice(org_id: str, body: SuperCreateInvoiceIn, db: AsyncSession = Depends(get_db)):
+    """Raise a club a shareable, payable invoice for the selected modules
+    (bundle discount + optional coupon applied) and, by default, email the
+    primary admin (or an alternative name/email) a link to pay it online. In
+    Stripe terms this creates the recurring subscription up front billed by
+    invoice (collection_method=send_invoice) — the club settles the first
+    invoice via the returned hosted link, which grants entitlement (invoice.paid
+    webhook). Only for a club not already subscribed — for an add-on to a live
+    subscription use "enter payment on their behalf" instead."""
+    club = await _load_club_with_subs_or_404(db, org_id)
+    if club.stripe_subscription_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This club already has a live subscription — add modules via 'Enter payment on their behalf' instead.",
+        )
+    keys = _validate_keys(body.module_keys)
+    if not keys:
+        raise HTTPException(status_code=422, detail="Select at least one module")
+    plan_by_key = {row["module"]: row for row in account_plan_status(club)}
+    already = [k for k in keys if not plan_by_key.get(k, {}).get("can_subscribe", True)]
+    if already:
+        raise HTTPException(status_code=409, detail=f"Already subscribed: {', '.join(already)}")
+    days_until_due = body.days_until_due if body.days_until_due and body.days_until_due > 0 else 14
+
+    schedule = await platform_settings.get_bundle_discount_schedule(db)
+    redemption_id = extra_coupon_id = extra_coupon_code = extra_coupon_off = None
+    extra_stackable = False
+    if body.coupon_code:
+        try:
+            redeemed = await discount_coupons.redeem_for_new_signup(
+                db, body.coupon_code, club, _with_core(keys), None,
+                force=True, applied_via="super_admin",
+            )
+        except discount_coupons.CouponError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        redemption_id = redeemed["redemption_id"]
+        extra_coupon_id = redeemed["stripe_coupon_id"]
+        extra_stackable = redeemed["stackable_with_bundle"]
+        extra_coupon_code = redeemed["coupon"].code
+        preview_quote = billing_pricing.price_for(keys, schedule=schedule)
+        extra_coupon_off = _apply_coupon_to_quote(preview_quote, redeemed["coupon"])["coupon"]["amount_off"]
+
+    try:
+        result = await stripe_client.create_subscription_send_invoice(
+            db, org_id=club.id, billing_keys=_with_core(keys), club_name=club.name,
+            customer_id=club.stripe_customer_id, customer_email=club.contact_email,
+            customer_address=_stripe_address(club), days_until_due=days_until_due,
+            discount_schedule=schedule,
+            extra_coupon_id=extra_coupon_id, extra_stackable=extra_stackable,
+            extra_coupon_code=extra_coupon_code, extra_coupon_off_dollars=extra_coupon_off,
+        )
+    except stripe_client.StripeNotConfigured:
+        if redemption_id:
+            await discount_coupons.revoke_redemption(db, redemption_id)
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        if redemption_id:
+            await discount_coupons.revoke_redemption(db, redemption_id)
+        raise HTTPException(status_code=502, detail=str(e) or "Could not raise the invoice")
+
+    sub = result["subscription"]
+    now = datetime.now(timezone.utc)
+    club.stripe_customer_id = result["customer_id"]
+    club.stripe_subscription_id = sub.get("id")
+    # Record the finalized invoice straight away so it appears in Billing
+    # History without waiting for the invoice.finalized webhook (idempotent).
+    raw_invoice = result.get("raw_invoice")
+    if isinstance(raw_invoice, dict) and raw_invoice.get("id"):
+        try:
+            await stripe_billing._upsert_invoice(db, club, raw_invoice, now, sub=sub)
+        except Exception:
+            logger.exception("Could not pre-record invoice for org %s", club.id)
+    if redemption_id:
+        await discount_coupons.mark_redemption_confirmed(db, redemption_id, sub.get("id"))
+    await db.commit()
+
+    invoice = result["invoice"] or {}
+    email_result = None
+    if body.send_email:
+        try:
+            email_result = await _send_invoice_email(club, body.recipient_name, body.recipient_email, invoice, db)
+        except HTTPException as e:
+            email_result = {"error": e.detail}
+    return {"invoice": invoice, "email": email_result}
+
+
+def _invoice_out(r: BillingInvoice) -> dict:
+    """One billing_invoices row shaped for the financial page's invoice list,
+    with the coupon's share of the invoice pre-computed as a percentage."""
+    coupon_pct = None
+    # Percentage of the pre-discount invoice value the coupon represented —
+    # the coupon $ over (what was actually charged + every discount applied).
+    gross = (r.amount_due or 0) + (r.bundle_discount_cents or 0) + (r.coupon_discount_cents or 0)
+    if r.coupon_discount_cents and gross > 0:
+        coupon_pct = round(r.coupon_discount_cents / gross * 100, 1)
+    return {
+        "id": str(r.id),
+        "invoice_number": r.invoice_number,
+        "status": r.status,
+        "amount_due": r.amount_due,
+        "amount_paid": r.amount_paid,
+        "tax_cents": r.tax_cents or 0,
+        "currency": r.currency,
+        "period_start": r.period_start.isoformat() if r.period_start else None,
+        "period_end": r.period_end.isoformat() if r.period_end else None,
+        "hosted_invoice_url": r.hosted_invoice_url,
+        "invoice_pdf": r.invoice_pdf,
+        "line_items": r.line_items,
+        "bundle_discount_cents": r.bundle_discount_cents or 0,
+        "coupon_code": r.coupon_code,
+        "coupon_discount_cents": r.coupon_discount_cents or 0,
+        "coupon_pct_of_invoice": coupon_pct,
+        "payment_method_type": r.payment_method_type,
+        "payment_method_summary": r.payment_method_summary,
+        "source": r.source,
+        "settled": (r.amount_paid or 0) >= (r.amount_due or 0) and r.status == "paid",
+        "stripe_invoice_id": r.stripe_invoice_id,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@router.get("/super/clubs/{org_id}/invoices", dependencies=[Depends(require_super_admin)])
+async def super_list_invoices(org_id: str, db: AsyncSession = Depends(get_db)):
+    """A club's invoices, newest first — the by-org-id super-admin twin of
+    /invoices, with GST, invoice number, settled flag and the coupon's share
+    of each invoice included."""
+    rows = (await db.execute(
+        select(BillingInvoice)
+        .where(BillingInvoice.organisation_id == org_id)
+        .order_by(BillingInvoice.created_at.desc())
+    )).scalars().all()
+    return [_invoice_out(r) for r in rows]
+
+
+@router.get("/super/clubs/{org_id}/invoices/{invoice_id}", dependencies=[Depends(require_super_admin)])
+async def super_invoice_detail(org_id: str, invoice_id: str, db: AsyncSession = Depends(get_db)):
+    """One invoice's full detail for the drilldown. The stored row is the base;
+    a best-effort live Stripe fetch fills in anything the mirror can't hold as
+    richly (per-discount breakdown, amount remaining, subtotal) and keeps an
+    open/unpaid invoice's figures current."""
+    r = (await db.execute(
+        select(BillingInvoice).where(
+            BillingInvoice.id == invoice_id, BillingInvoice.organisation_id == org_id,
+        )
+    )).scalar_one_or_none()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    out = _invoice_out(r)
+    try:
+        out["stripe"] = await stripe_client.retrieve_invoice(r.stripe_invoice_id)
+    except (stripe_client.StripeNotConfigured, stripe_error.StripeError):
+        out["stripe"] = None
+    return out
+
+
+class SendInvoiceIn(BaseModel):
+    recipient_name: Optional[str] = None
+    recipient_email: Optional[str] = None
+
+
+@router.post("/super/clubs/{org_id}/invoices/{invoice_id}/send", dependencies=[Depends(require_super_admin)])
+async def super_send_invoice(org_id: str, invoice_id: str, body: SendInvoiceIn, db: AsyncSession = Depends(get_db)):
+    """Email an existing invoice's pay link to the club's primary admin, or to
+    an alternative name/email the super admin supplies."""
+    club = await _get_club_or_404(db, org_id)
+    r = (await db.execute(
+        select(BillingInvoice).where(
+            BillingInvoice.id == invoice_id, BillingInvoice.organisation_id == org_id,
+        )
+    )).scalar_one_or_none()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if not r.hosted_invoice_url:
+        raise HTTPException(status_code=422, detail="This invoice has no online payment link to send.")
+    invoice = {
+        "number": r.invoice_number,
+        "hosted_invoice_url": r.hosted_invoice_url,
+        "total": (r.amount_due or 0) / 100,
+    }
+    return await _send_invoice_email(club, body.recipient_name, body.recipient_email, invoice, db)
+
+
+@router.post("/super/clubs/{org_id}/modules/{module_key}/reset-trial-eligibility",
+             dependencies=[Depends(require_super_admin)])
+async def super_reset_trial_eligibility(org_id: str, module_key: str, db: AsyncSession = Depends(get_db)):
+    """Make a module trial-eligible again by clearing its recorded trial
+    history — removes the module's subscription row(s) when they're only a
+    lapsed/cancelled trial (never when the club is genuinely subscribed), so
+    account_plan_status reads the module as never-trialed. A deliberate
+    super-admin override of the normal one-trial-per-module rule (e.g. giving a
+    club a fresh trial after a false start)."""
+    if module_key not in BILLABLE_MODULES:
+        raise HTTPException(status_code=422, detail="Unknown module")
+    club = await _load_club_with_subs_or_404(db, org_id)
+    plan = {r["module"]: r for r in account_plan_status(club)}.get(module_key, {})
+    if plan.get("status") == "subscribed":
+        raise HTTPException(
+            status_code=409,
+            detail="This module is a live paid subscription — cancel it before resetting trial eligibility.",
+        )
+    now = datetime.now(timezone.utc)
+    module_subscriptions.remove_billing(club, module_key, now=now)
+    await db.commit()
+    await db.refresh(club, attribute_names=["module_subscriptions"])
+    return {"ok": True, "module": module_key, "trial_eligible": True}

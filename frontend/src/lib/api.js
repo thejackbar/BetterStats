@@ -1522,6 +1522,39 @@ export const api = {
     request(`/club-admin/billing/super/clubs/${orgId}/payment-methods/${pmId}/default`, { method: 'POST' }),
   superRemovePaymentMethod: (orgId, pmId) =>
     request(`/club-admin/billing/super/clubs/${orgId}/payment-methods/${pmId}`, { method: 'DELETE' }),
+  // Super Admin per-club financial management (routers/billing.py
+  // /super/clubs/{orgId}/*) — the Club Financials page. Summary of a club's
+  // trial/subscription state + contact, quote (bundle discount + coupon),
+  // raise-a-shareable-invoice or enter-a-checkout on the club's behalf,
+  // invoice history + drilldown + email, and reset-trial-eligibility.
+  superFinancialSummary: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/summary`),
+  superFinancialQuote: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/quote`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superFinancialCheckoutSession: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/checkout-session`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superFinancialCreateInvoice: (orgId, body) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/create-invoice`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  superFinancialInvoices: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices`),
+  superFinancialInvoiceDetail: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}`),
+  superFinancialSendInvoice: (orgId, invoiceId, body = {}) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/send`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  superResetTrialEligibility: (orgId, moduleKey) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/modules/${moduleKey}/reset-trial-eligibility`, { method: 'POST' }),
   // Super-Admin-only rollup of every discount actually paid out, sourced from
   // billing_invoices — see routers/billing.py::discount_report.
   superDiscountReport: (dateFrom, dateTo) => {

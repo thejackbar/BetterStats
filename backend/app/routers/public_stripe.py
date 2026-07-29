@@ -12,8 +12,8 @@ for inbound SNS events.
 Deploy note: register this endpoint in the Stripe dashboard (Developers →
 Webhooks) as https://betterat.cricket/api/public/stripe/webhook (nginx strips
 the /api prefix, so it resolves at /public/stripe/webhook here) — subscribed
-to at least checkout.session.completed, invoice.paid, invoice.payment_failed,
-customer.subscription.deleted.
+to at least checkout.session.completed, invoice.finalized, invoice.paid,
+invoice.payment_failed, customer.subscription.deleted.
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ router = APIRouter(prefix="/public/stripe", tags=["public-stripe"])
 
 _HANDLERS = {
     "checkout.session.completed": stripe_billing.handle_checkout_completed,
+    "invoice.finalized": stripe_billing.handle_invoice_finalized,
     "invoice.paid": stripe_billing.handle_invoice_paid,
     "invoice.payment_failed": stripe_billing.handle_invoice_payment_failed,
     "customer.subscription.deleted": stripe_billing.handle_subscription_deleted,

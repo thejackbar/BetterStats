@@ -1338,6 +1338,13 @@ export default function SuperClubs() {
                         {editId === club.id ? 'Close' : 'Edit'}
                       </button>
                       <button
+                        onClick={() => { window.location.assign(`/admin/super/financials?club=${club.id}`) }}
+                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
+                        title="Trials, subscriptions, invoices and payments for this club"
+                      >
+                        Financials
+                      </button>
+                      <button
                         onClick={() => setPmModalClub(club)}
                         className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
                         title="Manage this club's saved payment methods"

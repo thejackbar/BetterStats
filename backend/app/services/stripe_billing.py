@@ -230,6 +230,27 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
         await db.commit()
 
 
+async def handle_invoice_finalized(db: AsyncSession, invoice: dict) -> None:
+    """invoice.finalized — an invoice has become a real, payable document (it
+    has its number and hosted_invoice_url now). Records it for Billing History
+    WITHOUT granting entitlement — that stays on invoice.paid. This is what
+    makes a super-admin-raised send-invoice (routers/billing.py's
+    create-invoice, collection_method=send_invoice) show up as an open,
+    unpaid row the moment it's created, rather than only appearing once the
+    club actually pays it. Idempotent on stripe_invoice_id (invoice.paid just
+    re-upserts the same row with the paid status/amounts later)."""
+    subscription_id = _invoice_subscription_id(invoice)
+    org, sub = await _resolve_org_for_subscription(db, subscription_id)
+    if org is None:
+        # A finalized invoice not tied to a subscription we know — nothing to
+        # record against a club. (One-off invoices aren't used by this app.)
+        logger.info("Stripe invoice.finalized: no known club for subscription=%r", subscription_id)
+        return
+    now = datetime.now(timezone.utc)
+    await _upsert_invoice(db, org, invoice, now, sub=sub)
+    await db.commit()
+
+
 async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None:
     """invoice.payment_failed — a grace-period signal, not an instant cutoff:
     moves the affected modules to past_due (see ACTIVE_STATUSES in
@@ -359,6 +380,18 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
     row.period_end = epoch_to_datetime(invoice.get("period_end"))
     row.hosted_invoice_url = invoice.get("hosted_invoice_url")
     row.invoice_pdf = invoice.get("invoice_pdf")
+    # Stripe's own human number (e.g. "BC-0001") and the GST it charged, both
+    # for the Super Admin financial page's invoice drilldown. ``tax`` is the
+    # total tax in cents on the invoice; keep the existing 0 if Stripe reports
+    # nothing (e.g. an account with no active GST registration).
+    if invoice.get("number"):
+        row.invoice_number = invoice.get("number")
+    row.tax_cents = invoice.get("tax") or 0
+    # source is stamped by the super-admin create paths (see routers/billing.py)
+    # via subscription metadata; a plain renewal has none, so default it.
+    if row.source is None:
+        meta_src = (sub.get("metadata") or {}).get("bs_invoice_source") if sub else None
+        row.source = meta_src or "subscription"
     lines = (invoice.get("lines") or {}).get("data") or []
     if lines:
         row.line_items = [

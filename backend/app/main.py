@@ -2731,6 +2731,13 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_billing_invoices_coupon_code ON billing_invoices(coupon_code) "
             "WHERE coupon_code IS NOT NULL"
         ))
+        # GST amount, Stripe invoice number, and source (migration 192) — for
+        # the Super Admin financial-management page's invoice drilldown.
+        await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS tax_cents INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS source TEXT"))
         # Per-club override of billing_checkout_enabled (migration 151) — see
         # services/platform_settings.billing_checkout_enabled_for_org.
         await conn.execute(text(

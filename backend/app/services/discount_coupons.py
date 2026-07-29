@@ -229,13 +229,19 @@ async def validate_redemption(db: AsyncSession, code: str, org, *, is_new_signup
     return coupon
 
 
-async def redeem_for_new_signup(db: AsyncSession, code: str, org, selected_module_keys: list[str], user) -> dict:
+async def redeem_for_new_signup(db: AsyncSession, code: str, org, selected_module_keys: list[str], user,
+                                *, force: bool = False, applied_via: str = "self_serve") -> dict:
+    """Records a pending new-signup redemption. ``force`` (a super admin
+    raising an invoice / entering a checkout on the club's behalf) skips the
+    redeem/new-signup/loyalty windows and the max-redemption cap — never the
+    "already redeemed"/inactive/coverage checks — matching validate_redemption's
+    own force semantics and the forced /quote preview."""
     coupon = await validate_redemption(
-        db, code, org, is_new_signup=True, candidate_module_keys=selected_module_keys,
+        db, code, org, is_new_signup=True, candidate_module_keys=selected_module_keys, force=force,
     )
     redemption = DiscountCouponRedemption(
         id=uuid.uuid4(), coupon_id=coupon.id, organisation_id=org.id,
-        redeemed_by_user_id=user.id if user else None, applied_via="self_serve", status="pending",
+        redeemed_by_user_id=user.id if user else None, applied_via=applied_via, status="pending",
     )
     db.add(redemption)
     await db.commit()
