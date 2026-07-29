@@ -8,6 +8,7 @@ import { Icon } from '../../../pages/admin/betterselect/ui'
 
 // Bottom-pinned tools sit after a divider (Layers today; History/Comments later).
 export const TOOLS = [
+  { key: 'source',   icon: 'bolt',      label: 'Data' },
   { key: 'design',   icon: 'overview',  label: 'Design' },
   { key: 'content',  icon: 'sheet',     label: 'Content' },
   { key: 'text',     icon: 'list',      label: 'Text' },
@@ -21,7 +22,7 @@ export const END_TOOLS = [
 ]
 
 export const TOOL_TITLE = {
-  design: 'Design', content: 'Content', text: 'Text', elements: 'Shapes',
+  source: 'Get your data', design: 'Design', content: 'Content', text: 'Text', elements: 'Shapes',
   photos: 'Photos & badge', data: 'Club data', brand: 'Brand kit', layers: 'Layers',
 }
 

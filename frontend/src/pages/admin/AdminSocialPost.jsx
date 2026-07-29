@@ -127,6 +127,16 @@ const TAB_ICON = {
   motm: 'player', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
   events: 'availability', blank: 'plus',
 }
+// Post types that pull from external data (BetterSelect / a match link / a round
+// import). These open on the "Get your data" step so the source is collected first.
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard']
+const SOURCE_HELP = {
+  lineup: 'Lineups come from BetterSelect. Pick a saved XI below to pull the players, captain, keeper and match details — or add players yourself in Content.',
+  result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
+  scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
+  fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
+  results: 'Pull the latest round\'s results for every grade straight from the results feed.',
+}
 
 
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
@@ -638,9 +648,19 @@ const DEFAULT_STYLE_JSON = JSON.stringify({
 export default function AdminSocialPost() {
   const location = useLocation()
   const navigate = useNavigate()
-  // Which rail tool's panel is showing. 'content' is the default (the per-type
-  // fields most posts start with).
-  const [tool, setTool] = useState('content')
+  // Which rail tool's panel is showing. A data-driven post type opens on the
+  // "Get your data" step so the source is collected before editing; everything
+  // else starts on Content.
+  const [tool, setTool] = useState(() => {
+    const t = new URLSearchParams(window.location.search).get('type')
+    return t && DATA_TABS.includes(t) ? 'source' : 'content'
+  })
+  // Post types whose data step has already been shown this session (so switching
+  // back to a tab doesn't force the step again).
+  const sourceSeen = useRef(new Set())
+  // BetterSelect fixtures with saved XIs, for the lineup source step.
+  const [sourceFixtures, setSourceFixtures] = useState(null)
+  const [lineupLoad, setLineupLoad] = useState(null)
   // Hidden file input the inspector's "Replace" drives; remembers which image
   // block to fill.
   const blankImgInputRef = useRef(null)
@@ -1356,8 +1376,24 @@ export default function AdminSocialPost() {
   // ─── Derived values ─────────────────────────────────────────────────────────
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
-  const switchTab = (tabKey) => { setTemplateId(TAB_FIRST[tabKey] || 'T1'); setCustomEdit(false) }
+  const switchTab = (tabKey) => {
+    setTemplateId(TAB_FIRST[tabKey] || 'T1'); setCustomEdit(false)
+    // Open the data step the first time you land on a data-driven type; leave it
+    // if you move to a type that has nothing to import.
+    if (DATA_TABS.includes(tabKey)) {
+      if (!sourceSeen.current.has(tabKey)) { setTool('source'); sourceSeen.current.add(tabKey) }
+    } else {
+      setTool((t) => (t === 'source' ? 'content' : t))
+    }
+  }
   const selectTemplate = (id) => { setTemplateId(id); setCustomEdit(false) }
+
+  // Load BetterSelect fixtures the first time the lineup data step is opened.
+  useEffect(() => {
+    if (tool === 'source' && activeTab === 'lineup' && sourceFixtures === null) {
+      api.bsSelectionOverview().then((d) => setSourceFixtures(d.fixtures || [])).catch(() => setSourceFixtures([]))
+    }
+  }, [tool, activeTab, sourceFixtures])
   const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
   const displayFont = DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0]
 
@@ -1811,6 +1847,34 @@ export default function AdminSocialPost() {
     return target.add(type, opts)
   }
 
+  // Pull a saved BetterSelect XI into the lineup post (players + captain / keeper
+  // + match + opponent), mirroring the Selection page's "share to social" handoff.
+  const loadLineupFromSelection = async (fixtureId) => {
+    if (!fixtureId) return
+    setLineupLoad('loading')
+    try {
+      const d = await api.bsGetSelection(fixtureId)
+      const lineup = (d.lineup || []).slice().sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999))
+      const byId = {}; allPlayers.forEach((p) => { byId[p.id] = p })
+      const poolById = {}; (d.pool || []).forEach((p) => { poolById[p.id] = p })
+      const picked = lineup.map((l) => {
+        const player = byId[l.player_id]
+        if (!player) return null
+        const pp = poolById[l.player_id]
+        return { player, role: (pp?.skill_positions?.[0]) || pp?.player_role || player.player_role || 'BAT', captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
+      }).filter(Boolean)
+      setSelectedPlayers(picked)
+      const fx = d.fixture
+      if (fx) {
+        setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
+        if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
+        const tn = (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || ''
+        if (tn) setHeadline(tn)
+      }
+      setLineupLoad(`ok:${picked.length}`)
+    } catch (e) { setLineupLoad(`err:${e?.message || 'Failed to load'}`) }
+  }
+
   // Media library handlers (optimistic upload, then swap in the stored URL).
   const uploadMedia = async (files) => {
     for (const f of files) {
@@ -1886,6 +1950,7 @@ export default function AdminSocialPost() {
   )
 
   const panelMeta = {
+    source: DATA_TABS.includes(activeTab) ? 'pull it first' : 'nothing to pull',
     design: `${tabTemplates.length} layout${tabTemplates.length === 1 ? '' : 's'}`,
     content: 'this post', data: 'live', brand: 'colour · type',
     layers: `${layer.items.length} block${layer.items.length === 1 ? '' : 's'}`,
@@ -1965,6 +2030,91 @@ export default function AdminSocialPost() {
         inspector={inspectorNode}
         panel={(
           <div className="flex flex-col gap-4">
+            {tool === 'source' && (
+              <div className="flex flex-col gap-4">
+                <div className="pb-card p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Icon name={TAB_ICON[activeTab] || 'bolt'} size={15} className="text-pb-accent" />
+                    <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{TABS.find((t) => t.key === activeTab)?.label} · data</h2>
+                  </div>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">{SOURCE_HELP[activeTab] || "This post type has nothing to import — it's all yours to design."}</p>
+                </div>
+
+                {activeTab === 'lineup' && (
+                  <div className="pb-card p-4 flex flex-col gap-2">
+                    <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">From BetterSelect</div>
+                    {sourceFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading your teams…</div>}
+                    {Array.isArray(sourceFixtures) && sourceFixtures.length === 0 && (
+                      <div className="text-pb-faintest text-[11px] leading-relaxed">No saved teams yet. Pick your XI in BetterSelect, or add players yourself in Content.</div>
+                    )}
+                    {Array.isArray(sourceFixtures) && sourceFixtures.length > 0 && (
+                      <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto">
+                        {sourceFixtures.slice(0, 20).map((fx) => (
+                          <button key={fx.id} onClick={() => loadLineupFromSelection(fx.id)}
+                            className="text-left px-3 py-2 rounded-lg border pb-hairline bg-pb-surface2 hover:border-pb-accent transition-colors">
+                            <div className="text-pb-text text-[12px] truncate">v {fx.opponent_name || 'TBC'}</div>
+                            <div className="font-mono text-[9px] text-pb-faint">{[fx.grade, fx.round, fx.played_on].filter(Boolean).join(' · ')}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
+                    {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded — head to Content or Design</div>}
+                    {typeof lineupLoad === 'string' && lineupLoad.startsWith('err:') && <div className="text-pb-red text-[10px] font-mono">✗ {lineupLoad.slice(4)}</div>}
+                    <button onClick={() => navigate('/admin/betterselect')} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">Open BetterSelect →</button>
+                  </div>
+                )}
+
+                {(activeTab === 'result' || activeTab === 'scorecard') && (
+                  <div className="pb-card p-4">
+                    <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Paste the match link</div>
+                    <div className="flex gap-2">
+                      <input
+                        value={activeTab === 'result' ? resUrlInput : scUrlInput}
+                        onChange={(e) => { if (activeTab === 'result') { setResUrlInput(e.target.value); setResUrlStatus(null) } else { setScUrlInput(e.target.value); setScUrlStatus(null) } }}
+                        onKeyDown={(e) => e.key === 'Enter' && (activeTab === 'result' ? handleResultImport() : handleScUrlImport())}
+                        placeholder="Match link or ID (e.g. 37af9ea5-…)"
+                        className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-2 text-xs text-pb-text font-mono" />
+                      <button onClick={activeTab === 'result' ? handleResultImport : handleScUrlImport}
+                        disabled={(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading'}
+                        className="px-3 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50" style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+                        {(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading' ? '…' : 'Fetch'}
+                      </button>
+                    </div>
+                    {(() => {
+                      const st = activeTab === 'result' ? resUrlStatus : scUrlStatus
+                      if (!st || st === 'loading') return null
+                      const ok = st === 'ok'
+                      return <p className={`font-mono text-[9px] mt-1.5 ${ok ? 'text-green-400' : 'text-pb-red'}`}>{ok ? (activeTab === 'result' ? '✓ Result, scores & top performers loaded' : '✓ Scorecard loaded') : `✗ ${st}`}</p>
+                    })()}
+                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Pulls the scores, top performers and matched player photos. You can still edit everything after.</p>
+                  </div>
+                )}
+
+                {activeTab === 'fixtures' && (
+                  <div className="pb-card p-4">
+                    <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
+                      status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
+                      onPull={importFixtures}
+                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                  </div>
+                )}
+                {activeTab === 'results' && (
+                  <div className="pb-card p-4">
+                    <RoundImportBox hint="recent results" rowsKey="results"
+                      status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
+                      onPull={importResults}
+                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                  </div>
+                )}
+
+                <button onClick={() => setTool(DATA_TABS.includes(activeTab) ? 'content' : 'content')}
+                  className="self-start px-3.5 h-9 rounded-md font-mono text-[10px] tracking-wide2 uppercase"
+                  style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+                  {DATA_TABS.includes(activeTab) ? 'Continue to editor →' : 'Start designing →'}
+                </button>
+              </div>
+            )}
             {tool === 'text' && <TextPanel onAdd={addBlock} />}
             {tool === 'elements' && <ShapesPanel onAdd={addBlock} />}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
