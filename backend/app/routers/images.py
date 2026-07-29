@@ -11,7 +11,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    ClubCommitteeMember, ClubGalleryImage, ClubNews, Organisation, Player, Sponsor, get_db,
+    ClubCommitteeMember, ClubGalleryImage, ClubNews, Organisation, Player,
+    SocialMediaAsset, Sponsor, get_db,
 )
 
 router = APIRouter(prefix="/images", tags=["images"])
@@ -132,6 +133,18 @@ async def get_sponsor_logo(sponsor_id: str, db: AsyncSession = Depends(get_db)):
     return Response(
         content=sponsor.logo_data,
         media_type=sponsor.logo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/social-media/{asset_id}")
+async def get_social_media_asset(asset_id: str, db: AsyncSession = Depends(get_db)):
+    asset = await db.get(SocialMediaAsset, _parse_uuid(asset_id))
+    if not asset or not asset.image_data:
+        raise HTTPException(404, "No image")
+    return Response(
+        content=asset.image_data,
+        media_type=asset.mime or "image/jpeg",
         headers=_CACHE_HEADERS,
     )
 

@@ -332,6 +332,10 @@ class Organisation(Base):
     # style control away from the defaults (the default palette already
     # derives from the club's own colours).
     socials_style = Column(JSONB, nullable=True)
+    # ─── BetterSocials brand kit (migration 191) ──────────────────────────────
+    # Opaque JSON blob the BetterSocials editor uses as the club's reusable
+    # brand palette/fonts/crest/sponsors set. NULL until an admin saves one.
+    social_brand_kit = Column(JSONB, nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only
@@ -457,6 +461,30 @@ class Sponsor(Base):
     contact_name = Column(Text, nullable=True)
     email = Column(Text, nullable=True)
     klubpro_sponsor_id = Column(Text, nullable=True)
+
+
+# ─── BetterSocials media library (migration 191) ─────────────────────────────
+# A per-club pool of uploaded images the BetterSocials editor can drop into a
+# post. Bytes live in-table (like club logos / sponsor logos / yearbook images)
+# so they survive container recreation. Served via GET /images/social-media/{id}.
+
+class SocialMediaAsset(Base):
+    __tablename__ = "social_media_asset"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organisations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename = Column(Text, nullable=True)
+    mime = Column(Text, nullable=True)
+    image_data = Column(LargeBinary, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 # ─── Front-end Website CMS (migration 069) ───────────────────────────────────

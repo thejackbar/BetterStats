@@ -16,7 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary
+    club_diary, social_media
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -415,6 +415,25 @@ async def lifespan(app: FastAPI):
             "ADD COLUMN IF NOT EXISTS na_steps JSON NOT NULL DEFAULT '[]'"))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS socials_style JSONB"))
+        # BetterSocials media library + brand kit (migration 191).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS social_media_asset (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                filename TEXT,
+                mime TEXT,
+                image_data BYTEA,
+                width INTEGER,
+                height INTEGER,
+                created_by UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_social_media_asset_organisation_id "
+            "ON social_media_asset(organisation_id)"))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS social_brand_kit JSONB"))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "
@@ -3894,6 +3913,7 @@ app.include_router(leaderboard.router)
 app.include_router(records.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
+app.include_router(social_media.router)   # BetterSocials media library + brand kit
 app.include_router(achievements.router)
 app.include_router(award_definitions.router)
 app.include_router(statlab.router)

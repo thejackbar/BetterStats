@@ -87,6 +87,26 @@ export const api = {
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   getSocialFixtures: () => request('/admin/social/fixtures'),
   getSocialResults: () => request('/admin/social/results'),
+
+  // BetterSocials — media library
+  listSocialMedia: () => request('/admin/social/media'),
+  uploadSocialMedia: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/admin/social/media`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  deleteSocialMedia: (id) => request(`/admin/social/media/${id}`, { method: 'DELETE' }),
+  // BetterSocials — brand kit
+  getSocialBrandKit: () => request('/admin/social/brand-kit'),
+  saveSocialBrandKit: (kit) =>
+    request('/admin/social/brand-kit', { method: 'PUT', body: JSON.stringify(kit) }),
   onboard: (orgId, orgName = '') =>
     request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
   listOrgs: () => request('/organisations'),
