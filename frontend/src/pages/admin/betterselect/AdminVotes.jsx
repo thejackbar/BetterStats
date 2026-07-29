@@ -89,14 +89,14 @@ function SettingsTab({ canManage }) {
     setBusy(true)
     try {
       setCfg(await api.votesRegenerateLink())
-      toast.success('New link generated — reshare it.')
+      toast.success('New link generated. Reshare it with your players.')
     } catch (e) { toast.error(e.message) }
     finally { setBusy(false) }
   }
 
   const copy = async (text, what) => {
     try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`) }
-    catch { toast.error('Copy failed — select and copy manually') }
+    catch { toast.error('Copy failed. Select and copy manually.') }
   }
 
   if (!cfg) return <PbSpinner message="Loading settings…" />
@@ -136,7 +136,7 @@ function SettingsTab({ canManage }) {
           </span>
         </div>
         <p className="text-[12.5px] text-pb-faint mb-3">
-          Players open the link, verify with the last 4 digits of their mobile, and cast their votes — no logins.
+          Players open the link, verify with the last 4 digits of their mobile, and cast their votes, without logging in.
         </p>
         <div className="flex items-center gap-2.5 mb-3">
           <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Status</span>
@@ -208,7 +208,7 @@ function SettingsTab({ canManage }) {
           <div className="text-[11px] text-pb-faintest mt-1.5">
             {cfg.counting_method === 'rank'
               ? `The week's top vote-getter earns ${cfg.ballot_values[0]} points, next ${cfg.ballot_values[1] ?? 0}, and so on.`
-              : 'Every vote counts at face value — 10 players all giving someone their 3 adds 30 to their season total.'}
+              : 'Every vote counts at face value: 10 players all giving someone their 3 adds 30 to their season total.'}
           </div>
         </Row>
         {cfg.counting_method === 'rank' && (
@@ -217,7 +217,7 @@ function SettingsTab({ canManage }) {
               options={[{ value: 'share', label: 'Allow ties' }, { value: 'countback', label: 'Countback' }]} />
             <div className="text-[11px] text-pb-faintest mt-1.5">
               {cfg.tie_policy === 'share'
-                ? 'Tied players share the position — both take the higher points.'
+                ? 'Tied players share the position and both take the higher points.'
                 : `Ties break on who received more ${cfg.ballot_values[0]}s, then ${cfg.ballot_values[1] ?? '—'}s, and so on. A dead heat after every countback still shares.`}
             </div>
           </Row>
@@ -234,7 +234,7 @@ function SettingsTab({ canManage }) {
       <div className="pb-card px-4 py-4">
         <div className="font-display font-bold text-[15px] mb-1">Who can see the leaderboard</div>
         <p className="text-[12.5px] text-pb-faint">
-          The count stays inside the admin app — nothing on the voting page or public site shows tallies.
+          The count stays inside the admin app. Nothing on the voting page or public site shows tallies.
           Club admins always see it; to give (or take away) access for other users, grant the{' '}
           <b className="text-pb-text">View vote results</b> capability on the{' '}
           <Link to="/admin/users" className="text-pb-accent underline">Users</Link> page.
@@ -361,7 +361,7 @@ function FixtureDetail({ fixtureId, onBack }) {
 
       {fx.state === 'awaiting_sync' && (
         <div className="rounded-lg px-4 py-3 text-sm bg-pb-amber/10 border border-pb-amber/30 text-pb-amber">
-          This game's scorecard hasn't synced yet — voting (and the eligible player list) opens once it has.
+          This game's scorecard hasn't synced yet. Voting (and the eligible player list) opens once it has.
           Run <Link to="/admin/sync" className="underline">Sync Now</Link> after the weekend's results are in.
         </div>
       )}
@@ -456,7 +456,7 @@ function FixturesTab({ canManage, openFixture, setOpenFixture }) {
         </select>
         {!data.settings?.enabled && (
           <span className="text-[12.5px] text-pb-amber">
-            The voting link is off — players can't vote yet. Turn it on under Settings (admins can still enter ballots here).
+            The voting link is off, so players can't vote yet. Turn it on under Settings (admins can still enter ballots here).
           </span>
         )}
       </div>
@@ -579,7 +579,7 @@ function LeaderboardTab() {
           </table>
           {board.through_round && (
             <div className="text-[11.5px] text-pb-faintest mt-2.5">
-              Standings as at {board.rounds.find((r) => r.key === board.through_round)?.label} — later rounds are listed below but not counted.
+              Standings as at {board.rounds.find((r) => r.key === board.through_round)?.label}. Later rounds are listed below but not counted.
             </div>
           )}
         </div>

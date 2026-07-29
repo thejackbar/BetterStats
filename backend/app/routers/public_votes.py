@@ -249,7 +249,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
         if want is None:
             raise HTTPException(
                 status_code=409,
-                detail="No mobile number is on file for you yet — ask your club admin to add it or to record your votes for you.",
+                detail="No mobile number is on file for you yet. Ask your club admin to add it, or to record your votes for you.",
             )
         given = phone_last4(body.pin)
         if given is None or given != want:

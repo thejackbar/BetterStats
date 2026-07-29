@@ -345,7 +345,7 @@ async def admin_enter_ballot(
     self-vote rule still applies."""
     fx = await _org_fixture(db, club, fixture_id)
     if not await vote_svc.game_exists(db, fx.id):
-        raise HTTPException(status_code=409, detail="This game's scorecard hasn't synced yet — votes open once it has")
+        raise HTTPException(status_code=409, detail="This game's scorecard hasn't synced yet. Votes open once it has")
     s = await vote_svc.get_settings(db, club.id)
     cfg = vote_svc.effective_config(s)
     eligible = await vote_svc.eligible_players(db, club.id, fx.id)

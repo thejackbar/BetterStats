@@ -113,7 +113,7 @@ export default function PublicVoting() {
       setReviewing(existing.length === (d.ballot_values || []).length)
       setStep('ballot')
     } catch (e) {
-      setError(e.message || 'Something went wrong — try again.')
+      setError(e.message || 'Something went wrong. Try again.')
     } finally { setBusy(false) }
   }, [token, me, supporterName])
 
@@ -188,7 +188,7 @@ export default function PublicVoting() {
       })
       setStep('done')
     } catch (e) {
-      setError(e.message || 'Couldn’t save your votes — please try again.')
+      setError(e.message || 'Couldn’t save your votes. Please try again.')
     } finally { setBusy(false) }
   }
 
@@ -202,7 +202,7 @@ export default function PublicVoting() {
   }, [landing, search])
 
   const reasonText = {
-    captain_only: 'Only the captain submits votes for this club — ask your skipper to cast them.',
+    captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
     did_not_play: 'Only players who played in this game can vote at this club.',
   }
 
@@ -236,7 +236,7 @@ export default function PublicVoting() {
             <Banner>{error}</Banner>
             {landing.fixtures.length === 0 && (
               <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
-                No games to vote on yet — check back after the weekend.
+                No games to vote on yet. Check back after the weekend.
               </div>
             )}
             <div className="flex flex-col gap-3">
@@ -262,7 +262,7 @@ export default function PublicVoting() {
               })}
             </div>
             <p className="text-center text-pb-faintest text-[11px] mt-5">
-              Votes go to your club’s count — results stay with the club until they’re announced.
+              Votes go to your club’s count. Results stay with the club until they’re announced.
             </p>
           </div>
         )}
@@ -292,7 +292,7 @@ export default function PublicVoting() {
             </div>
             {landing.allow_non_participants && (
               <button onClick={() => setStep('name')} className="block mx-auto mt-4 text-pb-accent text-sm underline">
-                I didn’t play — I’m a coach / supporter
+                I didn’t play (coach / supporter)
               </button>
             )}
             <button onClick={() => setStep('games')} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
@@ -439,7 +439,7 @@ export default function PublicVoting() {
             <div className="text-4xl mb-4">🗳️</div>
             <div className="font-display font-bold text-xl">Votes in!</div>
             <p className="text-pb-faint text-sm mt-2">
-              Thanks{me ? `, ${me.display_name.split(' ')[0]}` : supporterName ? `, ${supporterName.split(' ')[0]}` : ''} — your ballot is with the club.
+              Thanks{me ? `, ${me.display_name.split(' ')[0]}` : supporterName ? `, ${supporterName.split(' ')[0]}` : ''}. Your ballot is with the club.
               You can come back and change it while voting stays open.
             </p>
             <button onClick={() => { setFixture(null); setStep('games') }}
