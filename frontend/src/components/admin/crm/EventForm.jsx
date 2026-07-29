@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useToast } from '../../../contexts/ToastContext'
 import { Field, TextInput, TextArea, Select, Btn } from './ui'
 
 // Shared vocab — mirrors services/crm.py EVENT_TYPES / ALERT_CODES and
@@ -56,6 +57,15 @@ export function localInputToIso(local) {
   const d = new Date(local)
   return isNaN(d) ? null : d.toISOString()
 }
+// A complete, valid default for a new event — the next full hour — so the
+// datetime picker never starts in the half-filled state that silently blocks
+// submission.
+function defaultStartsAt() {
+  const d = new Date()
+  d.setMinutes(0, 0, 0)
+  d.setHours(d.getHours() + 1)
+  return isoToLocalInput(d.toISOString())
+}
 
 const EMPTY = {
   event_type: 'meeting', starts_at: '', title: '', location: '', body: '',
@@ -69,15 +79,21 @@ const EMPTY = {
 // fields. Manages its own draft state seeded from `initial`.
 export default function EventForm({ initial, ownerOptions = [], contactOptions = [], extraTop,
                                     onSubmit, onCancel, submitLabel = 'Save event', saving }) {
+  const toast = useToast()
   const [form, setForm] = useState(() => ({
     ...EMPTY,
     ...(initial || {}),
-    starts_at: initial?.starts_at ? isoToLocalInput(initial.starts_at) : '',
+    // Prefill a valid default (next full hour) for a brand-new event so the
+    // datetime field is complete out of the box — otherwise a 12-hour-locale
+    // browser leaves the AM/PM segment blank, the input reports an empty
+    // value, and the form can't be submitted with no obvious reason why.
+    starts_at: initial?.starts_at ? isoToLocalInput(initial.starts_at) : defaultStartsAt(),
   }))
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
   const submit = (e) => {
     e.preventDefault()
+    if (!form.starts_at) { toast.error('Pick a date and time for the event'); return }
     onSubmit({
       event_type: form.event_type,
       starts_at: localInputToIso(form.starts_at),
@@ -141,7 +157,7 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
           style={{ minHeight: '80px' }} />
       </Field>
       <div className="flex items-center gap-2">
-        <Btn type="submit" variant="primary" sm disabled={saving || !form.starts_at}>{submitLabel}</Btn>
+        <Btn type="submit" variant="primary" sm disabled={saving}>{submitLabel}</Btn>
         {onCancel && <Btn type="button" variant="ghost" sm onClick={onCancel} disabled={saving}>Cancel</Btn>}
       </div>
     </form>
