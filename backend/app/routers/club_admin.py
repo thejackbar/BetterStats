@@ -3318,20 +3318,22 @@ async def delete_club(
             detail="Archive the club first (this permanently destroys its data and is not reversible).",
         )
 
-    # These tables key on org_id but have no FK constraint, so the
-    # organisations cascade won't reach them — clean them up explicitly.
-    for table in ("merge_logs", "merge_pair_ignores", "grade_merge_logs", "player_achievements"):
-        await db.execute(
-            _text(f"DELETE FROM {table} WHERE org_id = CAST(:id AS UUID)"),
-            {"id": club_id},
-        )
+    # Stripe customer (external, best-effort — never block the DB purge): deleting
+    # it also cancels any subscription. A missing/already-deleted customer is fine.
+    if org.stripe_customer_id:
+        try:
+            await stripe_client.delete_customer(org.stripe_customer_id)
+        except Exception:  # noqa: BLE001
+            _logging.getLogger(__name__).exception("delete_club: could not delete Stripe customer for org %s", club_id)
 
-    # The rest (seasons, grades, games, players, stats, memberships, …) all
-    # FK to organisations ON DELETE CASCADE, so the DB handles them.
-    await db.execute(
-        _text("DELETE FROM organisations WHERE id = CAST(:id AS UUID)"),
-        {"id": club_id},
-    )
+    # Shared purge: deletes the org (FK ON DELETE CASCADE handles seasons/grades/
+    # games/players/stats/memberships/subscriptions), cleans the org-keyed no-FK
+    # tables, and deletes the club's own admin user login(s) — only those whose
+    # sole membership was this club (never a super admin / multi-club user).
+    # marketing_clubs.existing_org_id is ON DELETE SET NULL, so the Club
+    # Directory row is kept. Same helper the CRM test-club purge uses.
+    from app.services import crm as crm_service
+    await crm_service.hard_delete_registered_club(db, club_id)
     await db.commit()
     return {"status": "deleted", "id": club_id}
 
