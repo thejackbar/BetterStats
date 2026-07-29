@@ -124,6 +124,60 @@ async def refresh_twenty_leads_tasks():
         logger.error(f"Twenty leads/tasks refresh failed: {e}")
 
 
+# ─── CRM Sales Pipeline auto-recompute (Tier 2 incremental + Tier 3 global) ────
+# Both cadences are super-admin tunable from the pipeline's Settings modal
+# (platform_settings); the intervals are applied at boot and rescheduled live on
+# any change via reschedule_crm_sweeps(). max_instances=1 + coalesce keep a slow
+# run from stacking on the next tick.
+CRM_INCREMENTAL_JOB_ID = "crm_incremental_pipeline_sweep"
+CRM_GLOBAL_JOB_ID = "crm_global_engagement_sweep"
+
+
+async def crm_incremental_pipeline_sweep():
+    """Tier 2 — re-score only the pipeline's OWN cards whose club had new
+    telemetry since the last run (crm.recalc_pipeline_cards). The lookback is
+    2x the current interval (a floor of 120s) so a delayed/coalesced tick can't
+    leave a gap."""
+    from app.services import crm as crm_service
+    from app.services import platform_settings
+    try:
+        async with async_session_maker() as session:
+            interval = await platform_settings.get_crm_incremental_sweep_seconds(session)
+        result = await crm_service.recalc_pipeline_cards(lookback_seconds=max(2 * interval, 120))
+        if result.get("processed") or result.get("promoted") or result.get("error"):
+            logger.info(f"CRM incremental pipeline sweep: {result}")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"CRM incremental pipeline sweep failed: {e}")
+
+
+async def crm_global_engagement_sweep():
+    """Tier 3 — the full Club-Directory recompute (app.scripts.recalc_engagement),
+    the backstop that catches slow time-decay drift and anything the incremental
+    sweep missed."""
+    from app.scripts.recalc_engagement import recalc
+    logger.info("Starting scheduled CRM global engagement sweep")
+    try:
+        stats = await recalc()
+        logger.info(f"CRM global engagement sweep done: {stats}")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"CRM global engagement sweep failed: {e}")
+
+
+def reschedule_crm_sweeps(*, incremental_seconds=None, global_minutes=None) -> None:
+    """Apply new Tier-2 / Tier-3 cadences to the running scheduler immediately
+    (no restart). Called at boot with the persisted values and again whenever a
+    super admin edits them. Safe to call before the jobs exist (logs + skips)."""
+    try:
+        if incremental_seconds is not None:
+            scheduler.reschedule_job(CRM_INCREMENTAL_JOB_ID, trigger="interval",
+                                     seconds=int(incremental_seconds))
+        if global_minutes is not None:
+            scheduler.reschedule_job(CRM_GLOBAL_JOB_ID, trigger="interval",
+                                     minutes=int(global_minutes))
+    except Exception as e:  # noqa: BLE001 - job may not be registered yet
+        logger.warning(f"reschedule_crm_sweeps skipped: {e}")
+
+
 async def crawl_marketing_clubs():
     """Detail the next slice of the marketing club directory frontier. Off-peak,
     small nightly cap, opt-in (marketing_crawl_enabled). Resumable through the
@@ -369,11 +423,34 @@ def start_scheduler():
         id="fantasy_draft_tick",
         replace_existing=True,
     )
-    # BetterCricket CRM — the score-based Target/Contacted -> Engaged rule has
-    # no scheduled job at all: crm.check_web_signal_promotion fires directly
-    # from usage_tracker.record_event (every web/API event) and ses_events
-    # (every email open/click), so the check is fully event-driven — see
-    # crm.py's own docstrings for why no periodic sweep is needed.
+    # BetterCricket CRM — Tier 1 is event-driven (crm.check_web_signal_promotion
+    # fires from usage_tracker.record_event on every web/API event and from
+    # ses_events on every email open/click), so a threshold-cross or a new trial
+    # lands a card instantly. These two jobs are the Tier-2/Tier-3 backstops; the
+    # intervals seed from the defaults here and are reconciled to the persisted,
+    # super-admin-set values right after scheduler.start() (see the lifespan),
+    # then rescheduled live via reschedule_crm_sweeps on any edit.
+    from app.services.platform_settings import (
+        DEFAULT_CRM_INCREMENTAL_SWEEP_SECONDS, DEFAULT_CRM_GLOBAL_SWEEP_MINUTES,
+    )
+    scheduler.add_job(
+        crm_incremental_pipeline_sweep,
+        trigger="interval",
+        seconds=DEFAULT_CRM_INCREMENTAL_SWEEP_SECONDS,
+        id=CRM_INCREMENTAL_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        crm_global_engagement_sweep,
+        trigger="interval",
+        minutes=DEFAULT_CRM_GLOBAL_SWEEP_MINUTES,
+        id=CRM_GLOBAL_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # Per-module subscriptions — sweep expired trials daily so the held-modules
     # cache drops a lapsed trial for the synchronous gate too.
     scheduler.add_job(

@@ -1251,6 +1251,142 @@ async def last_activity_at_by_deal(session: AsyncSession, deals, club_by_id: dic
     return out
 
 
+# ─── Tier 2: incremental pipeline-card recompute (the ~1-min background sweep) ──
+# Re-score ONLY the clubs that currently have a deal card AND had new telemetry
+# in the last lookback window — cheap enough to run every minute. Tier 1
+# (check_web_signal_promotion) already re-scores a matched club instantly on
+# each event; this is the periodic backstop that guarantees freshness and
+# catches signals the web hook doesn't (a subscription/onboarding change), while
+# the full Club-Directory sweep (recalc_engagement, Tier 3) handles slow decay.
+
+async def _card_clubs_with_recent_activity(session: AsyncSession, card_clubs_by_id: dict, since) -> set:
+    """Of the clubs that currently hold a deal card, the subset whose telemetry
+    changed since ``since``: a page view (own org traffic, or a resolved
+    prospect/public visit via the pre-stamped resolved_marketing_club_id index),
+    a module-subscription change (trial/subscribe/cancel/pause), or an
+    onboarding-wizard update. Uses the indexed resolved_marketing_club_id column
+    the instant path already stamps (NOT the 7-subquery _RESOLVED_CID scan), so
+    it's cheap at a per-minute cadence. Email opens/clicks aren't scanned here —
+    they already fire the instant Tier-1 recompute via ses_events, and Tier 3 is
+    the backstop. Each sub-query is guarded so one failure can't abort the
+    sweep."""
+    changed: set = set()
+    if not card_clubs_by_id:
+        return changed
+    org_to_clubs: dict = {}
+    for cid, c in card_clubs_by_id.items():
+        if c is not None and c.existing_org_id:
+            org_to_clubs.setdefault(c.existing_org_id, []).append(cid)
+    org_ids = list(org_to_clubs.keys())
+    all_ids = list(card_clubs_by_id.keys())
+
+    if org_ids:
+        try:
+            for (org_id,) in (await session.execute(
+                select(OrgModuleSubscription.organisation_id).distinct()
+                .where(OrgModuleSubscription.organisation_id.in_(org_ids),
+                       OrgModuleSubscription.updated_at >= since)
+            )).all():
+                changed.update(org_to_clubs.get(org_id, ()))
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: module-subscription scan failed")
+        try:
+            for (org_id,) in (await session.execute(
+                select(OnboardingWizardState.organisation_id)
+                .where(OnboardingWizardState.organisation_id.in_(org_ids),
+                       OnboardingWizardState.updated_at >= since)
+            )).all():
+                changed.update(org_to_clubs.get(org_id, ()))
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: onboarding scan failed")
+        try:
+            for (org_id,) in (await session.execute(
+                text("SELECT DISTINCT org_id FROM usage_events "
+                     "WHERE org_id IN :orgs AND created_at >= :since")
+                .bindparams(bindparam("orgs", expanding=True), bindparam("since")),
+                {"orgs": org_ids, "since": since},
+            )).all():
+                changed.update(org_to_clubs.get(org_id, ()))
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: customer page-view scan failed")
+
+    # Resolved prospect/public page views — the indexed resolved_marketing_club_id
+    # column (stamped by the instant path for both a prospect visit AND a
+    # customer's own anonymous public traffic), so an equality on it is cheap.
+    if all_ids:
+        try:
+            for (cid,) in (await session.execute(
+                text("SELECT DISTINCT resolved_marketing_club_id FROM usage_events "
+                     "WHERE resolved_marketing_club_id IN :cids AND created_at >= :since")
+                .bindparams(bindparam("cids", expanding=True), bindparam("since")),
+                {"cids": all_ids, "since": since},
+            )).all():
+                if cid in card_clubs_by_id:
+                    changed.add(cid)
+        except Exception:  # noqa: BLE001
+            logger.exception("_card_clubs_with_recent_activity: resolved page-view scan failed")
+    return changed
+
+
+async def recalc_pipeline_cards(lookback_seconds: int = 120) -> dict:
+    """Tier 2 — the frequent incremental sweep. Re-score ONLY the clubs that (a)
+    currently hold an open deal card on the platform pipeline and (b) had new
+    telemetry in the last ``lookback_seconds``, then re-run each one's pipeline
+    membership + score-based promotion (sync_engagement_promotion, fast_web).
+    Opens its own session, commits per club, and never raises — returns a small
+    summary. Cheap by construction: the activity scan is indexed and the
+    re-score runs only on the (usually few) changed clubs. recalc_engagement
+    (Tier 3) is the full-directory backstop for slow decay / anything missed."""
+    from app.models.db import async_session_maker
+    since = datetime.now(timezone.utc) - timedelta(seconds=max(1, lookback_seconds))
+    processed = promoted = errors = 0
+    try:
+        async with async_session_maker() as session:
+            pipeline = await ensure_platform_pipeline(session)
+            club_ids = [row[0] for row in (await session.execute(
+                select(CrmDeal.marketing_club_id).distinct().where(
+                    CrmDeal.pipeline_id == pipeline.id,
+                    CrmDeal.status == "open",
+                    CrmDeal.archived_at.is_(None),
+                    CrmDeal.marketing_club_id.isnot(None),
+                )
+            )).all()]
+            if not club_ids:
+                return {"candidates": 0, "changed": 0, "processed": 0, "promoted": 0, "errors": 0}
+            card_clubs = {c.id: c for c in (await session.execute(
+                select(MarketingClub).where(MarketingClub.id.in_(club_ids))
+            )).scalars().all()}
+            changed = await _card_clubs_with_recent_activity(session, card_clubs, since)
+            # Re-fetch each club FRESH inside the loop (never touch the pre-loaded
+            # card_clubs objects here): a commit/rollback below expires every
+            # attached ORM object, so reading a stale one's attribute would fire a
+            # lazy load and raise MissingGreenlet — the same trap recalc_engagement
+            # documents. `changed` holds plain UUIDs, so it's safe to iterate.
+            for cid in changed:
+                try:
+                    club = await session.get(MarketingClub, cid)
+                    if club is None:
+                        continue
+                    org = (await session.get(
+                        Organisation, club.existing_org_id,
+                        options=[selectinload(Organisation.module_subscriptions)])
+                        if club.existing_org_id else None)
+                    deal = await sync_engagement_promotion(session, club, org, fast_web=True)
+                    if deal is not None:
+                        promoted += 1
+                    processed += 1
+                    await session.commit()
+                except Exception:  # noqa: BLE001 — one club must not abort the sweep
+                    errors += 1
+                    await session.rollback()
+                    logger.exception("recalc_pipeline_cards: re-score failed for club %s", cid)
+            return {"candidates": len(card_clubs), "changed": len(changed),
+                    "processed": processed, "promoted": promoted, "errors": errors}
+    except Exception:  # noqa: BLE001
+        logger.exception("recalc_pipeline_cards failed")
+        return {"error": "failed", "processed": processed, "promoted": promoted, "errors": errors}
+
+
 async def club_stats_by_club(session: AsyncSession, club_by_id: dict) -> dict:
     """marketing_club_id -> onboarded-club facts for the Kanban card's state
     line (a subscriber/trialing club only): seasons/grades/players counts,

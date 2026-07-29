@@ -3872,6 +3872,19 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_run_stripe_subscription_sweep())
 
     start_scheduler()
+    # Apply the super-admin-set CRM sweep cadences (Tier 2 / Tier 3) to the
+    # just-started scheduler — the jobs were registered with the defaults, this
+    # reconciles them to the persisted values so a restart keeps a custom cadence.
+    try:
+        from app.jobs.scheduler import reschedule_crm_sweeps
+        from app.services import platform_settings as _ps
+        from app.models.db import async_session_maker
+        async with async_session_maker() as _s:
+            _inc = await _ps.get_crm_incremental_sweep_seconds(_s)
+            _glob = await _ps.get_crm_global_sweep_minutes(_s)
+        reschedule_crm_sweeps(incremental_seconds=_inc, global_minutes=_glob)
+    except Exception:
+        logger.exception("could not apply persisted CRM sweep intervals")
     logger.info("BetterStats API started")
     yield
     stop_scheduler()

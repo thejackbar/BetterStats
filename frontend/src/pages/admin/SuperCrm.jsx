@@ -713,11 +713,49 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
   )
 }
 
-// Landing page for the pipeline's settings — one place to reach both
-// Sales Automation (the automation-rules page, a full navigation since it's
-// its own route) and Manage Stages (a modal, opened right from here).
+// Landing page for the pipeline's settings — Sales Automation (its own route),
+// Manage Stages (a modal opened right from here), and the auto-recompute
+// cadence (how often the pipeline re-scores itself in the background).
 function SettingsModal({ open, onClose, onManageStages }) {
+  const toast = useToast()
+  const [cadence, setCadence] = useState(null)
+  const [incMin, setIncMin] = useState('1')
+  const [incSec, setIncSec] = useState('0')
+  const [globMin, setGlobMin] = useState('60')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    api.superCrmGetSettings().then(s => {
+      if (!alive) return
+      setCadence(s)
+      const total = s.incremental_sweep_seconds ?? 60
+      setIncMin(String(Math.floor(total / 60)))
+      setIncSec(String(total % 60))
+      setGlobMin(String(s.global_sweep_minutes ?? 60))
+    }).catch(() => { if (alive) setCadence({ error: true }) })
+    return () => { alive = false }
+  }, [open])
+
+  const saveCadence = async () => {
+    const incremental = Math.max(0, Math.floor(Number(incMin) || 0)) * 60 + Math.max(0, Math.floor(Number(incSec) || 0))
+    const global = Math.max(0, Math.floor(Number(globMin) || 0))
+    setSaving(true)
+    try {
+      const r = await api.superCrmUpdateSettings({ incremental_sweep_seconds: incremental, global_sweep_minutes: global })
+      setIncMin(String(Math.floor(r.incremental_sweep_seconds / 60)))
+      setIncSec(String(r.incremental_sweep_seconds % 60))
+      setGlobMin(String(r.global_sweep_minutes))
+      toast.success('Auto-recompute cadence saved.')
+    } catch (e) {
+      toast.error(e.message || 'Could not save the cadence')
+    } finally { setSaving(false) }
+  }
+
   if (!open) return null
+  const incB = cadence?.bounds?.incremental_seconds
+  const globB = cadence?.bounds?.global_minutes
   return (
     <Modal open={open} onClose={onClose} title="Pipeline settings">
       <div className="space-y-2">
@@ -736,6 +774,50 @@ function SettingsModal({ open, onClose, onManageStages }) {
             Add, rename, reorder, hide or delete the pipeline's stages.
           </div>
         </button>
+
+        <div className="pb-card px-3 py-2.5">
+          <div className="font-medium text-[13px]">Auto-recompute cadence</div>
+          <div className="text-[11.5px] text-pb-faint mt-0.5 mb-2.5">
+            How often the pipeline re-scores itself in the background. A new trial, or a club
+            crossing the threshold, still creates its card instantly — these only control the
+            periodic sweeps that keep existing cards' scores fresh.
+          </div>
+          {cadence?.error ? (
+            <div className="text-[11.5px] text-pb-red">Couldn't load the current cadence.</div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <div className="text-[12px] font-medium">Pipeline cards (frequent)</div>
+                <div className="text-[11px] text-pb-faint mb-1">
+                  Re-scores only cards whose club had new activity since the last run.
+                  {incB ? ` Between ${incB.min}s and ${incB.max}s.` : ''}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <NumberInput min={0} value={incMin} onChange={e => setIncMin(e.target.value)} style={{ width: '58px' }} />
+                  <span className="text-[11px] text-pb-faint">min</span>
+                  <NumberInput min={0} max={59} value={incSec} onChange={e => setIncSec(e.target.value)} style={{ width: '58px' }} />
+                  <span className="text-[11px] text-pb-faint">sec</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-[12px] font-medium">Full directory sweep (periodic)</div>
+                <div className="text-[11px] text-pb-faint mb-1">
+                  Recomputes every Club Directory club, to catch anything the frequent sweep missed.
+                  {globB ? ` Between ${globB.min} and ${globB.max} min.` : ''}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <NumberInput min={0} value={globMin} onChange={e => setGlobMin(e.target.value)} style={{ width: '66px' }} />
+                  <span className="text-[11px] text-pb-faint">min</span>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Btn variant="primary" sm onClick={saveCadence} disabled={saving || !cadence}>
+                  {saving ? 'Saving…' : 'Save cadence'}
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   )

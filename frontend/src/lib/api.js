@@ -795,6 +795,8 @@ export const api = {
   },
   superCrmRecalcEngagement: () => request('/club-admin/super/crm/recalc-engagement', { method: 'POST' }),
   superCrmRecalcEngagementStatus: () => request('/club-admin/super/crm/recalc-engagement/status'),
+  superCrmGetSettings: () => request('/club-admin/super/crm/settings'),
+  superCrmUpdateSettings: (data) => request('/club-admin/super/crm/settings', { method: 'PATCH', body: JSON.stringify(data) }),
   superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
   superCrmGetDeal: (id) => request(`/club-admin/super/crm/deals/${id}`),
   superCrmUpdateDeal: (id, data) => request(`/club-admin/super/crm/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

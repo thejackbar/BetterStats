@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 # The whitelist of keys the General Settings UI can set, with validators. Add to this
 # as new settings are introduced.
-_INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days"}
+_INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days",
+             "crm_incremental_sweep_seconds", "crm_global_sweep_minutes"}
 
 # Boolean feature flags, off by default until a super admin turns them on from
 # General Settings. Each new self-serve-trial-onboarding surface (see
@@ -47,6 +48,21 @@ _BOOL_KEYS = {
 # commercial/marketing parameter a super admin tunes from General Settings, not
 # server configuration.
 DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 60
+
+# CRM Sales Pipeline auto-recompute cadences, super-admin tunable from the
+# pipeline's Settings modal (not General Settings). Tier 2: the frequent
+# incremental sweep that re-scores only the clubs that already have a deal card
+# AND had new telemetry since the last run (cheap — reuses the fast_web indexed
+# path). Tier 3: the periodic full sweep over every Club Directory club (the
+# recalc_engagement logic), which catches slow time-decay drift and anything the
+# incremental job missed. Clamped in the getters so a bad/extreme value can't
+# hammer the DB or silently disable a sweep.
+DEFAULT_CRM_INCREMENTAL_SWEEP_SECONDS = 60
+CRM_INCREMENTAL_SWEEP_MIN_SECONDS = 15
+CRM_INCREMENTAL_SWEEP_MAX_SECONDS = 3600
+DEFAULT_CRM_GLOBAL_SWEEP_MINUTES = 60
+CRM_GLOBAL_SWEEP_MIN_MINUTES = 5
+CRM_GLOBAL_SWEEP_MAX_MINUTES = 1440
 
 # ─── SES send-rate settings (super-admin managed, migration 120 blob) ─────────
 # Two live values a super admin controls from the BetterComms limits page:
@@ -178,6 +194,29 @@ async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
         return days if days > 0 else DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
     except (TypeError, ValueError):
         return DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
+
+
+async def get_crm_incremental_sweep_seconds(db: AsyncSession) -> int:
+    """Tier 2 cadence: how often (seconds) the incremental pipeline-card sweep
+    runs, clamped to [MIN, MAX], falling back to the default when unset/invalid."""
+    settings = await get_settings(db)
+    try:
+        v = int(settings.get("crm_incremental_sweep_seconds"))
+    except (TypeError, ValueError):
+        return DEFAULT_CRM_INCREMENTAL_SWEEP_SECONDS
+    return max(CRM_INCREMENTAL_SWEEP_MIN_SECONDS, min(CRM_INCREMENTAL_SWEEP_MAX_SECONDS, v))
+
+
+async def get_crm_global_sweep_minutes(db: AsyncSession) -> int:
+    """Tier 3 cadence: how often (minutes) the full Club-Directory engagement
+    sweep runs, clamped to [MIN, MAX], falling back to the default when
+    unset/invalid."""
+    settings = await get_settings(db)
+    try:
+        v = int(settings.get("crm_global_sweep_minutes"))
+    except (TypeError, ValueError):
+        return DEFAULT_CRM_GLOBAL_SWEEP_MINUTES
+    return max(CRM_GLOBAL_SWEEP_MIN_MINUTES, min(CRM_GLOBAL_SWEEP_MAX_MINUTES, v))
 
 
 async def get_active_meta_campaign_id(db: AsyncSession) -> str:
