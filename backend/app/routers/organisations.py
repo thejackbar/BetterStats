@@ -596,7 +596,7 @@ async def trigger_sync(org_id: str, background_tasks: BackgroundTasks, _user: Us
     if org_id in _org_sync_running:
         return {"status": "already_running", "org_id": org_id}
     org_uuid = uuid.UUID(org_id)
-    run_id = await start_sync_run(org_uuid, "org_full")
+    run_id = await start_sync_run(org_uuid, "org_full", triggered_by_user_id=_user.id)
     _org_sync_running.add(org_id)
     background_tasks.add_task(_sync_safe, org_id, run_id, "org_full")
     return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id)}

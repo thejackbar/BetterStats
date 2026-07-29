@@ -247,6 +247,7 @@ async def start_sync_run(
     org_id: uuid.UUID,
     kind: str,
     player_id: Optional[uuid.UUID] = None,
+    triggered_by_user_id: Optional[uuid.UUID] = None,
 ) -> uuid.UUID:
     run_id = uuid.uuid4()
     async with async_session_maker() as session:
@@ -257,6 +258,7 @@ async def start_sync_run(
             kind=kind,
             status="running",
             stats={},
+            triggered_by_user_id=triggered_by_user_id,
         ))
         await session.commit()
     return run_id

@@ -1115,6 +1115,9 @@ export const api = {
   },
   // Realtime snapshot: active visitors, per-minute, live feed, top pages, sources, UTMs.
   adminUsageLive: () => request('/club-admin/usage/live'),
+  // Snapshot of running background work — syncs, IQ prewarms, in-flight
+  // registrations, active Setup Wizard sessions (Current Background Processes).
+  adminUsageBackgroundProcesses: () => request('/club-admin/usage/background-processes'),
   // City-level visitor points for the Usage page map (city-centroid precision only).
   adminUsageGeo: ({ hours = 24 } = {}) => request(`/club-admin/usage/geo?hours=${hours}`),
   // Session duration + per-page dwell time (derived from the page_exit beacon).

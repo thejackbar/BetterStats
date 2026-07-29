@@ -64,6 +64,51 @@ async def _run_yearbook_stub_sweep():
             logger.error(f"Yearbook stub sweep failed: {e}")
 
 
+async def _resume_interrupted_syncs(rows: list[dict]) -> None:
+    """Restart org syncs that were cut off mid-run by the previous shutdown.
+
+    Each row was captured (and its old run finalized as 'error') during the
+    lifespan DDL phase. We start a BRAND-NEW incremental ``org_full`` run per
+    org — never re-wiping. An interrupted Full Rebuild resumes as a plain
+    incremental sync because its wipe phase already committed before the crash;
+    sync's per-game/per-season writes are idempotent on row-existence, so a
+    fresh incremental sync picks up exactly where the crash left off (the same
+    reasoning as pause→continue, see sync.pause_sync_run's docstring). The
+    original trigger's user is carried forward for attribution. Never raises —
+    one org failing to resume must not stop the rest, and a resume failure just
+    means the next weekly sync (or a manual click) catches it up anyway."""
+    from app.services.sync import start_sync_run, update_sync_run
+    from app.routers.organisations import _org_sync_running, _sync_safe
+    from app.routers.club_admin import _background_tasks, _hard_refresh_running
+    import uuid as _uuid
+    for row in rows:
+        org_id = row["org_id"]
+        try:
+            if org_id in _org_sync_running or org_id in _hard_refresh_running:
+                continue
+            user_id = _uuid.UUID(row["user_id"]) if row.get("user_id") else None
+            new_run_id = await start_sync_run(
+                _uuid.UUID(org_id), "org_full", triggered_by_user_id=user_id,
+            )
+            # Tag the fresh run so the Background Processes panel can show it was
+            # auto-resumed rather than manually triggered.
+            await update_sync_run(new_run_id, {
+                "resumed_after_restart": True,
+                "resumed_from_run_id": row["old_run_id"],
+                "resumed_from_kind": row["kind"],
+            })
+            _org_sync_running.add(org_id)
+            task = asyncio.create_task(_sync_safe(org_id, new_run_id, "org_full"))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+            logger.info(
+                f"Self-heal: resumed interrupted {row['kind']} for org {org_id} "
+                f"as run {new_run_id}"
+            )
+        except Exception:
+            logger.exception(f"Self-heal: failed to resume interrupted sync for org {org_id}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from sqlalchemy import text
@@ -1321,8 +1366,35 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(
                 f"CREATE INDEX IF NOT EXISTS {_ix_name} ON {_ix_table} ({_ix_col})"
             ))
-        # Mark any sync_runs left in 'running' state by a previous crash/restart
-        # as errored so the dashboard doesn't show a phantom in-flight sync.
+        # Who started each sync (migration 186) — powers the "Started by" column
+        # on the Super Admin Usage page's Current Background Processes panel, and
+        # lets a self-healed resume carry the original trigger's user forward.
+        await conn.execute(text(
+            "ALTER TABLE sync_runs ADD COLUMN IF NOT EXISTS triggered_by_user_id UUID"
+        ))
+        # Self-healing for interrupted syncs. A sync_run still 'running' at boot
+        # was cut off by the previous shutdown/restart (nothing is live yet in
+        # this fresh process, so any 'running' row is definitively stale).
+        # Capture the resumable org-level ones so a background step near the end
+        # of startup can restart them (see _resume_interrupted_syncs), then
+        # finalize every stale 'running' row as errored so the dashboard shows
+        # no phantom in-flight sync — a resumed sync gets a brand-new run row,
+        # it never reuses this errored one.
+        _interrupted_rows = (await conn.execute(text("""
+            SELECT id, org_id, kind, triggered_by_user_id
+            FROM sync_runs
+            WHERE status = 'running'
+              AND kind IN ('org_full', 'org_hard_refresh')
+        """))).mappings().all()
+        interrupted_syncs_to_resume = [
+            {
+                "old_run_id": str(r["id"]),
+                "org_id": str(r["org_id"]),
+                "kind": r["kind"],
+                "user_id": str(r["triggered_by_user_id"]) if r["triggered_by_user_id"] else None,
+            }
+            for r in _interrupted_rows
+        ]
         await conn.execute(text("""
             UPDATE sync_runs
             SET status = 'error',
@@ -3927,6 +3999,21 @@ async def lifespan(app: FastAPI):
     # stuck attempt doesn't hold a DB session open forever, and on failure
     # or timeout the repair simply retries next boot (idempotent either way).
     asyncio.create_task(_run_stripe_subscription_sweep())
+
+    # Self-heal: restart any org sync interrupted by the previous shutdown.
+    # Fired as a background task, NOT awaited — it makes outbound CA-proxy
+    # calls and boot must never wait on the network (same reasoning as the
+    # Stripe sweep above). The interrupted runs were already finalized as
+    # 'error' during the DDL phase; this starts a FRESH incremental sync that
+    # idempotently picks up where the crash left off. `interrupted_syncs_to_resume`
+    # is defined in the first DDL block above; guard in case that block changes.
+    try:
+        _to_resume = interrupted_syncs_to_resume
+    except NameError:
+        _to_resume = []
+    if _to_resume:
+        logger.info(f"Self-heal: {len(_to_resume)} interrupted sync(s) to resume after restart")
+        asyncio.create_task(_resume_interrupted_syncs(_to_resume))
 
     start_scheduler()
     # Apply the super-admin-set CRM sweep cadences (Tier 2 / Tier 3) to the

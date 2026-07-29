@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import uuid as _uuid
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import unquote_plus
 
@@ -1564,6 +1565,245 @@ async def visitor_journey(
             }
             for sess in sessions
         ],
+    }
+
+
+# ─── Current background processes ────────────────────────────────────────────
+
+# How a raw sync_runs.kind maps to a human label on the panel.
+_SYNC_KIND_LABEL = {
+    "org_full": "Sync (Sync Now)",
+    "org_hard_refresh": "Full Rebuild",
+    "player_deep": "Player deep sync",
+}
+
+# Self-serve registration funnel step → human label + 1-based position, so the
+# panel can show "which step they're at" (see public_self_serve.FUNNEL_STEPS and
+# services/meta_ads.REGISTRATION_STEP_ORDER — kept in the same order here).
+_REG_STEP_ORDER = [
+    ("club_prepared", "Club selected"),
+    ("admin_details_completed", "Admin details completed"),
+    ("email_code_sent", "Verification code sent"),
+    ("email_verified", "Email verified"),
+    ("acknowledgements_accepted", "Terms & privacy accepted"),
+    ("submit_attempted", "Submit attempted"),
+    ("registration_completed", "Registration completed"),
+]
+_REG_STEP_LABEL = {k: (i + 1, lbl) for i, (k, lbl) in enumerate(_REG_STEP_ORDER)}
+_REG_STEP_TOTAL = len(_REG_STEP_ORDER)
+
+
+@router.get("/club-admin/usage/background-processes")
+async def background_processes(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """What long-running work is happening on the platform right now — the
+    Super Admin Usage page's Current Background Processes panel. Four groups:
+
+    * ``syncs`` — every ``sync_runs`` row still ``running`` or ``paused``
+      (Full Rebuild / Sync Now / player deep sync), with the club + who started
+      it, how long it's been going, its live phase and % complete (read from the
+      run's ``stats`` progress keys), and whether it was auto-resumed after a
+      restart.
+    * ``iq_prewarm`` — in-process BetterIQ opponent-dossier prewarms.
+    * ``registrations`` — self-serve trial signups mid-flow (public wizard
+      beacons that haven't reached ``registration_completed``), showing which
+      step the prospect is at.
+    * ``onboarding`` — clubs whose admins are actively working the Setup Wizard
+      (progress touched recently), with the most recent acting user.
+
+    All read-only and cheap; the panel polls this every few seconds.
+    """
+    now = datetime.now(timezone.utc)
+
+    def _secs(ts) -> Optional[int]:
+        if not ts:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return max(0, int((now - ts).total_seconds()))
+
+    # ── Syncs (running or paused) ────────────────────────────────────────────
+    sync_rows = (await db.execute(text("""
+        SELECT sr.id, sr.org_id, sr.kind, sr.status, sr.started_at, sr.updated_at,
+               sr.stats, sr.player_id,
+               o.name AS club_name,
+               u.email AS user_email, u.display_name AS user_display_name,
+               p.name AS player_name, p.display_name_override AS player_display_name
+        FROM sync_runs sr
+        LEFT JOIN organisations o ON o.id = sr.org_id
+        LEFT JOIN users u ON u.id = sr.triggered_by_user_id
+        LEFT JOIN players p ON p.id = sr.player_id
+        WHERE sr.status IN ('running', 'paused')
+        ORDER BY sr.started_at DESC
+    """))).mappings().all()
+
+    syncs = []
+    for r in sync_rows:
+        st = r["stats"] or {}
+        pct = st.get("progress_pct")
+        syncs.append({
+            "run_id": str(r["id"]),
+            "kind": r["kind"],
+            "kind_label": _SYNC_KIND_LABEL.get(r["kind"], r["kind"]),
+            "status": r["status"],
+            "club_id": str(r["org_id"]) if r["org_id"] else None,
+            "club_name": r["club_name"],
+            "player_name": r["player_display_name"] or r["player_name"],
+            "started_by": (r["user_display_name"] or r["user_email"]) if r["user_email"] else None,
+            "started_by_email": r["user_email"],
+            "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "running_seconds": _secs(r["started_at"]),
+            "phase": st.get("progress_phase"),
+            "pct": int(pct) if isinstance(pct, (int, float)) else None,
+            "done": st.get("progress_done"),
+            "total": st.get("progress_total"),
+            "resumed_after_restart": bool(st.get("resumed_after_restart")),
+        })
+
+    # ── BetterIQ opponent-dossier prewarms (in-process) ──────────────────────
+    from app.services import iq_prewarm
+    prewarms = []
+    pw_snap = iq_prewarm.snapshot_all()
+    if pw_snap:
+        pw_ids = [s["org_id"] for s in pw_snap]
+        name_rows = (await db.execute(text("""
+            SELECT id::text AS id, name FROM organisations WHERE id = ANY(CAST(:ids AS uuid[]))
+        """), {"ids": pw_ids})).mappings().all()
+        names = {row["id"]: row["name"] for row in name_rows}
+        for s in pw_snap:
+            started = s.get("started_at")
+            started_dt = None
+            if started:
+                try:
+                    started_dt = datetime.fromisoformat(started)
+                except (ValueError, TypeError):
+                    started_dt = None
+            prewarms.append({
+                "org_id": s["org_id"],
+                "club_name": names.get(s["org_id"]),
+                "done": s.get("done"),
+                "total": s.get("total"),
+                "current": s.get("current"),
+                "started_at": started,
+                "running_seconds": _secs(started_dt),
+            })
+
+    # ── Self-serve registrations mid-flow (public wizard beacons) ────────────
+    # A visitor is "in progress" if they've beaconed a self_serve_step in the
+    # last 45 minutes but never reached registration_completed. Group per
+    # visitor, keep the furthest step reached (highest step index).
+    reg_rows = (await db.execute(text("""
+        WITH steps AS (
+            SELECT visitor_id, route AS step, created_at, metadata
+            FROM usage_events
+            WHERE event_type = 'self_serve_step'
+              AND visitor_id IS NOT NULL
+              AND created_at >= NOW() - INTERVAL '45 minutes'
+        ),
+        done AS (
+            SELECT DISTINCT visitor_id FROM steps WHERE step = 'registration_completed'
+        )
+        SELECT s.visitor_id,
+               MIN(s.created_at) AS first_at,
+               MAX(s.created_at) AS last_at,
+               (ARRAY_AGG(s.metadata ORDER BY s.created_at DESC)
+                 FILTER (WHERE jsonb_exists(s.metadata, 'club_name')))[1] AS club_meta,
+               ARRAY_AGG(DISTINCT s.step) AS steps
+        FROM steps s
+        WHERE s.visitor_id NOT IN (SELECT visitor_id FROM done)
+        GROUP BY s.visitor_id
+        ORDER BY MAX(s.created_at) DESC
+        LIMIT 50
+    """))).mappings().all()
+
+    registrations = []
+    for r in reg_rows:
+        reached = [s for s in (r["steps"] or []) if s in _REG_STEP_LABEL]
+        if not reached:
+            continue
+        # Furthest step = the one with the highest order index.
+        best_key = max(reached, key=lambda s: _REG_STEP_LABEL[s][0])
+        idx, label = _REG_STEP_LABEL[best_key]
+        club_meta = r["club_meta"] or {}
+        registrations.append({
+            "visitor_id": r["visitor_id"],
+            "club_name": club_meta.get("club_name"),
+            "step_key": best_key,
+            "step_label": label,
+            "step_index": idx,
+            "step_total": _REG_STEP_TOTAL,
+            "started_at": r["first_at"].isoformat() if r["first_at"] else None,
+            "last_at": r["last_at"].isoformat() if r["last_at"] else None,
+            "running_seconds": _secs(r["first_at"]),
+            "idle_seconds": _secs(r["last_at"]),
+        })
+
+    # ── Clubs actively working the Setup Wizard ──────────────────────────────
+    # Progress state touched in the last 15 minutes and not fully addressed.
+    # Onboarding state is org-scoped, but the club has a known owner: its
+    # primary admin (the person who registered it — club_memberships.is_primary_admin).
+    # That's who we identify as running the onboarding. The most recent
+    # setup_wizard_* audit entry is kept as a fallback for the rare club whose
+    # primary admin flag isn't set (or where a different admin is doing the work).
+    onboard_rows = (await db.execute(text("""
+        SELECT ows.organisation_id AS org_id, ows.updated_at,
+               ows.completed_steps, ows.skipped_steps, ows.na_steps,
+               o.name AS club_name,
+               pa.email AS admin_email, pa.display_name AS admin_display_name,
+               au.email AS actor_email, au.display_name AS actor_display_name
+        FROM onboarding_wizard_state ows
+        JOIN organisations o ON o.id = ows.organisation_id
+        LEFT JOIN LATERAL (
+            SELECT u.email, u.display_name
+            FROM club_memberships cm
+            JOIN users u ON u.id = cm.user_id
+            WHERE cm.club_id = ows.organisation_id AND cm.is_primary_admin IS TRUE
+            ORDER BY cm.created_at ASC
+            LIMIT 1
+        ) pa ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT user_id
+            FROM audit_logs
+            WHERE org_id = ows.organisation_id
+              AND action LIKE 'setup_wizard_%'
+              AND created_at >= NOW() - INTERVAL '30 minutes'
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) al ON TRUE
+        LEFT JOIN users au ON au.id = al.user_id
+        WHERE ows.updated_at >= NOW() - INTERVAL '15 minutes'
+        ORDER BY ows.updated_at DESC
+        LIMIT 50
+    """))).mappings().all()
+
+    onboarding = []
+    for r in onboard_rows:
+        done = len(r["completed_steps"] or [])
+        addressed = done + len(r["skipped_steps"] or []) + len(r["na_steps"] or [])
+        primary_admin = (r["admin_display_name"] or r["admin_email"]) if r["admin_email"] else None
+        actor = (r["actor_display_name"] or r["actor_email"]) if r["actor_email"] else None
+        onboarding.append({
+            "org_id": str(r["org_id"]),
+            "club_name": r["club_name"],
+            "done": done,
+            "addressed": addressed,
+            "last_activity_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "idle_seconds": _secs(r["updated_at"]),
+            # Who owns the onboarding: the club's primary admin, else whoever
+            # last touched a wizard step.
+            "actor": primary_admin or actor,
+            "primary_admin": primary_admin,
+        })
+
+    return {
+        "generated_at": now.isoformat(),
+        "syncs": syncs,
+        "iq_prewarm": prewarms,
+        "registrations": registrations,
+        "onboarding": onboarding,
     }
 
 

@@ -266,6 +266,222 @@ function SourceTag({ source }) {
   )
 }
 
+// ─── Current background processes (running jobs, registrations, onboarding) ──
+
+// seconds → short human duration, reusing the ms-based fmtDuration.
+function fmtSecs(s) {
+  return (s == null) ? '—' : fmtDuration(s * 1000)
+}
+
+// A slim progress bar for a sync's % complete. Uses the club-accent gradient.
+function ProgressBar({ pct }) {
+  const p = Math.max(0, Math.min(100, pct ?? 0))
+  return (
+    <div className="h-1.5 rounded-full bg-pb-hover overflow-hidden w-full">
+      <div className="h-full rounded-full transition-all"
+        style={{ width: `${p}%`, background: 'var(--pb-gradient, var(--pb-accent))' }} />
+    </div>
+  )
+}
+
+function BgRow({ children }) {
+  return <div className="pb-hairline-t py-2.5 first:border-t-0 first:pt-0">{children}</div>
+}
+
+function BackgroundProcessesSection() {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [live, setLive] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState(null)
+  const [, tick] = useState(0)
+  const [open, toggle] = useCollapse('bgproc', true)
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api.adminUsageBackgroundProcesses()
+      setData(d); setError(null); setUpdatedAt(Date.now())
+    } catch (e) {
+      setError(e?.message || 'Failed to load')
+    }
+  }, [])
+
+  useEffect(() => { if (open) load() }, [open, load])
+  useEffect(() => {
+    if (!live || !open) return
+    const id = setInterval(load, 5000)
+    return () => clearInterval(id)
+  }, [live, open, load])
+  // 1s heartbeat so the elapsed-time counters tick up between polls.
+  useEffect(() => {
+    const id = setInterval(() => tick(n => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const syncs = (data?.syncs || []).filter(Boolean)
+  const prewarms = (data?.iq_prewarm || []).filter(Boolean)
+  const registrations = (data?.registrations || []).filter(Boolean)
+  const onboarding = (data?.onboarding || []).filter(Boolean)
+  const totalCount = syncs.length + prewarms.length + registrations.length + onboarding.length
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={toggle} className="flex items-center gap-2 min-w-0 text-left">
+          <span className="font-mono text-pb-faint text-[11px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
+          <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">Current background processes</h2>
+          <Dot on={live && open} title="live" />
+        </button>
+        {open && data && (
+          <span className="font-mono text-[10px] text-pb-faint">
+            {totalCount === 0 ? 'idle' : `${totalCount} running`}
+          </span>
+        )}
+        <span className="font-mono text-[9px] text-pb-faintest hidden sm:inline">
+          {open && updatedAt ? `updated ${fmtAgo(new Date(updatedAt).toISOString())}` : ''}
+        </span>
+        {open && (
+          <span className="ml-auto flex items-center gap-2">
+            <button onClick={() => setLive(l => !l)}
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+              {live ? 'Pause' : 'Resume'}
+            </button>
+            <button onClick={load}
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+              Refresh
+            </button>
+          </span>
+        )}
+      </div>
+
+      {open && (<>
+        {error && (
+          <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+        )}
+        {data && totalCount === 0 && !error && (
+          <div className="font-mono text-[11px] text-pb-faint bg-pb-panel border pb-hairline rounded px-3 py-4 text-center">
+            Nothing running right now — no active syncs, rebuilds, prewarms, registrations or onboarding.
+          </div>
+        )}
+
+        <div className="grid lg:grid-cols-2 gap-5">
+          {/* Data syncs & rebuilds */}
+          {syncs.length > 0 && (
+            <div className="bg-pb-panel border pb-hairline rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">Data syncs &amp; rebuilds</h3>
+                <span className="font-mono text-[10px] text-pb-faint">{syncs.length}</span>
+              </div>
+              {syncs.map(s => (
+                <BgRow key={s.run_id}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-display font-bold text-[12px] text-pb-text">{s.kind_label}</span>
+                    {s.status === 'paused'
+                      ? <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded border pb-hairline text-pb-amber">paused</span>
+                      : <Dot on color="#8b5cf6" title="running" />}
+                    {s.resumed_after_restart && (
+                      <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded border pb-hairline text-pb-accent" title="Auto-restarted after a server restart">auto-resumed</span>
+                    )}
+                    <span className="font-mono text-[10px] text-pb-faint ml-auto">{fmtSecs(s.running_seconds)}</span>
+                  </div>
+                  <div className="font-mono text-[11px] text-pb-faint mt-0.5 truncate">
+                    {s.club_name || '—'}{s.player_name ? ` · ${s.player_name}` : ''}
+                    {s.started_by ? ` · by ${s.started_by}` : ' · system'}
+                  </div>
+                  {s.status === 'running' && (
+                    <div className="mt-1.5">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-mono text-[10px] text-pb-faint truncate">{s.phase || 'Working…'}</span>
+                        <span className="font-mono text-[10px] text-pb-text shrink-0">
+                          {s.pct != null ? `${s.pct}%` : ''}
+                          {s.done != null && s.total != null ? ` (${fmtNum(s.done)}/${fmtNum(s.total)})` : ''}
+                        </span>
+                      </div>
+                      {s.pct != null && <ProgressBar pct={s.pct} />}
+                    </div>
+                  )}
+                </BgRow>
+              ))}
+            </div>
+          )}
+
+          {/* BetterIQ opponent prewarms */}
+          {prewarms.length > 0 && (
+            <div className="bg-pb-panel border pb-hairline rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">BetterIQ prewarms</h3>
+                <span className="font-mono text-[10px] text-pb-faint">{prewarms.length}</span>
+              </div>
+              {prewarms.map(p => {
+                const pct = (p.total ? Math.round((p.done || 0) / p.total * 100) : null)
+                return (
+                  <BgRow key={p.org_id}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-bold text-[12px] text-pb-text truncate">{p.club_name || p.org_id.slice(0, 8)}</span>
+                      <Dot on color="#8b5cf6" title="building" />
+                      <span className="font-mono text-[10px] text-pb-faint ml-auto">{fmtSecs(p.running_seconds)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1 mb-1">
+                      <span className="font-mono text-[10px] text-pb-faint truncate">{p.current ? `Building ${p.current}` : 'Building dossiers…'}</span>
+                      <span className="font-mono text-[10px] text-pb-text shrink-0">{fmtNum(p.done || 0)}/{fmtNum(p.total || 0)}</span>
+                    </div>
+                    {pct != null && <ProgressBar pct={pct} />}
+                  </BgRow>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Self-serve registrations in progress */}
+          {registrations.length > 0 && (
+            <div className="bg-pb-panel border pb-hairline rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">Registrations in progress</h3>
+                <span className="font-mono text-[10px] text-pb-faint">{registrations.length}</span>
+              </div>
+              {registrations.map(r => (
+                <BgRow key={r.visitor_id}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-display font-bold text-[12px] text-pb-text truncate">{r.club_name || 'Prospect (club not yet picked)'}</span>
+                    <span className="font-mono text-[10px] text-pb-faint ml-auto">{fmtSecs(r.running_seconds)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1 mb-1">
+                    <span className="font-mono text-[10px] text-pb-faint truncate">Step {r.step_index}/{r.step_total}: {r.step_label}</span>
+                    <span className="font-mono text-[9px] text-pb-faintest shrink-0">idle {fmtSecs(r.idle_seconds)}</span>
+                  </div>
+                  <ProgressBar pct={Math.round(r.step_index / r.step_total * 100)} />
+                </BgRow>
+              ))}
+            </div>
+          )}
+
+          {/* Clubs working the Setup Wizard */}
+          {onboarding.length > 0 && (
+            <div className="bg-pb-panel border pb-hairline rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">Onboarding underway</h3>
+                <span className="font-mono text-[10px] text-pb-faint">{onboarding.length}</span>
+              </div>
+              {onboarding.map(o => (
+                <BgRow key={o.org_id}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-display font-bold text-[12px] text-pb-text truncate">{o.club_name || o.org_id.slice(0, 8)}</span>
+                    <Dot on color="#10b981" title="active" />
+                    <span className="font-mono text-[10px] text-pb-faint ml-auto">active {fmtSecs(o.idle_seconds)} ago</span>
+                  </div>
+                  <div className="font-mono text-[11px] text-pb-faint mt-0.5 truncate">
+                    Setup Wizard · {o.done} step{o.done === 1 ? '' : 's'} done
+                    {o.actor ? ` · ${o.actor}` : ''}
+                  </div>
+                </BgRow>
+              ))}
+            </div>
+          )}
+        </div>
+      </>)}
+    </div>
+  )
+}
+
 // ─── Live / realtime section (auto-refreshing, anonymous public traffic) ─────
 
 function LiveSection() {
@@ -954,6 +1170,9 @@ export default function AdminUsage() {
           Who's on the site right now, and what people are doing across BetterStats.
           IPs are stored as a truncated hash, not the raw address.
         </p>
+
+        {/* Current background processes — running jobs, registrations, onboarding */}
+        <BackgroundProcessesSection />
 
         {/* Live realtime section (anonymous public traffic, auto-refreshing) */}
         <LiveSection />
