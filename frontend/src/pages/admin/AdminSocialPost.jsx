@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
-import BetterSocialsLayout from '../../components/admin/BetterSocialsLayout'
+import { useLocation, useNavigate } from 'react-router-dom'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import Dropdown from '../../components/Dropdown'
+import ModuleLockup from '../../components/ModuleLockup'
+import { moduleBrand } from '../../lib/moduleBrand'
+import { Icon } from './betterselect/ui'
+import PostEditorShell from '../../components/admin/socialpost/PostEditorShell'
+import SelectionInspector from '../../components/admin/socialpost/SelectionInspector'
+import MediaLibraryPanel from '../../components/admin/socialpost/MediaLibraryPanel'
+import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
+import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
+import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
+import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
+import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -21,7 +31,6 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import BlankCanvasEditor from '../../components/admin/BlankCanvasEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
@@ -615,6 +624,18 @@ const DEFAULT_STYLE_JSON = JSON.stringify({
 
 export default function AdminSocialPost() {
   const location = useLocation()
+  const navigate = useNavigate()
+  // Which rail tool's panel is showing. 'content' is the default (the per-type
+  // fields most posts start with).
+  const [tool, setTool] = useState('content')
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false)
+  const typeBtnRef = useRef(null)
+  // Hidden file input the inspector's "Replace" drives; remembers which image
+  // block to fill.
+  const blankImgInputRef = useRef(null)
+  const pendingImgItem = useRef(null)
+  // Club media library (persisted via the social-media API).
+  const [mediaAssets, setMediaAssets] = useState([])
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
   const [adminSponsors, setAdminSponsors] = useState([])
@@ -912,6 +933,9 @@ export default function AdminSocialPost() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
+
+  // Club media library — reusable uploads shared across posts and admins.
+  useEffect(() => { api.listSocialMedia().then((a) => setMediaAssets(a || [])).catch(() => {}) }, [])
 
   // Team-sheet handoff from BetterSelect selection. Pre-populates the lineup
   // post from a saved XI once the player list has loaded. Runs once.
@@ -1312,7 +1336,10 @@ export default function AdminSocialPost() {
   // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
   const isBlankTab = tmpl.kind === 'blank'
   const showBlankTools = isBlankTab || customEdit
-  const layer = customEdit && !isBlankTab ? overlay : canvas
+  // The layer the rail panels + inspector edit: the standalone canvas on the
+  // Blank tab, else the overlay that floats on top of a real template. (Adding
+  // a block to a real template turns Custom Edit on so the overlay shows.)
+  const layer = isBlankTab ? canvas : overlay
 
   // Light-surface event layouts (Ticket, Gazette, Sticker, Swiss, Polaroid) want
   // a paper/ink pair rather than the dark-mode palette; eventPaletteFor is a
@@ -1564,11 +1591,9 @@ export default function AdminSocialPost() {
   }
 
   if (loading) return (
-    <BetterSocialsLayout>
-      <div className="flex items-center justify-center h-64">
-        <span className="font-mono text-[11px] text-pb-faint animate-pulse">LOADING...</span>
-      </div>
-    </BetterSocialsLayout>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-pb-bg">
+      <span className="font-mono text-[11px] text-pb-faint animate-pulse">LOADING...</span>
+    </div>
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
@@ -1581,14 +1606,165 @@ export default function AdminSocialPost() {
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
 
-  return (
-    <BetterSocialsLayout>
-      <SocialBackgroundDefs />
-      <div className="max-w-full">
-        <div className="flex gap-5 items-start">
+  // ─── Editor shell scaffolding ────────────────────────────────────────────
+  // Add a freeform block to the layer being edited: the standalone canvas on the
+  // Blank tab, else the overlay on top of a real template (turning on Custom
+  // Edit so it shows).
+  const addBlock = (type, opts = {}) => {
+    if (!isBlankTab && !customEdit) setCustomEdit(true)
+    const target = isBlankTab ? canvas : overlay
+    return target.add(type, opts)
+  }
 
-          {/* ─── LEFT: controls ────────────────────────────────────────────── */}
-          <div className="w-full xl:w-[500px] 2xl:w-[540px] shrink-0 flex flex-col gap-4 pb-20">
+  // Media library handlers (optimistic upload, then swap in the stored URL).
+  const uploadMedia = async (files) => {
+    for (const f of files) {
+      if (!f) continue
+      const tmpId = `tmp_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+      const tmpUrl = URL.createObjectURL(f)
+      setMediaAssets((a) => [{ id: tmpId, name: f.name, url: tmpUrl, _tmp: true }, ...a])
+      try {
+        const saved = await api.uploadSocialMedia(f)
+        setMediaAssets((a) => a.map((x) => (x.id === tmpId ? saved : x)))
+      } catch { setMediaAssets((a) => a.filter((x) => x.id !== tmpId)) }
+    }
+  }
+  const useMediaAsset = (asset) => {
+    const sel = layer.selIds.length === 1 ? layer.items.find((it) => it.id === layer.selIds[0]) : null
+    if (sel && sel.type === 'image') layer.update(sel.id, { src: asset.url, srcName: asset.name })
+    else addBlock('image', { src: asset.url, srcName: asset.name })
+  }
+  const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
+
+  const clubName = settings?.name || 'Club'
+  const headerLeft = (
+    <>
+      <button onClick={() => navigate('/admin')} title="Back to admin" className="w-7 h-7 grid place-items-center rounded-md text-pb-faint hover:text-pb-text transition-colors"><Icon name="back" size={16} /></button>
+      <span className="flex items-center gap-2 min-w-0">
+        {team.logo
+          ? <img src={team.logo} alt="" className="w-[26px] h-[26px] rounded object-contain shrink-0 bg-pb-surface2" />
+          : <span className="w-[26px] h-[26px] rounded grid place-items-center font-mono text-[11px] bg-pb-surface2 text-pb-dim shrink-0">{deriveShort(clubName).slice(0, 2)}</span>}
+        <span className="font-mono text-[9px] text-pb-faint uppercase truncate max-w-[110px] hidden sm:block">{clubName}</span>
+      </span>
+      <span className="w-px h-5 bg-pb-hairline" />
+      <ModuleLockup name="BetterPosts" logo={moduleBrand('socials').logo} accent="#EC4899" />
+      <span className="w-px h-5 bg-pb-hairline" />
+      <button ref={typeBtnRef} onClick={() => setTypeMenuOpen((o) => !o)}
+        className="flex items-center gap-2 px-2.5 h-8 rounded-md border pb-hairline2 bg-pb-surface2 hover:border-pb-accent transition-colors">
+        <span className="font-mono text-[8px] tracking-wide2 uppercase text-pb-faint">Post</span>
+        <span className="text-pb-text text-[12px]">{TABS.find((t) => t.key === activeTab)?.label}</span>
+        <Icon name="chevron" size={12} className="text-pb-faint rotate-90" />
+      </button>
+      <Dropdown anchorRef={typeBtnRef} open={typeMenuOpen} onClose={() => setTypeMenuOpen(false)}
+        className="bg-pb-surface border pb-hairline2 rounded-lg shadow-xl p-2">
+        <div className="grid grid-cols-2 gap-1 w-[420px]">
+          {TABS.map((t) => (
+            <button key={t.key} onClick={() => { switchTab(t.key); setTypeMenuOpen(false) }}
+              className={`text-left px-3 py-2 rounded-md text-[12px] transition-colors ${activeTab === t.key ? 'text-pb-accent bg-pb-surface2' : 'text-pb-dim hover:bg-pb-surface2'}`}>{t.label}</button>
+          ))}
+        </div>
+      </Dropdown>
+    </>
+  )
+  const headerRight = (
+    <>
+      {exportError && <span className="text-pb-red text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
+      <button onClick={handleReset} title="Reset the fields for this post type"
+        className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
+      <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
+        className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
+      <button onClick={handleExport} disabled={exporting}
+        className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : '↓ DOWNLOAD PNG'}</button>
+    </>
+  )
+
+  const panelMeta = {
+    design: `${tabTemplates.length} layout${tabTemplates.length === 1 ? '' : 's'}`,
+    content: 'this post', data: 'live', brand: 'colour · type',
+    layers: `${layer.items.length} block${layer.items.length === 1 ? '' : 's'}`,
+  }[tool] || ''
+
+  const renderCanvas = ({ availW, availH }) => {
+    const scale = Math.max(0.05, Math.min(availW / W, availH / H, 1))
+    const pw = Math.round(W * scale), ph = Math.round(H * scale)
+    return (
+      <div className="relative">
+        <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
+          <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
+            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+            {isBlankTab ? (
+              <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
+                interactive scale={scale} selectedIds={canvas.selIds}
+                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany} />
+            ) : (
+              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+            )}
+            {customEdit && !isBlankTab && (
+              <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
+                interactive scale={scale} selectedIds={overlay.selIds}
+                onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
+                style={{ position: 'absolute', inset: 0 }} />
+            )}
+          </div>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · SINGLE POST</span>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{showBlankTools ? 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL' : ''}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const inspectorNode = (
+    <SelectionInspector
+      items={layer.items} selIds={layer.selIds}
+      onUpdate={layer.update} onReorder={layer.reorder}
+      onDuplicate={layer.duplicate} onRemove={layer.remove} onAlign={layer.align}
+      palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem}
+    />
+  )
+
+  const photosPanel = (
+    <MediaLibraryPanel
+      assets={mediaAssets} onUpload={uploadMedia} onUseAsset={useMediaAsset} onAddEmptyFrame={() => addBlock('image')}
+      players={allPlayers} onAddPlayerPhoto={(pid) => addBlock('data', { kind: 'playerphoto', playerId: pid })}
+      onAddBrandLockup={() => addBlock('brand')}
+      sponsors={adminSponsors.map((s) => ({ name: s.name, url: `${BASE_URL}/images/sponsors/${s.id}/logo` }))}
+      onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
+      club={{ name: settings?.name, logo_url: team.logo }}
+    />
+  )
+
+  return (
+    <>
+      <SocialBackgroundDefs />
+      <input ref={blankImgInputRef} type="file" accept="image/png,image/webp,image/jpeg" className="sr-only"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f && pendingImgItem.current) setEditor({ key: 'blankimg', itemId: pendingImgItem.current, source: f }); e.target.value = '' }} />
+      <PostEditorShell
+        headerLeft={headerLeft}
+        headerRight={headerRight}
+        tool={tool}
+        onTool={setTool}
+        panelTitle={TOOL_TITLE[tool]}
+        panelMeta={panelMeta}
+        renderCanvas={renderCanvas}
+        inspector={inspectorNode}
+        panel={(
+          <div className="flex flex-col gap-4">
+            {tool === 'text' && <TextPanel onAdd={addBlock} />}
+            {tool === 'elements' && <ShapesPanel onAdd={addBlock} />}
+            {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
+            {tool === 'photos' && photosPanel}
+            {tool === 'layers' && (
+              <LayersPanel
+                items={layer.items} selIds={layer.selIds}
+                onSelect={layer.select} onReorder={layer.reorder}
+                onDuplicate={layer.duplicate} onRemove={layer.remove}
+                onMoveLayerBefore={layer.moveBefore} historyLog={[]}
+              />
+            )}
+            {tool === 'brand' && (<>
 
             {/* Style: palette + dark/light + font */}
             <section className="pb-card p-4">
@@ -1801,6 +1977,9 @@ export default function AdminSocialPost() {
               ))}
             </div>
 
+            </>)}
+
+            {tool === 'design' && (<>
             {/* Templates — collapsible. Built-in variants for this tab stacked
                 so they're all visible at once, plus a "Custom" group of saved
                 templates. Saving works on every tab (captures base template +
@@ -1885,6 +2064,16 @@ export default function AdminSocialPost() {
               )}
             </section>
 
+            </>)}
+
+            {tool === 'content' && (<>
+            {isBlankTab && (
+              <div className="pb-card p-4">
+                <p className="text-[11px] text-pb-dim leading-relaxed">
+                  A blank canvas — use the tools on the left (<span className="text-pb-text">Text</span>, <span className="text-pb-text">Shapes</span>, <span className="text-pb-text">Photos</span>, <span className="text-pb-text">Club data</span>) to add blocks, then drag them on the canvas. Or pick a starting layout under <span className="text-pb-text">Design</span>.
+                </p>
+              </div>
+            )}
             {/* Match Info */}
             {showMatchInfo && (
               <section className="pb-card p-4">
@@ -2680,119 +2869,10 @@ export default function AdminSocialPost() {
               </section>
             )}
 
-            {/* Blank Canvas builder — for the Blank tab, and as the Custom Edit
-                overlay on top of any real template. */}
-            {showBlankTools && (
-              <>
-                {customEdit && !isBlankTab && (
-                  <div className="pb-card p-3 flex items-center justify-between gap-2">
-                    <span className="font-mono text-[10px] text-pb-text">Custom editing <span className="text-pb-faint">{tmpl.name}</span> — add blocks on top, then save it as a template.</span>
-                    <button onClick={stopCustomEdit} className="px-2.5 py-1 rounded text-[10px] font-mono border pb-hairline text-pb-faint hover:text-pb-text shrink-0">Done</button>
-                  </div>
-                )}
-                <BlankCanvasEditor
-                  items={layer.items} selIds={layer.selIds}
-                  onSelect={layer.select} onDeselect={layer.deselect}
-                  onAdd={layer.add} onUpdate={layer.update} onRemove={layer.remove}
-                  onDuplicate={layer.duplicate} onReorder={layer.reorder}
-                  onMoveLayerBefore={layer.moveBefore} onAlign={layer.align}
-                  onApplyStarter={layer.applyStarter}
-                  palette={themedPalette} players={allPlayers}
-                  onPickImage={(itemId, file) => setEditor({ key: 'blankimg', itemId, source: file })}
-                />
-              </>
-            )}
-
-            {/* Mobile preview (visible on small screens, hidden on xl) */}
-            <div className="xl:hidden pb-card p-4">
-              <div className="flex items-center justify-between mb-3 gap-2">
-                <span className="font-mono text-[10px] text-pb-faint uppercase">{tmpl.id}: {tmpl.name}</span>
-                <div className="flex items-center gap-2">
-                  {exportError && <span className="text-red-400 text-xs font-mono truncate max-w-[120px]">{exportError}</span>}
-                  <button onClick={handleExport} disabled={exporting}
-                    className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 disabled:opacity-60"
-                    style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? '...' : '↓ PNG'}
-                  </button>
-                  <button onClick={handleReset} className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
-                    ↺ Reset
-                  </button>
-                </div>
-              </div>
-              {(() => {
-                const mobileW = Math.min(window.innerWidth - 64, 480)
-                const scale = mobileW / W
-                return (
-                  <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                    <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none', position: 'relative' }}>
-                      {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-                      {customEdit && !isBlankTab && (
-                        <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
-                      )}
-                    </div>
-                  </div>
-                )
-              })()}
-              <p className="text-pb-faintest text-[10px] font-mono mt-2">{W} × {H} px</p>
-            </div>
-
-          </div>{/* end left column */}
-
-          {/* ─── RIGHT: sticky preview (desktop only) ──────────────────────── */}
-          <div className="hidden xl:flex flex-1 min-w-0 sticky top-[64px] self-start flex-col gap-3">
-            <div className="pb-card p-4">
-              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                <span className="font-mono text-[10px] text-pb-faint uppercase shrink-0">{tmpl.id}: {tmpl.name}</span>
-                <div className="flex items-center gap-2 shrink-0">
-                  {exportError && <span className="text-red-400 text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
-                  <button onClick={handleExport} disabled={exporting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono tracking-wide2 transition-colors disabled:opacity-60"
-                    style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD PNG'}
-                  </button>
-                  <button onClick={handleReset}
-                    className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
-                    title="Reset all fields for this tab">
-                    ↺ Reset
-                  </button>
-                </div>
-              </div>
-              {(() => {
-                const pw = Math.min(700, W)
-                const scale = pw / W
-                const ph = Math.round(H * scale)
-                return (
-                  <>
-                    <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
-                        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
-                        {isBlankTab ? (
-                          <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
-                            interactive scale={scale} selectedIds={canvas.selIds}
-                            onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany} />
-                        ) : (
-                          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-                        )}
-                        {customEdit && !isBlankTab && (
-                          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
-                            interactive scale={scale} selectedIds={overlay.selIds}
-                            onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
-                            style={{ position: 'absolute', inset: 0 }} />
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-pb-faintest text-[10px] font-mono mt-2">
-                      {W} × {H} px · shown at {Math.round(scale * 100)}%{showBlankTools ? ' · drag items to move, corner handle to resize' : ''}
-                    </p>
-                  </>
-                )
-              })()}
-            </div>
+            </>)}
           </div>
-
-        </div>
-      </div>
+        )}
+      />
 
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
@@ -2827,6 +2907,6 @@ export default function AdminSocialPost() {
           }
         }}
       />
-    </BetterSocialsLayout>
+    </>
   )
 }

@@ -87,14 +87,20 @@ export function newBlankItem(type, opts = {}) {
   if (type === 'text') {
     return {
       id, type: 'text', text: opts.text || 'YOUR TEXT HERE',
-      x: 90, y: 440, w: 900,
-      fontFamily: "'Anton', sans-serif", fontSize: 120, bold: true,
-      color: 'ink', align: 'left', lineHeight: 0.92, letterSpacing: 0,
-      uppercase: true, bg: 'none', rotation: 0,
+      x: opts.x ?? 90, y: opts.y ?? 440, w: opts.w ?? 900,
+      fontFamily: opts.fontFamily || "'Anton', sans-serif",
+      fontSize: opts.fontSize ?? 120,
+      bold: opts.bold ?? true,
+      color: opts.color || 'ink', align: opts.align || 'left',
+      lineHeight: opts.lineHeight ?? 0.92, letterSpacing: opts.letterSpacing ?? 0,
+      uppercase: opts.uppercase ?? true, bg: 'none', rotation: 0,
     }
   }
   if (type === 'image') {
-    return { id, type: 'image', x: 340, y: 340, w: 400, h: 400, src: null, radius: 0, fit: 'contain', rotation: 0 }
+    return {
+      id, type: 'image', x: opts.x ?? 340, y: opts.y ?? 340, w: opts.w ?? 400, h: opts.h ?? 400,
+      src: opts.src ?? null, srcName: opts.srcName, radius: 0, fit: opts.fit || 'contain', rotation: 0,
+    }
   }
   if (type === 'brand') {
     return { id, type: 'brand', x: 60, y: 60, size: 160, layout: 'row', showName: true, align: 'left', color: 'ink' }
