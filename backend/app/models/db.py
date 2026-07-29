@@ -2075,6 +2075,13 @@ class SyncRun(Base):
     # Set by an operator action, cleared once the run's own loop checkpoint
     # (services/sync.py::_check_sync_control) notices and finalizes it.
     control = Column(Text, nullable=True)
+    # Who kicked this run off (migration 186) — the club admin (or super admin
+    # acting as the club) whose click started it. NULL for system-initiated
+    # runs (the weekly scheduler, a self-serve club's first auto-sync) and for
+    # runs auto-resumed after a restart where the original trigger's user is
+    # carried forward. Powers the "who started it" column on the Super Admin
+    # Usage page's Current Background Processes panel.
+    triggered_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class OppositionDossier(Base):
