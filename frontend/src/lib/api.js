@@ -2063,6 +2063,37 @@ export const api = {
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // ─── BetterSelect: vote collection (admin) ───
+  votesGetSettings: () => request('/votes/settings'),
+  votesSetSettings: (data) =>
+    request('/votes/settings', { method: 'POST', body: JSON.stringify(data) }),
+  votesRegenerateLink: () => request('/votes/settings/regenerate', { method: 'POST' }),
+  votesFixtures: (year) => request(`/votes/fixtures${year ? `?year=${year}` : ''}`),
+  votesFixtureDetail: (fixtureId) => request(`/votes/fixtures/${fixtureId}`),
+  votesAdminBallot: (fixtureId, data) =>
+    request(`/votes/fixtures/${fixtureId}/ballots`, { method: 'POST', body: JSON.stringify(data) }),
+  votesDeleteBallot: (ballotId) => request(`/votes/ballots/${ballotId}`, { method: 'DELETE' }),
+  votesLockFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/lock`, { method: 'POST' }),
+  votesReopenFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/reopen`, { method: 'POST' }),
+  votesLeaderboard: ({ year, grade_id, through_round } = {}) => {
+    const q = new URLSearchParams()
+    if (year) q.set('year', year)
+    if (grade_id) q.set('grade_id', grade_id)
+    if (through_round) q.set('through_round', through_round)
+    const qs = q.toString()
+    return request(`/votes/leaderboard${qs ? `?${qs}` : ''}`)
+  },
+
+  // ─── Public: vote collection (no admin auth; player cookie or typed name) ───
+  votePublicLanding: (token) => request(`/public/votes/${token}`),
+  votePublicVerify: (token, player_id, pin) =>
+    request(`/public/votes/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
+  votePublicSwitch: (token) =>
+    request(`/public/votes/${token}/switch`, { method: 'POST' }),
+  votePublicFixture: (token, fixtureId) => request(`/public/votes/${token}/fixtures/${fixtureId}`),
+  votePublicSubmit: (token, fixtureId, data) =>
+    request(`/public/votes/${token}/fixtures/${fixtureId}/ballot`, { method: 'POST', body: JSON.stringify(data) }),
+
   // ─── BetterFantasyCricket: public member play ───────────
   fanLanding: (token) => request(`/public/fantasy/${token}`),
   fanRegister: (token, data) => request(`/public/fantasy/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),

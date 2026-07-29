@@ -35,6 +35,7 @@ export const NAV = [
   { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },
   { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Pick and share your XI.' },
   { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS, desc: 'Training and net sessions.' },
+  { to: '/admin/betterselect/votes', label: 'Votes', icon: 'votes', cap: null, anyCaps: [CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS], desc: 'Best-player votes, Brownlow style.' },
   { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS, desc: 'Competition ladders.' },
 ]
 
@@ -47,7 +48,11 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
 
-  const items = NAV.filter(i => i.cap == null || hasCapability(i.cap))
+  // anyCaps: show the item when the user holds ANY of the listed capabilities
+  // (e.g. Votes is open to managers and designated leaderboard viewers alike).
+  const items = NAV.filter(i => i.anyCaps
+    ? i.anyCaps.some(c => hasCapability(c))
+    : (i.cap == null || hasCapability(i.cap)))
 
   // Label stored when bookmarking the current page.
   const activeNav = items.find(i => i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to))
