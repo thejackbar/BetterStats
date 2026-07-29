@@ -30,6 +30,7 @@ from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
 from app.services import crm_targets
 from app.services import crm_rules
+from app.services import stripe_client
 
 logger = logging.getLogger(__name__)
 
@@ -769,20 +770,51 @@ async def super_archive_deal(deal_id: str, db: AsyncSession = Depends(get_db)):
 @super_router.delete("/deals/{deal_id}/permanent", dependencies=[_super])
 async def super_delete_deal_permanent(deal_id: str, reset_club: bool = False,
                                       db: AsyncSession = Depends(get_db)):
-    """Permanently removes a platform deal — for purging test Leads/
-    Opportunities, not routine cleanup (that's Archive). `reset_club=true`
-    also wipes the linked prospect's sales-pipeline/engagement state (see
-    reset_marketing_club_engagement) so a later genuine self-serve signup or
-    enquiry from the SAME real club starts completely fresh, rather than
-    inheriting whatever test trial/demo flags were set on it — the club's
-    own directory row is never deleted, only its CRM-set state."""
+    """Permanently removes a platform deal. Two modes:
+
+    - `reset_club=false` (default): just deletes the deal — for tidying a real
+      Lead/Opportunity out of the pipeline without touching the club. (Archive
+      is the reversible option; this is the permanent one.)
+    - `reset_club=true` (the "this was test activity" checkbox): a FULL test-data
+      PURGE. It deletes the deal AND, when the deal is linked to a registered
+      club, HARD-DELETES that club from All Clubs (its seasons/games/players/
+      stats/memberships/module subscriptions), deletes the club's own admin user
+      login(s) (only those whose sole membership was this club — never a super
+      admin, never a user who also belongs to another club), and deletes the
+      club's Stripe customer (which cancels any subscription). The club's Club
+      Directory (marketing_clubs) row is KEPT — its engagement/trial/demo state
+      is reset so a genuine future enquiry starts fresh, but the directory entry
+      itself is NEVER removed. The All-Clubs Archive flow is untouched by this.
+    """
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    org_id = deal.organisation_id or (club.existing_org_id if club is not None else None)
+
     if reset_club and club is not None:
         await crm_service.reset_marketing_club_engagement(db, club)
+
+    # Delete the deal explicitly and flush it, so the club hard-delete below
+    # (which cascade-deletes deals via crm_deals.organisation_id ON DELETE
+    # CASCADE) can't race its own cascade against this row.
     await crm_service.delete_deal(db, deal)
+    await db.flush()
+
+    purged_org = False
+    if reset_club and org_id is not None:
+        org = await db.get(Organisation, org_id)
+        # Stripe is external — do it first (while we still hold the id) and never
+        # let it block the DB purge; a missing/already-deleted customer is fine.
+        if org is not None and org.stripe_customer_id:
+            try:
+                await stripe_client.delete_customer(org.stripe_customer_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("crm purge: could not delete Stripe customer for org %s", org_id)
+        await crm_service.hard_delete_registered_club(db, org_id)
+        purged_org = True
+
     await db.commit()
-    return {"deleted": True, "club_reset": bool(reset_club and club is not None)}
+    return {"deleted": True, "club_reset": bool(reset_club and club is not None),
+            "club_purged": purged_org}
 
 
 @super_router.get("/deals/{deal_id}/activities", dependencies=[_super])

@@ -35,7 +35,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, func, update as sa_update
+from sqlalchemy import select, func, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -769,6 +769,40 @@ async def delete_deal(session: AsyncSession, deal: CrmDeal) -> None:
     so the deal's notes/activity log and contact links go with it; no
     manual child cleanup needed."""
     await session.delete(deal)
+
+
+async def hard_delete_registered_club(session: AsyncSession, org_id) -> None:
+    """Permanently removes a REGISTERED club (Organisation) and its own login
+    accounts — the club side of the super-admin CRM test-club purge (see
+    routers/crm.py::super_delete_deal_permanent). Deliberately does NOT commit;
+    the caller owns the transaction.
+
+    - Deletes any user whose ONLY club membership was this club — never a super
+      admin, and never a user who also belongs to another club (their other
+      membership survives, so we leave the account alone).
+    - Deletes the Organisation. Its FK ON DELETE CASCADE children (seasons /
+      grades / games / players / per-game stats / memberships / module
+      subscriptions / …) go with it; the handful of org-keyed tables that carry
+      no FK are cleaned explicitly — this list MUST stay in sync with
+      club_admin.py::delete_club, which does the same (migration 142 fixed the
+      FK-cascade drift that used to 500 this on a club with real data).
+    - marketing_clubs.existing_org_id is ON DELETE SET NULL, so the club's Club
+      Directory row is UNLINKED but KEPT — a delete of this kind must never
+      remove the club from the Club Directory.
+    """
+    oid = str(org_id)
+    await session.execute(text("""
+        DELETE FROM users u
+        WHERE EXISTS (SELECT 1 FROM club_memberships m
+                      WHERE m.user_id = u.id AND m.club_id = CAST(:id AS UUID))
+          AND NOT EXISTS (SELECT 1 FROM club_memberships m2
+                          WHERE m2.user_id = u.id AND m2.club_id <> CAST(:id AS UUID))
+          AND NOT EXISTS (SELECT 1 FROM club_memberships ms
+                          WHERE ms.user_id = u.id AND ms.role = 'super_admin')
+    """), {"id": oid})
+    for table in ("merge_logs", "merge_pair_ignores", "grade_merge_logs", "player_achievements"):
+        await session.execute(text(f"DELETE FROM {table} WHERE org_id = CAST(:id AS UUID)"), {"id": oid})
+    await session.execute(text("DELETE FROM organisations WHERE id = CAST(:id AS UUID)"), {"id": oid})
 
 
 async def reset_marketing_club_engagement(session: AsyncSession, club: MarketingClub) -> None:

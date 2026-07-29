@@ -375,6 +375,17 @@ def describe_payment_method(pm: dict) -> tuple[str, str]:
     return pm_type, pm_type.replace("_", " ").title()
 
 
+async def delete_customer(customer_id: str) -> None:
+    """Permanently deletes a Stripe Customer — which also immediately cancels
+    every subscription it holds, so there's no need to cancel first. Used ONLY
+    by the super-admin CRM test-club purge (routers/crm.py) to clean up a test
+    Customer; for a real club you'd cancel a subscription, never delete the
+    Customer. A Customer already gone (deleted in the dashboard, or a re-run)
+    raises InvalidRequestError, which the caller swallows — nothing left to do."""
+    _require_configured()
+    await stripe.Customer.delete_async(customer_id)
+
+
 async def cancel_subscription(subscription_id: str) -> None:
     """Cancels a subscription immediately (not at period end) — used when a
     club's self-service cancel leaves it with zero held modules, so Stripe
