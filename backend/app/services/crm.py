@@ -1126,10 +1126,11 @@ async def last_activity_at_by_deal(session: AsyncSession, deals, club_by_id: dic
     """deal_id (UUID) -> the most recent 'activity' datetime for the deal, for
     the CRM pipeline's "New Deal Activity" recency filter. Aggregates, per deal,
     the latest of:
-      - the deal's own created_at / updated_at — covers manual edits, stage
-        moves, and every automatic sync_platform_deal_for_club touch (enquiry,
-        wizard lead, self-serve/super-admin trial, engagement-score promotion),
-        all of which bump updated_at;
+      - the deal's own created_at / updated_at — covers manual edits and every
+        stage promotion, whether done by hand (super/club move_stage) or
+        automatically (engagement-score promotion, sync_platform_deal_for_club
+        from an enquiry / wizard lead / self-serve or super-admin trial), all of
+        which bump updated_at;
       - its latest CrmActivity (logged notes + auto-promotion system rows);
       - for a linked/onboarded org: the latest module-subscription change
         (trial start, new subscription, cancel, pause — all maintain updated_at,

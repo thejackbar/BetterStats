@@ -244,23 +244,26 @@ const EMPTY_FILTERS = {
 const hasActiveTrial = (d) =>
   Object.values(d.trial_days_remaining || {}).some(v => v != null && v >= 0)
 
-// Is an ISO timestamp within a recency window? mode 'any' never filters (the
-// caller skips this); 'today' is the local calendar day; 'range' is the
-// inclusive [from, to] local-date span (either bound optional).
+// All dates on this page are Perth / Western Australia time (AWST, UTC+8
+// year-round — no daylight saving, so a fixed +08:00 offset is exact), never
+// UTC or the viewer's own zone. The Perth calendar date (YYYY-MM-DD) an instant
+// falls on:
+const PERTH_OFFSET_MS = 8 * 60 * 60 * 1000
+const perthDateStr = (d) => new Date(d.getTime() + PERTH_OFFSET_MS).toISOString().slice(0, 10)
+
+// Is an ISO timestamp within a recency window, judged in Perth time? mode 'any'
+// never filters (the caller skips this); 'today' is the Perth calendar day;
+// 'range' is the inclusive [from, to] span, where from/to are the Perth
+// calendar dates the user typed (bounded at Perth midnight … end-of-day).
 function inDateWindow(iso, mode, from, to) {
   if (mode === 'any') return true
   if (!iso) return false
   const d = new Date(iso)
   if (isNaN(d.getTime())) return false
-  if (mode === 'today') {
-    const now = new Date()
-    return d.getFullYear() === now.getFullYear()
-      && d.getMonth() === now.getMonth()
-      && d.getDate() === now.getDate()
-  }
+  if (mode === 'today') return perthDateStr(d) === perthDateStr(new Date())
   if (mode === 'range') {
-    if (from && d < new Date(`${from}T00:00:00`)) return false
-    if (to && d > new Date(`${to}T23:59:59.999`)) return false
+    if (from && d < new Date(`${from}T00:00:00+08:00`)) return false
+    if (to && d > new Date(`${to}T23:59:59.999+08:00`)) return false
     return true
   }
   return true
@@ -673,7 +676,7 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
                 ...(patch.to !== undefined ? { newDealsTo: patch.to } : {}),
               }))} />
             <DateWindowFilter label="New Deal Activity"
-              title="Deals with activity in this window — page views, trial/subscription changes (start, cancel, pause), or onboarding steps completed"
+              title="Deals with activity in this window — a stage promotion (manual or automatic), page views, trial/subscription changes (start, cancel, pause), or onboarding steps completed"
               mode={filters.activityMode} from={filters.activityFrom} to={filters.activityTo}
               onChange={patch => setFilters(f => ({
                 ...f,
