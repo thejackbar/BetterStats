@@ -8,7 +8,7 @@
 // player verified (~30 days). No tallies are ever shown here — the count stays
 // with the club's admins.
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 
 function fmtDay(d) {
@@ -53,6 +53,16 @@ const STATE_LABEL = {
 
 export default function PublicVoting() {
   const { token } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Optional deep-link params: a per-fixture link (?fixture=) jumps straight
+  // to that game's ballot, and a per-team link (?team=<grade_id>, plus
+  // ?round=/?q=) pre-scopes the games list — the same filters the admin
+  // Fixtures tab has, so a club can hand a manager a link already narrowed to
+  // their own side instead of everyone hunting through every grade.
+  const fixtureParam = searchParams.get('fixture') || ''
+  const teamParam = searchParams.get('team') || ''
+  const roundParam = searchParams.get('round') || ''
+  const qParam = searchParams.get('q') || ''
   const [step, setStep] = useState('loading') // loading | dead | games | pick | pin | name | ballot | done
   const [landing, setLanding] = useState(null)
   const [me, setMe] = useState(null) // verified player {id, display_name}
@@ -67,22 +77,23 @@ export default function PublicVoting() {
   const [posIndex, setPosIndex] = useState(0)
   const [reviewing, setReviewing] = useState(false)
   const pinRef = useRef(null)
+  const autoOpenedRef = useRef(false)
 
   const club = landing?.club
   const accent = club?.accent_color || club?.primary_color || null
 
   useEffect(() => {
     let alive = true
-    api.votePublicLanding(token)
+    api.votePublicLanding(token, { team: teamParam || undefined, round_key: roundParam || undefined, q: qParam || undefined })
       .then((d) => {
         if (!alive) return
         setLanding(d)
         setMe(d.me)
-        setStep('games')
+        setStep((s) => (s === 'loading' ? 'games' : s))
       })
       .catch(() => { if (alive) setStep('dead') })
     return () => { alive = false }
-  }, [token])
+  }, [token, teamParam, roundParam, qParam])
 
   useEffect(() => { if (step === 'pin' && pinRef.current) pinRef.current.focus() }, [step])
 
@@ -94,6 +105,14 @@ export default function PublicVoting() {
       setFixture(d)
       if (d.me && !me) setMe(d.me)
       setReviewing(false)
+      if (d.fixture?.state && d.fixture.state !== 'open') {
+        // Reached directly (a shared per-fixture link) rather than via the
+        // disabled-when-not-open games list — show why voting isn't
+        // available instead of letting them pick players and hit a 409.
+        setPicks([]); setPosIndex(0)
+        setStep('ballot')
+        return
+      }
       // Not identified yet: players verify with their PIN first; the pick step
       // offers the "I didn't play" escape hatch when the club allows it. A
       // supporter who already gave their name this session skips straight in.
@@ -116,6 +135,35 @@ export default function PublicVoting() {
       setError(e.message || 'Something went wrong. Try again.')
     } finally { setBusy(false) }
   }, [token, me, supporterName])
+
+  // A direct per-fixture link opens straight into that game once the landing
+  // data (and thus the club's branding/settings) has loaded, skipping the
+  // games list entirely.
+  useEffect(() => {
+    if (landing && fixtureParam && !autoOpenedRef.current) {
+      autoOpenedRef.current = true
+      openFixture(fixtureParam)
+    }
+  }, [landing, fixtureParam, openFixture])
+
+  const updateFilter = useCallback((key, value) => {
+    const next = new URLSearchParams(searchParams)
+    if (value) next.set(key, value)
+    else next.delete(key)
+    if (key === 'team') next.delete('round') // rounds are scoped to the team
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  const backToGames = useCallback(() => {
+    setFixture(null)
+    setError('')
+    if (searchParams.get('fixture')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('fixture')
+      setSearchParams(next, { replace: true })
+    }
+    setStep('games')
+  }, [searchParams, setSearchParams])
 
   const doVerify = async (player, pinValue) => {
     setBusy(true)
@@ -206,6 +254,16 @@ export default function PublicVoting() {
     did_not_play: 'Only players who played in this game can vote at this club.',
   }
 
+  // Shown when a shared per-fixture link (?fixture=) points at a game whose
+  // voting isn't currently open — the normal games list already disables
+  // these rows, but a direct link skips straight past that.
+  const notOpenText = {
+    upcoming: 'This game hasn’t been played yet.',
+    awaiting_team: 'The team list for this game isn’t in yet — check back soon.',
+    closed: 'Voting has closed for this game.',
+    locked: 'Voting is closed for this game.',
+  }
+
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
       <div className="max-w-md mx-auto px-4 py-8 sm:py-12">
@@ -234,9 +292,31 @@ export default function PublicVoting() {
               </div>
             )}
             <Banner>{error}</Banner>
+            {((landing.grades?.length || 0) > 1 || (landing.rounds?.length || 0) > 1) && (
+              <div className="flex flex-col gap-2 mb-3.5">
+                <div className="flex flex-wrap gap-2">
+                  {(landing.grades?.length || 0) > 1 && (
+                    <select value={teamParam} onChange={(e) => updateFilter('team', e.target.value)}
+                      className="flex-1 min-w-[110px] bg-pb-surface2 border pb-hairline rounded-lg px-2.5 py-2 text-[13px] focus:outline-none focus:border-pb-accent">
+                      <option value="">All teams</option>
+                      {landing.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                  )}
+                  {(landing.rounds?.length || 0) > 1 && (
+                    <select value={roundParam} onChange={(e) => updateFilter('round', e.target.value)}
+                      className="flex-1 min-w-[100px] bg-pb-surface2 border pb-hairline rounded-lg px-2.5 py-2 text-[13px] focus:outline-none focus:border-pb-accent">
+                      <option value="">All rounds</option>
+                      {landing.rounds.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                    </select>
+                  )}
+                </div>
+                <input value={qParam} onChange={(e) => updateFilter('q', e.target.value)} placeholder="Search opponent…"
+                  className="w-full bg-pb-surface2 border pb-hairline rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-pb-accent" />
+              </div>
+            )}
             {landing.fixtures.length === 0 && (
               <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
-                No games to vote on yet. Check back after the weekend.
+                {teamParam || roundParam || qParam ? 'No games match these filters.' : 'No games to vote on yet. Check back after the weekend.'}
               </div>
             )}
             <div className="flex flex-col gap-3">
@@ -295,7 +375,7 @@ export default function PublicVoting() {
                 I didn’t play (coach / supporter)
               </button>
             )}
-            <button onClick={() => setStep('games')} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
+            <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
           </div>
         )}
 
@@ -374,10 +454,15 @@ export default function PublicVoting() {
             </div>
             <Banner>{error}</Banner>
 
-            {fixture.role === 'none' ? (
+            {fixture.fixture.state !== 'open' ? (
+              <div className="rounded-xl border pb-hairline px-4 py-8 text-center text-pb-faint text-sm">
+                {notOpenText[fixture.fixture.state] || 'Voting isn’t open for this game.'}
+                <div className="mt-4"><button onClick={backToGames} className="text-pb-accent underline">← Back to games</button></div>
+              </div>
+            ) : fixture.role === 'none' ? (
               <div className="rounded-xl border pb-hairline px-4 py-8 text-center text-pb-faint text-sm">
                 {reasonText[fixture.reason] || 'You can’t vote on this game.'}
-                <div className="mt-4"><button onClick={() => setStep('games')} className="text-pb-accent underline">← Back to games</button></div>
+                <div className="mt-4"><button onClick={backToGames} className="text-pb-accent underline">← Back to games</button></div>
               </div>
             ) : reviewing ? (
               <div>
@@ -396,7 +481,7 @@ export default function PublicVoting() {
                   {busy ? 'Saving…' : fixture.my_ballot?.length ? 'Update my votes' : 'Submit my votes'}
                 </button>
                 <button onClick={restart} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text underline">Start again</button>
-                <button onClick={() => setStep('games')} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
+                <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
               </div>
             ) : (
               <div>
@@ -427,7 +512,7 @@ export default function PublicVoting() {
                     ← Back to the {values[posIndex - 1]}
                   </button>
                 )}
-                <button onClick={() => setStep('games')} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
+                <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
               </div>
             )}
           </div>
@@ -442,7 +527,7 @@ export default function PublicVoting() {
               Thanks{me ? `, ${me.display_name.split(' ')[0]}` : supporterName ? `, ${supporterName.split(' ')[0]}` : ''}. Your ballot is with the club.
               You can come back and change it while voting stays open.
             </p>
-            <button onClick={() => { setFixture(null); setStep('games') }}
+            <button onClick={backToGames}
               className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}>
               Back to games

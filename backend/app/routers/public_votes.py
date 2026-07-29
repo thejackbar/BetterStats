@@ -147,8 +147,20 @@ async def _verified_player(db: AsyncSession, request: Request, club: Organisatio
     return player
 
 
-async def _open_fixtures(db: AsyncSession, club: Organisation, cfg: dict) -> list[tuple[Fixture, str]]:
-    """Recent played fixtures with their voting state, newest first."""
+async def _open_fixtures(
+    db: AsyncSession, club: Organisation, cfg: dict,
+    grade_id: Optional[str] = None, round_key: Optional[str] = None, q: Optional[str] = None,
+) -> tuple[list[tuple[Fixture, str]], dict]:
+    """Recent played fixtures with their voting state, newest first, plus the
+    filter option lists (``grades``/``rounds``).
+
+    ``grade_id``/``round_key``/``q`` narrow the list — the same filters the
+    admin Fixtures tab has, so a club can share a link pre-scoped to one team
+    (``?team=<grade_id>``) instead of everyone wading through every grade's
+    fixtures to find their own. The option lists are always built from the
+    WHOLE lookback window regardless of the other filters, so they don't
+    collapse to the current selection.
+    """
     today = date.today()
     res = await db.execute(
         select(Fixture)
@@ -160,11 +172,48 @@ async def _open_fixtures(db: AsyncSession, club: Organisation, cfg: dict) -> lis
         )
         .order_by(Fixture.played_on.desc())
     )
-    fixtures = res.scalars().all()
-    if not fixtures:
-        return []
+    all_fixtures = res.scalars().all()
+    if not all_fixtures:
+        return [], {"grades": [], "rounds": []}
+
     from sqlalchemy import text
     from app.models.db import VoteFixtureOverride
+
+    grade_by_fixture = await vote_svc.effective_grade_ids(db, all_fixtures)
+    grade_names: dict[str, str] = {}
+    gids = {gid for gid in grade_by_fixture.values() if gid}
+    if gids:
+        gn_res = await db.execute(text("SELECT id, name FROM grades WHERE id = ANY(:ids)"), {"ids": list(gids)})
+        grade_names = {str(gid): name for gid, name in gn_res.fetchall()}
+    grades_opt = sorted(
+        ({"id": gid, "name": name} for gid, name in grade_names.items()), key=lambda g: g["name"],
+    )
+
+    rounds_seen: dict[str, tuple[str, Optional[date]]] = {}
+    for f in all_fixtures:
+        if grade_id and str(grade_by_fixture.get(str(f.id))) != grade_id:
+            continue
+        key = vote_svc.round_key_for(f)
+        if key not in rounds_seen:
+            rounds_seen[key] = (vote_svc.round_label_for(f), f.played_on)
+    rounds_opt = [
+        {"key": k, "label": lbl}
+        for k, (lbl, d) in sorted(
+            rounds_seen.items(), key=lambda kv: vote_svc.round_sort_key(kv[1][0], kv[1][1]), reverse=True,
+        )
+    ]
+
+    fixtures = all_fixtures
+    if grade_id:
+        fixtures = [f for f in fixtures if str(grade_by_fixture.get(str(f.id))) == grade_id]
+    if round_key:
+        fixtures = [f for f in fixtures if vote_svc.round_key_for(f) == round_key.lower()]
+    if q:
+        ql = q.strip().lower()
+        fixtures = [f for f in fixtures if ql in (f.opponent_name or f.label or "").lower()]
+    if not fixtures:
+        return [], {"grades": grades_opt, "rounds": rounds_opt}
+
     fids = [f.id for f in fixtures]
     match_ids = [vote_svc.match_ref_id(f) for f in fixtures]
     g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": match_ids})
@@ -194,18 +243,28 @@ async def _open_fixtures(db: AsyncSession, club: Organisation, cfg: dict) -> lis
         )
         state = vote_svc.fixture_vote_state(f, cfg, ov.status if ov else None, ready, today)
         out.append((f, state))
-    return out
+    return out, {"grades": grades_opt, "rounds": rounds_opt}
 
 
 @router.get("/{token}")
-async def get_landing(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def get_landing(
+    token: str, request: Request, db: AsyncSession = Depends(get_db),
+    team: Optional[str] = None, round_key: Optional[str] = None, q: Optional[str] = None,
+):
     """Club branding, the ballot shape, open fixtures, and the player name list
-    for the verify step. Never returns tallies."""
+    for the verify step. Never returns tallies.
+
+    ``team`` (one of the returned ``grades``' ids), ``round_key`` and ``q``
+    (opponent search) narrow the fixture list — the same shape as the admin
+    Fixtures tab filters, so a club can hand out a link pre-scoped to one
+    team (``/vote/{token}?team=<grade_id>``) instead of a supporter hunting
+    through every grade's games for their own.
+    """
     club, s = await _club_for_token(db, token)
     cfg = vote_svc.effective_config(s)
     players = await active_self_service_players(db, club)
     me = await _verified_player(db, request, club)
-    fixtures = await _open_fixtures(db, club, cfg)
+    fixtures, filter_opts = await _open_fixtures(db, club, cfg, grade_id=team, round_key=round_key, q=q)
     return {
         "club": _club_branding(club),
         "require_pin": bool(s.require_pin),
@@ -219,11 +278,17 @@ async def get_landing(token: str, request: Request, db: AsyncSession = Depends(g
              "has_phone": phone_last4(p.phone) is not None}
             for p in players
         ],
+        "grades": filter_opts["grades"],
+        "rounds": filter_opts["rounds"],
+        "team": team,
+        "round_key": round_key,
+        "q": q,
         "fixtures": [
             {
                 "id": str(f.id),
                 "opponent": f.opponent_name or f.label,
                 "round": vote_svc.round_label_for(f),
+                "round_key": vote_svc.round_key_for(f),
                 "date": f.played_on.isoformat() if f.played_on else None,
                 "home_away": f.home_away,
                 "state": state,

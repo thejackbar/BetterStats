@@ -1077,6 +1077,40 @@ BetterFees' derived allocation.
   plain note on a closed/locked fixture that ballots can still be entered
   below without reopening, and that "Reopen voting" is only needed if players
   should be able to self-serve vote via the public link again.
+- **Direct fixture/team links + filters on the public voting page (v8.94.8)**:
+  per direct request — one club-wide link (`vote_settings.link_token`) was the
+  only way in, so every player had to wade through the whole season's games to
+  find their own team's, and there was no way to point someone straight at a
+  single match. Rather than mint a token per fixture/team (a real proliferation
+  for a multi-grade club), the SAME base link now takes optional query params
+  that scope it — no new token, no new settings row:
+  - `?fixture=<id>` — `PublicVoting.jsx` auto-opens straight into that game's
+    ballot once the landing data loads (skips the games list entirely), via
+    the existing `GET .../fixtures/{id}` endpoint (unchanged). Reached
+    directly rather than via the games list's `disabled={!open}` guard, so a
+    link to a not-yet-open or already-closed game needs its own message —
+    added a `fixture.fixture.state !== 'open'` check ahead of the existing
+    role check, reusing `fixture_vote_state`'s state values.
+  - `?team=<grade_id>` (+ `?round=`/`?q=`) — scopes the landing list itself.
+    `GET /public/votes/{token}` gained `team`/`round_key`/`q` params, threaded
+    into `_open_fixtures`, which now ALSO returns `grades`/`rounds` option
+    lists (built from the whole lookback window regardless of the current
+    filter, same pattern as the admin Fixtures tab) by reusing
+    `services.votes.effective_grade_ids`/`round_sort_key` — no new backend
+    logic, just wiring the same v8.94.7 fix into the public path too.
+  - The public landing page shows Team/Round selects (+ a search box) when
+    there's more than one option, changing a filter updates the URL's query
+    params (`replace: true`, so it doesn't spam browser history) — which is
+    what makes the "team link" shareable: filter down once, copy the address
+    bar. `updateFilter`/`backToGames` centralise all the URL-parameter
+    bookkeeping so every "back to games" button in the flow keeps the
+    team/round filter but drops `?fixture=`.
+  - Admin-side generation: `FixtureDetail` gets a "Copy link" button
+    (`?fixture=`) next to Lock/Reopen; the Fixtures tab's grade filter gets
+    "Copy this team's link" (`?team=`) once a grade is picked. Both reuse
+    `data.settings.token`/`detail.settings.token` (already returned by
+    `list_vote_fixtures`/`fixture_detail`) and only show once the link itself
+    is enabled.
 
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 
