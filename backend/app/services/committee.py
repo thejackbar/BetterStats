@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (
     CommitteePosition, CommitteeTerm, CommitteeTask, CommitteeDocument, ClubEvent,
     AgendaTemplate, CommitteeMeeting, MeetingAttendance, MeetingAgendaItem, MeetingMotion,
-    AgmNomination, FeeMember,
+    AgmNomination, FeeMember, ClubRole,
 )
 
 # (name, responsibilities)
@@ -42,6 +42,7 @@ STARTER_POSITIONS = [
 def _position_dict(p: CommitteePosition) -> dict:
     return {
         "id": str(p.id), "name": p.name, "responsibilities": p.responsibilities,
+        "role_id": str(p.role_id) if p.role_id else None,
         "sort_order": p.sort_order, "is_active": p.is_active,
     }
 
@@ -141,7 +142,53 @@ def _nomination_dict(n: AgmNomination) -> dict:
 
 # ─── Positions ────────────────────────────────────────────────────────────────
 
+async def sync_committee_positions(session: AsyncSession, org_id) -> None:
+    """A committee position IS a committee-flagged club_role (migration 198).
+    The catalogue is edited in Roles; this keeps a committee_position row per
+    committee role (the term/task/doc/AGM FK anchor) in sync with it. Called
+    before any positions read/seed. Positions whose role is archived/removed
+    are deactivated but keep their term history."""
+    roles = (await session.execute(
+        select(ClubRole).where(ClubRole.organisation_id == org_id,
+                               ClubRole.is_committee.is_(True), ClubRole.is_active.is_(True))
+    )).scalars().all()
+    positions = (await session.execute(
+        select(CommitteePosition).where(CommitteePosition.organisation_id == org_id)
+    )).scalars().all()
+    by_role = {p.role_id: p for p in positions if p.role_id}
+    by_name = {p.name.lower(): p for p in positions}
+    live_role_ids = set()
+    changed = False
+    for role in roles:
+        live_role_ids.add(role.id)
+        pos = by_role.get(role.id) or by_name.get(role.title.lower())
+        if pos is None:
+            pos = CommitteePosition(organisation_id=org_id, name=role.title[:120],
+                                    responsibilities=role.description, role_id=role.id, sort_order=role.sort_order)
+            session.add(pos)
+            changed = True
+            continue
+        # Link + resync display fields from the role (the source of truth).
+        if pos.role_id != role.id:
+            pos.role_id = role.id; changed = True
+        if pos.name != role.title[:120]:
+            pos.name = role.title[:120]; changed = True
+        if pos.responsibilities != role.description:
+            pos.responsibilities = role.description; changed = True
+        if pos.sort_order != role.sort_order:
+            pos.sort_order = role.sort_order; changed = True
+        if not pos.is_active:
+            pos.is_active = True; changed = True
+    # Deactivate positions whose committee role no longer exists/active.
+    for pos in positions:
+        if pos.role_id and pos.role_id not in live_role_ids and pos.is_active:
+            pos.is_active = False; changed = True
+    if changed:
+        await session.flush()
+
+
 async def list_positions(session: AsyncSession, org_id, *, include_inactive: bool = False) -> list[CommitteePosition]:
+    await sync_committee_positions(session, org_id)
     stmt = select(CommitteePosition).where(CommitteePosition.organisation_id == org_id)
     if not include_inactive:
         stmt = stmt.where(CommitteePosition.is_active.is_(True))
@@ -181,17 +228,12 @@ async def archive_position(session: AsyncSession, p: CommitteePosition) -> None:
 
 
 async def seed_starter_positions(session: AsyncSession, org_id) -> int:
-    existing_names = {n.lower() for n in (await session.execute(
-        select(CommitteePosition.name).where(CommitteePosition.organisation_id == org_id)
-    )).scalars().all()}
-    seeded = 0
-    for position, (name, resp) in enumerate(STARTER_POSITIONS):
-        if name.lower() in existing_names:
-            continue
-        session.add(CommitteePosition(organisation_id=org_id, name=name, responsibilities=resp, sort_order=position))
-        seeded += 1
-    if seeded:
-        await session.flush()
+    """Seeds the COMMITTEE roles into the shared Roles catalogue, then ensures a
+    committee_position exists per role. The catalogue is Roles; this just makes
+    the committee roles available and holdable."""
+    from app.services import roles_activities as roles_service
+    seeded = await roles_service.seed_starter_roles(session, org_id, committee=True)
+    await sync_committee_positions(session, org_id)
     return seeded
 
 

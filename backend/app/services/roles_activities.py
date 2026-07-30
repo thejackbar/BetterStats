@@ -30,11 +30,8 @@ STARTER_ROLE_TYPES = [
     ("Other", "Anything that doesn't fit the above."),
 ]
 
-# (title, role_type_name)
+# (title, role_type_name) — everyday, non-committee roles a VOLUNTEER fills.
 STARTER_ROLES = [
-    ("President", "Committee Member"),
-    ("Secretary", "Committee Member"),
-    ("Treasurer", "Committee Member"),
     ("Head Coach", "Coach"),
     ("Junior Coach", "Coach"),
     ("Groundskeeper", "Ground Staff"),
@@ -42,6 +39,30 @@ STARTER_ROLES = [
     ("Bar Steward", "Food & Beverage"),
     ("Scorer", "Other"),
     ("Team Manager", "Other"),
+    ("First Aid Officer", "Other"),
+    ("Cleaner", "Other"),
+    ("Photographer", "Other"),
+]
+
+# (title, description) — the elected/appointed COMMITTEE roles. These are the
+# same roles the Committee Administration "Positions" tab holds terms against
+# (a committee role IS a committee position). Mirrors the old committee starter
+# positions so the two catalogues are one.
+STARTER_COMMITTEE_ROLES = [
+    ("President", "Overall leadership, chairs meetings, primary club spokesperson."),
+    ("Vice President", "Deputises for the President; often leads a portfolio area."),
+    ("Treasurer", "Club finances, budgets, membership fee oversight, financial reporting."),
+    ("Secretary", "Meeting minutes, correspondence, statutory/association paperwork."),
+    ("Junior Coordinator", "Junior program — registrations, coaching, grading."),
+    ("Senior Coordinator", "Senior teams — registrations, grading, team management."),
+    ("Selection Chair", "Chairs the selection panel across grades."),
+    ("Coach Coordinator", "Coaching appointments, accreditation, development."),
+    ("Grounds Manager", "Ground/wicket preparation and maintenance liaison."),
+    ("Equipment Manager", "Club kit, balls, training equipment."),
+    ("Bar Manager", "Bar operations, licensing compliance, RSA rostering."),
+    ("Volunteer Coordinator", "Recruits and rosters club volunteers."),
+    ("Sponsorship Manager", "Sponsor relationships and obligations."),
+    ("Social Media Officer", "Club social media and website content."),
 ]
 
 STARTER_ACTIVITY_TYPES = [
@@ -83,6 +104,7 @@ def _role_dict(r: ClubRole, type_name: Optional[str] = None) -> dict:
     return {"id": str(r.id), "title": r.title,
             "role_type_id": str(r.role_type_id) if r.role_type_id else None,
             "role_type_name": type_name, "description": r.description,
+            "is_committee": r.is_committee,
             "sort_order": r.sort_order, "is_active": r.is_active}
 
 
@@ -179,19 +201,22 @@ async def seed_starter_role_types(session, org_id) -> int:
     return await _seed_types(session, ClubRoleType, org_id, STARTER_ROLE_TYPES)
 
 
-async def list_roles(session: AsyncSession, org_id, *, include_inactive: bool = False) -> list[dict]:
+async def list_roles(session: AsyncSession, org_id, *, include_inactive: bool = False,
+                     committee: Optional[bool] = None) -> list[dict]:
     stmt = (select(ClubRole, ClubRoleType)
             .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
             .where(ClubRole.organisation_id == org_id))
     if not include_inactive:
         stmt = stmt.where(ClubRole.is_active.is_(True))
-    stmt = stmt.order_by(ClubRole.sort_order, func.lower(ClubRole.title))
+    if committee is not None:
+        stmt = stmt.where(ClubRole.is_committee.is_(committee))
+    stmt = stmt.order_by(ClubRole.is_committee.desc(), ClubRole.sort_order, func.lower(ClubRole.title))
     rows = (await session.execute(stmt)).all()
     return [_role_dict(r, t.name if t else None) for r, t in rows]
 
 
 async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id=None,
-                      description: Optional[str] = None) -> ClubRole:
+                      description: Optional[str] = None, is_committee: bool = False) -> ClubRole:
     title = (title or "").strip()
     if not title:
         raise ValueError("Title is required")
@@ -203,18 +228,22 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
             existing.is_active = True
             if role_type_id is not None:
                 existing.role_type_id = role_type_id
+            existing.is_committee = is_committee
             return existing
         raise ValueError(f'A role called "{title}" already exists')
-    r = ClubRole(organisation_id=org_id, title=title[:200], role_type_id=role_type_id, description=description)
+    r = ClubRole(organisation_id=org_id, title=title[:200], role_type_id=role_type_id,
+                 description=description, is_committee=is_committee)
     session.add(r)
     await session.flush()
     return r
 
 
 async def update_role(session: AsyncSession, r: ClubRole, **fields) -> ClubRole:
-    for f in ("title", "role_type_id", "description", "sort_order", "is_active"):
+    for f in ("title", "description", "sort_order", "is_active", "is_committee"):
         if f in fields and fields[f] is not None:
             setattr(r, f, fields[f])
+    if "role_type_id" in fields:
+        r.role_type_id = fields["role_type_id"]
     return r
 
 
@@ -222,20 +251,31 @@ async def archive_role(session: AsyncSession, r: ClubRole) -> None:
     r.is_active = False
 
 
-async def seed_starter_roles(session: AsyncSession, org_id) -> int:
-    """Seeds the starter role types AND a set of common roles keyed off them."""
-    await seed_starter_role_types(session, org_id)
+async def seed_starter_roles(session: AsyncSession, org_id, *, committee: bool = False) -> int:
+    """Seed a starter set of roles. committee=True seeds the elected/appointed
+    COMMITTEE roles (which the Committee Positions tab holds terms against);
+    committee=False seeds everyday volunteer roles + the role-type starter set."""
     existing_titles = {t.lower() for t in (await session.execute(
         select(ClubRole.title).where(ClubRole.organisation_id == org_id)
     )).scalars().all()}
     seeded = 0
-    for i, (title, type_name) in enumerate(STARTER_ROLES):
-        if title.lower() in existing_titles:
-            continue
-        rtype = await _get_or_create_type(session, ClubRoleType, org_id, type_name)
-        session.add(ClubRole(organisation_id=org_id, title=title,
-                             role_type_id=rtype.id if rtype else None, sort_order=i))
-        seeded += 1
+    if committee:
+        for i, (title, desc) in enumerate(STARTER_COMMITTEE_ROLES):
+            if title.lower() in existing_titles:
+                continue
+            rtype = await _get_or_create_type(session, ClubRoleType, org_id, "Committee Member")
+            session.add(ClubRole(organisation_id=org_id, title=title, description=desc,
+                                 role_type_id=rtype.id if rtype else None, is_committee=True, sort_order=i))
+            seeded += 1
+    else:
+        await seed_starter_role_types(session, org_id)
+        for i, (title, type_name) in enumerate(STARTER_ROLES):
+            if title.lower() in existing_titles:
+                continue
+            rtype = await _get_or_create_type(session, ClubRoleType, org_id, type_name)
+            session.add(ClubRole(organisation_id=org_id, title=title,
+                                 role_type_id=rtype.id if rtype else None, sort_order=i))
+            seeded += 1
     if seeded:
         await session.flush()
     return seeded

@@ -578,16 +578,23 @@ export const api = {
     request(`/club-admin/roles-activities/role-types/${id}`, { method: 'DELETE' }),
   raSeedRoleTypes: () =>
     request('/club-admin/roles-activities/role-types/seed-starter', { method: 'POST' }),
-  raRoles: (includeInactive) =>
-    request(`/club-admin/roles-activities/roles${includeInactive ? '?include_inactive=true' : ''}`),
+  // opts: { includeInactive, committee } (committee true|false filters by kind)
+  raRoles: (opts = {}) => {
+    const qs = new URLSearchParams()
+    if (opts.includeInactive) qs.set('include_inactive', 'true')
+    if (opts.committee === true) qs.set('committee', 'true')
+    if (opts.committee === false) qs.set('committee', 'false')
+    const q = qs.toString()
+    return request(`/club-admin/roles-activities/roles${q ? `?${q}` : ''}`)
+  },
   raCreateRole: (data) =>
     request('/club-admin/roles-activities/roles', { method: 'POST', body: JSON.stringify(data) }),
   raUpdateRole: (id, data) =>
     request(`/club-admin/roles-activities/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   raArchiveRole: (id) =>
     request(`/club-admin/roles-activities/roles/${id}`, { method: 'DELETE' }),
-  raSeedRoles: () =>
-    request('/club-admin/roles-activities/roles/seed-starter', { method: 'POST' }),
+  raSeedRoles: (committee) =>
+    request(`/club-admin/roles-activities/roles/seed-starter${committee ? '?committee=true' : ''}`, { method: 'POST' }),
   raActivityTypes: (includeInactive) =>
     request(`/club-admin/roles-activities/activity-types${includeInactive ? '?include_inactive=true' : ''}`),
   raCreateActivityType: (data) =>

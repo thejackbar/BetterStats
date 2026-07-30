@@ -100,12 +100,17 @@ async def _nomination_or_404(db: AsyncSession, club: Organisation, meeting: Comm
 async def list_positions(include_inactive: bool = False, _: User = _require,
                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     rows = await committee_service.list_positions(db, club.id, include_inactive=include_inactive)
+    # list_positions ensures/syncs a committee_position per committee role;
+    # persist that so the ids returned here are real anchors for a later term.
+    await db.commit()
     return {"positions": [committee_service._position_dict(p) for p in rows]}
 
 
 @router.get("/positions/current")
 async def positions_current(_: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return await committee_service.current_holders(db, club.id)
+    result = await committee_service.current_holders(db, club.id)
+    await db.commit()  # persists positions ensured by the sync (see list_positions)
+    return result
 
 
 class PositionCreate(BaseModel):

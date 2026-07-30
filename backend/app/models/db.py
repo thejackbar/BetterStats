@@ -2557,6 +2557,11 @@ class CommitteePosition(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     responsibilities = Column(Text, nullable=True)
+    # A committee position IS a committee-flagged club_role (migration 198). The
+    # position row stays the anchor for terms/tasks/docs/AGM FKs, but its name +
+    # responsibilities are kept in sync from the linked role, so the one catalogue
+    # is edited in Roles. NULL only for legacy rows created before the link.
+    role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -3082,6 +3087,10 @@ class ClubRole(Base):
     title = Column(Text, nullable=False)
     role_type_id = Column(UUID(as_uuid=True), ForeignKey("club_role_types.id", ondelete="SET NULL"), nullable=True)
     description = Column(Text, nullable=True)
+    # A committee role is a role that also appears as a Committee position
+    # (migration 198). Volunteers pick non-committee roles; Committee terms are
+    # held against committee roles. Both live in this one catalogue.
+    is_committee = Column(Boolean, nullable=False, server_default="false", default=False)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

@@ -43,6 +43,7 @@ class RoleUpsert(BaseModel):
     title: str
     role_type_id: Optional[str] = None
     description: Optional[str] = None
+    is_committee: Optional[bool] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -107,9 +108,9 @@ async def seed_role_types(_: User = _roles, club: Organisation = Depends(get_cur
 
 # ─── Roles ───────────────────────────────────────────────────────────────────
 @router.get("/roles")
-async def list_roles(include_inactive: bool = False, _: User = _roles,
+async def list_roles(include_inactive: bool = False, committee: Optional[bool] = None, _: User = _roles,
                      club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"roles": await svc.list_roles(db, club.id, include_inactive=include_inactive)}
+    return {"roles": await svc.list_roles(db, club.id, include_inactive=include_inactive, committee=committee)}
 
 
 @router.post("/roles")
@@ -117,7 +118,7 @@ async def create_role(data: RoleUpsert, _: User = _roles, club: Organisation = D
                       db: AsyncSession = Depends(get_db)):
     try:
         r = await svc.create_role(db, club.id, title=data.title, role_type_id=_uuid(data.role_type_id),
-                                  description=data.description)
+                                  description=data.description, is_committee=bool(data.is_committee))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
@@ -146,9 +147,9 @@ async def archive_role(role_id: str, _: User = _roles, club: Organisation = Depe
 
 
 @router.post("/roles/seed-starter")
-async def seed_roles(_: User = _roles, club: Organisation = Depends(get_current_club),
+async def seed_roles(committee: bool = False, _: User = _roles, club: Organisation = Depends(get_current_club),
                      db: AsyncSession = Depends(get_db)):
-    seeded = await svc.seed_starter_roles(db, club.id)
+    seeded = await svc.seed_starter_roles(db, club.id, committee=committee)
     await db.commit()
     return {"seeded": seeded}
 

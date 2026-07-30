@@ -4091,6 +4091,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS budget_estimate NUMERIC(10, 2)"))
         await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS actual_expenditure NUMERIC(10, 2)"))
 
+    # Migration 198: unify committee positions with the Roles catalogue.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE club_roles ADD COLUMN IF NOT EXISTS is_committee BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE committee_positions ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
