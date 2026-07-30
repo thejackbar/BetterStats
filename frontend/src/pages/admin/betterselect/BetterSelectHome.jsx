@@ -4,15 +4,19 @@
 // each a click into availability or selection. Built from the live API and
 // defensive about every shape so the landing page degrades rather than breaks.
 import { useState, useEffect, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import BetterSelectLayout, { NAV } from '../../../components/admin/BetterSelectLayout'
-import HubCard from '../../../components/admin/HubCard'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import BetterSelectLayout, { GROUPS } from '../../../components/admin/BetterSelectLayout'
+import ModuleHub from '../../../components/admin/ModuleHub'
+import ModuleHero from '../../../components/admin/ModuleHero'
 import { useAuth } from '../../../contexts/AuthContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY } from '../../../lib/availability'
+import { moduleBrand } from '../../../lib/moduleBrand'
 import { Icon, Btn, AvailSummary, Empty } from './ui'
+
+const BRAND = moduleBrand('select')
 
 const SELECT = '/admin/betterselect/select/'
 
@@ -43,6 +47,24 @@ function NeedRow({ tone, children, action, onClick }) {
 }
 
 export default function BetterSelectHome() {
+  const { group } = useParams()
+  if (group) {
+    return (
+      <BetterSelectLayout title="BetterSelect">
+        <div className="max-w-3xl">
+          <ModuleHub groups={GROUPS} basePath="/admin/betterselect" groupKey={group} />
+        </div>
+      </BetterSelectLayout>
+    )
+  }
+  return <BetterSelectOverview />
+}
+
+// The "this weekend" dashboard — the next fixture, who's responded, what
+// needs attention, and the upcoming fixtures — each a click into
+// availability or selection. Built from the live API and defensive about
+// every shape so the landing page degrades rather than breaks.
+function BetterSelectOverview() {
   const { hasCapability } = useAuth()
   const navigate = useNavigate()
   const [fixtures, setFixtures] = useState(null)
@@ -153,6 +175,11 @@ export default function BetterSelectHome() {
       title="Overview"
       actions={hero && canSelect && <Btn variant="primary" sm icon="selection" onClick={() => navigate(SELECT + hero.id)}>Pick this team</Btn>}
     >
+      <ModuleHero
+        name="BetterSelect"
+        logo={BRAND.logo}
+        blurb="Everything for match day — your squads, availability, selection, nets and votes."
+      />
       {!hero ? (
         <div className="pb-card px-5 py-12 text-center">
           <Empty className="mb-4">No upcoming fixtures yet.</Empty>
@@ -235,15 +262,11 @@ export default function BetterSelectHome() {
         </div>
       )}
 
-      {/* All BetterSelect tools — the next steps, always visible as cards
-          (the BetterAdmin house style) beneath the this-weekend dashboard. */}
-      <div className="mt-6">
+      {/* BetterSelect's tools, grouped into sub-modules — the BetterAdmin
+          house style, beneath the this-weekend dashboard. */}
+      <div className="mt-6 max-w-3xl">
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">BetterSelect tools</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {NAV.filter(t => t.label !== 'Overview' && (t.cap == null || hasCapability(t.cap))).map(t => (
-            <HubCard key={t.to} to={t.to} title={t.label} desc={t.desc} />
-          ))}
-        </div>
+        <ModuleHub groups={GROUPS} basePath="/admin/betterselect" />
       </div>
     </BetterSelectLayout>
   )

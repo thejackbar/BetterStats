@@ -11,7 +11,12 @@ import HubCard from './HubCard'
 // is hidden (overview) or sends you back (group page).
 export default function ModuleHub({ groups, basePath, groupKey }) {
   const { hasCapability } = useAuth()
-  const accessible = items => items.filter(i => i.cap == null || hasCapability(i.cap))
+  // anyCaps: show the item when the user holds ANY of the listed capabilities
+  // (e.g. BetterSelect's Votes is open to managers and designated leaderboard
+  // viewers alike). Falls back to the plain single-cap check otherwise.
+  const accessible = items => items.filter(i => i.anyCaps
+    ? i.anyCaps.some(c => hasCapability(c))
+    : (i.cap == null || hasCapability(i.cap)))
 
   // A group's page — one card per tool.
   if (groupKey) {

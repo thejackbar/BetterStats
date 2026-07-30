@@ -2137,6 +2137,13 @@ export const api = {
     const qs = q.toString()
     return request(`/votes/leaderboard${qs ? `?${qs}` : ''}`)
   },
+  votesBulkState: ({ fixture_ids, action }) =>
+    request('/votes/bulk-state', { method: 'POST', body: JSON.stringify({ fixture_ids, action }) }),
+  votesNudge: (fixtureId, body) =>
+    request('/votes/nudge', {
+      method: 'POST',
+      body: JSON.stringify(fixtureId ? { fixture_id: fixtureId, ...body } : body),
+    }),
 
   // ─── Public: vote collection (no admin auth; player cookie or typed name) ───
   votePublicLanding: (token, { team, round_key, q } = {}) => {

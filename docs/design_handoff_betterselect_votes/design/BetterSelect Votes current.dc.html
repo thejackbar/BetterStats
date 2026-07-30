@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root, [data-theme="dark"] {
+    --pb-bg:#0a0d14; --pb-surface:#10141d; --pb-surface2:#161b27;
+    --pb-hairline:#1d2331; --pb-hairline2:#262d3d;
+    --pb-text:#e6e8ef; --pb-dim:#8a90a2; --pb-faint:#5b6072; --pb-faintest:#3a3f50;
+    --pb-on-accent:#0a0d14;
+  }
+  [data-theme="light"] {
+    --pb-bg:#f5f6f8; --pb-surface:#ffffff; --pb-surface2:#eef0f3;
+    --pb-hairline:#e1e4ea; --pb-hairline2:#d0d4dd;
+    --pb-text:#1b1e27; --pb-dim:#5b6072; --pb-faint:#8a90a2; --pb-faintest:#b6bac6;
+    --pb-on-accent:#ffffff;
+  }
+  body { margin:0; background:var(--pb-bg); color:var(--pb-text); font-family:'Geist',Inter,system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  a { color:#3B82F6; text-decoration:underline; }
+  a:hover { color:#60a5fa; }
+  select { font-family:inherit; color:var(--pb-text); }
+  input { font-family:inherit; }
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background:var(--pb-surface); }
+  ::-webkit-scrollbar-thumb { background:var(--pb-hairline2); border-radius:9999px; }
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="min-height:100vh; background:var(--pb-bg); color:var(--pb-text); display:flex;">
+
+  <aside style="width:240px; flex-shrink:0; border-right:1px solid var(--pb-hairline); background:var(--pb-surface); display:flex; flex-direction:column; position:sticky; top:0; height:100vh;">
+    <div style="padding:16px; border-bottom:1px solid var(--pb-hairline);">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="width:32px; height:32px; border-radius:4px; background:rgba(59,130,246,0.15); color:#3B82F6; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;">A</span>
+        <div style="min-width:0;">
+          <div style="font-weight:700; font-size:14px; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Applecross Cricket Club</div>
+        </div>
+      </div>
+      <span style="display:inline-flex; align-items:center; gap:8px; margin-top:12px;">
+        <img src="frontend/src/assets/modules/betterselect.svg" alt="" style="width:28px; height:28px; border-radius:8px; flex-shrink:0;" />
+        <span style="font-weight:700; font-size:15px; line-height:1;">Better<span style="color:#3B82F6;">Select</span></span>
+      </span>
+      <a href="#" style="display:block; margin-top:12px; font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--pb-faintest); text-decoration:none;">← Back to admin</a>
+    </div>
+    <nav style="flex:1; overflow-y:auto; padding:8px 0; display:flex; flex-direction:column;">
+      <sc-for list="{{ nav }}" as="item" hint-placeholder-count="9">
+        <a href="#" style="{{ item.style }}">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;" dangerouslySetInnerHTML="{{ item.icon }}"></svg>
+          <span>{{ item.label }}</span>
+        </a>
+      </sc-for>
+    </nav>
+  </aside>
+
+  <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+    <header style="position:sticky; top:0; z-index:30; background:rgba(16,20,29,0.8); backdrop-filter:blur(8px); border-bottom:1px solid var(--pb-hairline); padding:12px 24px; display:flex; align-items:center; justify-content:space-between; gap:16px;">
+      <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+        <h1 style="font-weight:700; font-size:20px; margin:0;">Votes</h1>
+      </div>
+      <div style="display:flex; align-items:center; gap:4px; min-width:0; overflow-x:auto;">
+        <sc-for list="{{ pills }}" as="p" hint-placeholder-count="6">
+          <a href="#" style="{{ p.style }}">
+            <img src="{{ p.logo }}" alt="" style="width:16px; height:16px; border-radius:5px; flex-shrink:0;" />
+            <span>{{ p.label }}</span>
+          </a>
+        </sc-for>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button style="background:none; border:0; color:var(--pb-faint); cursor:pointer; padding:4px; display:flex;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12v17l-6-4-6 4z"></path></svg>
+        </button>
+        <div style="display:flex; align-items:center; gap:8px; font-size:14px; color:var(--pb-faint);">
+          <span>Jack Barwood</span>
+          <a href="#" style="color:var(--pb-faint);">Logout</a>
+        </div>
+      </div>
+    </header>
+
+    <main style="flex:1; padding:24px; max-width:1400px; width:100%; margin:0 auto; box-sizing:border-box;">
+      <div style="display:flex; align-items:center; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--pb-hairline);">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+          <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+        </sc-for>
+      </div>
+
+      <!-- ── Fixtures tab ── -->
+      <sc-if value="{{ isFixtures }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="Fixtures">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:16px;">
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px;">
+              <option>Season 2025/26</option>
+              <option>Season 2024/25</option>
+            </select>
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px;">
+              <option>All teams / grades</option>
+              <option>1st Grade</option>
+              <option>2nd Grade</option>
+              <option>3rd Grade</option>
+            </select>
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px;">
+              <option>All rounds</option>
+              <option>Round 9</option>
+              <option>Round 8</option>
+            </select>
+            <input placeholder="Search opponent…" style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px; width:160px; color:var(--pb-text);" />
+          </div>
+          <div style="border:1px solid var(--pb-hairline); border-radius:12px; overflow:hidden;">
+            <sc-for list="{{ fixtures }}" as="f" hint-placeholder-count="6">
+              <button onClick="{{ f.onClick }}" style="width:100%; display:flex; align-items:center; gap:12px; padding:12px 16px; text-align:left; background:none; border:0; border-top:1px solid var(--pb-hairline); color:inherit; font-family:inherit; cursor:pointer;" style-hover="background:var(--pb-surface2);">
+                <div style="min-width:0; flex:1;">
+                  <div style="font-weight:500; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ f.title }}</div>
+                  <div style="font-size:12px; color:var(--pb-faint); margin-top:2px;">{{ f.meta }}</div>
+                </div>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--pb-faint); flex-shrink:0;">{{ f.ballotsLabel }}</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:2px 8px; border-radius:9999px; flex-shrink:0; {{ f.badgeStyle }}">{{ f.badgeLabel }}</span>
+                <span style="color:var(--pb-faintest); flex-shrink:0;">→</span>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ── Fixture detail ── -->
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Fixture detail" style="display:flex; flex-direction:column; gap:16px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:12px;">
+            <button onClick="{{ backToFixtures }}" style="display:inline-flex; align-items:center; justify-content:center; gap:6px; border-radius:8px; font-size:12.5px; padding:6px 10px; background:transparent; color:var(--pb-dim); border:1px solid var(--pb-hairline2); cursor:pointer; font-family:inherit;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+              All fixtures
+            </button>
+            <div style="font-weight:700; font-size:18px;">Round 9 · vs Melville</div>
+            <span style="color:var(--pb-faint); font-size:14px;">7 Feb 2026</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:2px 8px; border-radius:9999px; background:rgba(22,199,132,0.14); color:#16c784;">OPEN</span>
+            <div style="margin-left:auto; display:flex; gap:8px;">
+              <button style="display:inline-flex; align-items:center; border-radius:8px; font-size:12.5px; padding:6px 10px; background:transparent; color:var(--pb-dim); border:1px solid var(--pb-hairline2); cursor:pointer; font-family:inherit;">Copy link</button>
+              <button style="display:inline-flex; align-items:center; border-radius:8px; font-size:12.5px; padding:6px 10px; background:transparent; color:var(--pb-dim); border:1px solid var(--pb-hairline2); cursor:pointer; font-family:inherit;">Lock voting</button>
+            </div>
+          </div>
+
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:4px;">
+              <div style="font-weight:700; font-size:15px;">Who can be voted for</div>
+              <div style="font-size:12px; color:var(--pb-faint);">Using the <b style="color:var(--pb-text);">Match scorecard</b></div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px;">
+              <button style="padding:6px 12px; border-radius:8px; font-size:12.5px; border:1px solid #3B82F6; color:#3B82F6; background:rgba(59,130,246,0.1); cursor:default; font-family:inherit;">Match scorecard<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faint); margin-left:6px;">11</span></button>
+              <button style="padding:6px 12px; border-radius:8px; font-size:12.5px; border:1px solid var(--pb-hairline); color:var(--pb-dim); background:transparent; cursor:pointer; font-family:inherit;">BetterSelect XI<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faint); margin-left:6px;">11</span></button>
+              <button style="padding:6px 12px; border-radius:8px; font-size:12.5px; border:1px solid var(--pb-hairline); color:var(--pb-dim); background:transparent; cursor:pointer; font-family:inherit;">Play.Cricket team list<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faint); margin-left:6px;">—</span></button>
+            </div>
+            <div style="font-size:11px; color:var(--pb-faintest); margin-top:8px;">The number is how many players each list would put on the ballot. Changing it here only affects this game.</div>
+          </div>
+
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <div style="font-weight:700; font-size:15px; margin-bottom:10px;">This week's count</div>
+            <table style="width:100%; font-size:14px; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint);">
+                  <th style="padding:6px 12px 6px 0; font-weight:400;">Player</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">Season points</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">Raw votes</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">3s</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">2s</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">1s</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ weekResults }}" as="r" hint-placeholder-count="5">
+                  <tr style="border-top:1px solid var(--pb-hairline);">
+                    <td style="padding:8px 12px 8px 0; font-weight:500;">{{ r.name }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700; color:#3B82F6;">{{ r.points }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace;">{{ r.raw }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ r.c3 }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ r.c2 }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ r.c1 }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <div style="font-weight:700; font-size:15px; margin-bottom:4px;">Enter a ballot</div>
+            <p style="font-size:12px; color:var(--pb-faint); margin:0 0 12px;">Paper votes, or the captain texting theirs in. Entering again for the same voter replaces their ballot.</p>
+            <div style="display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px;">
+              <div>
+                <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint); margin-bottom:4px;">Voter</label>
+                <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:8px 12px; font-size:14px; min-width:180px;"><option>— who's voting? —</option></select>
+              </div>
+              <div>
+                <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint); margin-bottom:4px;">3 votes</label>
+                <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:8px 12px; font-size:14px; min-width:160px;"><option>—</option></select>
+              </div>
+              <div>
+                <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint); margin-bottom:4px;">2 votes</label>
+                <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:8px 12px; font-size:14px; min-width:160px;"><option>—</option></select>
+              </div>
+              <div>
+                <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint); margin-bottom:4px;">1 vote</label>
+                <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:8px 12px; font-size:14px; min-width:160px;"><option>—</option></select>
+              </div>
+              <button style="display:inline-flex; align-items:center; border-radius:8px; font-size:12.5px; padding:6px 10px; background:#3B82F6; color:var(--pb-on-accent); font-weight:600; border:1px solid transparent; opacity:0.4; cursor:default; font-family:inherit;">Save ballot</button>
+            </div>
+          </div>
+
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <div style="font-weight:700; font-size:15px; margin-bottom:10px;">Ballots <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--pb-faint); font-weight:400;">(8)</span></div>
+            <div>
+              <sc-for list="{{ ballots }}" as="b" hint-placeholder-count="6">
+                <div style="padding:10px 0; display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; border-top:1px solid var(--pb-hairline);">
+                  <span style="font-weight:500; font-size:14px; min-width:140px;">{{ b.voter }}</span>
+                  <span style="font-size:13px; color:var(--pb-dim); flex:1;">{{ b.picks }}</span>
+                  <button style="background:none; border:0; color:var(--pb-faintest); cursor:pointer; display:flex; padding:0;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"></path></svg>
+                  </button>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ── Leaderboard tab ── -->
+      <sc-if value="{{ isLeaderboard }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Leaderboard" style="display:flex; flex-direction:column; gap:16px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px;"><option>Season 2025/26</option></select>
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px;"><option>Whole club</option><option>1st Grade</option></select>
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:6px 12px; font-size:14px;"><option>Full season to date</option><option>As at Round 8</option></select>
+            <span style="font-size:11.5px; color:var(--pb-faintest);">Weekly 3-2-1 conversion · ties shared</span>
+          </div>
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <table style="width:100%; font-size:14px; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint);">
+                  <th style="padding:6px 12px 6px 0; width:32px; font-weight:400;">#</th>
+                  <th style="padding:6px 12px 6px 0; font-weight:400;">Player</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">Points</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">Raw votes</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">3s</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">2s</th>
+                  <th style="padding:6px 12px 6px 0; text-align:right; font-weight:400;">1s</th>
+                  <th style="padding:6px 0; text-align:right; font-weight:400;">Rounds</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ standings }}" as="s" hint-placeholder-count="10">
+                  <tr style="border-top:1px solid var(--pb-hairline);">
+                    <td style="padding:8px 12px 8px 0; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ s.rank }}</td>
+                    <td style="padding:8px 12px 8px 0; font-weight:500;">{{ s.name }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700; color:{{ s.pointsColor }};">{{ s.points }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-dim);">{{ s.raw }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ s.c3 }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ s.c2 }}</td>
+                    <td style="padding:8px 12px 8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ s.c1 }}</td>
+                    <td style="padding:8px 0; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--pb-faint);">{{ s.rounds }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <button onClick="{{ toggleRounds }}" style="width:100%; display:flex; align-items:center; justify-content:space-between; background:none; border:0; color:inherit; cursor:pointer; font-family:inherit; padding:0;">
+              <span style="font-weight:700; font-size:15px;">Round by round</span>
+              <span style="color:var(--pb-faint); font-size:14px;">{{ roundsCaret }}</span>
+            </button>
+            <sc-if value="{{ showRounds }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:12px; display:flex; flex-direction:column; gap:16px;">
+                <sc-for list="{{ roundRows }}" as="rd" hint-placeholder-count="3">
+                  <div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint); margin-bottom:6px;">{{ rd.head }}</div>
+                    <div style="font-size:13px; color:var(--pb-dim);">{{ rd.body }}</div>
+                  </div>
+                </sc-for>
+                <div style="font-size:11px; color:var(--pb-faintest);">8 of 9 rounds counted.</div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ── Settings tab ── -->
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Settings" style="display:flex; flex-direction:column; gap:16px; max-width:768px;">
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <div style="font-weight:700; font-size:15px; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+              Voting link
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:2px 8px; border-radius:9999px; background:rgba(22,199,132,0.16); color:#16c784;">ON</span>
+            </div>
+            <p style="font-size:12.5px; color:var(--pb-faint); margin:0 0 12px;">Players open the link, verify with the last 4 digits of their mobile, and cast their votes, without logging in.</p>
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint);">Status</span>
+              <div style="display:inline-flex; padding:3px; gap:2px; background:var(--pb-surface2); border-radius:8px; border:1px solid var(--pb-hairline);">
+                <button style="border-radius:6px; font-weight:600; font-size:12px; padding:4px 10px; background:rgba(59,130,246,0.15); color:#3B82F6; border:0; cursor:pointer; font-family:inherit;">Enabled</button>
+                <button style="border-radius:6px; font-weight:600; font-size:12px; padding:4px 10px; background:transparent; color:var(--pb-faint); border:0; cursor:pointer; font-family:inherit;">Off</button>
+              </div>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--pb-faint); margin-left:12px;">PIN</span>
+              <div style="display:inline-flex; padding:3px; gap:2px; background:var(--pb-surface2); border-radius:8px; border:1px solid var(--pb-hairline);">
+                <button style="border-radius:6px; font-weight:600; font-size:12px; padding:4px 10px; background:rgba(59,130,246,0.15); color:#3B82F6; border:0; cursor:pointer; font-family:inherit;">Last-4 PIN</button>
+                <button style="border-radius:6px; font-weight:600; font-size:12px; padding:4px 10px; background:transparent; color:var(--pb-faint); border:0; cursor:pointer; font-family:inherit;">No PIN</button>
+              </div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
+              <input readonly="readonly" value="https://app.bettercricket.com/vote/9f3c2a8e" style="flex:1; min-width:220px; background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:8px; padding:8px 12px; font-size:14px; font-family:'JetBrains Mono',monospace; color:var(--pb-dim);" />
+              <button style="display:inline-flex; align-items:center; border-radius:8px; font-size:12.5px; padding:6px 10px; background:transparent; color:var(--pb-dim); border:1px solid var(--pb-hairline2); cursor:pointer; font-family:inherit;">Copy link</button>
+              <button style="display:inline-flex; align-items:center; border-radius:8px; font-size:12.5px; padding:6px 10px; background:transparent; color:var(--pb-dim); border:1px solid var(--pb-hairline2); cursor:pointer; font-family:inherit;">Copy message</button>
+              <button style="display:inline-flex; align-items:center; border-radius:8px; font-size:12.5px; padding:6px 10px; background:transparent; color:var(--pb-dim); border:1px solid var(--pb-hairline2); cursor:pointer; font-family:inherit;">Regenerate</button>
+            </div>
+            <div style="margin-top:12px; display:inline-block; text-align:center;">
+              <div style="width:144px; height:144px; border-radius:8px; background:#fff; padding:8px; box-sizing:border-box; display:flex; align-items:center; justify-content:center;">
+                <div style="width:100%; height:100%; background:repeating-conic-gradient(var(--pb-bg) 0% 25%, #fff 0% 50%) 0 0/16px 16px;"></div>
+              </div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faintest); margin-top:6px;">Scan to open</div>
+            </div>
+          </div>
+
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:4px 16px;">
+            <sc-for list="{{ settingRows }}" as="row" hint-placeholder-count="7">
+              <div style="display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px 24px; padding:14px 0; border-top:1px solid var(--pb-hairline);">
+                <div style="width:224px; flex-shrink:0;">
+                  <div style="font-size:14px; font-weight:500;">{{ row.label }}</div>
+                  <div style="font-size:12px; color:var(--pb-faint); margin-top:2px;">{{ row.hint }}</div>
+                </div>
+                <div style="flex:1; min-width:240px;">
+                  <div style="display:inline-flex; flex-wrap:wrap; padding:3px; gap:2px; background:var(--pb-surface2); border-radius:8px; border:1px solid var(--pb-hairline);">
+                    <sc-for list="{{ row.options }}" as="o" hint-placeholder-count="2">
+                      <button style="border-radius:6px; font-weight:600; font-size:12px; padding:4px 10px; border:0; cursor:pointer; font-family:inherit; {{ o.style }}">{{ o.label }}</button>
+                    </sc-for>
+                  </div>
+                  <div style="font-size:11px; color:var(--pb-faintest); margin-top:6px;">{{ row.note }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:6px; padding:16px;">
+            <div style="font-weight:700; font-size:15px; margin-bottom:4px;">Who can see the leaderboard</div>
+            <p style="font-size:12.5px; color:var(--pb-faint); margin:0;">The count stays inside the admin app. Nothing on the voting page or public site shows tallies. Club admins always see it; to give (or take away) access for other users, grant the <b style="color:var(--pb-text);">View vote results</b> capability on the <a href="#">Users</a> page. <b style="color:var(--pb-text);">Manage votes</b> controls who runs the vote itself.</p>
+          </div>
+        </div>
+      </sc-if>
+    </main>
+  </div>
+</div>
+
+<!-- ── Public voting page (/vote/:token) ── -->
+<sc-if value="{{ isPublic }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Public voting" data-theme="{{ theme }}" style="position:fixed; inset:0; z-index:50; background:var(--pb-bg); overflow-y:auto;">
+    <div style="max-width:448px; margin:0 auto; padding:48px 16px;">
+      <div style="display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; margin-bottom:24px;">
+        <span style="width:64px; height:64px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:20px; color:var(--pb-on-accent); background:#3B82F6;">ACC</span>
+        <div>
+          <div style="font-weight:700; font-size:20px; line-height:1.2;">Applecross Cricket Club</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.08em; color:var(--pb-faint); margin-top:4px;">BEST-PLAYER VOTES</div>
+        </div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:700; font-size:16px;">Round 9 · vs Melville</div>
+        <div style="font-size:12px; color:var(--pb-faint); margin-top:2px;">Saturday, 7 Feb · voting as <b style="color:var(--pb-text);">Tom Fletcher</b></div>
+      </div>
+      <div style="text-align:center; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:24px; color:#3B82F6;">Who gets your 3?</div>
+        <div style="font-size:12px; color:var(--pb-faint); margin-top:4px;">
+          <span style="font-family:'JetBrains Mono',monospace; margin:0 2px;">3</span>
+          <span style="font-family:'JetBrains Mono',monospace; margin:0 2px; opacity:0.4;">○</span>
+          <span style="font-family:'JetBrains Mono',monospace; margin:0 2px; opacity:0.4;">○</span>
+          · best player gets the 3
+        </div>
+      </div>
+      <div style="border:1px solid var(--pb-hairline); border-radius:12px; overflow:hidden;">
+        <sc-for list="{{ publicPlayers }}" as="p" hint-placeholder-count="10">
+          <button style="width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; text-align:left; background:none; border:0; border-top:1px solid var(--pb-hairline); color:inherit; font-family:inherit; cursor:pointer;" style-hover="background:var(--pb-surface2);">
+            <span style="font-size:15px; font-weight:500;">{{ p }}</span>
+            <span style="color:var(--pb-faintest); flex-shrink:0;">→</span>
+          </button>
+        </sc-for>
+      </div>
+      <button style="display:block; margin:12px auto 0; background:none; border:0; color:var(--pb-faint); font-size:14px; cursor:pointer; font-family:inherit;">← Back to games</button>
+      <div style="text-align:center; margin-top:40px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:var(--pb-faintest); text-transform:uppercase;">Powered by BetterCricket</span>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<div style="position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:60; display:flex; gap:4px; padding:5px; background:rgba(16,20,29,0.92); backdrop-filter:blur(8px); border:1px solid var(--pb-hairline2); border-radius:9999px;">
+  <button onClick="{{ toggleTheme }}" style="border-radius:9999px; font-size:12px; padding:5px 12px; border:0; cursor:pointer; font-family:inherit; white-space:nowrap; background:transparent; color:var(--pb-dim);">{{ themeLabel }}</button>
+  <span style="width:1px; align-self:stretch; background:var(--pb-hairline2); margin:0 2px;"></span>
+  <sc-for list="{{ screenPills }}" as="s" hint-placeholder-count="5">
+    <button onClick="{{ s.onClick }}" style="border-radius:9999px; font-size:12px; padding:5px 12px; border:0; cursor:pointer; font-family:inherit; white-space:nowrap; {{ s.style }}">{{ s.label }}</button>
+  </sc-for>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const NAV = [
+  ['Overview','overview'],['Players','player'],['Fixtures','fixtures'],['Squads','teams'],
+  ['Availability','availability'],['Selection','selection'],['Nets','nets'],['Votes','votes'],['Ladders','ladders'],
+];
+const ICONS = {
+  overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  player: '<circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>',
+  fixtures: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v3M16 3v3"/>',
+  teams: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"/>',
+  availability: '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+  selection: '<path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"/>',
+  nets: '<path d="M4 4v16M20 4v16M4 4h16M4 9h16M4 14h16M4 19h16M9 4v16M14 4v16"/>',
+  votes: '<rect x="4" y="9.5" width="16" height="10.5" rx="2"/><path d="M8.5 13.5h7"/><path d="M12 2v5M9.5 4.5L12 7l2.5-2.5"/>',
+  ladders: '<path d="M5 21V9M12 21V4M19 21v-8"/>',
+};
+const STATE_META = {
+  open: ['OPEN', '#16c784'], closed: ['CLOSED', 'var(--pb-faintest)'], locked: ['LOCKED', '#ef5b5b'],
+  awaiting_team: ['NEEDS TEAM LIST', '#f5b542'],
+};
+const FIXTURES = [
+  { id:'r9-mel', title:'Round 9 · vs Melville', meta:'7 Feb 2026 · 1st Grade · voting closes 14 Feb 2026', ballots:8, state:'open' },
+  { id:'r9-wil', title:'Round 9 · @ Willetton', meta:'7 Feb 2026 · 2nd Grade · voting closes 14 Feb 2026', ballots:3, state:'open' },
+  { id:'r9-fre', title:'Round 9 · vs Fremantle', meta:'7 Feb 2026 · 3rd Grade', ballots:0, state:'awaiting_team' },
+  { id:'r8-sub', title:'Round 8 · @ Subiaco', meta:'31 Jan 2026 · 1st Grade', ballots:11, state:'closed' },
+  { id:'r8-bay', title:'Round 8 · vs Bayswater', meta:'31 Jan 2026 · 2nd Grade', ballots:9, state:'locked' },
+  { id:'r7-scr', title:'Round 7 · vs Scarborough', meta:'24 Jan 2026 · 1st Grade', ballots:10, state:'closed' },
+];
+const WEEK = [
+  ['Tom Fletcher',3,17,4,2,1],['Sam Rahim',2,11,2,2,1],['Dylan Roche',1,6,1,1,1],
+  ['Harry Nguyen',0,3,0,1,1],['Josh Kellett',0,1,0,0,1],
+];
+const STANDINGS = [
+  ['Tom Fletcher',22,64,14,5,3,8],['Sam Rahim',19,58,11,7,4,8],['Dylan Roche',15,44,8,6,4,7],
+  ['Harry Nguyen',12,37,6,5,5,8],['Josh Kellett',10,29,4,5,4,6],['Ali Mansour',8,23,3,4,4,7],
+  ['Ben Traill',7,20,2,4,5,8],['Rory Shand',5,14,1,3,4,5],['Nick Verrall',4,11,1,2,3,6],['Ewan Pryce',2,6,0,1,4,4],
+];
+const BALLOTS = [
+  ['Tom Fletcher','3 Sam Rahim · 2 Dylan Roche · 1 Harry Nguyen'],
+  ['Sam Rahim','3 Tom Fletcher · 2 Dylan Roche · 1 Josh Kellett'],
+  ['Dylan Roche','3 Tom Fletcher · 2 Sam Rahim · 1 Harry Nguyen'],
+  ['Harry Nguyen','3 Tom Fletcher · 2 Sam Rahim · 1 Dylan Roche'],
+  ['Josh Kellett','3 Sam Rahim · 2 Tom Fletcher · 1 Harry Nguyen'],
+  ['Ali Mansour','3 Tom Fletcher · 2 Dylan Roche · 1 Sam Rahim'],
+  ['Ben Traill','3 Tom Fletcher · 2 Sam Rahim · 1 Josh Kellett'],
+  ['Coach Dave','3 Tom Fletcher · 2 Harry Nguyen · 1 Sam Rahim'],
+];
+const SETTING_ROWS = [
+  { label:'Who votes', hint:'Every player in the game, or just the captain.', options:[['All players',1],['Captain only',0]], note:'' },
+  { label:'Non-playing voters', hint:"Let the coach, president or supporters vote too. They enter their name on the voting page; you can delete any ballot you don't recognise.", options:[['Players only',0],['Allowed',1]], note:'' },
+  { label:'Voting for yourself', hint:'Whether a voter can include themselves in their picks.', options:[['Not allowed',1],['Allowed',0]], note:'' },
+  { label:'Ballot', hint:'Best player first. Default 3-2-1; make it 5-4-3-2-1, a single best-player vote, or anything else.', options:[['3',0],['2',0],['1',0],['+ Position',0]], note:'Currently: 3-2-1 (highest value = best player). Values are sorted highest-first when saved.' },
+  { label:'Season points', hint:"How a week's votes convert to leaderboard points.", options:[['Weekly 3-2-1',1],['Full tally',0]], note:"The week's top vote-getter earns 3 points, next 2, and so on." },
+  { label:'Ties', hint:'What happens when two players finish the week level.', options:[['Allow ties',1],['Countback',0]], note:'Tied players share the position and both take the higher points.' },
+  { label:'Voting closes', hint:'Days after the match before voting closes automatically. You can also lock or reopen any game yourself.', options:[['7 days',1]], note:'' },
+];
+const PILLS = [
+  ['Dashboard','betterstats',0],['Select','betterselect',1],['IQ','betteriq',0],
+  ['Socials','bettersocials',0],['Admin','betteradmin',0],['FantasyCricket','betterfantasy',0],
+];
+const PLAYERS = ['Sam Rahim','Dylan Roche','Harry Nguyen','Josh Kellett','Ali Mansour','Ben Traill','Rory Shand','Nick Verrall','Ewan Pryce','Marcus Idle'];
+
+class Component extends DCLogic {
+  state = { screen: 'fixtures', showRounds: false, theme: 'dark' };
+  set(screen) { this.setState({ screen }); }
+  renderVals() {
+    const sc = this.state.screen;
+    const tab = (t, label) => ({
+      label,
+      onClick: () => this.set(t),
+      style: 'padding:8px 14px; font-size:14px; font-weight:500; background:none; cursor:pointer; font-family:inherit; margin-bottom:-1px; border:0; border-bottom:2px solid ' +
+        ((sc === t || (t === 'fixtures' && sc === 'detail')) ? '#3B82F6; color:#3B82F6;' : 'transparent; color:var(--pb-faint);'),
+    });
+    return {
+      theme: this.state.theme,
+      themeLabel: this.state.theme === 'dark' ? 'Light mode' : 'Dark mode',
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      nav: NAV.map(([label, icon]) => ({
+        label, icon: { __html: ICONS[icon] },
+        style: 'display:flex; align-items:center; gap:12px; padding:8px 16px; font-size:14px; text-decoration:none; ' +
+          (label === 'Votes'
+            ? 'background:rgba(59,130,246,0.1); color:#3B82F6; border-right:2px solid #3B82F6;'
+            : 'color:var(--pb-faint);'),
+      })),
+      pills: PILLS.map(([label, logo, active]) => ({
+        label, logo: 'frontend/src/assets/modules/' + logo + '.svg',
+        style: 'display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:12.5px; line-height:1; white-space:nowrap; text-decoration:none; flex-shrink:0; ' +
+          (active
+            ? 'color:#3B82F6; font-weight:600; background:rgba(59,130,246,0.14); border:1px solid rgba(59,130,246,0.38);'
+            : 'color:var(--pb-faint); font-weight:500; background:transparent; border:1px solid transparent;'),
+      })),
+      tabs: [tab('fixtures', 'Fixtures'), tab('leaderboard', 'Leaderboard'), tab('settings', 'Settings')],
+      isFixtures: sc === 'fixtures', isDetail: sc === 'detail',
+      isLeaderboard: sc === 'leaderboard', isSettings: sc === 'settings', isPublic: sc === 'public',
+      fixtures: FIXTURES.map(f => {
+        const m = STATE_META[f.state];
+        return {
+          title: f.title, meta: f.meta,
+          ballotsLabel: f.ballots + (f.ballots === 1 ? ' ballot' : ' ballots'),
+          badgeLabel: m[0],
+          badgeStyle: 'background:color-mix(in srgb, ' + m[1] + ' 14%, transparent); color:' + m[1] + ';',
+          onClick: () => this.set('detail'),
+        };
+      }),
+      backToFixtures: () => this.set('fixtures'),
+      weekResults: WEEK.map(r => ({ name:r[0], points:r[1] || '—', raw:r[2], c3:r[3] || '·', c2:r[4] || '·', c1:r[5] || '·' })),
+      standings: STANDINGS.map((s, i) => ({
+        rank: i + 1, name: s[0], points: s[1], raw: s[2], c3: s[3] || '·', c2: s[4] || '·', c1: s[5] || '·', rounds: s[6],
+        pointsColor: i === 0 ? '#3B82F6' : 'var(--pb-text)',
+      })),
+      ballots: BALLOTS.map(b => ({ voter:b[0], picks:b[1] })),
+      settingRows: SETTING_ROWS.map(r => ({
+        label:r.label, hint:r.hint, note:r.note,
+        options: r.options.map(([label, active]) => ({
+          label,
+          style: active ? 'background:rgba(59,130,246,0.15); color:#3B82F6;' : 'background:transparent; color:var(--pb-faint);',
+        })),
+      })),
+      showRounds: this.state.showRounds,
+      roundsCaret: this.state.showRounds ? '▲' : '▼',
+      toggleRounds: () => this.setState(s => ({ showRounds: !s.showRounds })),
+      roundRows: [
+        { head:'Round 8 · 31 Jan 2026', body:'vs Subiaco (1st Grade): Tom Fletcher 3, Sam Rahim 2, Dylan Roche 1' },
+        { head:'Round 7 · 24 Jan 2026', body:'vs Scarborough (1st Grade): Sam Rahim 3, Harry Nguyen 2, Tom Fletcher 1' },
+        { head:'Round 9 · 7 Feb 2026 · not counted', body:'vs Melville (1st Grade): no votes' },
+      ],
+      publicPlayers: PLAYERS,
+      screenPills: [
+        ['fixtures','Fixtures'],['detail','Fixture detail'],['leaderboard','Leaderboard'],
+        ['settings','Settings'],['public','Public voting page'],
+      ].map(([k, label]) => ({
+        label, onClick: () => this.set(k),
+        style: sc === k ? 'background:rgba(59,130,246,0.18); color:#3B82F6; font-weight:600;' : 'background:transparent; color:var(--pb-dim);',
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

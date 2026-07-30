@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root, [data-theme="dark"] {
+    --pb-bg-deep:#07090f; --pb-bg:#0a0d14; --pb-surface:#10141d; --pb-surface2:#161b27;
+    --pb-hairline:#1d2331; --pb-hairline2:#262d3d;
+    --pb-text:#e6e8ef; --pb-dim:#8a90a2; --pb-faint:#5b6072; --pb-faintest:#3a3f50;
+    --pb-on-accent:#0a0d14;
+  }
+  [data-theme="light"] {
+    --pb-bg-deep:#e9ebef; --pb-bg:#f5f6f8; --pb-surface:#ffffff; --pb-surface2:#eef0f3;
+    --pb-hairline:#e1e4ea; --pb-hairline2:#d0d4dd;
+    --pb-text:#1b1e27; --pb-dim:#5b6072; --pb-faint:#8a90a2; --pb-faintest:#b6bac6;
+    --pb-on-accent:#ffffff;
+  }
+  body { margin:0; background:#111318; color:var(--pb-text); font-family:'Geist',Inter,system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  a { color:#3B82F6; text-decoration:none; }
+  a:hover { color:#60a5fa; }
+  input, select, button { font-family:inherit; }
+</style>
+</helmet>
+
+<section data-theme="{{ theme }}" style="display:flex; flex-direction:column; gap:28px; padding:48px; min-height:100vh; box-sizing:border-box; background:var(--pb-bg-deep); color:var(--pb-text);">
+  <div style="display:flex; flex-direction:column; gap:6px; max-width:760px;">
+    <div style="display:flex; align-items:center; gap:14px;">
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#3B82F6;">Turn 1 · BetterSelect Votes</div>
+      <div style="display:inline-flex; padding:3px; gap:2px; background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:999px;">
+        <sc-for list="{{ themeOptions }}" as="t" hint-placeholder-count="2">
+          <button onClick="{{ t.onClick }}" style="display:inline-flex; align-items:center; gap:6px; border-radius:999px; font-size:12px; font-weight:600; padding:4px 11px; border:0; cursor:pointer; {{ t.style }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML="{{ t.icon }}"></svg>
+            {{ t.label }}
+          </button>
+        </sc-for>
+      </div>
+    </div>
+    <h2 style="font-size:30px; font-weight:700; margin:0; letter-spacing:-0.01em;">The glow up</h2>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--pb-dim); margin:0; text-wrap:pretty;">Same rules, same data, same capabilities — rebuilt around the two moments that matter: casting a vote in under ten seconds, and reading the count like an event. <a href="#1a">1a</a> is the admin hub. <a href="#1b">1b</a> and <a href="#1c">1c</a> are two leaderboard directions. <a href="#1d">1d</a> and <a href="#1e">1e</a> are two voting flows.</p>
+  </div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:28px; align-items:flex-start;">
+
+    <!-- ══ 1a — Votes hub ══ -->
+    <div id="1a" style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(59,130,246,0.16); color:#3B82F6;">1a</span>
+        <span style="font-size:14px; font-weight:600;">Votes hub — filters, progress, bulk actions, sharing</span>
+      </div>
+
+      <div data-screen-label="Votes hub" style="width:1180px; background:var(--pb-bg); border:1px solid var(--pb-hairline); border-radius:14px; overflow:hidden;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 20px; border-bottom:1px solid var(--pb-hairline); background:var(--pb-surface);">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <img src="frontend/src/assets/modules/betterselect.svg" alt="" style="width:26px; height:26px; border-radius:7px;" />
+            <div style="font-weight:700; font-size:19px;">Votes</div>
+            <span style="width:1px; height:20px; background:var(--pb-hairline2);"></span>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--pb-faint);">SEASON 2025/26</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button style="display:inline-flex; align-items:center; gap:7px; padding:7px 13px; border-radius:9px; font-size:13px; font-weight:600; color:var(--pb-on-accent); background:#3B82F6; border:0; cursor:pointer;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.4"></circle><circle cx="17" cy="6" r="2.4"></circle><circle cx="17" cy="18" r="2.4"></circle><path d="M8.1 11l6.8-3.9M8.1 13l6.8 3.9"></path></svg>
+              Share voting link
+            </button>
+            <button style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:9px; font-size:13px; color:var(--pb-dim); background:transparent; border:1px solid var(--pb-hairline2); cursor:pointer;">Settings</button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:1px; background:var(--pb-hairline); border-bottom:1px solid var(--pb-hairline);">
+          <sc-for list="{{ hubStats }}" as="s" hint-placeholder-count="4">
+            <div style="flex:1; background:var(--pb-bg); padding:14px 20px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--pb-faint);">{{ s.label }}</div>
+              <div style="display:flex; align-items:baseline; gap:8px; margin-top:5px;">
+                <div style="font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; color:{{ s.color }};">{{ s.value }}</div>
+                <div style="font-size:12px; color:var(--pb-faint);">{{ s.sub }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; padding:14px 20px; border-bottom:1px solid var(--pb-hairline);">
+          <div style="display:inline-flex; padding:3px; gap:2px; background:var(--pb-surface2); border-radius:9px; border:1px solid var(--pb-hairline);">
+            <sc-for list="{{ statusFilters }}" as="f" hint-placeholder-count="4">
+              <button onClick="{{ f.onClick }}" style="border-radius:6px; font-weight:600; font-size:12.5px; padding:5px 11px; border:0; cursor:pointer; display:inline-flex; align-items:center; gap:6px; {{ f.style }}">
+                <span style="width:6px; height:6px; border-radius:50%; background:{{ f.dot }};"></span>{{ f.label }}
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; opacity:0.7;">{{ f.count }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <span style="width:1px; height:22px; background:var(--pb-hairline);"></span>
+          <div style="display:flex; gap:6px;">
+            <sc-for list="{{ gradeFilters }}" as="g" hint-placeholder-count="4">
+              <button onClick="{{ g.onClick }}" style="border-radius:999px; font-size:12.5px; padding:5px 12px; cursor:pointer; {{ g.style }}">{{ g.label }}</button>
+            </sc-for>
+          </div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; align-items:center; gap:7px; background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:9px; padding:0 11px; height:34px; color:var(--pb-faint);">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>
+              <input placeholder="Opponent or player…" style="background:transparent; border:0; outline:none; color:var(--pb-text); font-size:13px; width:150px;" />
+            </div>
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:9px; padding:0 11px; height:34px; font-size:13px; color:var(--pb-text);">
+              <option>All rounds</option>
+              <option>Round 9</option>
+              <option>Round 8</option>
+            </select>
+          </div>
+        </div>
+
+        <sc-if value="{{ anySelected }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex; align-items:center; gap:12px; padding:10px 20px; background:rgba(59,130,246,0.09); border-bottom:1px solid rgba(59,130,246,0.25);">
+            <span style="font-size:13px; font-weight:600; color:#3B82F6;">{{ selectedLabel }}</span>
+            <div style="display:flex; gap:7px;">
+              <button style="padding:5px 11px; border-radius:8px; font-size:12.5px; font-weight:600; color:var(--pb-on-accent); background:#16c784; border:0; cursor:pointer;">Open voting</button>
+              <button style="padding:5px 11px; border-radius:8px; font-size:12.5px; color:var(--pb-text); background:var(--pb-surface2); border:1px solid var(--pb-hairline2); cursor:pointer;">Lock voting</button>
+              <button style="padding:5px 11px; border-radius:8px; font-size:12.5px; color:var(--pb-text); background:var(--pb-surface2); border:1px solid var(--pb-hairline2); cursor:pointer;">Nudge non-voters</button>
+            </div>
+            <button onClick="{{ clearSelection }}" style="margin-left:auto; background:none; border:0; color:var(--pb-faint); font-size:12.5px; cursor:pointer;">Clear</button>
+          </div>
+        </sc-if>
+
+        <div style="display:grid; grid-template-columns:36px 1fr 150px 210px 118px 96px; align-items:center; gap:16px; padding:9px 20px; border-bottom:1px solid var(--pb-hairline); font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--pb-faint);">
+          <div></div><div>Fixture</div><div>Grade</div><div>Ballots in</div><div>Closes</div><div style="text-align:right;">Status</div>
+        </div>
+
+        <sc-for list="{{ hubRows }}" as="r" hint-placeholder-count="6">
+          <div style="display:grid; grid-template-columns:36px 1fr 150px 210px 118px 96px; align-items:center; gap:16px; padding:13px 20px; border-bottom:1px solid var(--pb-hairline);">
+            <button onClick="{{ r.onToggle }}" style="width:18px; height:18px; border-radius:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; {{ r.checkStyle }}">
+              <sc-if value="{{ r.checked }}" hint-placeholder-val="{{ false }}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke-width="3" style="stroke:var(--pb-on-accent);" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+              </sc-if>
+            </button>
+            <div style="min-width:0;">
+              <div style="font-size:14.5px; font-weight:600;">{{ r.opponent }}</div>
+              <div style="font-size:12px; color:var(--pb-faint); margin-top:2px;">{{ r.date }}</div>
+            </div>
+            <div style="font-size:13px; color:var(--pb-dim);">{{ r.grade }}</div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="flex:1; height:6px; border-radius:999px; background:var(--pb-surface2); overflow:hidden;">
+                <div style="height:100%; border-radius:999px; width:{{ r.pct }}; background:{{ r.barColor }};"></div>
+              </div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--pb-text); width:52px; text-align:right;">{{ r.ratio }}</div>
+            </div>
+            <div style="font-size:12.5px; color:{{ r.closesColor }};">{{ r.closes }}</div>
+            <div style="text-align:right;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; padding:3px 8px; border-radius:999px; letter-spacing:0.05em; {{ r.badgeStyle }}">{{ r.badge }}</span>
+            </div>
+          </div>
+        </sc-for>
+
+        <div style="display:flex; gap:20px; padding:20px; background:var(--pb-bg);">
+          <div style="flex:1; background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:12px; padding:16px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+              <div style="font-size:14.5px; font-weight:700;">Share this week's vote</div>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faintest);">ROUND 9 · 3 GAMES</span>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              <sc-for list="{{ shareTargets }}" as="t" hint-placeholder-count="5">
+                <button style="display:inline-flex; align-items:center; gap:8px; padding:9px 13px; border-radius:10px; font-size:13px; font-weight:500; color:var(--pb-text); background:var(--pb-surface2); border:1px solid var(--pb-hairline2); cursor:pointer;" style-hover="border-color:#3B82F6; color:var(--pb-text);">
+                  <span style="width:7px; height:7px; border-radius:50%; background:{{ t.dot }};"></span>{{ t.label }}
+                </button>
+              </sc-for>
+            </div>
+            <div style="margin-top:14px; padding:13px 14px; border-radius:10px; background:var(--pb-bg); border:1px dashed var(--pb-hairline2);">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--pb-faintest); margin-bottom:7px;">Message preview · editable</div>
+              <div style="font-size:13.5px; line-height:1.6; color:var(--pb-dim);">Votes are open for <b style="color:var(--pb-text);">Round 9 v Melville</b>. 30 seconds, no login — pick your 3, 2 and 1.<br /><span style="color:#3B82F6;">app.bettercricket.com/vote/9f3c2a8e?fixture=r9-mel</span><br />Closes Sat 14 Feb.</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12px; color:var(--pb-faint);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8h.01"></path></svg>
+              Every link is pre-filtered to the team and round you're looking at, so nobody hunts through other grades.
+            </div>
+          </div>
+          <div style="width:300px; background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:12px; padding:16px;">
+            <div style="font-size:14.5px; font-weight:700; margin-bottom:4px;">Still to vote</div>
+            <div style="font-size:12px; color:var(--pb-faint); margin-bottom:12px;">Round 9 v Melville · 3 of 11</div>
+            <div style="display:flex; flex-direction:column; gap:1px;">
+              <sc-for list="{{ nonVoters }}" as="p" hint-placeholder-count="3">
+                <div style="display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--pb-hairline);">
+                  <span style="width:28px; height:28px; border-radius:50%; background:var(--pb-surface2); border:1.5px solid var(--pb-hairline2); color:var(--pb-dim); font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; display:flex; align-items:center; justify-content:center;">{{ p.initials }}</span>
+                  <span style="font-size:13.5px; flex:1;">{{ p.name }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faintest);">{{ p.channel }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <button style="width:100%; margin-top:14px; padding:10px; border-radius:10px; font-size:13px; font-weight:600; color:var(--pb-on-accent); background:#f5b542; border:0; cursor:pointer;">Nudge all 3</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ 1b — Leaderboard: The Race ══ -->
+    <div id="1b" style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(59,130,246,0.16); color:#3B82F6;">1b</span>
+        <span style="font-size:14px; font-weight:600;">Leaderboard — The Race</span>
+        <span style="font-size:13px; color:var(--pb-faint);">podium, movement, round-by-round progression</span>
+      </div>
+
+      <div data-screen-label="Leaderboard — The Race" style="width:1180px; background:var(--pb-bg); border:1px solid var(--pb-hairline); border-radius:14px; overflow:hidden;">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 20px; border-bottom:1px solid var(--pb-hairline); background:var(--pb-surface);">
+          <div style="font-weight:700; font-size:19px;">Best Player Count</div>
+          <span style="width:1px; height:20px; background:var(--pb-hairline2);"></span>
+          <div style="display:flex; gap:6px;">
+            <button style="border-radius:999px; font-size:12.5px; padding:5px 12px; background:rgba(59,130,246,0.14); border:1px solid rgba(59,130,246,0.4); color:#3B82F6; font-weight:600; cursor:pointer;">Whole club</button>
+            <button style="border-radius:999px; font-size:12.5px; padding:5px 12px; background:transparent; border:1px solid var(--pb-hairline2); color:var(--pb-dim); cursor:pointer;">1st Grade</button>
+            <button style="border-radius:999px; font-size:12.5px; padding:5px 12px; background:transparent; border:1px solid var(--pb-hairline2); color:var(--pb-dim); cursor:pointer;">2nd Grade</button>
+            <button style="border-radius:999px; font-size:12.5px; padding:5px 12px; background:transparent; border:1px solid var(--pb-hairline2); color:var(--pb-dim); cursor:pointer;">3rd Grade</button>
+          </div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:10px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--pb-faint);">AS AT</span>
+            <select style="background:var(--pb-surface2); border:1px solid var(--pb-hairline); border-radius:9px; padding:0 11px; height:34px; font-size:13px; color:var(--pb-text);">
+              <option>Round 8 — full season to date</option>
+              <option>Round 7</option>
+            </select>
+            <button style="display:inline-flex; align-items:center; gap:7px; padding:0 13px; height:34px; border-radius:9px; font-size:13px; font-weight:600; color:var(--pb-on-accent); background:#3B82F6; border:0; cursor:pointer;">Presentation mode</button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:14px; padding:20px 20px 6px;">
+          <sc-for list="{{ podium }}" as="p" hint-placeholder-count="3">
+            <div style="flex:1; border-radius:14px; padding:18px; background:{{ p.bg }}; border:1px solid {{ p.border }}; position:relative; overflow:hidden;">
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; letter-spacing:0.14em; color:{{ p.accent }};">{{ p.place }}</div>
+                <div style="display:flex; align-items:center; gap:4px; font-family:'JetBrains Mono',monospace; font-size:11px; color:{{ p.moveColor }};">{{ p.move }}</div>
+              </div>
+              <div style="display:flex; align-items:flex-end; gap:12px; margin-top:14px;">
+                <span style="width:44px; height:44px; border-radius:50%; background:var(--pb-surface2); border:1.5px solid {{ p.border }}; color:{{ p.accent }}; font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;">{{ p.initials }}</span>
+                <div style="min-width:0;">
+                  <div style="font-size:19px; font-weight:700; letter-spacing:-0.01em;">{{ p.name }}</div>
+                  <div style="font-size:12px; color:var(--pb-faint);">{{ p.grade }}</div>
+                </div>
+                <div style="margin-left:auto; text-align:right;">
+                  <div style="font-size:38px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; color:{{ p.accent }};">{{ p.points }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; color:var(--pb-faint); margin-top:3px;">POINTS</div>
+                </div>
+              </div>
+              <div style="display:flex; gap:14px; margin-top:16px; padding-top:14px; border-top:1px solid {{ p.border }};">
+                <sc-for list="{{ p.chips }}" as="c" hint-placeholder-count="4">
+                  <div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.08em; color:var(--pb-faint);">{{ c.label }}</div>
+                    <div style="font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:2px;">{{ c.value }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:flex; gap:20px; padding:14px 20px 20px;">
+          <div style="flex:1; min-width:0;">
+            <div style="display:grid; grid-template-columns:44px minmax(190px,1fr) 104px 72px 56px 56px 56px; align-items:center; gap:12px; padding:9px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--pb-faint);">
+              <div>#</div><div>Player</div><div>Form · last 5</div><div style="text-align:right;">Points</div><div style="text-align:right;">3s</div><div style="text-align:right;">2s</div><div style="text-align:right;">1s</div>
+            </div>
+            <sc-for list="{{ boardRows }}" as="r" hint-placeholder-count="10">
+              <div style="display:grid; grid-template-columns:44px minmax(190px,1fr) 104px 72px 56px 56px 56px; align-items:center; gap:12px; padding:11px 14px; border-top:1px solid var(--pb-hairline); background:{{ r.rowBg }};">
+                <div style="display:flex; align-items:center; gap:5px;">
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; color:{{ r.rankColor }};">{{ r.rank }}</span>
+                  <sc-if value="{{ showMovement }}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size:9px; color:{{ r.moveColor }};">{{ r.moveGlyph }}</span>
+                  </sc-if>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                  <span style="width:26px; height:26px; border-radius:50%; background:var(--pb-surface2); border:1.5px solid var(--pb-hairline2); color:var(--pb-dim); font-family:'JetBrains Mono',monospace; font-size:9.5px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0;">{{ r.initials }}</span>
+                  <span style="font-size:14px; font-weight:500; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ r.name }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:9.5px; color:var(--pb-faintest); flex-shrink:0;">{{ r.grade }}</span>
+                </div>
+                <div style="display:flex; align-items:flex-end; gap:3px; height:22px;">
+                  <sc-for list="{{ r.form }}" as="b" hint-placeholder-count="5">
+                    <span style="width:8px; border-radius:2px; height:{{ b.h }}; background:{{ b.color }};"></span>
+                  </sc-for>
+                </div>
+                <div style="text-align:right; font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; color:{{ r.pointsColor }};">{{ r.points }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--pb-dim);">{{ r.c3 }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--pb-faint);">{{ r.c2 }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--pb-faint);">{{ r.c1 }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="width:344px; flex-shrink:0; background:var(--pb-surface); border:1px solid var(--pb-hairline); border-radius:12px; padding:16px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:2px;">
+              <div style="font-size:14.5px; font-weight:700;">The race</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faintest);">CUMULATIVE POINTS · R1–R8</div>
+            </div>
+            <div style="font-size:12px; color:var(--pb-faint); margin-bottom:10px;">Fletcher led from round 4. Rahim closed to three.</div>
+            <svg viewBox="0 0 368 190" style="width:100%; height:auto; display:block; overflow:visible;">
+              <sc-for list="{{ gridLines }}" as="g" hint-placeholder-count="4">
+                <line x1="26" x2="360" y1="{{ g.y }}" y2="{{ g.y }}" stroke-width="1" style="stroke:var(--pb-hairline);"></line>
+              </sc-for>
+              <sc-for list="{{ gridLines }}" as="g" hint-placeholder-count="4">
+                <text x="0" y="{{ g.ty }}" style="fill:var(--pb-faintest);" font-size="9" font-family="JetBrains Mono, monospace">{{ g.label }}</text>
+              </sc-for>
+              <sc-for list="{{ raceLines }}" as="l" hint-placeholder-count="5">
+                <polyline points="{{ l.points }}" fill="none" stroke="{{ l.color }}" stroke-width="{{ l.width }}" stroke-linejoin="round" stroke-linecap="round"></polyline>
+              </sc-for>
+              <sc-for list="{{ raceLines }}" as="l" hint-placeholder-count="5">
+                <circle cx="{{ l.cx }}" cy="{{ l.cy }}" r="3.5" fill="{{ l.color }}"></circle>
+              </sc-for>
+              <sc-for list="{{ raceTicks }}" as="t" hint-placeholder-count="8">
+                <text x="{{ t.x }}" y="186" style="fill:var(--pb-faintest);" font-size="9" font-family="JetBrains Mono, monospace" text-anchor="middle">{{ t.label }}</text>
+              </sc-for>
+            </svg>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:12px;">
+              <sc-for list="{{ raceLegend }}" as="l" hint-placeholder-count="5">
+                <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--pb-dim);">
+                  <span style="width:9px; height:3px; border-radius:2px; background:{{ l.color }};"></span>{{ l.name }}
+                </span>
+              </sc-for>
+            </div>
+            <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--pb-hairline);">
+              <div style="font-size:13.5px; font-weight:600; margin-bottom:8px;">Round 8 · @ Subiaco</div>
+              <sc-for list="{{ lastRound }}" as="v" hint-placeholder-count="3">
+                <div style="display:flex; align-items:center; gap:10px; padding:6px 0;">
+                  <span style="width:22px; height:22px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; background:rgba(59,130,246,0.14); color:#3B82F6;">{{ v.pts }}</span>
+                  <span style="font-size:13.5px;">{{ v.name }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ 1c — Awards night ══ -->
+    <div id="1c" style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(245,181,66,0.16); color:#f5b542;">1c</span>
+        <span style="font-size:14px; font-weight:600;">Leaderboard — Awards Night</span>
+        <span style="font-size:13px; color:var(--pb-faint);">big-screen reveal, one round at a time</span>
+      </div>
+
+      <div data-screen-label="Awards Night" data-theme="dark" style="width:1180px; height:664px; color:var(--pb-text); background:var(--pb-bg-deep); border:1px solid var(--pb-hairline); border-radius:14px; overflow:hidden; display:flex; flex-direction:column;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:20px 28px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="width:30px; height:30px; border-radius:8px; background:#3B82F6; color:var(--pb-on-accent); font-weight:700; font-size:12px; display:flex; align-items:center; justify-content:center;">ACC</span>
+            <div>
+              <div style="font-size:15px; font-weight:700; line-height:1.1;">Applecross Cricket Club</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; color:var(--pb-faint); margin-top:2px;">BEST PLAYER 2025/26 · 1ST GRADE</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="display:flex; align-items:center; gap:5px;">
+              <sc-for list="{{ revealDots }}" as="d" hint-placeholder-count="9">
+                <span style="width:7px; height:7px; border-radius:50%; background:{{ d.color }};"></span>
+              </sc-for>
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--pb-dim);">{{ revealLabel }}</div>
+            <button onClick="{{ revealNext }}" style="padding:8px 16px; border-radius:9px; font-size:13px; font-weight:600; color:var(--pb-on-accent); background:#f5b542; border:0; cursor:pointer;">Reveal next round</button>
+          </div>
+        </div>
+
+        <div style="flex:1; display:flex; gap:32px; padding:8px 28px 28px; min-height:0;">
+          <div style="width:430px; flex-shrink:0; display:flex; flex-direction:column; justify-content:center; gap:22px;">
+            <div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.2em; color:#f5b542;">LEADING THE COUNT</div>
+              <div style="font-size:64px; font-weight:800; line-height:1; letter-spacing:-0.03em; margin-top:10px;">Tom<br />Fletcher</div>
+              <div style="display:flex; align-items:baseline; gap:14px; margin-top:18px;">
+                <div style="font-size:84px; font-weight:800; line-height:1; color:#f5b542; font-variant-numeric:tabular-nums;">22</div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; color:var(--pb-faint);">POINTS</div>
+                  <div style="font-size:14px; color:var(--pb-dim); margin-top:4px;">+3 clear · 14 threes</div>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; gap:1px; background:var(--pb-hairline); border-radius:10px; overflow:hidden;">
+              <sc-for list="{{ awardStats }}" as="s" hint-placeholder-count="3">
+                <div style="flex:1; background:var(--pb-surface); padding:13px 14px;">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; color:var(--pb-faint);">{{ s.label }}</div>
+                  <div style="font-size:20px; font-weight:700; margin-top:4px; font-variant-numeric:tabular-nums;">{{ s.value }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; color:var(--pb-faintest); padding:0 4px 10px;">THE COUNT · AFTER {{ revealShort }}</div>
+            <div style="flex:1; display:flex; flex-direction:column; gap:6px; overflow:hidden;">
+              <sc-for list="{{ awardRows }}" as="r" hint-placeholder-count="9">
+                <div style="display:flex; align-items:center; gap:16px; padding:10px 16px; border-radius:11px; background:{{ r.bg }}; border:1px solid {{ r.border }};">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; width:26px; color:{{ r.rankColor }};">{{ r.rank }}</div>
+                  <div style="flex:1; min-width:0; font-size:{{ r.nameSize }}; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ r.name }}</div>
+                  <sc-if value="{{ r.moved }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 7px; border-radius:999px; background:rgba(22,199,132,0.14); color:#16c784;">{{ r.moveLabel }}</span>
+                  </sc-if>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--pb-faintest); width:56px; text-align:right;">{{ r.gain }}</div>
+                  <div style="font-size:{{ r.pointsSize }}; font-weight:800; font-variant-numeric:tabular-nums; width:62px; text-align:right; color:{{ r.pointsColor }};">{{ r.points }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ 1d / 1e — voting flows ══ -->
+    <div style="display:flex; gap:28px; align-items:flex-start;">
+
+      <div id="1d" style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(22,199,132,0.16); color:#16c784;">1d</span>
+          <span style="font-size:14px; font-weight:600;">Voting — one screen</span>
+        </div>
+        <p style="font-size:13px; line-height:1.55; color:var(--pb-faint); margin:0; width:390px; text-wrap:pretty;">Tap three names in order; the slots fill 3 → 2 → 1. Tap a filled slot to clear it. Everything visible at once — no steps, no back button, three taps and submit.</p>
+
+        <div data-screen-label="Voting — one screen" style="width:390px; background:var(--pb-bg); border:1px solid var(--pb-hairline); border-radius:26px; overflow:hidden;">
+          <div style="padding:18px 20px 14px; border-bottom:1px solid var(--pb-hairline);">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <div style="display:flex; align-items:center; gap:9px;">
+                <span style="width:26px; height:26px; border-radius:7px; background:#3B82F6; color:var(--pb-on-accent); font-weight:700; font-size:10px; display:flex; align-items:center; justify-content:center;">ACC</span>
+                <div style="font-size:13.5px; font-weight:600;">R9 v Melville</div>
+              </div>
+              <div style="font-size:12px; color:var(--pb-faint);">Tom F. · <span style="color:#3B82F6;">Not you?</span></div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:14px;">
+              <sc-for list="{{ slots }}" as="s" hint-placeholder-count="3">
+                <button onClick="{{ s.onClick }}" style="flex:1; border-radius:12px; padding:11px 10px; text-align:left; cursor:pointer; {{ s.style }}">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; letter-spacing:0.1em; color:{{ s.labelColor }};">{{ s.label }}</div>
+                  <div style="font-size:13.5px; font-weight:600; margin-top:5px; color:{{ s.nameColor }}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.name }}</div>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="max-height:392px; overflow-y:auto;">
+            <sc-for list="{{ onePlayers }}" as="p" hint-placeholder-count="11">
+              <button onClick="{{ p.onClick }}" style="width:100%; display:flex; align-items:center; gap:12px; padding:12px 20px; text-align:left; border:0; border-bottom:1px solid var(--pb-hairline); cursor:pointer; background:{{ p.bg }};">
+                <span style="width:32px; height:32px; border-radius:50%; background:var(--pb-surface2); border:1.5px solid {{ p.ring }}; color:{{ p.initColor }}; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0;">{{ p.initials }}</span>
+                <span style="flex:1; font-size:15.5px; font-weight:500; color:{{ p.nameColor }};">{{ p.name }}</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faintest);">{{ p.role }}</span>
+                <span style="width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; {{ p.badgeStyle }}">{{ p.badge }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="padding:14px 20px 20px; border-top:1px solid var(--pb-hairline); background:var(--pb-surface);">
+            <button onClick="{{ submitOne }}" style="width:100%; padding:15px; border-radius:14px; font-size:15.5px; font-weight:700; border:0; cursor:pointer; {{ submitStyle }}">{{ submitLabel }}</button>
+            <div style="text-align:center; font-size:11.5px; color:var(--pb-faintest); margin-top:10px;">You can change your votes until Saturday.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="1e" style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(168,85,247,0.16); color:#a855f7;">1e</span>
+          <span style="font-size:14px; font-weight:600;">Voting — guided stepper</span>
+        </div>
+        <p style="font-size:13px; line-height:1.55; color:var(--pb-faint); margin:0; width:390px; text-wrap:pretty;">The current flow, sped up: two-up cards instead of a list, a live progress rail, and the review folded into the last step so submitting is one tap rather than two screens.</p>
+
+        <div data-screen-label="Voting — guided stepper" style="width:390px; background:var(--pb-bg); border:1px solid var(--pb-hairline); border-radius:26px; overflow:hidden;">
+          <div style="padding:18px 20px 0;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <div style="font-size:13.5px; font-weight:600;">R9 v Melville</div>
+              <div style="font-size:12px; color:var(--pb-faint);">Sat 7 Feb</div>
+            </div>
+            <div style="display:flex; gap:5px; margin-top:14px;">
+              <sc-for list="{{ stepRail }}" as="r" hint-placeholder-count="3">
+                <div style="flex:1; height:4px; border-radius:999px; background:{{ r.color }};"></div>
+              </sc-for>
+            </div>
+            <div style="margin-top:20px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.14em; color:var(--pb-faint);">STEP 2 OF 3</div>
+              <div style="font-size:29px; font-weight:800; letter-spacing:-0.02em; margin-top:6px; line-height:1.1;">Who gets your <span style="color:#3B82F6;">2</span>?</div>
+              <div style="font-size:13px; color:var(--pb-faint); margin-top:6px;">Your 3 went to <b style="color:var(--pb-text);">Sam Rahim</b> · <span style="color:#3B82F6;">change</span></div>
+            </div>
+          </div>
+          <div style="padding:18px 20px 0; display:grid; grid-template-columns:1fr 1fr; gap:10px; max-height:352px; overflow-y:auto;">
+            <sc-for list="{{ stepCards }}" as="c" hint-placeholder-count="10">
+              <button style="border-radius:14px; padding:14px 12px; text-align:left; cursor:pointer; background:var(--pb-surface); border:1px solid var(--pb-hairline);" style-hover="border-color:#3B82F6; background:var(--pb-surface2);">
+                <span style="width:34px; height:34px; border-radius:50%; background:var(--pb-surface2); border:1.5px solid var(--pb-hairline2); color:var(--pb-dim); font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center;">{{ c.initials }}</span>
+                <div style="font-size:14.5px; font-weight:600; margin-top:10px; line-height:1.25;">{{ c.name }}</div>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pb-faintest); margin-top:4px;">{{ c.line }}</div>
+              </button>
+            </sc-for>
+          </div>
+          <div style="padding:16px 20px 20px;">
+            <div style="display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:12px; background:var(--pb-surface); border:1px solid var(--pb-hairline);">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="stroke:var(--pb-faint);" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+              <span style="font-size:12.5px; color:var(--pb-faint);">Back to the 3</span>
+              <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--pb-faintest);">1 LEFT AFTER THIS</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ notes ══ -->
+    <div style="width:520px; background:var(--pb-bg); border:1px solid var(--pb-hairline); border-radius:14px; padding:22px;">
+      <div style="font-size:15px; font-weight:700; margin-bottom:4px;">Functionality suggestions</div>
+      <div style="font-size:12.5px; color:var(--pb-faint); margin-bottom:16px;">Built into the mocks above, plus a few worth a decision.</div>
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <sc-for list="{{ notes }}" as="n" hint-placeholder-count="6">
+          <div style="display:flex; gap:12px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:9.5px; font-weight:700; padding:3px 7px; border-radius:5px; height:fit-content; flex-shrink:0; {{ n.tagStyle }}">{{ n.tag }}</span>
+            <div>
+              <div style="font-size:13.5px; font-weight:600;">{{ n.title }}</div>
+              <div style="font-size:12.5px; line-height:1.55; color:var(--pb-dim); margin-top:3px;">{{ n.body }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showMovement&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Leaderboard&quot;,&quot;label&quot;:&quot;Show rank movement (▲▼)&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark' | 'light'&quot;,&quot;section&quot;:&quot;Appearance&quot;,&quot;label&quot;:&quot;Theme&quot;}}">
+const A = '#3B82F6', GREEN = '#16c784', AMBER = '#f5b542', RED = '#ef5b5b';
+const initials = n => n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+const HUB = [
+  { opp:'Round 9 · vs Melville', date:'Sat 7 Feb', grade:'1st Grade', in:8, of:11, closes:'in 5 days', state:'open' },
+  { opp:'Round 9 · @ Willetton', date:'Sat 7 Feb', grade:'2nd Grade', in:3, of:11, closes:'in 5 days', state:'open' },
+  { opp:'Round 9 · vs Fremantle', date:'Sat 7 Feb', grade:'3rd Grade', in:0, of:0, closes:'—', state:'awaiting' },
+  { opp:'Round 8 · @ Subiaco', date:'Sat 31 Jan', grade:'1st Grade', in:11, of:11, closes:'closed', state:'closed' },
+  { opp:'Round 8 · vs Bayswater', date:'Sat 31 Jan', grade:'2nd Grade', in:9, of:11, closes:'locked', state:'locked' },
+  { opp:'Round 7 · vs Scarborough', date:'Sat 24 Jan', grade:'1st Grade', in:10, of:11, closes:'closed', state:'closed' },
+];
+const BADGE = {
+  open: ['OPEN', GREEN], closed: ['CLOSED', 'var(--pb-faint)'], locked: ['LOCKED', RED], awaiting: ['NO TEAM', AMBER],
+};
+const STANDINGS = [
+  ['Tom Fletcher','1st',22,14,5,3,+0,[3,2,3,3,3]],
+  ['Sam Rahim','1st',19,11,7,4,+1,[2,3,2,2,2]],
+  ['Dylan Roche','1st',15,8,6,4,-1,[1,1,2,3,1]],
+  ['Harry Nguyen','2nd',12,6,5,5,+2,[0,2,1,1,2]],
+  ['Josh Kellett','1st',10,4,5,4,-1,[1,0,2,1,1]],
+  ['Ali Mansour','2nd',8,3,4,4,+0,[0,1,1,0,2]],
+  ['Ben Traill','1st',7,2,4,5,-2,[1,1,0,1,0]],
+  ['Rory Shand','3rd',5,1,3,4,+1,[0,0,1,2,0]],
+  ['Nick Verrall','2nd',4,1,2,3,+0,[1,0,0,0,1]],
+  ['Ewan Pryce','3rd',2,0,1,4,-1,[0,1,0,0,0]],
+];
+const RACE = [
+  ['Tom Fletcher', A,      [3,3,6,9,12,15,19,22]],
+  ['Sam Rahim',   GREEN,   [0,3,5,8,11,14,16,19]],
+  ['Dylan Roche', AMBER,   [2,4,6,7,10,12,14,15]],
+  ['Harry Nguyen','#a855f7',[1,2,5,7,8,10,11,12]],
+  ['Josh Kellett','#06b6d4',[0,1,3,4,6,8,9,10]],
+];
+const XI = [
+  ['Sam Rahim','BAT'],['Dylan Roche','ALL'],['Harry Nguyen','BWL'],['Josh Kellett','WK'],
+  ['Ali Mansour','BWL'],['Ben Traill','BAT'],['Rory Shand','ALL'],['Nick Verrall','BWL'],
+  ['Ewan Pryce','BAT'],['Marcus Idle','BWL'],['Kade Ellery','ALL'],
+];
+const NOTES = [
+  ['BUILT','Ballots-in progress per fixture','Every row shows how many of the eligible XI have voted, so a manager can see at a glance which game needs a nudge instead of opening each one.'],
+  ['BUILT','Bulk open / lock by round','Select rounds or grades and open, lock or nudge in one action — the end-of-season catch-up that currently takes eleven visits.'],
+  ['BUILT','Status + grade + round filters everywhere','Open / needs-team / closed as first-class filters on the hub, and the same scoping carries into the share link so players only see their own games.'],
+  ['NEW','Nudge non-voters','The hub knows who is eligible and who has voted. One tap sends the pre-filtered link to just the players still outstanding, over the channel the club already uses.'],
+  ['NEW','Post the count to socials','The podium card in 1b exports as a square image straight into BetterSocials — the weekly count becomes a post rather than a screenshot of a spreadsheet.'],
+  ['ASK','Player-facing vote history','Players cannot see the count (by design). Do you want them to at least see their own past ballots on the /vote page?'],
+];
+
+class Component extends DCLogic {
+  state = { status:'all', grade:'all', selected:['r8s','r8b'], picks:[null,null,null], reveal:8, theme:null };
+
+  renderVals() {
+    const { status, grade, selected, picks, reveal } = this.state;
+    const theme = this.state.theme ?? this.props.theme ?? 'dark';
+    const showMovement = this.props.showMovement ?? true;
+
+    const counts = { all:HUB.length, open:2, awaiting:1, closed:3 };
+    const filtered = HUB.filter(r =>
+      (status === 'all' || (status === 'closed' ? (r.state === 'closed' || r.state === 'locked') : r.state === status)) &&
+      (grade === 'all' || r.grade === grade));
+
+    const chip = (active) => active
+      ? 'background:rgba(59,130,246,0.14); border:1px solid rgba(59,130,246,0.4); color:' + A + '; font-weight:600;'
+      : 'background:transparent; border:1px solid var(--pb-hairline2); color:var(--pb-dim);';
+
+    // ── race chart geometry ──
+    const X0 = 34, X1 = 356, Y0 = 168, Y1 = 12, MAX = 24;
+    const px = i => X0 + (i / 7) * (X1 - X0);
+    const py = v => Y0 - (v / MAX) * (Y0 - Y1);
+
+    // ── podium ──
+    const podium = STANDINGS.slice(0, 3).map((s, i) => {
+      const accent = [AMBER, 'var(--pb-dim)', '#c98b4a'][i];
+      return {
+        place: ['1ST','2ND','3RD'][i], accent,
+        bg: 'linear-gradient(160deg, color-mix(in srgb, ' + accent + ' 9%, var(--pb-surface)) 0%, var(--pb-surface) 70%)',
+        border: 'color-mix(in srgb, ' + accent + ' 32%, transparent)',
+        name: s[0], grade: s[1] + ' Grade', initials: initials(s[0]), points: s[2],
+        move: s[6] === 0 ? '—' : (s[6] > 0 ? '▲ ' + s[6] : '▼ ' + Math.abs(s[6])),
+        moveColor: s[6] === 0 ? 'var(--pb-faintest)' : (s[6] > 0 ? GREEN : RED),
+        chips: [
+          { label:'3s', value:s[3] }, { label:'2s', value:s[4] }, { label:'1s', value:s[5] },
+          { label:'RAW', value:s[3]*3 + s[4]*2 + s[5] },
+        ],
+      };
+    });
+
+    // ── awards reveal ──
+    const awardRows = STANDINGS.slice(0, 9).map((s, i) => ({
+      rank: i + 1, name: s[0],
+      points: reveal >= 8 ? s[2] : Math.max(0, s[2] - 3),
+      gain: i < 3 ? '+' + (3 - i) : '',
+      moved: showMovement && s[6] > 0, moveLabel: '▲ ' + s[6],
+      nameSize: i === 0 ? '22px' : i < 3 ? '19px' : '17px',
+      pointsSize: i === 0 ? '26px' : '21px',
+      pointsColor: i === 0 ? AMBER : i < 3 ? 'var(--pb-text)' : 'var(--pb-dim)',
+      rankColor: i === 0 ? AMBER : 'var(--pb-faintest)',
+      bg: i === 0 ? 'linear-gradient(90deg, rgba(245,181,66,0.14) 0%, rgba(245,181,66,0.02) 100%)' : i < 3 ? 'var(--pb-surface)' : 'transparent',
+      border: i === 0 ? 'rgba(245,181,66,0.35)' : i < 3 ? 'var(--pb-hairline)' : 'transparent',
+    }));
+
+    // ── one-screen voting ──
+    const slotVals = [3, 2, 1];
+    const nextSlot = picks.indexOf(null);
+    const slots = slotVals.map((v, i) => {
+      const filled = picks[i];
+      const isNext = nextSlot === i;
+      return {
+        label: v + (v === 1 ? ' VOTE' : ' VOTES'),
+        name: filled || 'Tap a name',
+        labelColor: filled ? A : isNext ? A : 'var(--pb-faintest)',
+        nameColor: filled ? 'var(--pb-text)' : 'var(--pb-faintest)',
+        style: filled
+          ? 'background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.45);'
+          : isNext
+            ? 'background:var(--pb-surface); border:1px dashed ' + A + ';'
+            : 'background:var(--pb-surface); border:1px dashed var(--pb-hairline2);',
+        onClick: () => this.setState(s => ({ picks: s.picks.map((p, j) => (j === i ? null : p)) })),
+      };
+    });
+    const onePlayers = XI.map(([name, role]) => {
+      const at = picks.indexOf(name);
+      return {
+        name, role, initials: initials(name),
+        badge: at >= 0 ? String(slotVals[at]) : (nextSlot >= 0 ? String(slotVals[nextSlot]) : ''),
+        badgeStyle: at >= 0
+          ? 'background:' + A + '; color:var(--pb-on-accent);'
+          : 'background:transparent; color:var(--pb-hairline2); border:1px dashed var(--pb-hairline2);',
+        bg: at >= 0 ? 'rgba(59,130,246,0.07)' : 'transparent',
+        ring: at >= 0 ? A : 'var(--pb-hairline2)',
+        initColor: at >= 0 ? A : 'var(--pb-dim)',
+        nameColor: at >= 0 ? 'var(--pb-text)' : 'var(--pb-text)',
+        onClick: () => this.setState(s => {
+          const i = s.picks.indexOf(name);
+          if (i >= 0) return { picks: s.picks.map((p, j) => (j === i ? null : p)) };
+          const slot = s.picks.indexOf(null);
+          if (slot < 0) return null;
+          return { picks: s.picks.map((p, j) => (j === slot ? name : p)) };
+        }),
+      };
+    });
+    const done = picks.every(Boolean);
+
+    return {
+      showMovement,
+      theme,
+      themeOptions: [
+        ['dark','Dark','<circle cx="12" cy="12" r="9"/><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'],
+        ['light','Light','<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4"/>'],
+      ].map(([k, label, icon]) => ({
+        label, icon: { __html: icon },
+        onClick: () => this.setState({ theme: k }),
+        style: theme === k
+          ? 'background:rgba(59,130,246,0.16); color:' + A + ';'
+          : 'background:transparent; color:var(--pb-faint);',
+      })),
+
+      hubStats: [
+        { label:'OPEN NOW', value:'2', sub:'games', color:GREEN },
+        { label:'BALLOTS THIS ROUND', value:'11', sub:'of 22 eligible', color:'var(--pb-text)' },
+        { label:'AWAITING TEAM LIST', value:'1', sub:'game', color:AMBER },
+        { label:'ROUNDS COUNTED', value:'8', sub:'of 9', color:'var(--pb-text)' },
+      ],
+      statusFilters: [
+        ['all','All','var(--pb-faint)'], ['open','Open',GREEN], ['awaiting','Needs team',AMBER], ['closed','Closed','var(--pb-faint)'],
+      ].map(([k, label, dot]) => ({
+        label, dot, count: counts[k],
+        style: status === k ? 'background:rgba(59,130,246,0.15); color:' + A + ';' : 'background:transparent; color:var(--pb-faint);',
+        onClick: () => this.setState({ status:k }),
+      })),
+      gradeFilters: ['all','1st Grade','2nd Grade','3rd Grade'].map(g => ({
+        label: g === 'all' ? 'All grades' : g,
+        style: chip(grade === g),
+        onClick: () => this.setState({ grade:g }),
+      })),
+      anySelected: selected.length > 0,
+      selectedLabel: selected.length + ' game' + (selected.length === 1 ? '' : 's') + ' selected',
+      clearSelection: () => this.setState({ selected: [] }),
+      hubRows: filtered.map((r, i) => {
+        const id = 'row' + i;
+        const key = r.opp;
+        const checked = selected.includes(key) || (i >= 3 && selected.length > 0 && i <= 4);
+        const b = BADGE[r.state];
+        const pct = r.of ? Math.round((r.in / r.of) * 100) : 0;
+        return {
+          opponent: r.opp, date: r.date, grade: r.grade, id,
+          ratio: r.of ? r.in + '/' + r.of : '—',
+          pct: pct + '%',
+          barColor: pct === 100 ? GREEN : pct >= 50 ? A : AMBER,
+          closes: r.closes,
+          closesColor: r.state === 'open' ? 'var(--pb-text)' : 'var(--pb-faint)',
+          badge: b[0],
+          badgeStyle: 'background:color-mix(in srgb, ' + b[1] + ' 15%, transparent); color:' + b[1] + ';',
+          checked,
+          checkStyle: checked
+            ? 'background:' + A + '; border:1px solid ' + A + ';'
+            : 'background:var(--pb-surface2); border:1px solid var(--pb-hairline2);',
+          onToggle: () => this.setState(s => ({
+            selected: s.selected.includes(key) ? s.selected.filter(x => x !== key) : [...s.selected, key],
+          })),
+        };
+      }),
+      shareTargets: [
+        { label:'WhatsApp group', dot:GREEN }, { label:'SMS the XI', dot:A },
+        { label:'Copy message', dot:'var(--pb-dim)' }, { label:'QR for the clubroom', dot:'var(--pb-dim)' },
+        { label:'Post to socials', dot:'#EC4899' },
+      ],
+      nonVoters: [['Ben Traill','SMS'],['Rory Shand','WHATSAPP'],['Marcus Idle','SMS']]
+        .map(([name, channel]) => ({ name, channel, initials: initials(name) })),
+
+      podium,
+      boardRows: STANDINGS.map((s, i) => ({
+        rank: i + 1, name: s[0], initials: initials(s[0]), grade: s[1], points: s[2],
+        c3: s[3], c2: s[4], c1: s[5] || '·',
+        rankColor: i < 3 ? AMBER : 'var(--pb-faint)',
+        pointsColor: i === 0 ? AMBER : 'var(--pb-text)',
+        rowBg: i < 3 ? 'rgba(245,181,66,0.035)' : 'transparent',
+        moveGlyph: s[6] === 0 ? '—' : (s[6] > 0 ? '▲' : '▼'),
+        moveColor: s[6] === 0 ? 'var(--pb-faintest)' : (s[6] > 0 ? GREEN : RED),
+        form: s[7].map(v => ({
+          h: (4 + v * 6) + 'px',
+          color: v === 0 ? 'var(--pb-hairline)' : v === 3 ? A : v === 2 ? 'rgba(59,130,246,0.65)' : 'rgba(59,130,246,0.35)',
+        })),
+      })),
+      gridLines: [0, 8, 16, 24].map(v => ({ y: py(v), ty: py(v) + 3, label: String(v) })),
+      raceLines: RACE.map(([name, color, vals], i) => ({
+        color, width: i === 0 ? 2.4 : 1.6,
+        points: vals.map((v, j) => px(j) + ',' + py(v)).join(' '),
+        cx: px(7), cy: py(vals[7]),
+      })),
+      raceLegend: RACE.map(([name, color]) => ({ name: name.split(' ')[1], color })),
+      raceTicks: [0,1,2,3,4,5,6,7].map(i => ({ x: px(i), label: 'R' + (i + 1) })),
+      lastRound: [{ pts:3, name:'Tom Fletcher' },{ pts:2, name:'Sam Rahim' },{ pts:1, name:'Dylan Roche' }],
+
+      revealDots: [1,2,3,4,5,6,7,8,9].map(n => ({ color: n <= reveal ? AMBER : 'var(--pb-hairline)' })),
+      revealLabel: 'ROUND ' + reveal + ' OF 9',
+      revealShort: 'ROUND ' + reveal,
+      revealNext: () => this.setState(s => ({ reveal: s.reveal >= 9 ? 1 : s.reveal + 1 })),
+      awardStats: [
+        { label:'THREES', value:'14' }, { label:'ROUNDS VOTED', value:'8' }, { label:'MARGIN', value:'+3' },
+      ],
+      awardRows,
+
+      slots, onePlayers,
+      submitLabel: done ? 'Submit my votes' : 'Pick ' + (3 - picks.filter(Boolean).length) + ' more',
+      submitStyle: done
+        ? 'background:' + A + '; color:var(--pb-on-accent);'
+        : 'background:var(--pb-surface2); color:var(--pb-faintest);',
+      submitOne: () => {},
+
+      stepRail: [A, A, 'var(--pb-hairline)'].map(color => ({ color })),
+      stepCards: XI.slice(0, 10).map(([name, role]) => ({
+        name, initials: initials(name), line: role + ' · 41 (32)',
+      })),
+
+      notes: NOTES.map(([tag, title, body]) => ({
+        tag, title, body,
+        tagStyle: tag === 'BUILT'
+          ? 'background:rgba(22,199,132,0.14); color:' + GREEN + ';'
+          : tag === 'NEW'
+            ? 'background:rgba(59,130,246,0.14); color:' + A + ';'
+            : 'background:rgba(245,181,66,0.14); color:' + AMBER + ';',
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

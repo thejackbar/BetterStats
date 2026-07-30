@@ -380,6 +380,10 @@ export default function App() {
 
           {/* BetterSelect module */}
           <Route path="/admin/betterselect" element={<ProtectedRoute requireModule="select"><BetterSelectHome /></ProtectedRoute>} />
+          {/* Sub-module group page (Your Squad / Match Day / Club Life) — a
+              dynamic segment, but React Router ranks the specific tool routes
+              below it higher, so /players, /fixtures etc. always win over it. */}
+          <Route path="/admin/betterselect/:group" element={<ProtectedRoute requireModule="select"><BetterSelectHome /></ProtectedRoute>} />
           <Route path="/admin/betterselect/players" element={<ProtectedRoute requireModule="select"><BsPlayers /></ProtectedRoute>} />
           <Route path="/admin/betterselect/fixtures" element={<ProtectedRoute requireModule="select"><BsFixtures /></ProtectedRoute>} />
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute requireModule="select"><BsTeams /></ProtectedRoute>} />

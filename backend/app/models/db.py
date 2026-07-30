@@ -1315,6 +1315,22 @@ class VoteFixtureOverride(Base):
     set_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class VoteNudge(Base):
+    """One reminder-email send, for the Games hub's "Nudge non-voters".
+
+    The audit trail the nudge rate limit reads: at most one nudge per player
+    per fixture per 24h (migration 196), so a manager mashing the button
+    can't spam the same player with reminder emails.
+    """
+    __tablename__ = "vote_nudges"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    sent_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class NetSession(Base):
     """BetterSelect → Net Manager: one net/practice session.
 

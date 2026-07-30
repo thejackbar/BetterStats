@@ -1112,6 +1112,85 @@ BetterFees' derived allocation.
     `list_vote_fixtures`/`fixture_detail`) and only show once the link itself
     is enabled.
 
+## Votes redesign — Games hub, podium leaderboard, awards night, one-screen ballot (Jul 2026)
+
+The three-tab admin screen (Fixtures/Leaderboard/Settings) and the public
+stepper ballot were rebuilt from the `docs/design_handoff_betterselect_votes`
+handoff. Every existing endpoint/field keeps its shape — this is additive.
+
+- **Games hub** (was "Fixtures", `?tab=hub`, `VotesHub.jsx`): a 4-cell counter
+  strip (open now / ballots this round / awaiting team / rounds counted, from
+  the new `GET /votes/fixtures` `summary` block), a status segmented control
+  (client-side filter, so counts stay stable while flicking) + grade chips +
+  round/search/season selects (server-side), a fixture table with a
+  `<BallotProgress>` bar per row (`voters_expected`/`outstanding_count`,
+  computed batch-per-page — see below), multi-select bulk open/lock
+  (`POST /votes/bulk-state`), and one `ShareVotePanel` (WhatsApp/SMS/copy/QR/
+  socials, all client-side URL schemes — no backend send) + `OutstandingVoters`
+  chase card for whichever open fixture is "in focus".
+- **`voters_expected`/`outstanding_count`** (new fixture-list fields): batch
+  SQL across the whole season's fixtures (`services/votes.py::
+  scorecard_voter_counts`/`lineup_voter_counts`/`player_ballot_counts`) rather
+  than one live-eligibility call per row. `'playhq'`-sourced fixtures read 0 in
+  the list (a live Play.Cricket fetch per row isn't worth the round trips) —
+  same "cheap readiness" trade-off the pre-existing `ready` flag already made;
+  the fixture DETAIL view (one fixture, one fetch) resolves it exactly via
+  `resolve_eligibility`. `summary`'s counters are computed over the WHOLE
+  season regardless of the hub's own grade/round/search filters, matching how
+  `grades`/`rounds` options already work.
+- **Leaderboard** (`VotesLeaderboard.jsx`): a 1st/2nd/3rd `PodiumCard` row
+  (gold/silver/bronze — the one new hex is `#c98b4a` bronze), a standings table
+  with rank movement (▲/▼ vs the previous counted round) and a per-player form
+  sparkline (last 5 counted rounds), and a `RaceChart` (hand-rolled inline SVG,
+  cumulative points for the top 5 — no charting library pulled in for five
+  polylines). All of `movement`/`tied`/`form`/`cumulative`/`round_gain`/
+  `grade`/`grade_short` are computed inside `build_leaderboard` from a rank
+  snapshot taken after every counted round — no new storage, still fully
+  derived-on-read like the rest of this feature. `last_round` (the race card's
+  "what just happened" block) is the last counted round's own results.
+- **Awards night** (`AwardsNight.jsx`, `?tab=leaderboard` → Presentation mode):
+  full-screen, forced-dark stage (re-declares `color`, not just the `--pb-*`
+  tokens, since `color` inherits), reveals the count one round at a time via
+  `through_round` replay (→/Space/←/Esc). `board.club_name`/`club_short`/
+  `season_label`/`grade_name`/`grade_id` are stamped onto the leaderboard
+  payload by the router (`_club_short` falls back to initials when the club
+  has no `short_name`); `grade_id` on the board is what fixes the awards-night
+  reveal actually replaying the SAME grade the leaderboard was scoped to
+  (without it, a grade-filtered presentation would silently replay whole-club
+  standings on every reveal).
+- **Public ballot, one screen** (`PublicVoting.jsx`): the old per-position
+  stepper is replaced by 3 tap-targets (3/2/1) above the team list — tap a
+  name to fill the next empty slot, tap a filled slot/chosen name to clear it,
+  Submit once full. No API change; `picks` is still the same fixed-length
+  array submitted as-is.
+- **`POST /votes/bulk-state`** — `{fixture_ids, action: 'open'|'lock'}`, same
+  per-fixture rules as the existing single lock/reopen endpoints; a fixture
+  that can't open (no team list) is reported in `skipped`, not a hard failure.
+- **`POST /votes/nudge`** — `{fixture_id, player_ids}` or `{fixture_ids}` (every
+  outstanding voter across several fixtures). **Deviates from the design
+  brief on purpose**: the brief assumed automated SMS/WhatsApp reminders, but
+  this codebase has no SMS/WhatsApp sending integration at all (BetterComms is
+  email-only, `services/email_service.py`) — so a nudge is a reminder EMAIL to
+  the player's stored address (`services/votes.py::send_nudge`), and a player
+  with no email simply reads `channel: 'none'` and can't be nudged this way
+  (`reason: 'no_contact'`). Rate-limited to one nudge per player per fixture
+  per 24h via the new **`vote_nudges`** table (migration 196, mirrored in
+  `main.py`'s lifespan) — the send log both backs the cooldown and makes the
+  count auditable, same posture as the BetterComms usage policy.
+- **`OutstandingVoters` on the hub tab** needed its own fixture-detail fetch
+  (`fixture.outstanding` only exists on `GET /votes/fixtures/{id}`, not the
+  list) — `VotesHub` fetches it for whichever open fixture is "in focus" and
+  merges it in, rather than the list row's bare `outstanding_count`. Manage-
+  only (nudging is a `MANAGE_VOTES` action; a `VIEW_VOTE_RESULTS`-only user
+  never triggers the extra fetch).
+- **"Post to socials"** (phase 2 in the brief — no standings-card renderer
+  exists yet in BetterSocials): `ShareVotePanel` copies the message and
+  deep-links to the plain `/admin/social-post` composer instead of doing
+  nothing.
+- Capabilities unchanged: `MANAGE_VOTES` gates the hub's write actions/bulk/
+  nudge/fixture detail/settings; `VIEW_VOTE_RESULTS` gates the leaderboard and
+  presentation mode. No tallies anywhere on the public page.
+
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 
 Best-tier analytics module (master-plan Phase 4). Gated by `require_module("iq")` + the `MANAGE_IQ` cap. Module surface mirrors BetterSelect — own `IQLayout` (violet `--pb-accent` override), dashboard tile + sidebar entry flip on automatically once `MODULE_INFO`/`MODULE_META` have `built: true`. Routes under `/admin/betteriq` (Overview + Opposition + Selection + Player trends). **NL Q&A is the one remaining phase** (still needs an LLM-provider decision — open in the spec).

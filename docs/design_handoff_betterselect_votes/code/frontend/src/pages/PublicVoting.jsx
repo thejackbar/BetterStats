@@ -256,7 +256,7 @@ export default function PublicVoting() {
             </div>
             {me && (
               <button onClick={async () => {
-                try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
+                try { await api.votePublicSwitch(token) } catch {}
                 setMe(null); setChosen(null); setStep('games')
               }} className="ml-auto text-xs text-pb-faint hover:text-pb-text underline shrink-0">Not you?</button>
             )}

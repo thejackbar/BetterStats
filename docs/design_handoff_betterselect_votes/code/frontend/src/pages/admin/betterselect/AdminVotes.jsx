@@ -1,13 +1,13 @@
 // BetterSelect → Votes. Brownlow-style best-player vote collection.
 //
-// Three tabs:
+// Three tabs, unchanged in purpose from the original implementation:
 //   Hub         — every played game with its voting state, ballot progress,
 //                 bulk open/lock/nudge and sharing. (Was "Fixtures".)
 //   Leaderboard — the season count, club-wide or per grade, replayable "as at"
 //                 any round, with a podium, rank movement, form and a
 //                 presentation mode for awards night.
-//   Settings    — who votes, ballot shape, counting method, tie policy,
-//                 eligibility source, auto-close and the public link.
+//   Settings    — unchanged: who votes, ballot shape, counting method, tie
+//                 policy, eligibility source, auto-close and the public link.
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
@@ -16,7 +16,7 @@ import { CAP } from '../../../lib/capabilities'
 import VotesHub from './votes/VotesHub'
 import VotesLeaderboard from './votes/VotesLeaderboard'
 import FixtureDetail from './votes/FixtureDetail'
-import VotesSettings from './votes/VotesSettings'
+import SettingsTab from './votes/VotesSettings'
 
 export default function AdminVotes() {
   const { hasCapability } = useAuth()
@@ -49,7 +49,7 @@ export default function AdminVotes() {
         ? <FixtureDetail fixtureId={openFixture} onBack={() => setOpenFixture(null)} />
         : <VotesHub canManage={canManage} onOpenFixture={setOpenFixture} />)}
       {tab === 'leaderboard' && <VotesLeaderboard />}
-      {tab === 'settings' && canManage && <VotesSettings canManage={canManage} />}
+      {tab === 'settings' && canManage && <SettingsTab canManage={canManage} />}
     </BetterSelectLayout>
   )
 }
