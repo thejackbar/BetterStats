@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 # The whitelist of keys the General Settings UI can set, with validators. Add to this
 # as new settings are introduced.
 _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days",
-             "crm_incremental_sweep_seconds", "crm_global_sweep_minutes"}
+             "crm_incremental_sweep_seconds", "crm_global_sweep_minutes",
+             "crm_event_stale_hours"}
 
 # Boolean feature flags, off by default until a super admin turns them on from
 # General Settings. Each new self-serve-trial-onboarding surface (see
@@ -60,6 +61,15 @@ DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 60
 DEFAULT_CRM_INCREMENTAL_SWEEP_SECONDS = 60
 CRM_INCREMENTAL_SWEEP_MIN_SECONDS = 15
 CRM_INCREMENTAL_SWEEP_MAX_SECONDS = 3600
+# How many hours after an event's scheduled time it's considered "old" — a
+# past event older than this is greyed out on the Kanban card (a soonest
+# upcoming event always wins over any past one, so this only affects a card
+# whose latest event has already been and gone). Super-admin tunable from the
+# pipeline's Settings modal.
+DEFAULT_CRM_EVENT_STALE_HOURS = 24
+CRM_EVENT_STALE_MIN_HOURS = 1
+CRM_EVENT_STALE_MAX_HOURS = 8760  # up to a year
+
 DEFAULT_CRM_GLOBAL_SWEEP_MINUTES = 60
 CRM_GLOBAL_SWEEP_MIN_MINUTES = 5
 CRM_GLOBAL_SWEEP_MAX_MINUTES = 1440
@@ -205,6 +215,17 @@ async def get_crm_incremental_sweep_seconds(db: AsyncSession) -> int:
     except (TypeError, ValueError):
         return DEFAULT_CRM_INCREMENTAL_SWEEP_SECONDS
     return max(CRM_INCREMENTAL_SWEEP_MIN_SECONDS, min(CRM_INCREMENTAL_SWEEP_MAX_SECONDS, v))
+
+
+async def get_crm_event_stale_hours(db: AsyncSession) -> int:
+    """How old (hours) a past event must be before it's greyed on the Kanban
+    card, clamped to [MIN, MAX], falling back to the default when unset/invalid."""
+    settings = await get_settings(db)
+    try:
+        v = int(settings.get("crm_event_stale_hours"))
+    except (TypeError, ValueError):
+        return DEFAULT_CRM_EVENT_STALE_HOURS
+    return max(CRM_EVENT_STALE_MIN_HOURS, min(CRM_EVENT_STALE_MAX_HOURS, v))
 
 
 async def get_crm_global_sweep_minutes(db: AsyncSession) -> int:

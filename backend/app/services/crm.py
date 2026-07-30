@@ -1755,11 +1755,17 @@ async def list_events(session: AsyncSession, *, deal_id=None, marketing_club_id=
 
 async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> dict:
     """Map deal_id -> its soonest upcoming (or, if none upcoming, most recent
-    past) event, as a lean dict for the Kanban card summary. One query."""
+    past) event, as a lean dict for the Kanban card summary. One query. Each
+    summary carries ``is_past`` and ``stale`` (past AND older than the
+    super-admin-set event-stale window) so the board can grey out an
+    old, been-and-gone event — while a soonest upcoming event always wins over
+    any past one, so adding a future event stops the past one showing at all."""
     ids = [d for d in deal_ids if d]
     if not ids:
         return {}
     now = now or datetime.now(timezone.utc)
+    from app.services import platform_settings as ps
+    stale_before = now - timedelta(hours=await ps.get_crm_event_stale_hours(session))
     rows = (await session.execute(
         select(CrmEvent).where(CrmEvent.deal_id.in_(ids)).order_by(CrmEvent.starts_at.asc())
     )).scalars().all()
@@ -1768,6 +1774,8 @@ async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> d
         summary = {
             "id": str(e.id), "event_type": e.event_type, "title": e.title,
             "starts_at": _iso(e.starts_at),
+            "is_past": bool(e.starts_at and e.starts_at < now),
+            "stale": bool(e.starts_at and e.starts_at < stale_before),
         }
         if e.starts_at and e.starts_at >= now:
             upcoming.setdefault(e.deal_id, summary)  # first (soonest) upcoming wins

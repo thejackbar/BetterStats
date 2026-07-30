@@ -794,6 +794,7 @@ async def super_recalc_engagement_status():
 class CrmSweepSettings(BaseModel):
     incremental_sweep_seconds: Optional[int] = None
     global_sweep_minutes: Optional[int] = None
+    event_stale_hours: Optional[int] = None
 
 
 @super_router.get("/settings", dependencies=[_super])
@@ -804,11 +805,14 @@ async def super_crm_settings(db: AsyncSession = Depends(get_db)):
     return {
         "incremental_sweep_seconds": await ps.get_crm_incremental_sweep_seconds(db),
         "global_sweep_minutes": await ps.get_crm_global_sweep_minutes(db),
+        "event_stale_hours": await ps.get_crm_event_stale_hours(db),
         "bounds": {
             "incremental_seconds": {"min": ps.CRM_INCREMENTAL_SWEEP_MIN_SECONDS,
                                     "max": ps.CRM_INCREMENTAL_SWEEP_MAX_SECONDS},
             "global_minutes": {"min": ps.CRM_GLOBAL_SWEEP_MIN_MINUTES,
                                "max": ps.CRM_GLOBAL_SWEEP_MAX_MINUTES},
+            "event_stale_hours": {"min": ps.CRM_EVENT_STALE_MIN_HOURS,
+                                  "max": ps.CRM_EVENT_STALE_MAX_HOURS},
         },
     }
 
@@ -833,6 +837,13 @@ async def super_update_crm_settings(body: CrmSweepSettings, db: AsyncSession = D
                 f"global_sweep_minutes must be {ps.CRM_GLOBAL_SWEEP_MIN_MINUTES}"
                 f"–{ps.CRM_GLOBAL_SWEEP_MAX_MINUTES}"))
         patch["crm_global_sweep_minutes"] = v
+    if body.event_stale_hours is not None:
+        v = body.event_stale_hours
+        if not (ps.CRM_EVENT_STALE_MIN_HOURS <= v <= ps.CRM_EVENT_STALE_MAX_HOURS):
+            raise HTTPException(status_code=422, detail=(
+                f"event_stale_hours must be {ps.CRM_EVENT_STALE_MIN_HOURS}"
+                f"–{ps.CRM_EVENT_STALE_MAX_HOURS}"))
+        patch["crm_event_stale_hours"] = v
     if patch:
         try:
             await ps.update_settings(db, patch)
@@ -845,7 +856,8 @@ async def super_update_crm_settings(body: CrmSweepSettings, db: AsyncSession = D
         reschedule_crm_sweeps(incremental_seconds=inc, global_minutes=glob)
     except Exception:  # noqa: BLE001
         logger.exception("could not reschedule CRM sweeps after settings update")
-    return {"incremental_sweep_seconds": inc, "global_sweep_minutes": glob}
+    return {"incremental_sweep_seconds": inc, "global_sweep_minutes": glob,
+            "event_stale_hours": await ps.get_crm_event_stale_hours(db)}
 
 
 @super_router.post("/deals", dependencies=[_super])

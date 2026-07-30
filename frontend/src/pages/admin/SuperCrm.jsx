@@ -240,6 +240,9 @@ const EMPTY_FILTERS = {
   // change) recency windows: 'any' (no filter) | 'today' | 'range'.
   newDealsMode: 'any', newDealsFrom: '', newDealsTo: '',
   activityMode: 'any', activityFrom: '', activityTo: '',
+  // Scheduled-event filter on a deal's next_event: 'all' (no filter) | 'today'
+  // | 'future' | 'range'.
+  eventsMode: 'all', eventsFrom: '', eventsTo: '',
 }
 
 // A deal has at least one ACTIVE (not-yet-expired) module trial. trial_days_
@@ -695,6 +698,23 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
                 filters.customersOnly ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
               Customers
             </button>
+            {/* Events — filters deals by their next scheduled event (the one
+                shown on the card). All = no filter. */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-pb-faint" title="Deals by their next scheduled event">Events</span>
+              <Select value={filters.eventsMode} onChange={e => setFilters(f => ({ ...f, eventsMode: e.target.value }))} style={{ width: FBW.window }}>
+                <option value="all">All</option>
+                <option value="today">Today</option>
+                <option value="future">Future</option>
+                <option value="range">Date range…</option>
+              </Select>
+              {filters.eventsMode === 'range' && (
+                <>
+                  <input type="date" value={filters.eventsFrom} onChange={e => setFilters(f => ({ ...f, eventsFrom: e.target.value }))} className={DATE_INPUT_CLS} />
+                  <input type="date" value={filters.eventsTo} onChange={e => setFilters(f => ({ ...f, eventsTo: e.target.value }))} className={DATE_INPUT_CLS} />
+                </>
+              )}
+            </div>
           </div>
           {/* Row 3: Product Interest chips + Sort-by, together on one line. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-0.5">
@@ -727,7 +747,9 @@ function SettingsModal({ open, onClose, onManageStages }) {
   const [incMin, setIncMin] = useState('1')
   const [incSec, setIncSec] = useState('0')
   const [globMin, setGlobMin] = useState('60')
+  const [staleHours, setStaleHours] = useState('24')
   const [saving, setSaving] = useState(false)
+  const [savingStale, setSavingStale] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -739,6 +761,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
       setIncMin(String(Math.floor(total / 60)))
       setIncSec(String(total % 60))
       setGlobMin(String(s.global_sweep_minutes ?? 60))
+      setStaleHours(String(s.event_stale_hours ?? 24))
     }).catch(() => { if (alive) setCadence({ error: true }) })
     return () => { alive = false }
   }, [open])
@@ -758,9 +781,22 @@ function SettingsModal({ open, onClose, onManageStages }) {
     } finally { setSaving(false) }
   }
 
+  const saveStale = async () => {
+    const hours = Math.max(1, Math.floor(Number(staleHours) || 0))
+    setSavingStale(true)
+    try {
+      const r = await api.superCrmUpdateSettings({ event_stale_hours: hours })
+      setStaleHours(String(r.event_stale_hours))
+      toast.success('Event display setting saved.')
+    } catch (e) {
+      toast.error(e.message || 'Could not save the setting')
+    } finally { setSavingStale(false) }
+  }
+
   if (!open) return null
   const incB = cadence?.bounds?.incremental_seconds
   const globB = cadence?.bounds?.global_minutes
+  const staleB = cadence?.bounds?.event_stale_hours
   return (
     <Modal open={open} onClose={onClose} title="Pipeline settings">
       <div className="space-y-2">
@@ -820,6 +856,28 @@ function SettingsModal({ open, onClose, onManageStages }) {
                   {saving ? 'Saving…' : 'Save cadence'}
                 </Btn>
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="pb-card px-3 py-2.5">
+          <div className="font-medium text-[13px]">Kanban events</div>
+          <div className="text-[11.5px] text-pb-faint mt-0.5 mb-2">
+            When a card's latest event has been and gone, grey out its summary once it's
+            this many hours old. A soonest upcoming event always shows in full colour and
+            takes priority over any past one.
+            {staleB ? ` Between ${staleB.min} and ${staleB.max} hours.` : ''}
+          </div>
+          {cadence?.error ? (
+            <div className="text-[11.5px] text-pb-red">Couldn't load the current setting.</div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] font-medium">Grey out a past event after</span>
+              <NumberInput min={1} value={staleHours} onChange={e => setStaleHours(e.target.value)} style={{ width: '66px' }} />
+              <span className="text-[11px] text-pb-faint">hours</span>
+              <Btn variant="primary" sm onClick={saveStale} disabled={savingStale || !cadence} className="ml-auto">
+                {savingStale ? 'Saving…' : 'Save'}
+              </Btn>
             </div>
           )}
         </div>
@@ -985,6 +1043,22 @@ export default function SuperCrm() {
       // date) — 0 means "due today", not yet expired.
       if (filters.trialExpired && !(d.min_trial_days_remaining < 0)) return false
       if (filters.customersOnly && !(d.subscribed_modules && d.subscribed_modules.length > 0)) return false
+      // Events — filter by the deal's next scheduled event (the one shown on
+      // the card). 'all' is no filter; the rest need an event to match.
+      if (filters.eventsMode !== 'all') {
+        const ev = d.next_event
+        if (!ev || !ev.starts_at) return false
+        const ed = new Date(ev.starts_at)
+        if (filters.eventsMode === 'today') {
+          const now = new Date()
+          if (ed.getFullYear() !== now.getFullYear() || ed.getMonth() !== now.getMonth() || ed.getDate() !== now.getDate()) return false
+        } else if (filters.eventsMode === 'future') {
+          if (ed < new Date()) return false
+        } else if (filters.eventsMode === 'range') {
+          if (filters.eventsFrom) { const f = new Date(filters.eventsFrom); f.setHours(0, 0, 0, 0); if (ed < f) return false }
+          if (filters.eventsTo) { const tt = new Date(filters.eventsTo); tt.setHours(23, 59, 59, 999); if (ed > tt) return false }
+        }
+      }
       // New Deals — deal-card creation date within the chosen window.
       if (!inDateWindow(d.created_at, filters.newDealsMode, filters.newDealsFrom, filters.newDealsTo)) return false
       // New Deal Activity — latest tracked change (deal edit, trial/subscription

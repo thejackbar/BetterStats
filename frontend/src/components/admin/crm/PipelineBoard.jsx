@@ -241,10 +241,13 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   )}
                   {/* Next scheduled event — a calendar/date-based summary, set
                       apart from the rest of the card in its own indigo colour
-                      with a small calendar icon. */}
+                      with a small calendar icon. A been-and-gone event past the
+                      super-admin "stale" window greys out (mid-grey); a soonest
+                      upcoming event always wins over any past one. */}
                   {deal.next_event && (
                     <div className="flex items-center gap-1 mt-1.5 text-[10.5px] leading-snug font-medium"
-                      style={{ color: '#8b7cf6' }} title="Next scheduled event">
+                      style={{ color: deal.next_event.stale ? '#9ca3af' : '#8b7cf6' }}
+                      title={deal.next_event.stale ? 'Past event (no upcoming one scheduled)' : 'Next scheduled event'}>
                       <CalendarIcon />
                       <span className="truncate">{eventSummaryText(deal.next_event)}</span>
                     </div>
