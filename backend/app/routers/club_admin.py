@@ -1939,6 +1939,92 @@ async def list_all_clubs(
     return payloads
 
 
+@router.get("/super/clubs/trials-ending-soon.csv")
+async def export_trials_ending_soon_csv(
+    days: int = 3,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """CSV of every club with a module trial expiring within ``days`` (default
+    3, matching trial_lifecycle.TRIAL_ENDING_SOON_DAYS and SuperClubs.jsx's own
+    "Ending soon" tab, so all three surfaces read the same window). One row
+    per club — a club running several module trials at once is collapsed to
+    its soonest-expiring one, with every trialing module listed.
+
+    Admin column: the club's own admin (any club_membership with a usable
+    email, primary admin preferred — mirrors trial_lifecycle._primary_admin).
+    Falls back to the top-ranked (lowest role_rank) contact on the Club
+    Directory when the club has no admin account with an email at all.
+    """
+    now = _datetime.now(_timezone.utc)
+    horizon = now + _timedelta(days=max(days, 0))
+
+    trial_rows = (await db.execute(_text("""
+        SELECT o.id, o.name, MIN(s.trial_ends_at) AS soonest_ends_at,
+               array_agg(s.module_key ORDER BY s.module_key) AS module_keys
+        FROM organisations o
+        JOIN org_module_subscriptions s ON s.organisation_id = o.id
+        WHERE o.archived_at IS NULL AND s.status = 'trial' AND s.trial_ends_at IS NOT NULL
+          AND s.trial_ends_at BETWEEN :now AND :horizon
+        GROUP BY o.id, o.name
+        ORDER BY soonest_ends_at ASC, o.name ASC
+    """), {"now": now, "horizon": horizon})).all()
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Club Name", "Admin Name", "Admin Email", "Contact Source", "Trial Ends", "Modules Trialing"])
+
+    if not trial_rows:
+        return StreamingResponse(
+            iter([buf.getvalue()]), media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=trials-ending-soon-{now.date().isoformat()}.csv"},
+        )
+
+    org_ids = [r.id for r in trial_rows]
+
+    admin_rows = (await db.execute(_text("""
+        SELECT DISTINCT ON (cm.club_id) cm.club_id, u.display_name, u.first_name, u.last_name, u.username, u.email
+        FROM club_memberships cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.club_id = ANY(:ids) AND u.email IS NOT NULL AND u.email != ''
+        ORDER BY cm.club_id, cm.is_primary_admin DESC
+    """), {"ids": org_ids})).all()
+    admin_by_org = {
+        row.club_id: (
+            row.display_name or " ".join(p for p in [row.first_name, row.last_name] if p) or row.username,
+            row.email,
+        )
+        for row in admin_rows
+    }
+
+    directory_rows = (await db.execute(_text("""
+        SELECT DISTINCT ON (mc.existing_org_id) mc.existing_org_id, c.full_name, c.email
+        FROM marketing_clubs mc JOIN marketing_club_contacts c ON c.marketing_club_id = mc.id
+        WHERE mc.existing_org_id = ANY(:ids) AND c.email IS NOT NULL AND c.email != ''
+        ORDER BY mc.existing_org_id, c.role_rank ASC
+    """), {"ids": org_ids})).all()
+    directory_by_org = {row.existing_org_id: (row.full_name, row.email) for row in directory_rows}
+
+    for r in trial_rows:
+        admin = admin_by_org.get(r.id)
+        source = "Club Admin"
+        if not admin:
+            admin = directory_by_org.get(r.id)
+            source = "Club Directory"
+        if not admin:
+            admin = (None, None)
+            source = "None found"
+        w.writerow([
+            r.name, admin[0] or "", admin[1] or "", source,
+            r.soonest_ends_at.date().isoformat() if r.soonest_ends_at else "",
+            ", ".join(r.module_keys or []),
+        ])
+
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=trials-ending-soon-{now.date().isoformat()}.csv"},
+    )
+
+
 class SyncControlRequest(BaseModel):
     action: str  # "pause" | "cancel" | "continue"
 

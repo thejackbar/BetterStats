@@ -1482,6 +1482,10 @@ export const api = {
     request('/auth/switch-club', { method: 'POST', body: JSON.stringify({ club_id: clubId }) }),
   superListClubs: (includeArchived = false) =>
     request(`/club-admin/super/clubs${includeArchived ? '?include_archived=true' : ''}`),
+  // CSV export: clubs with a module trial expiring within `days` (default 3),
+  // club admin name/email with a Club Directory fallback baked in server-side.
+  superExportTrialsEndingSoon: (days = 3) =>
+    fetch(`${BASE}/club-admin/super/clubs/trials-ending-soon.csv?days=${days}`, { credentials: 'include' }),
   superGetGeneralSettings: () => request('/club-admin/super/general-settings'),
   superUpdateGeneralSettings: (data) =>
     request('/club-admin/super/general-settings', { method: 'PATCH', body: JSON.stringify(data) }),

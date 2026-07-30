@@ -137,6 +137,26 @@ export default function SuperClubs() {
   const [showArchived, setShowArchived] = useState(false)
   // Phase 21 — trial view filter: all / trialing / ending soon (<=7d) / expired.
   const [trialFilter, setTrialFilter] = useState('all')
+  const [exportingTrials, setExportingTrials] = useState(false)
+
+  const exportTrialsEndingSoon = async () => {
+    setExportingTrials(true)
+    try {
+      const res = await api.superExportTrialsEndingSoon(TRIAL_ENDING_SOON_DAYS)
+      if (!res.ok) throw new Error(`Export failed (${res.status})`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `trials-ending-soon-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setExportingTrials(false)
+    }
+  }
 
   // Club Directory-style search + filters (client-side — the full club list is
   // already fetched, same as the existing trialFilter above).
@@ -1148,6 +1168,15 @@ export default function SuperClubs() {
               {f.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={exportTrialsEndingSoon}
+            disabled={exportingTrials}
+            title="Club name + club admin (or top Club Directory contact) for every club whose trial ends within 3 days"
+            className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+          >
+            {exportingTrials ? 'Exporting…' : `⬇ Export ending-soon (CSV)`}
+          </button>
         </div>
 
         <div className="pb-card overflow-hidden">
