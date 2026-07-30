@@ -3,6 +3,9 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { MemberSelect } from '../../components/admin/clubmanager/pickers'
+
+const today = () => new Date().toISOString().slice(0, 10)
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 const CATEGORIES = ['operational', 'maintenance', 'compliance', 'finance', 'other']
@@ -19,7 +22,7 @@ const ATTENDANCE_STATUSES = ['present', 'apology', 'absent']
 const label = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
 
 function TabBar({ tab, setTab }) {
-  const tabs = [['positions', 'Positions'], ['tasks', 'Tasks'], ['documents', 'Documents'], ['calendar', 'Calendar'], ['meetings', 'Meetings & AGM']]
+  const tabs = [['positions', 'Committee Roles'], ['tasks', 'Tasks'], ['documents', 'Documents'], ['calendar', 'Calendar'], ['meetings', 'Meetings & AGM']]
   return (
     <div className="flex gap-1 mb-5">
       {tabs.map(([k, l]) => (
@@ -32,39 +35,50 @@ function TabBar({ tab, setTab }) {
   )
 }
 
-// ── Positions tab ───────────────────────────────────────────────────────────
-function StartTermForm({ position, onClose, onDone }) {
+// ── Committee Roles tab (succession) ────────────────────────────────────────
+function StartTermForm({ position, members, onClose, onDone }) {
   const toast = useToast()
-  const [holderName, setHolderName] = useState('')
+  const [memberId, setMemberId] = useState(null)
+  const [startedAt, setStartedAt] = useState(today())
   const [busy, setBusy] = useState(false)
+  const selected = members.find(m => m.member_id === memberId)
   async function submit() {
-    if (!holderName.trim()) return
+    if (!memberId || !selected) { toast.error('Pick a member'); return }
     setBusy(true)
     try {
-      await api.committeeStartTerm(position.id, { holder_name: holderName.trim() })
+      await api.committeeStartTerm(position.id, {
+        member_id: memberId,
+        holder_name: selected.full_name,
+        started_at: startedAt || today(),
+      })
       toast.success('Term started')
       onDone()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
   return (
-    <div className="mt-2 flex gap-2">
-      <input autoFocus className={inp} placeholder="Holder name" value={holderName} onChange={e => setHolderName(e.target.value)} />
-      <button onClick={submit} disabled={busy || !holderName.trim()}
+    <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:items-start">
+      <div className="flex-1 min-w-[180px]">
+        <MemberSelect members={members} value={memberId} onChange={setMemberId} placeholder="Choose member…" />
+      </div>
+      <input type="date" className={`${inp} sm:w-40`} value={startedAt} onChange={e => setStartedAt(e.target.value)} />
+      <button onClick={submit} disabled={busy || !memberId}
         className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
         {busy ? 'SAVING…' : 'START TERM'}
       </button>
-      <button onClick={onClose} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Cancel</button>
+      <button onClick={onClose} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">Cancel</button>
     </div>
   )
 }
 
-function PositionCard({ position, onChanged }) {
+function PositionCard({ position, members, onChanged }) {
   const toast = useToast()
   const [showStart, setShowStart] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState(null)
   const [endingId, setEndingId] = useState(null)
   const [handoverNotes, setHandoverNotes] = useState('')
+  const [editingDate, setEditingDate] = useState(false)
+  const [dateDraft, setDateDraft] = useState('')
 
   const loadHistory = async () => {
     if (history) { setShowHistory(x => !x); return }
@@ -75,6 +89,13 @@ function PositionCard({ position, onChanged }) {
     try {
       await api.committeeEndTerm(termId, { handover_notes: handoverNotes || null })
       toast.success('Term ended'); setEndingId(null); setHandoverNotes(''); setHistory(null); onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  async function saveDate(termId) {
+    try {
+      await api.committeeUpdateTerm(termId, { started_at: dateDraft || today() })
+      toast.success('Start date updated'); setEditingDate(false); setHistory(null); onChanged()
     } catch (e) { toast.error(e.message) }
   }
 
@@ -93,7 +114,19 @@ function PositionCard({ position, onChanged }) {
           <div className="flex items-center justify-between gap-2 bg-pb-surface2/40 border pb-hairline rounded px-3 py-2">
             <div>
               <div className="text-pb-text text-sm">{term.holder_name}</div>
-              <div className="font-mono text-[10px] text-pb-faint">Since {term.started_at}</div>
+              {editingDate ? (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <input type="date" className={`${inp} w-36`} value={dateDraft} onChange={e => setDateDraft(e.target.value)} />
+                  <button onClick={() => saveDate(term.id)} className="font-mono text-[10px] text-pb-accent">Save</button>
+                  <button onClick={() => setEditingDate(false)} className="font-mono text-[10px] text-pb-faint">Cancel</button>
+                </div>
+              ) : (
+                <div className="font-mono text-[10px] text-pb-faint flex items-center gap-2">
+                  <span>Since {term.started_at}</span>
+                  <button onClick={() => { setDateDraft((term.started_at || '').slice(0, 10) || today()); setEditingDate(true) }}
+                    className="text-pb-faintest hover:text-pb-text">edit date</button>
+                </div>
+              )}
             </div>
             {endingId === term.id ? (
               <div className="flex items-center gap-1.5">
@@ -111,7 +144,7 @@ function PositionCard({ position, onChanged }) {
         {!term && !showStart && (
           <button onClick={() => setShowStart(true)} className="mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text">+ Start a term</button>
         )}
-        {showStart && <StartTermForm position={position} onClose={() => setShowStart(false)} onDone={() => { setShowStart(false); onChanged() }} />}
+        {showStart && <StartTermForm position={position} members={members} onClose={() => setShowStart(false)} onDone={() => { setShowStart(false); onChanged() }} />}
       </div>
       {showHistory && history && (
         <div className="mt-2 pt-2 border-t pb-hairline-t space-y-1">
@@ -128,7 +161,7 @@ function PositionCard({ position, onChanged }) {
   )
 }
 
-function PositionsTab() {
+function PositionsTab({ members }) {
   const toast = useToast()
   const [data, setData] = useState(null)
   const [seeding, setSeeding] = useState(false)
@@ -142,25 +175,28 @@ function PositionsTab() {
     setSeeding(true)
     try {
       const r = await api.committeeSeedStarterPositions()
-      toast.success(r.seeded > 0 ? `Added ${r.seeded} starter position${r.seeded === 1 ? '' : 's'}` : 'Already up to date')
+      toast.success(r.seeded > 0 ? `Added ${r.seeded} committee role${r.seeded === 1 ? '' : 's'}` : 'Already up to date')
       load()
     } catch (e) { toast.error(e.message) } finally { setSeeding(false) }
   }
 
-  if (data === null) return <PbSpinner message="Loading committee…" />
+  if (data === null) return <PbSpinner message="Loading committee roles…" />
   return (
     <div>
-      <div className="flex justify-end mb-3">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <p className="font-mono text-[10px] text-pb-faintest leading-relaxed max-w-xl">
+          Committee roles are managed under Roles in the left menu. This tab records who holds each role and when they started.
+        </p>
         <button onClick={seedStarter} disabled={seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seeding ? 'ADDING…' : '+ STARTER SET (14 POSITIONS)'}
+          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+          {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (14)'}
         </button>
       </div>
       {data.positions.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee positions yet — add the starter set above to get going.</div>
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet — add the committee roles above, or create them under Roles.</div>
       ) : (
         <div className="space-y-2">
-          {data.positions.map(p => <PositionCard key={p.id} position={p} onChanged={load} />)}
+          {data.positions.map(p => <PositionCard key={p.id} position={p} members={members} onChanged={load} />)}
         </div>
       )}
     </div>
@@ -347,6 +383,9 @@ function CalendarTab() {
   if (events === null) return <PbSpinner message="Loading calendar…" />
   return (
     <div>
+      <p className="font-mono text-[10px] text-pb-faintest mb-4 leading-relaxed">
+        These are your club events. The full events calendar with month/week/day views, filters, ticketing and registrations lives under Events in the left menu. This is a quick committee view.
+      </p>
       <div className="pb-card p-4 mb-4">
         <div className="flex flex-col sm:flex-row gap-2">
           <input className={`${inp} flex-1`} placeholder="Title" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
@@ -782,16 +821,23 @@ function MeetingsTab() {
 }
 
 export default function AdminCommittee() {
+  const toast = useToast()
   const [tab, setTab] = useState('positions')
+  const [members, setMembers] = useState([])
+
+  useEffect(() => {
+    api.feeAllMembers().then(d => setMembers(d.members || [])).catch(e => toast.error(e.message))
+  }, [toast])
+
   return (
     <BetterClubManagerLayout>
       <div className="max-w-4xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Committee Administration</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Positions and succession history, the task register, a document index, the club calendar, and meetings/AGM.
+          Committee roles and succession history, the task register, a document index, the club calendar, and meetings/AGM.
         </p>
         <TabBar tab={tab} setTab={setTab} />
-        {tab === 'positions' && <PositionsTab />}
+        {tab === 'positions' && <PositionsTab members={members} />}
         {tab === 'tasks' && <TasksTab />}
         {tab === 'documents' && <DocumentsTab />}
         {tab === 'calendar' && <CalendarTab />}
