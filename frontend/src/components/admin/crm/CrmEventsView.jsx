@@ -148,6 +148,23 @@ function EventCard({ ev, onEdit, onDelete, compact }) {
   )
 }
 
+// A compact calendar chip (month grid + week columns): time + type + title on
+// the first line, then club name, then contact name (each only when present).
+function EventChip({ ev, onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      title={`${fmtTime(ev.starts_at)} ${eventTypeLabel(ev.event_type)}${ev.title ? ` · ${ev.title}` : ''}`}
+      className="block w-full text-left leading-tight px-1.5 py-1 rounded"
+      style={{ background: 'rgba(139,124,246,0.14)', color: EVENT_COLOR }}>
+      <div className="text-[10px] font-medium truncate">
+        {fmtTime(ev.starts_at)} {eventTypeLabel(ev.event_type)}{ev.title ? ` · ${ev.title}` : ''}
+      </div>
+      {ev.marketing_club_name && <div className="text-[9.5px] truncate opacity-90">{ev.marketing_club_name}</div>}
+      {ev.contact_name && <div className="text-[9.5px] truncate opacity-75">{ev.contact_name}</div>}
+    </button>
+  )
+}
+
 // ─── calendar month grid ─────────────────────────────────────────────────────
 function MonthView({ cursor, events, onPick, onDayAdd }) {
   const first = startOfMonth(cursor)
@@ -180,11 +197,7 @@ function MonthView({ cursor, events, onPick, onDayAdd }) {
               </div>
               <div className="space-y-0.5 mt-0.5">
                 {dayEvents.slice(0, 3).map(e => (
-                  <button key={e.id} onClick={() => onPick(e)} title={e.title || eventTypeLabel(e.event_type)}
-                    className="block w-full text-left text-[9.5px] leading-tight truncate px-1 py-0.5 rounded"
-                    style={{ background: 'rgba(139,124,246,0.14)', color: EVENT_COLOR }}>
-                    {fmtTime(e.starts_at)} {e.title || eventTypeLabel(e.event_type)}
-                  </button>
+                  <EventChip key={e.id} ev={e} onClick={() => onPick(e)} />
                 ))}
                 {dayEvents.length > 3 && (
                   <div className="text-[9px] text-pb-faint px-1">+{dayEvents.length - 3} more</div>
@@ -224,15 +237,7 @@ function WeekDayView({ cursor, mode, events, onPick, onEdit, onDelete }) {
               {dayEvents.length === 0 && <div className="text-[10.5px] text-pb-faintest px-1 py-2">—</div>}
               {dayEvents.map(e => mode === 'day'
                 ? <EventCard key={e.id} ev={e} onEdit={onEdit} onDelete={onDelete} />
-                : (
-                  <button key={e.id} onClick={() => onPick(e)}
-                    className="block w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded"
-                    style={{ background: 'rgba(139,124,246,0.14)', color: EVENT_COLOR }}>
-                    <div className="font-medium">{fmtTime(e.starts_at)}</div>
-                    <div className="truncate">{e.title || eventTypeLabel(e.event_type)}</div>
-                    {e.marketing_club_name && <div className="truncate opacity-80">{e.marketing_club_name}</div>}
-                  </button>
-                ))}
+                : <EventChip key={e.id} ev={e} onClick={() => onPick(e)} />)}
             </div>
           </div>
         )

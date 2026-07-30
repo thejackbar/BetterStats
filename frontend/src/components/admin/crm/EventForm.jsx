@@ -175,13 +175,14 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
   )
 }
 
-// Compact one-liner used on the Kanban card + list rows: "Demo · 5 Aug, 2:30pm".
+// Compact one-liner for the Kanban card summary (a calendar icon is rendered
+// beside it): "01 Aug · 11:00 am · Demo · Intro demo call".
 export function eventSummaryText(ev) {
-  if (!ev) return ''
-  const when = ev.starts_at ? new Date(ev.starts_at).toLocaleString('en-AU', {
-    day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
-  }) : ''
-  const label = eventTypeLabel(ev.event_type)
+  if (!ev || !ev.starts_at) return ''
+  const d = new Date(ev.starts_at)
+  const date = d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' })
+  const time = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })
+  const type = eventTypeLabel(ev.event_type)
   const title = ev.title ? ` · ${ev.title}` : ''
-  return `${label}${title}${when ? ` · ${when}` : ''}`
+  return `${date} · ${time} · ${type}${title}`
 }
