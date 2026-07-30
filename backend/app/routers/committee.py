@@ -161,6 +161,19 @@ async def seed_starter_positions(_: User = _require, club: Organisation = Depend
     return {"seeded": seeded}
 
 
+class PositionReorder(BaseModel):
+    position_ids: List[str]
+
+
+@router.post("/positions/reorder")
+async def reorder_positions(data: PositionReorder, _: User = _require, club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    ids = [uuid.UUID(x) for x in data.position_ids]
+    await committee_service.reorder_positions(db, club.id, ids)
+    await db.commit()
+    return {"ok": True}
+
+
 # ─── Terms ────────────────────────────────────────────────────────────────────
 
 @router.get("/positions/{position_id}/history")

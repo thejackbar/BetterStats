@@ -227,6 +227,22 @@ async def archive_position(session: AsyncSession, p: CommitteePosition) -> None:
     p.is_active = False
 
 
+async def reorder_positions(session: AsyncSession, org_id, position_ids) -> None:
+    """Set the display order of the committee roles. Writes the new index onto
+    BOTH the committee_position AND its linked committee role's sort_order, so
+    the order survives the position↔role sync and matches the Roles page."""
+    for idx, pid in enumerate(position_ids):
+        p = await session.get(CommitteePosition, pid)
+        if p is None or p.organisation_id != org_id:
+            continue
+        p.sort_order = idx
+        if p.role_id:
+            role = await session.get(ClubRole, p.role_id)
+            if role is not None and role.organisation_id == org_id:
+                role.sort_order = idx
+    await session.flush()
+
+
 async def seed_starter_positions(session: AsyncSession, org_id) -> int:
     """Seeds the COMMITTEE roles into the shared Roles catalogue, then ensures a
     committee_position exists per role. The catalogue is Roles; this just makes
