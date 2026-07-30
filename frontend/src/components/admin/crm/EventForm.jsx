@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
 import { Field, TextInput, TextArea, Select, Btn } from './ui'
+import DateTimePicker from './DateTimePicker'
 
 // Shared vocab — mirrors services/crm.py EVENT_TYPES / ALERT_CODES and
 // models/db.py::CrmEvent so the two never drift.
@@ -124,7 +125,7 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
           </Select>
         </Field>
         <Field label="Date & time" width="210px">
-          <TextInput type="datetime-local" value={form.starts_at} onChange={set('starts_at')} required />
+          <DateTimePicker value={form.starts_at} onChange={(v) => setForm(f => ({ ...f, starts_at: v }))} required />
         </Field>
         <Field label="Title (optional)" width="230px">
           <TextInput value={form.title} onChange={set('title')} placeholder="e.g. Intro demo call" />
