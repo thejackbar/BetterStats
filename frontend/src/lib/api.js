@@ -553,6 +553,73 @@ export const api = {
   diaryBoard: () => request('/club-admin/club-diary/board'),
   diaryUpdateOccurrence: (id, data) =>
     request(`/club-admin/club-diary/occurrences/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  diarySeedStarterCategories: () =>
+    request('/club-admin/club-diary/categories/seed-starter', { method: 'POST' }),
+  diaryAddDependency: (definitionId, dependsOnId) =>
+    request(`/club-admin/club-diary/definitions/${definitionId}/dependencies`, { method: 'POST', body: JSON.stringify({ depends_on_definition_id: dependsOnId }) }),
+  diaryRemoveDependency: (definitionId, dependsOnId) =>
+    request(`/club-admin/club-diary/definitions/${definitionId}/dependencies/${dependsOnId}`, { method: 'DELETE' }),
+  diarySeasonYears: () => request('/club-admin/club-diary/season-years'),
+  diaryGenerateSeason: (year) =>
+    request(`/club-admin/club-diary/season/${year}/generate`, { method: 'POST' }),
+  diarySeasonPlan: (year) => request(`/club-admin/club-diary/season/${year}`),
+
+  // Shared member/person picker across BetterClubManager (all org members).
+  feeAllMembers: () => request('/club-admin/fees/all-members'),
+
+  // Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
+  raRoleTypes: (includeInactive) =>
+    request(`/club-admin/roles-activities/role-types${includeInactive ? '?include_inactive=true' : ''}`),
+  raCreateRoleType: (data) =>
+    request('/club-admin/roles-activities/role-types', { method: 'POST', body: JSON.stringify(data) }),
+  raUpdateRoleType: (id, data) =>
+    request(`/club-admin/roles-activities/role-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  raArchiveRoleType: (id) =>
+    request(`/club-admin/roles-activities/role-types/${id}`, { method: 'DELETE' }),
+  raSeedRoleTypes: () =>
+    request('/club-admin/roles-activities/role-types/seed-starter', { method: 'POST' }),
+  raRoles: (includeInactive) =>
+    request(`/club-admin/roles-activities/roles${includeInactive ? '?include_inactive=true' : ''}`),
+  raCreateRole: (data) =>
+    request('/club-admin/roles-activities/roles', { method: 'POST', body: JSON.stringify(data) }),
+  raUpdateRole: (id, data) =>
+    request(`/club-admin/roles-activities/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  raArchiveRole: (id) =>
+    request(`/club-admin/roles-activities/roles/${id}`, { method: 'DELETE' }),
+  raSeedRoles: () =>
+    request('/club-admin/roles-activities/roles/seed-starter', { method: 'POST' }),
+  raActivityTypes: (includeInactive) =>
+    request(`/club-admin/roles-activities/activity-types${includeInactive ? '?include_inactive=true' : ''}`),
+  raCreateActivityType: (data) =>
+    request('/club-admin/roles-activities/activity-types', { method: 'POST', body: JSON.stringify(data) }),
+  raUpdateActivityType: (id, data) =>
+    request(`/club-admin/roles-activities/activity-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  raArchiveActivityType: (id) =>
+    request(`/club-admin/roles-activities/activity-types/${id}`, { method: 'DELETE' }),
+  raSeedActivityTypes: () =>
+    request('/club-admin/roles-activities/activity-types/seed-starter', { method: 'POST' }),
+  raActivities: (includeInactive) =>
+    request(`/club-admin/roles-activities/activities${includeInactive ? '?include_inactive=true' : ''}`),
+  raCreateActivity: (data) =>
+    request('/club-admin/roles-activities/activities', { method: 'POST', body: JSON.stringify(data) }),
+  raUpdateActivity: (id, data) =>
+    request(`/club-admin/roles-activities/activities/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  raArchiveActivity: (id) =>
+    request(`/club-admin/roles-activities/activities/${id}`, { method: 'DELETE' }),
+  raSeedActivities: () =>
+    request('/club-admin/roles-activities/activities/seed-starter', { method: 'POST' }),
+
+  // Event types (club-defined catalogue + starter sets)
+  eventListTypes: (includeInactive) =>
+    request(`/club-admin/events/event-types${includeInactive ? '?include_inactive=true' : ''}`),
+  eventCreateType: (data) =>
+    request('/club-admin/events/event-types', { method: 'POST', body: JSON.stringify(data) }),
+  eventUpdateType: (id, data) =>
+    request(`/club-admin/events/event-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  eventArchiveType: (id) =>
+    request(`/club-admin/events/event-types/${id}`, { method: 'DELETE' }),
+  eventSeedTypes: (committeeOnly) =>
+    request(`/club-admin/events/event-types/seed-starter${committeeOnly ? '?committee_only=true' : ''}`, { method: 'POST' }),
 
   // Club admin — Membership Types (migration 175) — the cross-season
   // catalogue a member's membership_type_id points at.

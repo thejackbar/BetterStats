@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { MemberSelect, RoleMultiSelect } from '../../components/admin/clubmanager/pickers'
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -33,15 +34,22 @@ function TagInput({ values, onChange, placeholder }) {
   )
 }
 
-function VolunteerRow({ v, onChanged }) {
+function VolunteerRow({ v, onChanged, clubRoles, activities, onRoleCreated, onActivityCreated }) {
   const toast = useToast()
   const [expanded, setExpanded] = useState(false)
   const [roles, setRoles] = useState(v.roles_interested || [])
+  const [roleIds, setRoleIds] = useState((v.roles || []).map(r => r.id))
   const [days, setDays] = useState(v.available_days || [])
   const [livesNearby, setLivesNearby] = useState(v.lives_nearby)
   const [hours, setHours] = useState(null)
-  const [hoursForm, setHoursForm] = useState({ hours: '', activity: '', logged_date: new Date().toISOString().slice(0, 10) })
+  const [hoursForm, setHoursForm] = useState({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) })
   const [saving, setSaving] = useState(false)
+  const [newActivity, setNewActivity] = useState('')
+  const [showNewActivity, setShowNewActivity] = useState(false)
+  const [addingActivity, setAddingActivity] = useState(false)
+
+  // Reseed local state if the directory row changes (e.g. after a save/reload).
+  useEffect(() => { setRoleIds((v.roles || []).map(r => r.id)) }, [v.roles])
 
   const loadHours = useCallback(() => {
     api.volunteerListHours(v.member_id).then(d => setHours(d.hours || [])).catch(() => {})
@@ -52,16 +60,33 @@ function VolunteerRow({ v, onChanged }) {
   async function saveProfile() {
     setSaving(true)
     try {
-      await api.volunteerUpsertProfile({ member_id: v.member_id, roles_interested: roles, available_days: days, lives_nearby: livesNearby })
+      await api.volunteerUpsertProfile({ member_id: v.member_id, roles_interested: roles, available_days: days, lives_nearby: livesNearby, role_ids: roleIds })
       toast.success('Profile saved'); onChanged()
     } catch (e) { toast.error(e.message) } finally { setSaving(false) }
+  }
+
+  async function createActivity() {
+    const t = newActivity.trim()
+    if (!t) return
+    setAddingActivity(true)
+    try {
+      const a = await api.raCreateActivity({ title: t })
+      onActivityCreated(a)
+      setHoursForm(f => ({ ...f, activity_id: a.id }))
+      setNewActivity(''); setShowNewActivity(false)
+    } catch (e) { toast.error(e.message) } finally { setAddingActivity(false) }
   }
 
   async function logHours() {
     if (!Number(hoursForm.hours)) { toast.error('Hours is required'); return }
     try {
-      await api.volunteerLogHours({ member_id: v.member_id, hours: Number(hoursForm.hours), activity: hoursForm.activity || null, logged_date: hoursForm.logged_date })
-      setHoursForm({ hours: '', activity: '', logged_date: new Date().toISOString().slice(0, 10) })
+      await api.volunteerLogHours({
+        member_id: v.member_id,
+        hours: Number(hoursForm.hours),
+        activity_id: hoursForm.activity_id || null,
+        logged_date: hoursForm.logged_date,
+      })
+      setHoursForm({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) })
       loadHours(); onChanged()
     } catch (e) { toast.error(e.message) }
   }
@@ -76,7 +101,11 @@ function VolunteerRow({ v, onChanged }) {
         <div>
           <div className="text-pb-text font-semibold text-sm">{v.full_name}</div>
           <div className="font-mono text-[10px] text-pb-faint mt-0.5 flex flex-wrap gap-1.5">
-            {(v.roles_interested || []).length === 0 ? <span className="text-pb-faintest">No roles set</span> : v.roles_interested.map(r => <span key={r}>{r}</span>)}
+            {(v.roles || []).length > 0
+              ? v.roles.map(r => <span key={r.id} className="text-pb-accent">{r.title}</span>)
+              : (v.roles_interested || []).length === 0
+                ? <span className="text-pb-faintest">No roles set</span>
+                : v.roles_interested.map(r => <span key={r}>{r}</span>)}
             {v.lives_nearby && <span className="text-pb-accent">· Lives nearby</span>}
           </div>
         </div>
@@ -87,6 +116,20 @@ function VolunteerRow({ v, onChanged }) {
       </button>
       {expanded && (
         <div className="border-t pb-hairline-t px-4 py-3 space-y-4">
+          <div>
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">ROLES</div>
+            <RoleMultiSelect
+              roles={clubRoles}
+              value={roleIds}
+              onChange={setRoleIds}
+              onCreateRole={async (title) => {
+                const role = await api.raCreateRole({ title })
+                onRoleCreated(role)
+                return role
+              }}
+              label="Assign roles"
+            />
+          </div>
           <div>
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">ROLES INTERESTED</div>
             <TagInput values={roles} onChange={setRoles} placeholder="e.g. Scorer, BBQ, Ground prep" />
@@ -127,12 +170,26 @@ function VolunteerRow({ v, onChanged }) {
                 ))}
               </div>
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
               <input type="date" className={`${inp} w-36`} value={hoursForm.logged_date} onChange={e => setHoursForm(f => ({ ...f, logged_date: e.target.value }))} />
               <input type="number" min="0" step="0.5" className={`${inp} w-24`} placeholder="Hours" value={hoursForm.hours} onChange={e => setHoursForm(f => ({ ...f, hours: e.target.value }))} />
-              <input className={`${inp} flex-1 min-w-[140px]`} placeholder="Activity" value={hoursForm.activity} onChange={e => setHoursForm(f => ({ ...f, activity: e.target.value }))} />
+              <select className={`${inp} flex-1 min-w-[140px]`} value={hoursForm.activity_id} onChange={e => setHoursForm(f => ({ ...f, activity_id: e.target.value }))}>
+                <option value="">— choose activity —</option>
+                {activities.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+              </select>
+              <button onClick={() => setShowNewActivity(x => !x)} className="px-2 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ new</button>
               <button onClick={logHours} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-dim hover:text-pb-text">Log hours</button>
             </div>
+            {showNewActivity && (
+              <div className="flex gap-1.5 mt-2">
+                <input className={`${inp} flex-1`} placeholder="New activity title" value={newActivity} onChange={e => setNewActivity(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); createActivity() } }} />
+                <button onClick={createActivity} disabled={addingActivity || !newActivity.trim()}
+                  className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+                  {addingActivity ? '…' : 'ADD ACTIVITY'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -144,8 +201,9 @@ export default function AdminVolunteers() {
   const toast = useToast()
   const [volunteers, setVolunteers] = useState(null)
   const [allMembers, setAllMembers] = useState([])
-  const [seasons, setSeasons] = useState([])
-  const [addingMemberId, setAddingMemberId] = useState('')
+  const [clubRoles, setClubRoles] = useState([])
+  const [activities, setActivities] = useState([])
+  const [addingMemberId, setAddingMemberId] = useState(null)
   const [roleFilter, setRoleFilter] = useState('')
   const [dayFilter, setDayFilter] = useState('')
 
@@ -153,21 +211,36 @@ export default function AdminVolunteers() {
     api.volunteerDirectory().then(d => setVolunteers(d.volunteers || [])).catch(e => toast.error(e.message))
   }, [toast])
 
+  const reloadRoles = useCallback(() => {
+    api.raRoles().then(d => setClubRoles(d.roles || [])).catch(() => {})
+  }, [])
+
+  const reloadActivities = useCallback(() => {
+    api.raActivities().then(d => setActivities(d.activities || [])).catch(() => {})
+  }, [])
+
   useEffect(() => {
     load()
-    api.adminListSeasons().then(seas => {
-      const sorted = (seas || []).filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0))
-      setSeasons(sorted)
-      if (sorted[0]) api.feeListMembers(sorted[0].id).then(d => setAllMembers(d.members || [])).catch(() => {})
-    }).catch(() => {})
-  }, [load])
+    reloadRoles()
+    reloadActivities()
+    api.feeAllMembers().then(d => setAllMembers(d.members || [])).catch(() => {})
+  }, [load, reloadRoles, reloadActivities])
+
+  const onRoleCreated = useCallback((role) => {
+    if (role?.id) setClubRoles(prev => (prev.some(r => r.id === role.id) ? prev : [...prev, role]))
+  }, [])
+
+  const onActivityCreated = useCallback((a) => {
+    if (a?.id) setActivities(prev => (prev.some(x => x.id === a.id) ? prev : [...prev, a]))
+  }, [])
 
   const filtered = useMemo(() => {
     if (!volunteers) return []
-    return volunteers.filter(v =>
-      (!roleFilter || (v.roles_interested || []).some(r => r.toLowerCase().includes(roleFilter.toLowerCase()))) &&
-      (!dayFilter || (v.available_days || []).includes(dayFilter))
-    )
+    return volunteers.filter(v => {
+      const roleNames = [...(v.roles || []).map(r => r.title), ...(v.roles_interested || [])]
+      return (!roleFilter || roleNames.some(r => r.toLowerCase().includes(roleFilter.toLowerCase())))
+        && (!dayFilter || (v.available_days || []).includes(dayFilter))
+    })
   }, [volunteers, roleFilter, dayFilter])
 
   const candidateMembers = useMemo(() => {
@@ -175,11 +248,11 @@ export default function AdminVolunteers() {
     return allMembers.filter(m => !existing.has(m.member_id))
   }, [allMembers, volunteers])
 
-  async function addVolunteer() {
-    if (!addingMemberId) return
+  async function addVolunteer(memberId) {
+    if (!memberId) return
     try {
-      await api.volunteerUpsertProfile({ member_id: addingMemberId, roles_interested: [], available_days: [], lives_nearby: false })
-      setAddingMemberId('')
+      await api.volunteerUpsertProfile({ member_id: memberId, roles_interested: [], available_days: [] })
+      setAddingMemberId(null)
       load()
     } catch (e) { toast.error(e.message) }
   }
@@ -190,23 +263,22 @@ export default function AdminVolunteers() {
       <div className="max-w-4xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Volunteers</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Roles interested, availability, and an hours ledger — filter to find who's available, qualified and nearby.
+          Roles, availability, and an hours ledger — filter to find who's available, qualified and nearby.
         </p>
 
         <div className="pb-card p-4 mb-4">
           <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">ADD A VOLUNTEER</div>
           <div className="flex gap-2">
-            <select className={`${inp} flex-1`} value={addingMemberId} onChange={e => setAddingMemberId(e.target.value)}>
-              <option value="">Select member…</option>
-              {candidateMembers.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
-            </select>
-            <button onClick={addVolunteer} disabled={!addingMemberId}
+            <div className="flex-1">
+              <MemberSelect members={candidateMembers} value={addingMemberId} onChange={setAddingMemberId} placeholder="Search for a player or member…" />
+            </div>
+            <button onClick={() => addVolunteer(addingMemberId)} disabled={!addingMemberId}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
               + ADD
             </button>
           </div>
           <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
-            Candidates come from BetterFees' members for the latest season — add them there first if not listed.
+            Search any club member. Members already on the volunteer list are hidden.
           </p>
         </div>
 
@@ -222,7 +294,11 @@ export default function AdminVolunteers() {
           <div className="pb-card p-6 text-center text-pb-dim text-sm">No volunteers match.</div>
         ) : (
           <div className="space-y-2">
-            {filtered.map(v => <VolunteerRow key={v.member_id} v={v} onChanged={load} />)}
+            {filtered.map(v => (
+              <VolunteerRow key={v.member_id} v={v} onChanged={load}
+                clubRoles={clubRoles} activities={activities}
+                onRoleCreated={onRoleCreated} onActivityCreated={onActivityCreated} />
+            ))}
           </div>
         )}
       </div>

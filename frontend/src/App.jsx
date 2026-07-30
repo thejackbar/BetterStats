@@ -104,6 +104,8 @@ const AdminFeesXero = lazy(() => import('./pages/admin/AdminFeesXero'))
 const AdminMembershipTypes = lazy(() => import('./pages/admin/AdminMembershipTypes'))
 const AdminCommittee = lazy(() => import('./pages/admin/AdminCommittee'))
 const AdminVolunteers = lazy(() => import('./pages/admin/AdminVolunteers'))
+const AdminRoles = lazy(() => import('./pages/admin/AdminRoles'))
+const AdminActivities = lazy(() => import('./pages/admin/AdminActivities'))
 const AdminQualifications = lazy(() => import('./pages/admin/AdminQualifications'))
 const AdminEvents = lazy(() => import('./pages/admin/AdminEvents'))
 const AdminAssets = lazy(() => import('./pages/admin/AdminAssets'))
@@ -306,6 +308,8 @@ export default function App() {
           <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
           <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
           <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
+          <Route path="/admin/roles" element={<ProtectedRoute requireRole="super_admin"><AdminRoles /></ProtectedRoute>} />
+          <Route path="/admin/activities" element={<ProtectedRoute requireRole="super_admin"><AdminActivities /></ProtectedRoute>} />
           <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><AdminQualifications /></ProtectedRoute>} />
           <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><AdminEvents /></ProtectedRoute>} />
           <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
