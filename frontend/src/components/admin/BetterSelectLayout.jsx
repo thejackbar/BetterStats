@@ -26,17 +26,53 @@ function loadClubBranding() {
 }
 
 // BetterSelect runs as its own module surface — a focused nav with just the
-// availability/selection tools, separate from the main admin "noise".
+// availability/selection tools, separate from the main admin "noise". The
+// tools are organised into GROUPS (same pattern as BetterStatsLayout): the
+// surface home shows one card per group, each group card opens a page
+// listing its tools, and the sidebar flattens the same groups into headed
+// sections. One source of truth, three views. URLs of the tools themselves
+// are unchanged — only the surrounding chrome moved.
+export const GROUPS = [
+  {
+    key: 'squad',
+    label: 'Your Squad',
+    desc: 'Your player pool and how it splits into teams.',
+    items: [
+      { to: '/admin/betterselect/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS, desc: 'Your BetterSelect player pool.' },
+      { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS, desc: 'Set up your teams and squads.' },
+    ],
+  },
+  {
+    key: 'matchday',
+    label: 'Match Day',
+    desc: 'The weekly cycle — fixtures, availability and picking the XI.',
+    items: [
+      { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES, desc: 'Upcoming games and results.' },
+      { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },
+      { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Pick and share your XI.' },
+    ],
+  },
+  {
+    key: 'club',
+    label: 'Club Life',
+    desc: 'Training, best-player voting and competition ladders.',
+    items: [
+      { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS, desc: 'Training and net sessions.' },
+      { to: '/admin/betterselect/votes', label: 'Votes', icon: 'votes', cap: null, anyCaps: [CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS], desc: 'Best-player votes, Brownlow style.' },
+      { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS, desc: 'Competition ladders.' },
+    ],
+  },
+]
+
+// The sidebar flattens the groups: Overview, then a heading + its tools per group.
 export const NAV = [
-  { to: '/admin/betterselect', label: 'Overview', icon: 'overview', cap: null, exact: true },
-  { to: '/admin/betterselect/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS, desc: 'Your BetterSelect player pool.' },
-  { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES, desc: 'Upcoming games and results.' },
-  { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS, desc: 'Set up your teams and squads.' },
-  { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },
-  { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Pick and share your XI.' },
-  { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS, desc: 'Training and net sessions.' },
-  { to: '/admin/betterselect/votes', label: 'Votes', icon: 'votes', cap: null, anyCaps: [CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS], desc: 'Best-player votes, Brownlow style.' },
-  { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS, desc: 'Competition ladders.' },
+  // Non-exact so Overview stays highlighted on the group pages
+  // (/admin/betterselect/:group) too — no tool route is nested under this path.
+  { to: '/admin/betterselect', label: 'Overview', icon: 'overview', cap: null },
+  ...GROUPS.flatMap(g => [
+    { heading: g.label },
+    ...g.items.map(({ to, label, icon, cap, exact, anyCaps }) => ({ to, label, icon, cap, exact, anyCaps })),
+  ]),
 ]
 
 export default function BetterSelectLayout({ children, title, actions, headerLeft }) {
@@ -48,20 +84,31 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
 
-  // anyCaps: show the item when the user holds ANY of the listed capabilities
+  // Nav may include `{ heading }` separators (kept regardless of cap — they
+  // carry no `to`/`cap`); ordinary items are filtered by capability, with
+  // anyCaps meaning "show when the user holds ANY of the listed capabilities"
   // (e.g. Votes is open to managers and designated leaderboard viewers alike).
-  const items = NAV.filter(i => i.anyCaps
-    ? i.anyCaps.some(c => hasCapability(c))
-    : (i.cap == null || hasCapability(i.cap)))
+  // A heading left with no visible items under it is dropped so a label never
+  // dangles — same pattern as the generic ModuleLayout.
+  const items = NAV
+    .filter(i => i.heading || (i.anyCaps ? i.anyCaps.some(c => hasCapability(c)) : (i.cap == null || hasCapability(i.cap))))
+    .filter((i, idx, arr) => !i.heading || (arr[idx + 1] && !arr[idx + 1].heading))
 
   // Label stored when bookmarking the current page.
-  const activeNav = items.find(i => i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to))
+  const activeNav = items.find(i => i.to && (i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to)))
   const pageName = title || activeNav?.label
   const bookmarkLabel = 'BetterSelect' + (pageName ? ` · ${pageName}` : '')
 
   const NavItems = ({ onNavigate }) => (
     <>
-      {items.map(item => {
+      {items.map((item, idx) => {
+        if (item.heading) {
+          return (
+            <div key={`h-${idx}`} className="px-4 pt-4 pb-1 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
+              {item.heading}
+            </div>
+          )
+        }
         const active = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
         return (
           <Link key={item.to} to={item.to} onClick={onNavigate}
