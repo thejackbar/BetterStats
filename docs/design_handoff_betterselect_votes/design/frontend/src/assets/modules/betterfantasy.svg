@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="BetterFantasyCricket">
+  <defs>
+    <linearGradient id="fantasyTile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"></stop>
+      <stop offset="1" stop-color="#0891b2"></stop>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#fantasyTile)"></rect>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.16"></rect>
+  
+  <g fill="#062a30">
+    <path fill-rule="evenodd" d="M20 15 H44 V19 C44 30 39 38 32 38 C25 38 20 30 20 19 Z M32 19.6 L33.35 23.14 L37.2 23.3 L34.2 25.7 L35.2 29.4 L32 27.3 L28.8 29.4 L29.8 25.7 L26.8 23.3 L30.65 23.14 Z"></path>
+    <rect x="29.5" y="37.5" width="5" height="7.5" rx="0.6"></rect>
+    <rect x="24.5" y="44.5" width="15" height="3.6" rx="1.6"></rect>
+    <rect x="20.5" y="49.5" width="23" height="4.6" rx="2.2"></rect>
+  </g>
+  <g fill="none" stroke="#062a30" stroke-width="3" stroke-linecap="round">
+    <path d="M20 17 C12 17 12 28 21 30"></path>
+    <path d="M44 17 C52 17 52 28 43 30"></path>
+  </g>
+</svg>
