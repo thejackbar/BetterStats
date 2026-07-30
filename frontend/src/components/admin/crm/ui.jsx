@@ -61,12 +61,17 @@ export function TextArea(props) {
   return <textarea {...props} className={`${inputCls} min-h-[64px] ${props.className || ''}`} />
 }
 
-export function Modal({ open, onClose, title, children, wide, footer }) {
+export function Modal({ open, onClose, title, children, wide, footer, tall }) {
   if (!open) return null
+  // `tall` maximises usable height for content-heavy modals (e.g. the deal
+  // detail): calc(100vh - margins) always fits the viewport — borders stay
+  // visible on any screen height — while sitting a little taller than the
+  // default 86vh. The body still scrolls if content overflows.
+  const box = tall ? 'my-4 max-h-[calc(100vh-5rem)]' : 'mt-10 mb-8 max-h-[86vh]'
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4" style={{ backdropFilter: 'blur(2px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className={`pb-card bg-pb-surface w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} mt-10 mb-8 max-h-[86vh] overflow-hidden flex flex-col`}>
+      <div className={`pb-card bg-pb-surface w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} ${box} overflow-hidden flex flex-col`}>
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-pb-hairline shrink-0">
           <h2 className="font-display font-bold text-base">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="text-pb-faint hover:text-pb-text p-1 rounded hover:bg-pb-surface2"><Icon name="close" size={18} /></button>

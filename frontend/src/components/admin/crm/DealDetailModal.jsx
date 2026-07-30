@@ -257,7 +257,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   ) : (t.itemSingular[0].toUpperCase() + t.itemSingular.slice(1))
 
   return (
-    <Modal open={open} onClose={onClose} wide title={titleNode}
+    <Modal open={open} onClose={onClose} wide tall title={titleNode}
       footer={deal ? (
         <>
           <Btn variant="ghost" onClick={() => setShowPurgeBox(v => !v)}>Delete permanently…</Btn>
@@ -463,6 +463,41 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             )
           })()}
 
+          {/* Note composer — kept high in the modal so the Type dropdown and
+              "Log an update…" field are visible without scrolling; the activity
+              history stays under "Notes & activity" further down. */}
+          <div>
+            <h3 className="font-display font-bold text-[13px] mb-2">Add a note</h3>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-pb-faint">Type</span>
+                {/* Sized to fit the widest option, not a fixed Tailwind width —
+                    the inline style wins over the shared Select's w-full. */}
+                <Select value={noteType} onChange={e => setNoteType(e.target.value)} style={{ width: 'auto' }}>
+                  <option value="note">Note</option>
+                  <option value="call">Call</option>
+                  <option value="email">Email</option>
+                  <option value="meeting">Meeting</option>
+                  {eventsEnabled && <option value="event">Event</option>}
+                </Select>
+              </div>
+              {noteType === 'event' && eventsEnabled ? (
+                <div className="pb-card px-3 py-3">
+                  <EventForm ownerOptions={ownerOptions || []} contactOptions={contactOptions}
+                    onSubmit={addEvent} saving={saving} submitLabel="Add event" />
+                </div>
+              ) : (
+                <form onSubmit={addActivity} className="space-y-2">
+                  <TextArea placeholder="Log an update…" value={note} onChange={e => setNote(e.target.value)}
+                    style={{ minHeight: '110px' }} />
+                  <div className="flex justify-end">
+                    <Btn type="submit" variant="ghost" sm>Add</Btn>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Contacts</h3>
             {(() => {
@@ -538,7 +573,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Notes &amp; activity</h3>
-            <div className="space-y-2 mb-2 max-h-48 overflow-y-auto">
+            <div className="space-y-2 max-h-48 overflow-y-auto">
               {activities.length === 0 && <p className="text-[12px] text-pb-faintest">No activity logged yet.</p>}
               {activities.map(a => (
                 <div key={a.id} className="text-[12.5px] pb-card px-2.5 py-2">
@@ -549,34 +584,6 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   {a.body && <p className="text-pb-text">{a.body}</p>}
                 </div>
               ))}
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-pb-faint">Type</span>
-                {/* Sized to fit the widest option, not a fixed Tailwind width —
-                    the inline style wins over the shared Select's w-full. */}
-                <Select value={noteType} onChange={e => setNoteType(e.target.value)} style={{ width: 'auto' }}>
-                  <option value="note">Note</option>
-                  <option value="call">Call</option>
-                  <option value="email">Email</option>
-                  <option value="meeting">Meeting</option>
-                  {eventsEnabled && <option value="event">Event</option>}
-                </Select>
-              </div>
-              {noteType === 'event' && eventsEnabled ? (
-                <div className="pb-card px-3 py-3">
-                  <EventForm ownerOptions={ownerOptions || []} contactOptions={contactOptions}
-                    onSubmit={addEvent} saving={saving} submitLabel="Add event" />
-                </div>
-              ) : (
-                <form onSubmit={addActivity} className="space-y-2">
-                  <TextArea placeholder="Log an update…" value={note} onChange={e => setNote(e.target.value)}
-                    style={{ minHeight: '110px' }} />
-                  <div className="flex justify-end">
-                    <Btn type="submit" variant="ghost" sm>Add</Btn>
-                  </div>
-                </form>
-              )}
             </div>
           </div>
         </div>
