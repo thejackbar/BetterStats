@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
@@ -164,12 +164,34 @@ function PositionCard({ position, members, onChanged }) {
 function PositionsTab({ members }) {
   const toast = useToast()
   const [data, setData] = useState(null)
+  const [positions, setPositions] = useState([])
   const [seeding, setSeeding] = useState(false)
+  const dragIndex = useRef(null)
+  const [dragOver, setDragOver] = useState(null)
 
   const load = useCallback(() => {
-    api.committeePositionsCurrent().then(setData).catch(e => toast.error(e.message))
+    api.committeePositionsCurrent()
+      .then(d => { setData(d); setPositions(d.positions || []) })
+      .catch(e => toast.error(e.message))
   }, [toast])
   useEffect(() => { load() }, [load])
+
+  // Native HTML5 drag-and-drop reordering (no library). The drag handle on
+  // each card starts the drag; the whole row is the drop zone. On drop we
+  // persist the new order, which writes each committee role's sort_order.
+  const onDrop = async (toIdx) => {
+    const from = dragIndex.current
+    dragIndex.current = null
+    setDragOver(null)
+    if (from === null || from === toIdx) return
+    const next = [...positions]
+    const [moved] = next.splice(from, 1)
+    next.splice(toIdx, 0, moved)
+    setPositions(next)  // optimistic
+    try {
+      await api.committeeReorderPositions(next.map(p => p.id))
+    } catch (e) { toast.error(e.message); load() }
+  }
 
   const seedStarter = async () => {
     setSeeding(true)
@@ -192,11 +214,26 @@ function PositionsTab({ members }) {
           {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (14)'}
         </button>
       </div>
-      {data.positions.length === 0 ? (
+      {positions.length === 0 ? (
         <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet — add the committee roles above, or create them under Roles.</div>
       ) : (
         <div className="space-y-2">
-          {data.positions.map(p => <PositionCard key={p.id} position={p} members={members} onChanged={load} />)}
+          <p className="font-mono text-[10px] text-pb-faintest">Drag the ⠿ handle to reorder.</p>
+          {positions.map((p, idx) => (
+            <div key={p.id} className={`relative rounded ${dragOver === idx ? 'ring-1 ring-pb-accent/60' : ''}`}
+              onDragOver={e => { e.preventDefault(); if (dragOver !== idx) setDragOver(idx) }}
+              onDragLeave={() => setDragOver(o => (o === idx ? null : o))}
+              onDrop={() => onDrop(idx)}>
+              <span draggable
+                onDragStart={() => { dragIndex.current = idx }}
+                onDragEnd={() => { dragIndex.current = null; setDragOver(null) }}
+                title="Drag to reorder"
+                className="absolute left-1.5 top-4 z-10 cursor-grab active:cursor-grabbing text-pb-faintest hover:text-pb-text select-none text-sm leading-none">⠿</span>
+              <div className="pl-6">
+                <PositionCard position={p} members={members} onChanged={load} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

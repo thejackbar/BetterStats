@@ -319,6 +319,8 @@ export const api = {
     request(`/club-admin/committee/positions/${id}`, { method: 'DELETE' }),
   committeeSeedStarterPositions: () =>
     request('/club-admin/committee/positions/seed-starter', { method: 'POST' }),
+  committeeReorderPositions: (positionIds) =>
+    request('/club-admin/committee/positions/reorder', { method: 'POST', body: JSON.stringify({ position_ids: positionIds }) }),
   committeePositionHistory: (id) => request(`/club-admin/committee/positions/${id}/history`),
   committeeStartTerm: (positionId, data) =>
     request(`/club-admin/committee/positions/${positionId}/terms`, { method: 'POST', body: JSON.stringify(data) }),
