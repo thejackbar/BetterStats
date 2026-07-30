@@ -48,6 +48,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const [editPhoneId, setEditPhoneId] = useState(null)
   const [showPurgeBox, setShowPurgeBox] = useState(false)
   const [resetClub, setResetClub] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [discountAmount, setDiscountAmount] = useState('')
   const [discountPercent, setDiscountPercent] = useState('')
   const [discountReason, setDiscountReason] = useState('')
@@ -55,6 +56,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
   const load = useCallback(() => {
     if (!dealId) return
+    setDeleting(false)
     setLoading(true)
     const calls = [client.getDeal(dealId), client.listActivities(dealId), client.listContacts(dealId)]
     calls.push(client.listEvents ? client.listEvents(dealId) : Promise.resolve({ events: [] }))
@@ -119,11 +121,12 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   }
 
   const deletePermanently = async () => {
+    setDeleting(true)
     try {
       await client.deletePermanent(dealId, resetClub)
       onChanged?.()
       onClose()
-    } catch (e) { toast.error(e.message || `Could not delete this ${t.itemSingular}`) }
+    } catch (e) { toast.error(e.message || `Could not delete this ${t.itemSingular}`); setDeleting(false) }
   }
 
   const addActivity = async (e) => {
@@ -294,9 +297,18 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                 </label>
               )}
               <div className="flex justify-end gap-2">
-                <Btn variant="ghost" sm onClick={() => setShowPurgeBox(false)}>Cancel</Btn>
-                <Btn variant="danger" sm onClick={deletePermanently}>Confirm delete</Btn>
+                <Btn variant="ghost" sm onClick={() => setShowPurgeBox(false)} disabled={deleting}>Cancel</Btn>
+                <Btn variant="danger" sm onClick={deletePermanently} disabled={deleting}>
+                  {deleting ? 'Deleting…' : 'Confirm delete'}
+                </Btn>
               </div>
+              {deleting && (
+                <p className="text-[11.5px] text-pb-amber text-right">
+                  {resetClub
+                    ? 'Deleting the deal and wiping the club’s data (seasons, games, players, stats, login, Stripe). This can take a moment — please don’t close this window.'
+                    : `Deleting this ${t.itemSingular}…`}
+                </p>
+              )}
             </div>
           )}
           <div className="flex flex-wrap gap-3">
@@ -467,7 +479,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               "Log an update…" field are visible without scrolling; the activity
               history stays under "Notes & activity" further down. */}
           <div>
-            <h3 className="font-display font-bold text-[13px] mb-2">Add a note</h3>
+            <h3 className="font-display font-bold text-[13px] mb-2">Add a note/event</h3>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-pb-faint">Type</span>
@@ -477,7 +489,6 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   <option value="note">Note</option>
                   <option value="call">Call</option>
                   <option value="email">Email</option>
-                  <option value="meeting">Meeting</option>
                   {eventsEnabled && <option value="event">Event</option>}
                 </Select>
               </div>
@@ -497,6 +508,28 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               )}
             </div>
           </div>
+
+          {/* Scheduled events sit right under the note/event composer so the
+              list a super admin just added to is immediately below the form. */}
+          {eventsEnabled && (
+            <div>
+              <h3 className="font-display font-bold text-[13px] mb-2 flex items-center gap-1.5">
+                <CalendarIcon className="text-pb-accent" /> Scheduled events
+              </h3>
+              <div className="space-y-2">
+                {events.length === 0 && <p className="text-[12px] text-pb-faintest">No events scheduled.</p>}
+                {events.map(ev => editingEventId === ev.id ? (
+                  <div key={ev.id} className="pb-card px-3 py-3 border-pb-accent/40">
+                    <EventForm initial={ev} ownerOptions={ownerOptions || []} contactOptions={contactOptions}
+                      onSubmit={(payload) => saveEvent(ev.id, payload)} onCancel={() => setEditingEventId(null)}
+                      saving={saving} submitLabel="Save changes" />
+                  </div>
+                ) : (
+                  <EventRow key={ev.id} ev={ev} onEdit={() => setEditingEventId(ev.id)} onDelete={() => deleteEvent(ev.id)} />
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Contacts</h3>
@@ -550,26 +583,6 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           <EngagementBreakdownPanel marketingClubId={deal.marketing_club_id} />
 
           <WebsiteAnalyticsPanel marketingClubId={deal.marketing_club_id} />
-
-          {eventsEnabled && (
-            <div>
-              <h3 className="font-display font-bold text-[13px] mb-2 flex items-center gap-1.5">
-                <CalendarIcon className="text-pb-accent" /> Scheduled events
-              </h3>
-              <div className="space-y-2">
-                {events.length === 0 && <p className="text-[12px] text-pb-faintest">No events scheduled.</p>}
-                {events.map(ev => editingEventId === ev.id ? (
-                  <div key={ev.id} className="pb-card px-3 py-3 border-pb-accent/40">
-                    <EventForm initial={ev} ownerOptions={ownerOptions || []} contactOptions={contactOptions}
-                      onSubmit={(payload) => saveEvent(ev.id, payload)} onCancel={() => setEditingEventId(null)}
-                      saving={saving} submitLabel="Save changes" />
-                  </div>
-                ) : (
-                  <EventRow key={ev.id} ev={ev} onEdit={() => setEditingEventId(ev.id)} onDelete={() => deleteEvent(ev.id)} />
-                ))}
-              </div>
-            </div>
-          )}
 
           <div>
             <h3 className="font-display font-bold text-[13px] mb-2">Notes &amp; activity</h3>

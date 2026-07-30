@@ -8,12 +8,14 @@ import DateTimePicker from './DateTimePicker'
 export const EVENT_TYPE_OPTIONS = [
   { value: 'call', label: 'Call' },
   { value: 'demo', label: 'Demo' },
-  { value: 'meeting', label: 'Meeting' },
   { value: 'review_deal', label: 'Review Deal' },
   { value: 'follow_up', label: 'Follow Up' },
   { value: 'other', label: 'Other' },
 ]
-export const EVENT_TYPE_LABELS = Object.fromEntries(EVENT_TYPE_OPTIONS.map(o => [o.value, o.label]))
+// 'meeting' is no longer offered in the picker, but legacy events still carry
+// it — keep a label so they render as "Meeting" rather than a raw code.
+export const EVENT_TYPE_LABELS_LEGACY = { meeting: 'Meeting' }
+export const EVENT_TYPE_LABELS = { ...EVENT_TYPE_LABELS_LEGACY, ...Object.fromEntries(EVENT_TYPE_OPTIONS.map(o => [o.value, o.label])) }
 export const eventTypeLabel = (v) => EVENT_TYPE_LABELS[v] || v || 'Event'
 
 export const ALERT_OPTIONS = [
@@ -83,7 +85,7 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
   // and (b) throw on `.trim()` at submit — which silently aborted the save on
   // edit. Every text field is therefore always a string in state.
   const [form, setForm] = useState(() => ({
-    event_type: initial?.event_type || 'meeting',
+    event_type: initial?.event_type || 'call',
     // Prefill a valid default (next full hour) for a brand-new event so the
     // datetime field is complete out of the box — otherwise a 12-hour-locale
     // browser leaves the AM/PM segment blank, the input reports an empty

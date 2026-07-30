@@ -1766,6 +1766,7 @@ async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> d
     now = now or datetime.now(timezone.utc)
     from app.services import platform_settings as ps
     stale_before = now - timedelta(hours=await ps.get_crm_event_stale_hours(session))
+    show_past = await ps.get_crm_show_past_events(session)
     rows = (await session.execute(
         select(CrmEvent).where(CrmEvent.deal_id.in_(ids)).order_by(CrmEvent.starts_at.asc())
     )).scalars().all()
@@ -1783,7 +1784,9 @@ async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> d
             past[e.deal_id] = summary  # keep overwriting → last (most recent) past wins
     out = {}
     for did in ids:
-        out[did] = upcoming.get(did) or past.get(did)
+        # A soonest upcoming event always wins; a past event only shows when
+        # "Show past events" is on (then greyed once older than the stale window).
+        out[did] = upcoming.get(did) or (past.get(did) if show_past else None)
     return out
 
 

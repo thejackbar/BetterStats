@@ -40,6 +40,10 @@ _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days",
 _BOOL_KEYS = {
     "self_serve_registration_enabled", "onboarding_wizard_enabled", "trial_nudges_enabled",
     "billing_checkout_enabled", "member_portal_enabled", "merch_storefront_enabled",
+    # Unlike the feature flags above (default OFF), this one defaults ON — see
+    # get_crm_show_past_events. It's listed here only so update_settings
+    # validates/stores it as a real boolean.
+    "crm_show_past_events",
 }
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
@@ -226,6 +230,14 @@ async def get_crm_event_stale_hours(db: AsyncSession) -> int:
     except (TypeError, ValueError):
         return DEFAULT_CRM_EVENT_STALE_HOURS
     return max(CRM_EVENT_STALE_MIN_HOURS, min(CRM_EVENT_STALE_MAX_HOURS, v))
+
+
+async def get_crm_show_past_events(db: AsyncSession) -> bool:
+    """Whether past events show on Kanban cards at all. Defaults ON (unlike the
+    feature flags); when OFF, a card whose only event is in the past shows no
+    event summary."""
+    v = (await get_settings(db)).get("crm_show_past_events")
+    return True if v is None else bool(v)
 
 
 async def get_crm_global_sweep_minutes(db: AsyncSession) -> int:

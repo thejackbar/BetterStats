@@ -137,7 +137,9 @@ function EventCard({ ev, onEdit, onDelete, compact }) {
           {ev.location && <span>· 📍 {ev.location}</span>}
           {ev.owner_name && <span>· {ev.owner_name}</span>}
           {ev.contact_name && <span>· {ev.contact_name}</span>}
-          {ev.deal_title && <span>· deal: {ev.deal_title}</span>}
+          {/* The linked deal's title duplicates the club name shown at the
+              start of the line, so only surface it for a deal with no club. */}
+          {!ev.marketing_club_name && ev.deal_title && <span>· deal: {ev.deal_title}</span>}
         </div>
       )}
       {!compact && alerts.length > 0 && (
@@ -148,19 +150,20 @@ function EventCard({ ev, onEdit, onDelete, compact }) {
   )
 }
 
-// A compact calendar chip (month grid + week columns): time + type + title on
-// the first line, then club name, then contact name (each only when present).
-function EventChip({ ev, onClick }) {
+// A calendar chip: time + type + title on the first line, then club name, then
+// contact name. `compact` (month grid, where cells are kept short so the whole
+// month fits the viewport) shows the first line only; week columns show all
+// three lines. The full detail is always in the title tooltip and on click.
+function EventChip({ ev, onClick, compact }) {
+  const line1 = `${fmtTime(ev.starts_at)} ${eventTypeLabel(ev.event_type)}${ev.title ? ` · ${ev.title}` : ''}`
+  const tip = [line1, ev.marketing_club_name, ev.contact_name].filter(Boolean).join('\n')
   return (
-    <button type="button" onClick={onClick}
-      title={`${fmtTime(ev.starts_at)} ${eventTypeLabel(ev.event_type)}${ev.title ? ` · ${ev.title}` : ''}`}
-      className="block w-full text-left leading-tight px-1.5 py-1 rounded"
+    <button type="button" onClick={onClick} title={tip}
+      className="block w-full text-left leading-tight px-1.5 py-0.5 rounded"
       style={{ background: 'rgba(139,124,246,0.14)', color: EVENT_COLOR }}>
-      <div className="text-[10px] font-medium truncate">
-        {fmtTime(ev.starts_at)} {eventTypeLabel(ev.event_type)}{ev.title ? ` · ${ev.title}` : ''}
-      </div>
-      {ev.marketing_club_name && <div className="text-[9.5px] truncate opacity-90">{ev.marketing_club_name}</div>}
-      {ev.contact_name && <div className="text-[9.5px] truncate opacity-75">{ev.contact_name}</div>}
+      <div className="text-[10px] font-medium truncate">{line1}</div>
+      {!compact && ev.marketing_club_name && <div className="text-[9.5px] truncate opacity-90">{ev.marketing_club_name}</div>}
+      {!compact && ev.contact_name && <div className="text-[9.5px] truncate opacity-75">{ev.contact_name}</div>}
     </button>
   )
 }
@@ -185,8 +188,11 @@ function MonthView({ cursor, events, onPick, onDayAdd }) {
           const inMonth = day.getMonth() === cursor.getMonth()
           const dayEvents = byDay[day.toDateString()] || []
           const today = isToday(day)
+          // Compact fixed-height cell so all 6 rows of a month fit a laptop
+          // viewport without scrolling past the end of the month. Overflow
+          // inside a busy day scrolls within the cell.
           return (
-            <div key={i} className={`min-h-[92px] border-b border-r border-pb-hairline p-1 ${inMonth ? '' : 'bg-pb-surface2/40'}`}>
+            <div key={i} className={`h-[74px] overflow-y-auto border-b border-r border-pb-hairline p-1 ${inMonth ? '' : 'bg-pb-surface2/40'}`}>
               <div className="flex items-center justify-between">
                 <button onClick={() => onDayAdd(day)} title="Add an event on this day"
                   className={`text-[11px] w-5 h-5 rounded-full flex items-center justify-center ${
@@ -196,11 +202,11 @@ function MonthView({ cursor, events, onPick, onDayAdd }) {
                 </button>
               </div>
               <div className="space-y-0.5 mt-0.5">
-                {dayEvents.slice(0, 3).map(e => (
-                  <EventChip key={e.id} ev={e} onClick={() => onPick(e)} />
+                {dayEvents.slice(0, 2).map(e => (
+                  <EventChip key={e.id} ev={e} onClick={() => onPick(e)} compact />
                 ))}
-                {dayEvents.length > 3 && (
-                  <div className="text-[9px] text-pb-faint px-1">+{dayEvents.length - 3} more</div>
+                {dayEvents.length > 2 && (
+                  <div className="text-[9px] text-pb-faint px-1">+{dayEvents.length - 2} more</div>
                 )}
               </div>
             </div>
@@ -252,7 +258,7 @@ export default function CrmEventsView({ owners }) {
   const ownerOptions = owners || []
   const [allEvents, setAllEvents] = useState([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('list')        // list | calendar
+  const [view, setView] = useState('calendar')     // calendar (default) | list
   const [calMode, setCalMode] = useState('month')  // month | week | day
   const [cursor, setCursor] = useState(() => new Date())
 
@@ -354,8 +360,8 @@ export default function CrmEventsView({ owners }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <button onClick={() => setView('list')} className={pill(view === 'list')}>List</button>
           <button onClick={() => setView('calendar')} className={pill(view === 'calendar')}>Calendar</button>
+          <button onClick={() => setView('list')} className={pill(view === 'list')}>List</button>
         </div>
         <Btn variant="primary" sm onClick={() => openAdd()}>New event</Btn>
       </div>

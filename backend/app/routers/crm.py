@@ -795,6 +795,7 @@ class CrmSweepSettings(BaseModel):
     incremental_sweep_seconds: Optional[int] = None
     global_sweep_minutes: Optional[int] = None
     event_stale_hours: Optional[int] = None
+    show_past_events: Optional[bool] = None
 
 
 @super_router.get("/settings", dependencies=[_super])
@@ -806,6 +807,7 @@ async def super_crm_settings(db: AsyncSession = Depends(get_db)):
         "incremental_sweep_seconds": await ps.get_crm_incremental_sweep_seconds(db),
         "global_sweep_minutes": await ps.get_crm_global_sweep_minutes(db),
         "event_stale_hours": await ps.get_crm_event_stale_hours(db),
+        "show_past_events": await ps.get_crm_show_past_events(db),
         "bounds": {
             "incremental_seconds": {"min": ps.CRM_INCREMENTAL_SWEEP_MIN_SECONDS,
                                     "max": ps.CRM_INCREMENTAL_SWEEP_MAX_SECONDS},
@@ -844,6 +846,8 @@ async def super_update_crm_settings(body: CrmSweepSettings, db: AsyncSession = D
                 f"event_stale_hours must be {ps.CRM_EVENT_STALE_MIN_HOURS}"
                 f"–{ps.CRM_EVENT_STALE_MAX_HOURS}"))
         patch["crm_event_stale_hours"] = v
+    if body.show_past_events is not None:
+        patch["crm_show_past_events"] = body.show_past_events
     if patch:
         try:
             await ps.update_settings(db, patch)
@@ -857,7 +861,8 @@ async def super_update_crm_settings(body: CrmSweepSettings, db: AsyncSession = D
     except Exception:  # noqa: BLE001
         logger.exception("could not reschedule CRM sweeps after settings update")
     return {"incremental_sweep_seconds": inc, "global_sweep_minutes": glob,
-            "event_stale_hours": await ps.get_crm_event_stale_hours(db)}
+            "event_stale_hours": await ps.get_crm_event_stale_hours(db),
+            "show_past_events": await ps.get_crm_show_past_events(db)}
 
 
 @super_router.post("/deals", dependencies=[_super])

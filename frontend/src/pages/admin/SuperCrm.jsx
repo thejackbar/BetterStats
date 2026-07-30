@@ -11,6 +11,7 @@ import PipelineBoard, { TIER_TONE, EngagementArrow } from '../../components/admi
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
 import CrmEventsView from '../../components/admin/crm/CrmEventsView'
+import { CalendarIcon, eventSummaryText } from '../../components/admin/crm/EventForm'
 import {
   Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
   LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel,
@@ -748,6 +749,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
   const [incSec, setIncSec] = useState('0')
   const [globMin, setGlobMin] = useState('60')
   const [staleHours, setStaleHours] = useState('24')
+  const [showPast, setShowPast] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingStale, setSavingStale] = useState(false)
 
@@ -762,6 +764,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
       setIncSec(String(total % 60))
       setGlobMin(String(s.global_sweep_minutes ?? 60))
       setStaleHours(String(s.event_stale_hours ?? 24))
+      setShowPast(s.show_past_events !== false)
     }).catch(() => { if (alive) setCadence({ error: true }) })
     return () => { alive = false }
   }, [open])
@@ -785,8 +788,9 @@ function SettingsModal({ open, onClose, onManageStages }) {
     const hours = Math.max(1, Math.floor(Number(staleHours) || 0))
     setSavingStale(true)
     try {
-      const r = await api.superCrmUpdateSettings({ event_stale_hours: hours })
+      const r = await api.superCrmUpdateSettings({ event_stale_hours: hours, show_past_events: showPast })
       setStaleHours(String(r.event_stale_hours))
+      setShowPast(r.show_past_events !== false)
       toast.success('Event display setting saved.')
     } catch (e) {
       toast.error(e.message || 'Could not save the setting')
@@ -861,23 +865,30 @@ function SettingsModal({ open, onClose, onManageStages }) {
         </div>
 
         <div className="pb-card px-3 py-2.5">
-          <div className="font-medium text-[13px]">Kanban events</div>
+          <div className="font-medium text-[13px]">Past Events</div>
           <div className="text-[11.5px] text-pb-faint mt-0.5 mb-2">
-            When a card's latest event has been and gone, grey out its summary once it's
-            this many hours old. A soonest upcoming event always shows in full colour and
-            takes priority over any past one.
-            {staleB ? ` Between ${staleB.min} and ${staleB.max} hours.` : ''}
+            How a card's past events show once its latest event has been and gone. A soonest
+            upcoming event always shows in full colour and takes priority over any past one.
+            {staleB ? ` Grey-out window between ${staleB.min} and ${staleB.max} hours.` : ''}
           </div>
           {cadence?.error ? (
             <div className="text-[11.5px] text-pb-red">Couldn't load the current setting.</div>
           ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] font-medium">Grey out a past event after</span>
-              <NumberInput min={1} value={staleHours} onChange={e => setStaleHours(e.target.value)} style={{ width: '66px' }} />
-              <span className="text-[11px] text-pb-faint">hours</span>
-              <Btn variant="primary" sm onClick={saveStale} disabled={savingStale || !cadence} className="ml-auto">
-                {savingStale ? 'Saving…' : 'Save'}
-              </Btn>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-[12px] text-pb-text">
+                <input type="checkbox" checked={showPast} onChange={e => setShowPast(e.target.checked)} />
+                Show past events on Kanban cards
+              </label>
+              <div className={`flex items-center gap-2 ${showPast ? '' : 'opacity-40'}`}>
+                <span className="text-[12px] font-medium">Grey out past events after</span>
+                <NumberInput min={1} value={staleHours} onChange={e => setStaleHours(e.target.value)} disabled={!showPast} style={{ width: '66px' }} />
+                <span className="text-[11px] text-pb-faint">hours</span>
+              </div>
+              <div className="flex justify-end">
+                <Btn variant="primary" sm onClick={saveStale} disabled={savingStale || !cadence}>
+                  {savingStale ? 'Saving…' : 'Save'}
+                </Btn>
+              </div>
             </div>
           )}
         </div>
@@ -1177,11 +1188,12 @@ export default function SuperCrm() {
                       <SortableTh label="Engagement" sortKey="engagement" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
                       <SortableTh label="Source" sortKey="source" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
                       <SortableTh label="Status" sortKey="status" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <th className="px-3 py-2 font-medium">Next event</th>
                     </tr>
                   </thead>
                   <tbody>
                     {listSortedDeals.length === 0 && (
-                      <tr><td colSpan={8} className="px-3 py-6 text-center text-pb-faintest">
+                      <tr><td colSpan={9} className="px-3 py-6 text-center text-pb-faintest">
                         {deals.length === 0 ? 'No deals yet.' : 'No deals match these filters.'}
                       </td></tr>
                     )}
@@ -1209,6 +1221,15 @@ export default function SuperCrm() {
                           {d.status === 'won' && <Pill tone="green">Won</Pill>}
                           {d.status === 'lost' && <Pill tone="red">Lost</Pill>}
                           {d.status === 'open' && <Pill>Open</Pill>}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {d.next_event ? (
+                            <span className="inline-flex items-center gap-1 text-[11.5px] whitespace-nowrap"
+                              style={{ color: d.next_event.stale ? '#9ca3af' : '#8b7cf6' }}>
+                              <CalendarIcon />
+                              {eventSummaryText(d.next_event)}
+                            </span>
+                          ) : <span className="text-pb-faintest">—</span>}
                         </td>
                       </tr>
                     ))}
