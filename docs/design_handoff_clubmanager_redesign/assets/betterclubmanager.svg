@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="BetterClubManager">
+  <defs>
+    <linearGradient id="clubmgrTile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#818cf8"></stop>
+      <stop offset="1" stop-color="#4f46e5"></stop>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#clubmgrTile)"></rect>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.18"></rect>
+  
+  <g fill="#1a1633">
+    <circle cx="32" cy="24" r="7"></circle>
+    <path d="M20 46 a12 12 0 0 1 24 0 a2 2 0 0 1 -2 2 h-20 a2 2 0 0 1 -2 -2 z"></path>
+    <circle cx="15" cy="28" r="5.2"></circle>
+    <path d="M6 45 a9 9 0 0 1 12.5 -8.3 a15 15 0 0 0 -5.2 9.3 h-5.6 a1.8 1.8 0 0 1 -1.7 -1z"></path>
+    <circle cx="49" cy="28" r="5.2"></circle>
+    <path d="M58 45 a9 9 0 0 0 -12.5 -8.3 a15 15 0 0 1 5.2 9.3 h5.6 a1.8 1.8 0 0 0 1.7 -1z"></path>
+  </g>
+</svg>
