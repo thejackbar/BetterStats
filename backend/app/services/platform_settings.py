@@ -561,8 +561,8 @@ async def update_bundle_discount_schedule(db: AsyncSession, schedule: dict) -> d
 # Applied per group (one limit each), not per individual step. Values can't be 0
 # (0 would drop everyone instantly), so this gets its own getter/setter rather
 # than the generic _INT_KEYS validator — same reasoning as backup_schedule below.
-DEFAULT_REGISTRATION_IDLE_MINUTES = 30
-DEFAULT_ONBOARDING_IDLE_MINUTES = 15
+DEFAULT_REGISTRATION_IDLE_MINUTES = 5
+DEFAULT_ONBOARDING_IDLE_MINUTES = 5
 IDLE_MINUTES_MIN = 1
 IDLE_MINUTES_MAX = 1440  # a day — a generous ceiling; nobody sits idle-but-active longer
 
