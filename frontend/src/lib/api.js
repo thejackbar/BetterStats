@@ -1192,6 +1192,12 @@ export const api = {
   // Snapshot of running background work — syncs, IQ prewarms, in-flight
   // registrations, active Setup Wizard sessions (Current Background Processes).
   adminUsageBackgroundProcesses: () => request('/club-admin/usage/background-processes'),
+  // Idle-abandonment limits for the Current Background Processes panel (the
+  // Settings dialog): how long a mid-flow registration / onboarding club can sit
+  // idle before it's dropped from the panel as abandoned.
+  adminUsageBackgroundSettings: () => request('/club-admin/usage/background-settings'),
+  adminUpdateUsageBackgroundSettings: (data) =>
+    request('/club-admin/usage/background-settings', { method: 'PATCH', body: JSON.stringify(data) }),
   // City-level visitor points for the Usage page map (city-centroid precision only).
   adminUsageGeo: ({ hours = 24 } = {}) => request(`/club-admin/usage/geo?hours=${hours}`),
   // Session duration + per-page dwell time (derived from the page_exit beacon).

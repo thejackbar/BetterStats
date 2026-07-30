@@ -550,6 +550,73 @@ async def update_bundle_discount_schedule(db: AsyncSession, schedule: dict) -> d
     return await get_bundle_discount_schedule(db)
 
 
+# ─── Background-process idle limits (Usage page "Current background processes") ─
+# Two super-admin-tunable idle thresholds, in whole minutes, that decide when a
+# mid-flow prospect/club is considered to have ABANDONED and is dropped from the
+# Usage page's live panel:
+#   registration_minutes — a self-serve trial signup idle at any of its 7 funnel
+#                           steps (time since their last step beacon).
+#   onboarding_minutes    — a club working the Setup Wizard idle at any step
+#                           (time since its wizard progress was last touched).
+# Applied per group (one limit each), not per individual step. Values can't be 0
+# (0 would drop everyone instantly), so this gets its own getter/setter rather
+# than the generic _INT_KEYS validator — same reasoning as backup_schedule below.
+DEFAULT_REGISTRATION_IDLE_MINUTES = 30
+DEFAULT_ONBOARDING_IDLE_MINUTES = 15
+IDLE_MINUTES_MIN = 1
+IDLE_MINUTES_MAX = 1440  # a day — a generous ceiling; nobody sits idle-but-active longer
+
+
+def _clamp_idle_minutes(value, fallback: int) -> int:
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    if v < IDLE_MINUTES_MIN:
+        return IDLE_MINUTES_MIN
+    if v > IDLE_MINUTES_MAX:
+        return IDLE_MINUTES_MAX
+    return v
+
+
+async def get_background_process_settings(db: AsyncSession) -> dict:
+    """The idle-abandonment limits for the Usage page's Current Background
+    Processes panel. Falls back to the seed defaults when unset or malformed."""
+    settings = await get_settings(db)
+    raw = settings.get("background_process_idle")
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "registration_minutes": _clamp_idle_minutes(
+            raw.get("registration_minutes"), DEFAULT_REGISTRATION_IDLE_MINUTES),
+        "onboarding_minutes": _clamp_idle_minutes(
+            raw.get("onboarding_minutes"), DEFAULT_ONBOARDING_IDLE_MINUTES),
+    }
+
+
+async def update_background_process_settings(
+    db: AsyncSession, *, registration_minutes=None, onboarding_minutes=None,
+) -> dict:
+    """Set either idle limit (whole minutes, clamped 1-1440). Commits. Only the
+    provided fields change."""
+    current = await get_background_process_settings(db)
+    out = dict(current)
+    if registration_minutes is not None:
+        out["registration_minutes"] = _clamp_idle_minutes(
+            registration_minutes, current["registration_minutes"])
+    if onboarding_minutes is not None:
+        out["onboarding_minutes"] = _clamp_idle_minutes(
+            onboarding_minutes, current["onboarding_minutes"])
+    s = await get_settings(db)
+    merged = dict(s)
+    merged["background_process_idle"] = out
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(merged)},
+    )
+    await db.commit()
+    return await get_background_process_settings(db)
+
+
 # ─── Backup schedule (daily automated backup — host systemd timer reads this) ─
 # The host-level backup script has no UI of its own; it reads its schedule and
 # retention window from here on every tick (see ops/backup/backup.sh) so a

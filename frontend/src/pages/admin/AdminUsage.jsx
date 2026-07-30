@@ -288,6 +288,116 @@ function BgRow({ children }) {
   return <div className="pb-hairline-t py-2.5 first:border-t-0 first:pt-0">{children}</div>
 }
 
+// Settings dialog for the idle-abandonment limits. One limit for registrations,
+// one for the Setup Wizard. A prospect/club idle past its group's limit is
+// dropped from the panel (assumed abandoned) — with the one exception that a
+// club whose full rebuild is still running is kept (that async sync shows in the
+// Syncs panel and is genuinely still working).
+function BgSettingsModal({ onClose, onSaved }) {
+  const [form, setForm] = useState(null)
+  const [bounds, setBounds] = useState({ min_minutes: 1, max_minutes: 1440 })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    api.adminUsageBackgroundSettings()
+      .then(d => { if (!alive) return
+        setForm({ registration_minutes: d.registration_minutes, onboarding_minutes: d.onboarding_minutes })
+        setBounds({ min_minutes: d.min_minutes, max_minutes: d.max_minutes })
+      })
+      .catch(e => alive && setError(e?.message || 'Failed to load'))
+      .finally(() => alive && setLoading(false))
+    return () => { alive = false }
+  }, [])
+
+  const clamp = (v) => Math.max(bounds.min_minutes, Math.min(bounds.max_minutes, Number(v) || bounds.min_minutes))
+
+  const save = async () => {
+    if (!form) return
+    setSaving(true); setError(null)
+    try {
+      const saved = await api.adminUpdateUsageBackgroundSettings({
+        registration_minutes: clamp(form.registration_minutes),
+        onboarding_minutes: clamp(form.onboarding_minutes),
+      })
+      onSaved?.(saved)
+      onClose()
+    } catch (e) {
+      setError(e?.message || 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-y-auto" onClick={onClose}>
+      <div className="pb-card w-full max-w-md bg-pb-surface mt-16" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 pb-0">
+          <h2 className="font-display font-bold text-lg text-pb-text">Background process settings</h2>
+          <p className="font-mono text-[10px] text-pb-faintest mt-1">
+            When to consider a mid-flow prospect or club to have abandoned the process.
+          </p>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {error && (
+            <div className="font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+          )}
+          {loading || !form ? (
+            <p className="text-sm text-pb-dim">Loading…</p>
+          ) : (<>
+            <div>
+              <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">Registrations in progress</h3>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Idle time limit</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" min={bounds.min_minutes} max={bounds.max_minutes}
+                  value={form.registration_minutes}
+                  onChange={(e) => setForm(f => ({ ...f, registration_minutes: e.target.value }))}
+                  className="w-24 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                />
+                <span className="font-mono text-[11px] text-pb-faint">minutes</span>
+              </div>
+              <p className="font-mono text-[10px] text-pb-faintest mt-1 leading-relaxed">
+                A self-serve trial signup idle at any of its 7 steps for longer than this is dropped from the panel as abandoned.
+              </p>
+            </div>
+            <div>
+              <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">Onboarding in progress</h3>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Idle time limit</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" min={bounds.min_minutes} max={bounds.max_minutes}
+                  value={form.onboarding_minutes}
+                  onChange={(e) => setForm(f => ({ ...f, onboarding_minutes: e.target.value }))}
+                  className="w-24 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                />
+                <span className="font-mono text-[11px] text-pb-faint">minutes</span>
+              </div>
+              <p className="font-mono text-[10px] text-pb-faintest mt-1 leading-relaxed">
+                A club idle in the Setup Wizard for longer than this is dropped as abandoned — except a club whose first full rebuild is still running, which is kept while that sync is in progress.
+              </p>
+            </div>
+          </>)}
+        </div>
+
+        <div className="p-5 pt-0 flex items-center justify-end gap-2">
+          <button onClick={onClose}
+            className="font-mono text-[11px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+          <button onClick={save} disabled={saving || loading || !form}
+            className="font-mono text-[11px] px-3 py-1.5 rounded bg-pb-accent text-white disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BackgroundProcessesSection() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -295,6 +405,7 @@ function BackgroundProcessesSection() {
   const [updatedAt, setUpdatedAt] = useState(null)
   const [, tick] = useState(0)
   const [open, toggle] = useCollapse('bgproc', true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -341,6 +452,10 @@ function BackgroundProcessesSection() {
         </span>
         {open && (
           <span className="ml-auto flex items-center gap-2">
+            <button onClick={() => setSettingsOpen(true)} title="Idle-abandonment limits"
+              className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
+              Settings
+            </button>
             <button onClick={() => setLive(l => !l)}
               className="font-mono text-[10px] px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">
               {live ? 'Pause' : 'Resume'}
@@ -352,6 +467,10 @@ function BackgroundProcessesSection() {
           </span>
         )}
       </div>
+
+      {settingsOpen && (
+        <BgSettingsModal onClose={() => setSettingsOpen(false)} onSaved={load} />
+      )}
 
       {open && (<>
         {error && (
@@ -465,8 +584,10 @@ function BackgroundProcessesSection() {
                 <BgRow key={o.org_id}>
                   <div className="flex items-center gap-2">
                     <span className="font-display font-bold text-[12px] text-pb-text truncate">{o.club_name || o.org_id.slice(0, 8)}</span>
-                    <Dot on color="#10b981" title="active" />
-                    <span className="font-mono text-[10px] text-pb-faint ml-auto">active {fmtSecs(o.idle_seconds)} ago</span>
+                    <Dot on color={o.sync_running ? '#8b5cf6' : '#10b981'} title={o.sync_running ? 'sync running' : 'active'} />
+                    {o.sync_running
+                      ? <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded border pb-hairline text-pb-accent ml-auto" title="First full rebuild still running — kept while the sync is in progress">sync running</span>
+                      : <span className="font-mono text-[10px] text-pb-faint ml-auto">active {fmtSecs(o.idle_seconds)} ago</span>}
                   </div>
                   <div className="font-mono text-[11px] text-pb-faint mt-0.5 truncate">
                     Setup Wizard · {o.done} step{o.done === 1 ? '' : 's'} done

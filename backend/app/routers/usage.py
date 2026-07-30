@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import User, get_db
 from app.routers.auth import require_super_admin
+from app.services import platform_settings as ps
 from app.services.usage_tracker import record_event
 
 router = APIRouter(tags=["usage"])
@@ -1624,6 +1625,13 @@ async def background_processes(
             ts = ts.replace(tzinfo=timezone.utc)
         return max(0, int((now - ts).total_seconds()))
 
+    # Idle-abandonment limits (super-admin tunable via the panel's Settings
+    # button). A prospect/club idle past their group's limit is treated as
+    # abandoned and dropped from the panel. See services/platform_settings.
+    idle = await ps.get_background_process_settings(db)
+    reg_idle_minutes = idle["registration_minutes"]
+    onb_idle_minutes = idle["onboarding_minutes"]
+
     # ── Syncs (running or paused) ────────────────────────────────────────────
     sync_rows = (await db.execute(text("""
         SELECT sr.id, sr.org_id, sr.kind, sr.status, sr.started_at, sr.updated_at,
@@ -1663,6 +1671,16 @@ async def background_processes(
             "resumed_after_restart": bool(st.get("resumed_after_restart")),
         })
 
+    # Orgs with a sync/rebuild currently in flight. Used below as the sole
+    # exception to the onboarding idle-drop: the Setup Wizard's first step
+    # (full_rebuild) kicks off a long async sync, so a club that starts it and
+    # leaves the page LOOKS idle on the wizard while the rebuild runs. That's not
+    # abandonment — the job is still going and already shows in the Syncs panel —
+    # so we keep such a club on the onboarding list regardless of idle time.
+    active_sync_org_ids = {
+        str(r["org_id"]) for r in sync_rows if r["org_id"]
+    }
+
     # ── BetterIQ opponent-dossier prewarms (in-process) ──────────────────────
     from app.services import iq_prewarm
     prewarms = []
@@ -1692,16 +1710,19 @@ async def background_processes(
             })
 
     # ── Self-serve registrations mid-flow (public wizard beacons) ────────────
-    # A visitor is "in progress" if they've beaconed a self_serve_step in the
-    # last 45 minutes but never reached registration_completed. Group per
-    # visitor, keep the furthest step reached (highest step index).
+    # A visitor is "in progress" if they've beaconed a self_serve_step within the
+    # registration idle limit but never reached registration_completed. Group per
+    # visitor, keep the furthest step reached (highest step index). Because the
+    # window IS the idle limit, a prospect whose last step beacon is older than
+    # the limit falls out of this query entirely — i.e. they're dropped from the
+    # panel, treated as having abandoned the signup.
     reg_rows = (await db.execute(text("""
         WITH steps AS (
             SELECT visitor_id, route AS step, created_at, metadata
             FROM usage_events
             WHERE event_type = 'self_serve_step'
               AND visitor_id IS NOT NULL
-              AND created_at >= NOW() - INTERVAL '45 minutes'
+              AND created_at >= NOW() - (:reg_idle_minutes * INTERVAL '1 minute')
         ),
         done AS (
             SELECT DISTINCT visitor_id FROM steps WHERE step = 'registration_completed'
@@ -1717,7 +1738,7 @@ async def background_processes(
         GROUP BY s.visitor_id
         ORDER BY MAX(s.created_at) DESC
         LIMIT 50
-    """))).mappings().all()
+    """), {"reg_idle_minutes": reg_idle_minutes})).mappings().all()
 
     registrations = []
     for r in reg_rows:
@@ -1742,7 +1763,15 @@ async def background_processes(
         })
 
     # ── Clubs actively working the Setup Wizard ──────────────────────────────
-    # Progress state touched in the last 15 minutes and not fully addressed.
+    # A club shows here while its wizard progress was touched within the
+    # onboarding idle limit (time since ows.updated_at) — a club idle past that
+    # is treated as having abandoned setup and drops off the panel.
+    # THE ONE EXCEPTION: a club with a sync/rebuild still in flight is kept no
+    # matter how idle it looks. The wizard's first step (full_rebuild) fires a
+    # long async sync; the admin typically starts it and leaves the page, so the
+    # wizard state goes stale while the rebuild runs. That job already shows in
+    # the Syncs panel and is genuinely still working, so it's not abandonment —
+    # hence the OR EXISTS(running sync) below.
     # Onboarding state is org-scoped, but the club has a known owner: its
     # primary admin (the person who registered it — club_memberships.is_primary_admin).
     # That's who we identify as running the onboarding. The most recent
@@ -1774,10 +1803,15 @@ async def background_processes(
             LIMIT 1
         ) al ON TRUE
         LEFT JOIN users au ON au.id = al.user_id
-        WHERE ows.updated_at >= NOW() - INTERVAL '15 minutes'
+        WHERE ows.updated_at >= NOW() - (:onb_idle_minutes * INTERVAL '1 minute')
+           OR EXISTS (
+                SELECT 1 FROM sync_runs sr2
+                WHERE sr2.org_id = ows.organisation_id
+                  AND sr2.status IN ('running', 'paused')
+           )
         ORDER BY ows.updated_at DESC
         LIMIT 50
-    """))).mappings().all()
+    """), {"onb_idle_minutes": onb_idle_minutes})).mappings().all()
 
     onboarding = []
     for r in onboard_rows:
@@ -1792,6 +1826,10 @@ async def background_processes(
             "addressed": addressed,
             "last_activity_at": r["updated_at"].isoformat() if r["updated_at"] else None,
             "idle_seconds": _secs(r["updated_at"]),
+            # True when this club is only still listed because a sync/rebuild is
+            # running (the full_rebuild exception) rather than recent wizard
+            # activity — lets the panel say "sync running" instead of "active".
+            "sync_running": str(r["org_id"]) in active_sync_org_ids,
             # Who owns the onboarding: the club's primary admin, else whoever
             # last touched a wizard step.
             "actor": primary_admin or actor,
@@ -1800,10 +1838,54 @@ async def background_processes(
 
     return {
         "generated_at": now.isoformat(),
+        "idle_limits": {
+            "registration_minutes": reg_idle_minutes,
+            "onboarding_minutes": onb_idle_minutes,
+        },
         "syncs": syncs,
         "iq_prewarm": prewarms,
         "registrations": registrations,
         "onboarding": onboarding,
+    }
+
+
+@router.get("/club-admin/usage/background-settings")
+async def get_background_settings(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """The idle-abandonment limits for the Current Background Processes panel —
+    read by the panel's Settings dialog. See services/platform_settings."""
+    s = await ps.get_background_process_settings(db)
+    return {
+        **s,
+        "min_minutes": ps.IDLE_MINUTES_MIN,
+        "max_minutes": ps.IDLE_MINUTES_MAX,
+    }
+
+
+class BackgroundSettingsUpdate(BaseModel):
+    registration_minutes: Optional[int] = None
+    onboarding_minutes: Optional[int] = None
+
+
+@router.patch("/club-admin/usage/background-settings")
+async def patch_background_settings(
+    payload: BackgroundSettingsUpdate,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set either idle limit (whole minutes). Values are clamped server-side to
+    [min_minutes, max_minutes]."""
+    s = await ps.update_background_process_settings(
+        db,
+        registration_minutes=payload.registration_minutes,
+        onboarding_minutes=payload.onboarding_minutes,
+    )
+    return {
+        **s,
+        "min_minutes": ps.IDLE_MINUTES_MIN,
+        "max_minutes": ps.IDLE_MINUTES_MAX,
     }
 
 
