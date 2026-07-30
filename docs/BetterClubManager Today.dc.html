@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="app">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0a0d14; }
+  * { box-sizing: border-box; }
+  a { color: #6366F1; text-decoration: none; }
+  a:hover { color: #8b8df5; }
+  input, select, button, textarea { font-family: inherit; }
+  .pbnum { font-variant-numeric: tabular-nums; }
+  .pbscroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .pbscroll::-webkit-scrollbar-thumb { background: #262d3d; border-radius: 8px; }
+  .pbscroll::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; background: #0a0d14; color: #e6e8ef; font-family: Geist, Inter, system-ui, sans-serif; font-size: 16px;">
+
+  <aside style="width: 240px; flex: 0 0 240px; border-right: 1px solid #1d2331; background: #10141d; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;">
+    <div style="padding: 16px; border-bottom: 1px solid #1d2331;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="width: 32px; height: 32px; border-radius: 4px; background: rgba(99,102,241,0.15); color: #6366F1; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px;">K</span>
+        <div style="min-width: 0;">
+          <div style="font-weight: 700; font-size: 14px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Kalamunda CC</div>
+        </div>
+      </div>
+      <span style="display: inline-flex; align-items: center; gap: 8px; margin-top: 12px;">
+        <img src="frontend/src/assets/modules/betterclubmanager.svg" alt="" style="width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;">
+        <span style="font-weight: 700; font-size: 15px; line-height: 1;">Better<span style="color: #6366F1;">ClubManager</span></span>
+      </span>
+      <a href="#" style="display: block; margin-top: 12px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #3a3f50;">← Back to admin</a>
+    </div>
+    <nav class="pbscroll" style="flex: 1; overflow-y: auto; padding: 8px 0;">
+      <button style="{{ n.overview.style }}" onClick="{{ n.overview.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>
+        <span>Overview</span>
+      </button>
+      <div style="padding: 16px 16px 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #5b6072; text-transform: uppercase;">People</div>
+      <button style="{{ n.committee.style }}" onClick="{{ n.committee.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>
+        <span>Committee</span>
+      </button>
+      <button style="{{ n.volunteers.style }}" onClick="{{ n.volunteers.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="8" r="3.4"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path></svg>
+        <span>Volunteers</span>
+      </button>
+      <button style="{{ n.roles.style }}" onClick="{{ n.roles.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+        <span>Roles</span>
+      </button>
+      <button style="{{ n.activities.style }}" onClick="{{ n.activities.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg>
+        <span>Activities</span>
+      </button>
+      <button style="{{ n.families.style }}" onClick="{{ n.families.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>
+        <span>Families</span>
+      </button>
+      <button style="{{ n.qualifications.style }}" onClick="{{ n.qualifications.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+        <span>Qualifications</span>
+      </button>
+      <div style="padding: 16px 16px 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #5b6072; text-transform: uppercase;">Club</div>
+      <button style="{{ n.events.style }}" onClick="{{ n.events.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="13" r="8"></circle><path d="M12 13V9M9 2h6M12 5V2"></path></svg>
+        <span>Events</span>
+      </button>
+      <button style="{{ n.assets.style }}" onClick="{{ n.assets.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9"></path></svg>
+        <span>Assets &amp; Facilities</span>
+      </button>
+      <button style="{{ n.diary.style }}" onClick="{{ n.diary.go }}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg>
+        <span>Club Diary</span>
+      </button>
+    </nav>
+  </aside>
+
+  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+    <header style="position: sticky; top: 0; z-index: 30; background: rgba(16,20,29,0.8); backdrop-filter: blur(8px); border-bottom: 1px solid #1d2331; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.08em; color: #5b6072;">Better<span style="color: #6366F1;">ClubManager</span></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-size: 14px; color: #5b6072;">Jack Barendse</span>
+        <span style="font-size: 14px; color: #5b6072; text-decoration: underline;">Logout</span>
+      </div>
+    </header>
+
+    <main style="flex: 1; padding: 24px; max-width: 1400px; width: 100%; margin: 0 auto;">
+
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <h1 style="font-weight: 700; font-size: 20px; margin: 0 0 8px;">BetterClubManager</h1>
+          <p style="color: #5b6072; font-size: 14px; margin: 0 0 24px; max-width: 42rem;">The club back office in one place. Committee and volunteers, families, events and the facilities and diary that keep the club running.</p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="background: color-mix(in srgb, #6366F1 6%, transparent); border: 1px solid rgba(99,102,241,0.3); border-radius: 6px; padding: 20px; cursor: pointer;" onClick="{{ n.people.go }}">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <span style="font-weight: 700; font-size: 18px; color: #e6e8ef;">People</span>
+                <span style="font-size: 24px; color: #6366F1;">→</span>
+              </div>
+              <div style="color: #5b6072; font-size: 14px; margin-top: 4px;">Your committee, volunteers, families and members.</div>
+            </div>
+            <div style="background: color-mix(in srgb, #6366F1 6%, transparent); border: 1px solid rgba(99,102,241,0.3); border-radius: 6px; padding: 20px; cursor: pointer;" onClick="{{ n.club.go }}">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <span style="font-weight: 700; font-size: 18px; color: #e6e8ef;">Club</span>
+                <span style="font-size: 24px; color: #6366F1;">→</span>
+              </div>
+              <div style="color: #5b6072; font-size: 14px; margin-top: 4px;">Events, facilities and the running club diary.</div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isGroup }}">
+        <div>
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #5b6072; cursor: pointer;" onClick="{{ n.overview.go }}">← Overview</span>
+          <h2 style="font-weight: 700; font-size: 20px; margin: 8px 0 0;">{{ groupLabel }}</h2>
+          <p style="color: #5b6072; font-size: 14px; margin: 0 0 20px;">{{ groupDesc }}</p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px;">
+            <sc-for list="{{ groupItems }}" as="it" hint-placeholder-count="6">
+              <div style="background: color-mix(in srgb, #6366F1 6%, transparent); border: 1px solid rgba(99,102,241,0.3); border-radius: 6px; padding: 20px; cursor: pointer;" onClick="{{ it.go }}">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                  <span style="font-weight: 700; font-size: 18px; color: #e6e8ef;">{{ it.label }}</span>
+                  <span style="font-size: 24px; color: #6366F1;">→</span>
+                </div>
+                <div style="color: #5b6072; font-size: 14px; margin-top: 4px;">{{ it.desc }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isVolunteers }}">
+        <div style="max-width: 56rem;">
+          <h1 style="font-weight: 700; font-size: 24px; margin: 0 0 4px;">Volunteers</h1>
+          <p style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5b6072; margin: 0 0 20px;">Manage your volunteer directory and roles, then record who did what and for how long.</p>
+          <div style="display: flex; gap: 4px; margin-bottom: 20px;">
+            <button style="{{ vt.volunteers }}" onClick="{{ setVolTabVolunteers }}">Volunteers</button>
+            <button style="{{ vt.hours }}" onClick="{{ setVolTabHours }}">Hours</button>
+          </div>
+
+          <sc-if value="{{ volTabIsVolunteers }}">
+            <div>
+              <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">ADD A VOLUNTEER</div>
+                <div style="display: flex; gap: 8px;">
+                  <input placeholder="Search for a player or member…" style="flex: 1; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+                  <button style="padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #0a0d14; background: #6366F1; border: none; opacity: 0.4; white-space: nowrap;">+ ADD</button>
+                </div>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #3a3f50; margin: 6px 0 0;">Search any club member. Members already on the volunteer list are hidden.</p>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+                <input placeholder="Filter by role (e.g. Scorer)…" style="flex: 1; min-width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+                <select style="width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;"><option>Any day</option></select>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <sc-for list="{{ volunteers }}" as="v" hint-placeholder-count="5">
+                  <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px;">
+                    <button style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: transparent; border: none; text-align: left; cursor: pointer; color: inherit;" onClick="{{ v.toggle }}">
+                      <div>
+                        <div style="color: #e6e8ef; font-weight: 600; font-size: 14px;">{{ v.full_name }}</div>
+                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 6px;">
+                          <sc-for list="{{ v.roleChips }}" as="c" hint-placeholder-count="2">
+                            <span style="{{ c.style }}">{{ c.text }}</span>
+                          </sc-for>
+                        </div>
+                      </div>
+                      <div style="text-align: right; flex-shrink: 0;">
+                        <div style="font-weight: 700; font-size: 16px; color: #6366F1;">{{ v.hoursLabel }}</div>
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #3a3f50;">{{ v.caret }}</span>
+                      </div>
+                    </button>
+                    <sc-if value="{{ v.expanded }}">
+                      <div style="border-top: 1px solid #1d2331; padding: 12px 16px; display: flex; flex-direction: column; gap: 16px;">
+                        <div>
+                          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">ROLES</div>
+                          <div style="background: #161b27; border: 1px solid #1d2331; border-radius: 4px; min-height: 38px; padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                            <sc-for list="{{ v.roles }}" as="r" hint-placeholder-count="2">
+                              <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(99,102,241,0.15); color: #6366F1; border-radius: 4px; padding: 2px 6px; font-size: 11px;">{{ r.title }} <span style="cursor:pointer">×</span></span>
+                            </sc-for>
+                          </div>
+                        </div>
+                        <div>
+                          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">ROLES INTERESTED</div>
+                          <div style="display: flex; gap: 6px;">
+                            <input placeholder="e.g. Scorer, BBQ, Ground prep" style="flex: 1; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+                            <button style="padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; border: 1px solid #1d2331; background: transparent; color: #5b6072; cursor: pointer;">Add</button>
+                          </div>
+                        </div>
+                        <div>
+                          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">AVAILABLE DAYS</div>
+                          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            <sc-for list="{{ v.dayChips }}" as="d" hint-placeholder-count="7">
+                              <button style="{{ d.style }}">{{ d.label }}</button>
+                            </sc-for>
+                          </div>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8a90a2; cursor: pointer;">
+                          <input type="checkbox"> Lives nearby
+                        </label>
+                        <button style="padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; font-weight: 600; color: #0a0d14; background: #6366F1; border: none; cursor: pointer; align-self: flex-start;">SAVE PROFILE</button>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ volTabIsHours }}">
+            <div>
+              <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">WHOSE HOURS?</div>
+                <input placeholder="Choose a volunteer…" style="width: 100%; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              </div>
+              <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 24px; text-align: center; color: #8a90a2; font-size: 14px;">Choose a volunteer to view and log their hours.</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isRoles }}">
+        <div style="max-width: 56rem;">
+          <h1 style="font-weight: 700; font-size: 30px; margin: 0 0 4px;">Roles</h1>
+          <p style="color: #5b6072; font-size: 14px; margin: 0 0 20px;">The club's role catalogue, grouped by role type. Committee roles are held as positions in Committee Administration, where you track who fills each one and their term. General roles are the jobs assigned to volunteers elsewhere in BetterClubManager.</p>
+          <div style="display: flex; gap: 4px; margin-bottom: 20px;">
+            <button style="{{ rt.roles }}" onClick="{{ setRoleTabRoles }}">Roles</button>
+            <button style="{{ rt.types }}" onClick="{{ setRoleTabTypes }}">Types</button>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-bottom: 12px;">
+            <button style="padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; border: 1px solid #1d2331; background: transparent; color: #5b6072; cursor: pointer;">+ COMMITTEE ROLES (14)</button>
+            <button style="padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; border: 1px solid #1d2331; background: transparent; color: #5b6072; cursor: pointer;">+ GENERAL ROLES (10)</button>
+          </div>
+          <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">ADD A ROLE</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <input placeholder="Role title (e.g. Junior Coordinator)" style="flex: 1; min-width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              <select style="width: 192px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px;"><option>— no type —</option></select>
+              <input placeholder="Description (optional)" style="flex: 1; min-width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              <label style="display: flex; align-items: center; gap: 6px; color: #5b6072; font-size: 12px; white-space: nowrap;"><input type="checkbox"> Committee role</label>
+              <button style="padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #0a0d14; background: #6366F1; border: none; opacity: 0.4; white-space: nowrap;">+ ROLE</button>
+            </div>
+          </div>
+          <div style="margin-bottom: 20px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 8px;">COMMITTEE ROLES</div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <sc-for list="{{ committeeRoles }}" as="r" hint-placeholder-count="4">
+                <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 10px 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+                  <div>
+                    <div><span style="color: #e6e8ef; font-size: 14px;">{{ r.title }}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; margin-left: 8px;">{{ r.typeLabel }}</span></div>
+                    <div style="color: #5b6072; font-size: 12px; margin-top: 2px;">{{ r.description }}</div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Edit</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Remove</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 8px;">GENERAL ROLES</div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <sc-for list="{{ generalRoles }}" as="r" hint-placeholder-count="6">
+                <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 10px 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+                  <div>
+                    <div><span style="color: #e6e8ef; font-size: 14px;">{{ r.title }}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; margin-left: 8px;">{{ r.typeLabel }}</span></div>
+                    <div style="color: #5b6072; font-size: 12px; margin-top: 2px;">{{ r.description }}</div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Edit</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Remove</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isActivities }}">
+        <div style="max-width: 56rem;">
+          <h1 style="font-weight: 700; font-size: 24px; margin: 0 0 4px;">Activities</h1>
+          <p style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5b6072; margin: 0 0 20px;">The catalogue of jobs a volunteer's logged hours are spent on — ground work, canteen, coaching, admin. Group them into types so hours can be tallied by category.</p>
+          <div style="display: flex; gap: 4px; margin-bottom: 20px;">
+            <button style="{{ at.activities }}">Activities</button>
+            <button style="{{ at.types }}">Types</button>
+          </div>
+          <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+            <button style="padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; border: 1px solid #1d2331; background: transparent; color: #5b6072; cursor: pointer;">+ STARTER SET (14 ACTIVITIES)</button>
+          </div>
+          <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">ADD AN ACTIVITY</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <input placeholder="Activity title (e.g. Boundary line marking)" style="flex: 1; min-width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              <select style="width: 192px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px;"><option>— no type —</option></select>
+              <input placeholder="Description (optional)" style="flex: 1; min-width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              <button style="padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #0a0d14; background: #6366F1; border: none; opacity: 0.4; white-space: nowrap;">+ ACTIVITY</button>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <sc-for list="{{ activities }}" as="a" hint-placeholder-count="8">
+              <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="min-width: 0;">
+                  <span style="color: #e6e8ef; font-size: 14px;">{{ a.title }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; margin-left: 8px;">{{ a.type }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Edit</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Remove</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isQuals }}">
+        <div style="max-width: 56rem;">
+          <h1 style="font-weight: 700; font-size: 24px; margin: 0 0 4px;">Qualifications</h1>
+          <p style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5b6072; margin: 0 0 20px;">Coach/umpire/scorer accreditation, WWCC, First Aid, RSA — with expiry tracking. No automated reminder emails yet; check this page for what needs renewing.</p>
+          <div style="display: flex; gap: 4px; margin-bottom: 20px;">
+            <button style="{{ qt.expiring }}">Expiring / Members</button>
+            <button style="{{ qt.types }}">Types</button>
+          </div>
+          <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 6px;">RECORD A QUALIFICATION</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <input placeholder="Search for a player or member…" style="flex: 1; min-width: 200px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              <select style="flex: 1; min-width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px;"><option>Select type…</option></select>
+              <input type="date" style="width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+              <input placeholder="Certificate ref" style="width: 160px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; padding: 6px 10px; color: #e6e8ef; font-size: 14px; outline: none;">
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: flex-start;">
+              <div style="flex: 1; min-width: 200px; background: #161b27; border: 1px solid #1d2331; border-radius: 4px; min-height: 38px; padding: 6px 10px; color: #3a3f50; font-size: 14px;">Relevant roles (optional)…</div>
+              <button style="padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #0a0d14; background: #6366F1; border: none; white-space: nowrap; cursor: pointer;">RECORD</button>
+            </div>
+          </div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 8px;">EXPIRED OR EXPIRING WITHIN 60 DAYS</div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <sc-for list="{{ expiring }}" as="q" hint-placeholder-count="4">
+              <div style="background: #10141d; border: 1px solid #1d2331; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div>
+                  <span style="color: #e6e8ef; font-size: 14px;">{{ q.full_name }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; margin-left: 8px;">{{ q.type_name }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                  <span style="{{ q.badgeStyle }}">{{ q.badgeText }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5b6072; cursor: pointer;">Remove</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isStub }}">
+        <div style="max-width: 56rem;">
+          <h1 style="font-weight: 700; font-size: 24px; margin: 0 0 4px;">{{ stubTitle }}</h1>
+          <p style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5b6072; margin: 0 0 20px;">{{ stubDesc }}</p>
+          <div style="display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap;">
+            <sc-for list="{{ stubTabs }}" as="t" hint-placeholder-count="4">
+              <button style="{{ t.style }}">{{ t.label }}</button>
+            </sc-for>
+          </div>
+          <div style="background: #10141d; border: 1px dashed #262d3d; border-radius: 6px; padding: 32px; text-align: center;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #3a3f50; margin-bottom: 8px;">RECREATION PENDING</div>
+            <div style="color: #8a90a2; font-size: 14px;">Page header and tab set are lifted verbatim from {{ stubSource }}. The panel bodies are large — say the word and I'll recreate them in full detail.</div>
+          </div>
+        </div>
+      </sc-if>
+
+    </main>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const NAV = {
+  overview: 'Overview', committee: 'Committee', volunteers: 'Volunteers', roles: 'Roles',
+  activities: 'Activities', families: 'Families', qualifications: 'Qualifications',
+  events: 'Events', assets: 'Assets & Facilities', diary: 'Club Diary',
+};
+const PEOPLE_KEYS = ['committee','volunteers','roles','activities','families','qualifications'];
+const CLUB_KEYS = ['events','assets','diary'];
+const ITEM_DESC = {
+  committee: 'Committee roles and members.',
+  volunteers: 'Volunteer roster and roles.',
+  roles: 'The club role catalogue.',
+  activities: 'What volunteer hours are spent on.',
+  families: 'Link players into family groups.',
+  qualifications: 'Track coaching and first-aid tickets.',
+  events: 'Club events and the calendar.',
+  assets: 'Grounds, nets and club gear.',
+  diary: 'The running club diary.',
+};
+const STUBS = {
+  committee: { title: 'Committee Administration', desc: 'Committee positions, terms, tasks, documents and meeting records.', tabs: ['Committee Roles','Tasks','Documents','Calendar','Meetings & AGM'], source: 'AdminCommittee.jsx' },
+  families: { title: 'Families', desc: 'Link players and parents/guardians into family groups, with family financials per season.', tabs: [], source: 'AdminFamilies.jsx' },
+  events: { title: 'Events & Ticketing', desc: 'Club events, event types and ticketing/registration.', tabs: ['Events','Types'], source: 'AdminEvents.jsx' },
+  assets: { title: 'Assets & Facilities', desc: 'Grounds, nets and club gear, plus their bookings.', tabs: ['Facilities','Bookings','Assets'], source: 'AdminAssets.jsx' },
+  diary: { title: 'Club Diary', desc: 'The running club diary — recurring task templates generated into a season plan.', tabs: ['Calendar','Season Plan','Templates','Gantt'], source: 'AdminClubDiary.jsx' },
+};
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+class Component extends DCLogic {
+  state = { screen: 'volunteers', volTab: 'volunteers', roleTab: 'roles', expanded: {} };
+
+  navStyle(key) {
+    const active = this.state.screen === key;
+    return 'display:flex;align-items:center;gap:12px;width:100%;padding:8px 16px;font-size:14px;background:'
+      + (active ? 'rgba(99,102,241,0.1)' : 'transparent')
+      + ';color:' + (active ? '#6366F1' : '#5b6072')
+      + ';border:none;border-right:' + (active ? '2px solid #6366F1' : '2px solid transparent')
+      + ';text-align:left;cursor:pointer;font-family:inherit;';
+  }
+  tabStyle(on) {
+    return 'padding:8px 16px;border-radius:4px;font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:0.08em;border:none;cursor:pointer;background:'
+      + (on ? '#161b27' : 'transparent') + ';color:' + (on ? '#e6e8ef' : '#5b6072') + ';';
+  }
+
+  renderVals() {
+    const s = this.state.screen;
+    const n = {};
+    Object.keys(NAV).forEach(k => { n[k] = { style: this.navStyle(k), go: () => this.setState({ screen: k }) }; });
+    n.people = { go: () => this.setState({ screen: 'people' }) };
+    n.club = { go: () => this.setState({ screen: 'club' }) };
+
+    const isGroup = s === 'people' || s === 'club';
+    const keys = s === 'club' ? CLUB_KEYS : PEOPLE_KEYS;
+    const groupItems = keys.map(k => ({
+      label: NAV[k], desc: ITEM_DESC[k], go: () => this.setState({ screen: k }),
+    }));
+
+    const volunteers = [
+      { id: 1, full_name: 'Andrew Pearce', roles: [{ id: 1, title: 'Bar Supervisor' }], interested: [], hours: 42, nearby: true, days: ['Friday','Saturday'] },
+      { id: 2, full_name: 'Sarah Whitcombe', roles: [{ id: 2, title: 'Scorer' }, { id: 3, title: 'Team Manager' }], interested: [], hours: 28, nearby: false, days: ['Saturday','Sunday'] },
+      { id: 3, full_name: 'Dev Patel', roles: [], interested: ['Ground prep','BBQ'], hours: 11, nearby: true, days: ['Monday','Wednesday'] },
+      { id: 4, full_name: 'Megan Doyle', roles: [{ id: 4, title: 'Canteen Coordinator' }], interested: [], hours: 63, nearby: false, days: ['Thursday','Saturday'] },
+      { id: 5, full_name: 'Tom Ellery', roles: [], interested: [], hours: 0, nearby: false, days: [] },
+    ].map(v => {
+      const chips = [];
+      if (v.roles.length) v.roles.forEach(r => chips.push({ text: r.title, style: 'color:#6366F1;' }));
+      else if (!v.interested.length) chips.push({ text: 'No roles set', style: 'color:#3a3f50;' });
+      else v.interested.forEach(t => chips.push({ text: t, style: 'color:#5b6072;' }));
+      if (v.nearby) chips.push({ text: '· Lives nearby', style: 'color:#6366F1;' });
+      const expanded = !!this.state.expanded[v.id];
+      return {
+        ...v, roleChips: chips, expanded, caret: expanded ? '▾' : '▸',
+        hoursLabel: v.hours + 'h',
+        toggle: () => this.setState(st => ({ expanded: { ...st.expanded, [v.id]: !st.expanded[v.id] } })),
+        dayChips: DAYS.map(d => {
+          const on = v.days.includes(d);
+          return { label: d.slice(0, 3), style: 'font-family:\'JetBrains Mono\',monospace;font-size:10px;padding:4px 8px;border-radius:4px;cursor:pointer;'
+            + (on ? 'border:1px solid #1d2331;color:#e6e8ef;background:#161b27;' : 'border:1px dashed #3a3f50;color:#3a3f50;background:transparent;') };
+        }),
+      };
+    });
+
+    const roleRow = (title, typeLabel, description) => ({ title, typeLabel: typeLabel ? '· ' + typeLabel : '', description: description || '' });
+    const committeeRoles = [
+      roleRow('President', 'Executive', 'Chairs the committee and represents the club.'),
+      roleRow('Vice President', 'Executive', ''),
+      roleRow('Secretary', 'Executive', 'Minutes, correspondence and returns.'),
+      roleRow('Treasurer', 'Executive', ''),
+      roleRow('Junior Coordinator', 'Cricket', ''),
+    ];
+    const generalRoles = [
+      roleRow('Scorer', 'Match Day', ''),
+      roleRow('Umpire', 'Match Day', ''),
+      roleRow('Team Manager', 'Match Day', ''),
+      roleRow('Bar Supervisor', 'Food & Beverage', 'Must hold a current RSA.'),
+      roleRow('Canteen Coordinator', 'Food & Beverage', ''),
+      roleRow('Groundsman', 'Ground', ''),
+    ];
+
+    const activities = [
+      { title: 'Boundary line marking', type: 'Ground work' },
+      { title: 'Wicket preparation', type: 'Ground work' },
+      { title: 'Canteen shift', type: 'Canteen' },
+      { title: 'Bar shift', type: 'Canteen' },
+      { title: 'Junior coaching', type: 'Coaching' },
+      { title: 'Scoring', type: 'Match day' },
+      { title: 'Committee meeting', type: 'Admin' },
+      { title: 'Working bee', type: 'Maintenance' },
+    ];
+
+    const badge = (expired, date) => ({
+      badgeText: (expired ? 'EXPIRED ' : 'EXPIRES SOON ') + date,
+      badgeStyle: 'font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:0.08em;border-radius:4px;padding:2px 6px;border:1px solid '
+        + (expired ? 'rgba(239,91,91,0.4);color:#ef5b5b;' : 'rgba(245,181,66,0.4);color:#f5b542;'),
+    });
+    const expiring = [
+      { full_name: 'Andrew Pearce', type_name: 'RSA', ...badge(true, '2026-05-14') },
+      { full_name: 'Sarah Whitcombe', type_name: 'Working With Children Check', ...badge(false, '2026-08-22') },
+      { full_name: 'Dev Patel', type_name: 'Level 1 Coaching', ...badge(false, '2026-09-01') },
+      { full_name: 'Megan Doyle', type_name: 'First Aid', ...badge(true, '2026-02-28') },
+    ];
+
+    const stub = STUBS[s];
+
+    return {
+      n,
+      isOverview: s === 'overview',
+      isGroup,
+      groupLabel: s === 'club' ? 'Club' : 'People',
+      groupDesc: s === 'club' ? 'Events, facilities and the running club diary.' : 'Your committee, volunteers, families and members.',
+      groupItems,
+      isVolunteers: s === 'volunteers',
+      isRoles: s === 'roles',
+      isActivities: s === 'activities',
+      isQuals: s === 'qualifications',
+      isStub: !!stub,
+      stubTitle: stub ? stub.title : '',
+      stubDesc: stub ? stub.desc : '',
+      stubSource: stub ? stub.source : '',
+      stubTabs: stub ? stub.tabs.map((label, i) => ({ label, style: this.tabStyle(i === 0) })) : [],
+      vt: { volunteers: this.tabStyle(this.state.volTab === 'volunteers'), hours: this.tabStyle(this.state.volTab === 'hours') },
+      volTabIsVolunteers: this.state.volTab === 'volunteers',
+      volTabIsHours: this.state.volTab === 'hours',
+      setVolTabVolunteers: () => this.setState({ volTab: 'volunteers' }),
+      setVolTabHours: () => this.setState({ volTab: 'hours' }),
+      rt: { roles: this.tabStyle(this.state.roleTab === 'roles'), types: this.tabStyle(this.state.roleTab === 'types') },
+      setRoleTabRoles: () => this.setState({ roleTab: 'roles' }),
+      setRoleTabTypes: () => this.setState({ roleTab: 'types' }),
+      at: { activities: this.tabStyle(true), types: this.tabStyle(false) },
+      qt: { expiring: this.tabStyle(true), types: this.tabStyle(false) },
+      volunteers, committeeRoles, generalRoles, activities, expiring,
+    };
+  }
+}
+
+</script>
+</body>
+</html>
