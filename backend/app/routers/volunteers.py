@@ -39,6 +39,8 @@ class ProfileUpsert(BaseModel):
     available_days: List[str] = []
     lives_nearby: bool = False
     notes: Optional[str] = None
+    # Assigned ClubRole ids (the volunteer's roles). None = leave unchanged.
+    role_ids: Optional[List[str]] = None
 
 
 @router.post("/profiles")
@@ -49,20 +51,27 @@ async def upsert_profile(data: ProfileUpsert, _: User = _require, club: Organisa
         db, club.id, member.id, roles_interested=data.roles_interested, available_days=data.available_days,
         lives_nearby=data.lives_nearby, notes=data.notes,
     )
+    if data.role_ids is not None:
+        role_uuids = [uuid.UUID(r) for r in data.role_ids]
+        await volunteers_service.set_member_roles(db, club.id, member.id, role_uuids)
+    out = volunteers_service._profile_dict(p)
+    out["role_ids"] = await volunteers_service.member_role_ids(db, club.id, member.id)
     await db.commit()
-    return volunteers_service._profile_dict(p)
+    return out
+
+
+@router.get("/members/{member_id}/roles")
+async def member_roles(member_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+                       db: AsyncSession = Depends(get_db)):
+    await _member_or_404(db, club, member_id)
+    return {"role_ids": await volunteers_service.member_role_ids(db, club.id, uuid.UUID(member_id))}
 
 
 @router.get("/members/{member_id}/hours")
 async def list_hours(member_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
                      db: AsyncSession = Depends(get_db)):
     await _member_or_404(db, club, member_id)
-    rows = await volunteers_service.list_hours(db, club.id, uuid.UUID(member_id))
-    return {"hours": [
-        {"id": str(h.id), "logged_date": h.logged_date.isoformat() if h.logged_date else None,
-         "hours": float(h.hours), "activity": h.activity, "notes": h.notes}
-        for h in rows
-    ]}
+    return {"hours": await volunteers_service.list_hours(db, club.id, uuid.UUID(member_id))}
 
 
 class HoursCreate(BaseModel):
@@ -70,6 +79,7 @@ class HoursCreate(BaseModel):
     hours: float
     logged_date: Optional[date] = None
     activity: Optional[str] = None
+    activity_id: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -80,7 +90,8 @@ async def log_hours(data: HoursCreate, current_user: User = Depends(get_current_
     try:
         h = await volunteers_service.log_hours(
             db, club.id, member.id, hours=data.hours, logged_date=data.logged_date,
-            activity=data.activity, notes=data.notes, created_by_user_id=current_user.id,
+            activity=data.activity, activity_id=uuid.UUID(data.activity_id) if data.activity_id else None,
+            notes=data.notes, created_by_user_id=current_user.id,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

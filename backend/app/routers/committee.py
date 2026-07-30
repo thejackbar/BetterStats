@@ -357,6 +357,9 @@ async def list_events(upcoming_only: bool = False, _: User = _require, club: Org
 class EventCreate(BaseModel):
     title: str
     event_type: str = "other"
+    event_type_id: Optional[uuid.UUID] = None
+    organiser_member_id: Optional[uuid.UUID] = None
+    organiser_name: Optional[str] = None
     starts_at: datetime
     ends_at: Optional[datetime] = None
     location: Optional[str] = None
@@ -382,6 +385,9 @@ async def create_event(data: EventCreate, _: User = _require, club: Organisation
 class EventPatch(BaseModel):
     title: Optional[str] = None
     event_type: Optional[str] = None
+    event_type_id: Optional[uuid.UUID] = None
+    organiser_member_id: Optional[uuid.UUID] = None
+    organiser_name: Optional[str] = None
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     location: Optional[str] = None

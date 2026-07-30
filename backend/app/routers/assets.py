@@ -119,6 +119,11 @@ class BookingCreate(BaseModel):
     starts_at: datetime
     ends_at: Optional[datetime] = None
     booked_by_member_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_mobile: Optional[str] = None
+    owner_member_id: Optional[str] = None
+    owner_name: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -128,7 +133,8 @@ async def create_booking(data: BookingCreate, _: User = _require, club: Organisa
     await _facility_or_404(db, club, data.facility_id)
     fields = data.model_dump()
     facility_id = uuid.UUID(fields.pop("facility_id"))
-    fields["booked_by_member_id"] = uuid.UUID(fields["booked_by_member_id"]) if fields.get("booked_by_member_id") else None
+    for f in ("booked_by_member_id", "owner_member_id"):
+        fields[f] = uuid.UUID(fields[f]) if fields.get(f) else None
     try:
         b = await assets_service.create_booking(db, club.id, facility_id=facility_id, **fields)
     except ValueError as e:
@@ -142,6 +148,11 @@ class BookingPatch(BaseModel):
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     booked_by_member_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_mobile: Optional[str] = None
+    owner_member_id: Optional[str] = None
+    owner_name: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -150,8 +161,9 @@ async def update_booking(booking_id: str, data: BookingPatch, _: User = _require
                          db: AsyncSession = Depends(get_db)):
     b = await _booking_or_404(db, club, booking_id)
     fields = data.model_dump(exclude_unset=True)
-    if "booked_by_member_id" in fields:
-        fields["booked_by_member_id"] = uuid.UUID(fields["booked_by_member_id"]) if fields["booked_by_member_id"] else None
+    for f in ("booked_by_member_id", "owner_member_id"):
+        if f in fields:
+            fields[f] = uuid.UUID(fields[f]) if fields[f] else None
     await assets_service.update_booking(db, b, **fields)
     await db.commit()
     return assets_service._booking_dict(b)
@@ -170,8 +182,13 @@ async def delete_booking(booking_id: str, _: User = _require, club: Organisation
 
 @router.get("/items")
 async def list_assets(include_inactive: bool = False, category: Optional[str] = None, status: Optional[str] = None,
+                      facility_id: Optional[str] = None, cost_min: Optional[float] = None, cost_max: Optional[float] = None,
+                      acquired_from: Optional[date] = None, acquired_to: Optional[date] = None,
                       _: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    rows = await assets_service.list_assets(db, club.id, include_inactive=include_inactive, category=category, status=status)
+    rows = await assets_service.list_assets(
+        db, club.id, include_inactive=include_inactive, category=category, status=status,
+        facility_id=uuid.UUID(facility_id) if facility_id else None,
+        cost_min=cost_min, cost_max=cost_max, acquired_from=acquired_from, acquired_to=acquired_to)
     return {"assets": [assets_service._asset_dict(a) for a in rows]}
 
 

@@ -32,7 +32,10 @@ from app.models.db import (
     FEE_PAYMENT_TYPES, FEE_FORMATS, MEMBERSHIP_STATUSES, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
-from app.auth.capabilities import require_cap, MANAGE_FEES
+from app.auth.capabilities import (
+    require_cap, require_any_cap, MANAGE_FEES, MANAGE_VOLUNTEERS, MANAGE_QUALIFICATIONS,
+    MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY,
+)
 from app.services import fees as fee_service
 from app.services import fees_square as fee_square_service
 from app.services import fees_xero as fee_xero_service
@@ -468,6 +471,29 @@ async def seed_starter_membership_types(
     seeded = await membership_types_service.seed_starter_types(db, club.id)
     await db.commit()
     return {"seeded": seeded}
+
+
+# Every fee-paying person in the club, regardless of season — the shared
+# member/person picker used across BetterClubManager (Volunteers, Qualifications,
+# Event organiser, Booking owner, Club Diary responsibility). Readable by any of
+# those tools' capabilities, not just MANAGE_FEES.
+@router.get("/all-members")
+async def list_all_members(
+    _: User = Depends(require_any_cap(
+        MANAGE_FEES, MANAGE_VOLUNTEERS, MANAGE_QUALIFICATIONS,
+        MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(FeeMember).where(FeeMember.organisation_id == club.id)
+        .order_by(func.lower(FeeMember.full_name))
+    )).scalars().all()
+    return {"members": [
+        {"member_id": str(m.id), "full_name": m.full_name, "email": m.email, "mobile": m.mobile,
+         "player_id": str(m.player_id) if m.player_id else None, "is_linked": m.player_id is not None}
+        for m in rows
+    ]}
 
 
 @router.get("/members")

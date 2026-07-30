@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
-from app.models.db import User, Organisation, ClubEvent, EventRegistration, get_db
+from app.models.db import User, Organisation, ClubEvent, EventRegistration, ClubEventType, get_db
 from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_COMMITTEE
 from app.services import committee as committee_service
@@ -48,6 +48,66 @@ async def _registration_or_404(db: AsyncSession, event: ClubEvent, reg_id: str) 
     if not r or r.event_id != event.id:
         raise HTTPException(status_code=404, detail="Registration not found")
     return r
+
+
+# ─── Event types (club-defined catalogue + starter sets) ─────────────────────
+
+@router.get("/event-types")
+async def list_event_types(include_inactive: bool = False, _: User = _require,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    rows = await events_service.list_event_types(db, club.id, include_inactive=include_inactive)
+    return {"types": [events_service._event_type_dict(t) for t in rows]}
+
+
+class EventTypeUpsert(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_committee_only: Optional[bool] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+@router.post("/event-types")
+async def create_event_type(data: EventTypeUpsert, _: User = _require, club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    try:
+        t = await events_service.create_event_type(
+            db, club.id, name=data.name, description=data.description,
+            is_committee_only=bool(data.is_committee_only), sort_order=data.sort_order or 0)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return events_service._event_type_dict(t)
+
+
+@router.patch("/event-types/{type_id}")
+async def update_event_type(type_id: str, data: EventTypeUpsert, _: User = _require,
+                            club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    t = await db.get(ClubEventType, uuid.UUID(type_id))
+    if not t or t.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Event type not found")
+    await events_service.update_event_type(db, t, **data.model_dump(exclude_unset=True))
+    await db.commit()
+    return events_service._event_type_dict(t)
+
+
+@router.delete("/event-types/{type_id}")
+async def archive_event_type(type_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+                             db: AsyncSession = Depends(get_db)):
+    t = await db.get(ClubEventType, uuid.UUID(type_id))
+    if not t or t.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Event type not found")
+    await events_service.archive_event_type(db, t)
+    await db.commit()
+    return {"archived": True}
+
+
+@router.post("/event-types/seed-starter")
+async def seed_event_types(committee_only: bool = False, _: User = _require,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    seeded = await events_service.seed_starter_event_types(db, club.id, committee_only=committee_only)
+    await db.commit()
+    return {"seeded": seeded}
 
 
 # ─── Admin: registrations against one of our events ───────────────────────────

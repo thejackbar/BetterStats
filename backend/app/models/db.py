@@ -2622,7 +2622,15 @@ class ClubEvent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     title = Column(Text, nullable=False)
+    # Legacy free-text kind (kept for back-compat); the club-defined catalogue
+    # row is ``event_type_id`` (migration 197). Readers prefer the catalogue
+    # name when the FK is set, else fall back to this string.
     event_type = Column(Text, nullable=False, server_default="other", default="other")
+    event_type_id = Column(UUID(as_uuid=True), ForeignKey("club_event_types.id", ondelete="SET NULL"), nullable=True)
+    # The club person running the event (an internal member), with a free-text
+    # fallback name for someone who isn't a recorded member (migration 197).
+    organiser_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    organiser_name = Column(Text, nullable=True)
     starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
     ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
     location = Column(Text, nullable=True)
@@ -2660,7 +2668,10 @@ class VolunteerHours(Base):
     member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
     logged_date = Column(Date, nullable=False, server_default=func.current_date())
     hours = Column(Numeric(6, 2), nullable=False, server_default="0")
+    # Free-text label kept for back-compat; the club-defined catalogue row is
+    # ``activity_id`` (migration 197). A logged row can carry either or both.
     activity = Column(Text, nullable=True)
+    activity_id = Column(UUID(as_uuid=True), ForeignKey("club_activities.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -2875,6 +2886,14 @@ class FacilityBooking(Base):
     starts_at = Column(TIMESTAMP(timezone=True), nullable=False)
     ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
     booked_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    # External hirer's contact + the club person responsible for the booking
+    # (migration 197). A booking can span days/weeks/months via ends_at (e.g.
+    # a facility rented to another organisation for a whole season).
+    contact_name = Column(Text, nullable=True)
+    contact_email = Column(Text, nullable=True)
+    contact_mobile = Column(Text, nullable=True)
+    owner_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    owner_name = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -2929,7 +2948,7 @@ class MaintenanceLog(Base):
 # recurring task last year, and the year before." See the migration 181
 # docstring and services/club_diary.py for the full reasoning.
 
-DIARY_TASK_FREQUENCIES = ("annual", "quarterly", "once")
+DIARY_TASK_FREQUENCIES = ("annual", "quarterly", "monthly", "once")
 DIARY_TASK_STATUSES = ("pending", "in_progress", "done", "not_applicable")
 
 
@@ -2946,6 +2965,8 @@ class DiaryCategory(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    # Hex colour used to colour-code the Gantt chart by category (migration 197).
+    color = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -2969,6 +2990,12 @@ class DiaryTaskDefinition(Base):
     default_month = Column(Integer, nullable=True)  # 1-12, a suggestion only
     default_assignee_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
     default_assignee_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    # Template-level responsibility (a club role), an associated third party,
+    # and a budgetary estimate — carried onto each season's occurrence when it
+    # is generated, then editable per season (migration 197).
+    responsibility_role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
+    third_party = Column(Text, nullable=True)
+    budget_estimate = Column(Numeric(10, 2), nullable=True)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     # Optional reminder email to whoever's assigned, ahead of the due date
     # (migration 182) — off by default, per-task opt-in, not mandatory.
@@ -2995,6 +3022,18 @@ class DiaryTaskOccurrence(Base):
     due_date = Column(Date, nullable=True)
     status = Column(Text, nullable=False, server_default="pending", default="pending")
     assigned_to_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    # Per-season planning + tracking (migration 197): a start date (with due_date
+    # as the target end, so the pair drives the Gantt bars), progress %, an
+    # estimated completion date, the responsible role, a third party, the
+    # season's budget estimate and actual expenditure to date — so a task can
+    # be shown early/late and under/over budget.
+    assigned_to_role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
+    start_date = Column(Date, nullable=True)
+    percent_complete = Column(Integer, nullable=False, server_default="0", default=0)
+    estimated_completion_date = Column(Date, nullable=True)
+    third_party = Column(Text, nullable=True)
+    budget_estimate = Column(Numeric(10, 2), nullable=True)
+    actual_expenditure = Column(Numeric(10, 2), nullable=True)
     notes = Column(Text, nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # Reminder throttle (migration 182) — mirrors MemberQualification/
@@ -3002,6 +3041,151 @@ class DiaryTaskOccurrence(Base):
     last_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── Roles & Activities (migration 197) — the club's volunteer taxonomy ──────
+# A shared catalogue used by BOTH Volunteers (a volunteer holds one or more
+# Roles) and Qualifications (a qualification can be tagged with the Roles it
+# is required for). Activities describe what a volunteer's logged hours were
+# spent on. Both Roles and Activities carry a club-defined Type (its own
+# catalogue with a starter set), same opt-in posture as qualification_types /
+# club_diary_categories — nothing is auto-seeded.
+
+class ClubRoleType(Base):
+    """A club-defined kind of role (Committee Member, Ground Staff, Coach,
+    Food & Beverage, Other, …). Archived rather than deleted so a role that
+    references it keeps its grouping."""
+    __tablename__ = "club_role_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_club_role_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubRole(Base):
+    """A specific role a volunteer can hold — Title + Type + optional
+    description (e.g. "Under-12 Coach" of type Coach)."""
+    __tablename__ = "club_roles"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "title", name="uq_club_roles_org_title"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    role_type_id = Column(UUID(as_uuid=True), ForeignKey("club_role_types.id", ondelete="SET NULL"), nullable=True)
+    description = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubActivityType(Base):
+    """A club-defined kind of activity, loosely mirroring the role types
+    (Committee, Ground, Coaching, Food & Beverage, Match Day, …, Other)."""
+    __tablename__ = "club_activity_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_club_activity_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubActivity(Base):
+    """A specific activity a volunteer's logged hours can be recorded against —
+    Title + Type + optional description."""
+    __tablename__ = "club_activities"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "title", name="uq_club_activities_org_title"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    activity_type_id = Column(UUID(as_uuid=True), ForeignKey("club_activity_types.id", ondelete="SET NULL"), nullable=True)
+    description = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class VolunteerRole(Base):
+    """Link: a volunteer (keyed by member) holds a ClubRole. Keyed on member,
+    not the profile row, so it survives a profile being re-created."""
+    __tablename__ = "volunteer_roles"
+    __table_args__ = (
+        UniqueConstraint("member_id", "role_id", name="uq_volunteer_roles_member_role"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class QualificationRole(Base):
+    """Link: a member qualification is relevant to a ClubRole (a qualification
+    can apply to several roles)."""
+    __tablename__ = "qualification_roles"
+    __table_args__ = (
+        UniqueConstraint("qualification_id", "role_id", name="uq_qualification_roles_qual_role"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    qualification_id = Column(UUID(as_uuid=True), ForeignKey("member_qualifications.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubEventType(Base):
+    """A club-defined kind of event (Social Night, Awards Night, AGM, Busy Bee,
+    …). ``is_committee_only`` marks internal committee events (Committee
+    Meeting, Stock Take, End of Season) so the Events page can offer two
+    starter sets and filter them apart."""
+    __tablename__ = "club_event_types"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_club_event_types_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    is_committee_only = Column(Boolean, nullable=False, server_default="false", default=False)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DiaryTaskDependency(Base):
+    """``definition_id`` cannot start until ``depends_on_definition_id`` is
+    done — drives the Gantt chart's dependency arrows and the season plan's
+    ordering (migration 197)."""
+    __tablename__ = "club_diary_task_dependencies"
+    __table_args__ = (
+        UniqueConstraint("definition_id", "depends_on_definition_id", name="uq_club_diary_task_dependency"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
+    depends_on_definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────

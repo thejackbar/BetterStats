@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -107,16 +107,19 @@ class QualificationCreate(BaseModel):
     obtained_at: Optional[date] = None
     certificate_ref: Optional[str] = None
     notes: Optional[str] = None
+    role_ids: Optional[List[str]] = None
 
 
 @router.post("/members/qualification")
 async def add_qualification(data: QualificationCreate, _: User = _require, club: Organisation = Depends(get_current_club),
                             db: AsyncSession = Depends(get_db)):
     member = await _member_or_404(db, club, data.member_id)
+    role_uuids = [uuid.UUID(r) for r in data.role_ids] if data.role_ids is not None else None
     try:
         q = await qualifications_service.add_qualification(
             db, club.id, member.id, uuid.UUID(data.qualification_type_id),
             obtained_at=data.obtained_at, certificate_ref=data.certificate_ref, notes=data.notes,
+            role_ids=role_uuids,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -129,6 +132,7 @@ class QualificationPatch(BaseModel):
     expires_at: Optional[date] = None
     certificate_ref: Optional[str] = None
     notes: Optional[str] = None
+    role_ids: Optional[List[str]] = None
 
 
 @router.patch("/qualification/{qualification_id}")
@@ -137,7 +141,11 @@ async def update_qualification(qualification_id: str, data: QualificationPatch, 
     q = await db.get(MemberQualification, uuid.UUID(qualification_id))
     if not q or q.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Qualification not found")
-    await qualifications_service.update_qualification(db, q, **data.model_dump(exclude_unset=True))
+    fields = data.model_dump(exclude_unset=True)
+    role_ids = fields.pop("role_ids", None)
+    await qualifications_service.update_qualification(db, q, **fields)
+    if role_ids is not None:
+        await qualifications_service.set_qualification_roles(db, club.id, q.id, [uuid.UUID(r) for r in role_ids])
     await db.commit()
     return qualifications_service._qual_dict(q)
 

@@ -79,6 +79,9 @@ def _document_dict(d: CommitteeDocument) -> dict:
 def _event_dict(e: ClubEvent) -> dict:
     return {
         "id": str(e.id), "title": e.title, "event_type": e.event_type,
+        "event_type_id": str(e.event_type_id) if e.event_type_id else None,
+        "organiser_member_id": str(e.organiser_member_id) if e.organiser_member_id else None,
+        "organiser_name": e.organiser_name,
         "starts_at": e.starts_at.isoformat() if e.starts_at else None,
         "ends_at": e.ends_at.isoformat() if e.ends_at else None,
         "location": e.location, "description": e.description,
@@ -345,6 +348,8 @@ async def create_event(session: AsyncSession, org_id, **fields) -> ClubEvent:
         raise ValueError("Title and start time are required")
     e = ClubEvent(
         organisation_id=org_id, title=title[:300], event_type=fields.get("event_type") or "other",
+        event_type_id=fields.get("event_type_id"),
+        organiser_member_id=fields.get("organiser_member_id"), organiser_name=fields.get("organiser_name"),
         starts_at=fields["starts_at"], ends_at=fields.get("ends_at"),
         location=fields.get("location"), description=fields.get("description"),
         is_ticketed=fields.get("is_ticketed") or False,
@@ -359,9 +364,14 @@ async def create_event(session: AsyncSession, org_id, **fields) -> ClubEvent:
 
 
 async def update_event(session: AsyncSession, e: ClubEvent, **fields) -> ClubEvent:
+    # organiser_* + event_type_id are nullable and may be cleared explicitly,
+    # so they use "present in the payload" rather than "not None".
     for f in ("title", "event_type", "starts_at", "ends_at", "location", "description",
               "is_ticketed", "ticket_price_cents", "capacity", "registration_deadline", "registration_open"):
         if f in fields and fields[f] is not None:
+            setattr(e, f, fields[f])
+    for f in ("event_type_id", "organiser_member_id", "organiser_name"):
+        if f in fields:
             setattr(e, f, fields[f])
     return e
 

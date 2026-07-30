@@ -31,6 +31,9 @@ def _booking_dict(b: FacilityBooking) -> dict:
         "starts_at": b.starts_at.isoformat() if b.starts_at else None,
         "ends_at": b.ends_at.isoformat() if b.ends_at else None,
         "booked_by_member_id": str(b.booked_by_member_id) if b.booked_by_member_id else None,
+        "contact_name": b.contact_name, "contact_email": b.contact_email, "contact_mobile": b.contact_mobile,
+        "owner_member_id": str(b.owner_member_id) if b.owner_member_id else None,
+        "owner_name": b.owner_name,
         "notes": b.notes,
     }
 
@@ -113,7 +116,10 @@ async def create_booking(session: AsyncSession, org_id, *, facility_id, **fields
     b = FacilityBooking(
         organisation_id=org_id, facility_id=facility_id, title=title[:300],
         starts_at=fields["starts_at"], ends_at=fields.get("ends_at"),
-        booked_by_member_id=fields.get("booked_by_member_id"), notes=fields.get("notes"),
+        booked_by_member_id=fields.get("booked_by_member_id"),
+        contact_name=fields.get("contact_name"), contact_email=fields.get("contact_email"),
+        contact_mobile=fields.get("contact_mobile"), owner_member_id=fields.get("owner_member_id"),
+        owner_name=fields.get("owner_name"), notes=fields.get("notes"),
     )
     session.add(b)
     await session.flush()
@@ -121,8 +127,13 @@ async def create_booking(session: AsyncSession, org_id, *, facility_id, **fields
 
 
 async def update_booking(session: AsyncSession, b: FacilityBooking, **fields) -> FacilityBooking:
-    for field in ("title", "starts_at", "ends_at", "booked_by_member_id", "notes"):
+    for field in ("title", "starts_at"):
         if field in fields and fields[field] is not None:
+            setattr(b, field, fields[field])
+    # Nullable fields may be cleared explicitly ("present in the payload").
+    for field in ("ends_at", "booked_by_member_id", "contact_name", "contact_email",
+                  "contact_mobile", "owner_member_id", "owner_name", "notes"):
+        if field in fields:
             setattr(b, field, fields[field])
     return b
 
@@ -134,7 +145,9 @@ async def delete_booking(session: AsyncSession, b: FacilityBooking) -> None:
 # ─── Club assets ──────────────────────────────────────────────────────────────
 
 async def list_assets(session: AsyncSession, org_id, *, include_inactive: bool = False,
-                      category: Optional[str] = None, status: Optional[str] = None) -> list[ClubAsset]:
+                      category: Optional[str] = None, status: Optional[str] = None,
+                      facility_id=None, cost_min=None, cost_max=None,
+                      acquired_from=None, acquired_to=None) -> list[ClubAsset]:
     stmt = select(ClubAsset).where(ClubAsset.organisation_id == org_id)
     if not include_inactive:
         stmt = stmt.where(ClubAsset.is_active.is_(True))
@@ -142,6 +155,16 @@ async def list_assets(session: AsyncSession, org_id, *, include_inactive: bool =
         stmt = stmt.where(ClubAsset.category == category)
     if status:
         stmt = stmt.where(ClubAsset.status == status)
+    if facility_id:
+        stmt = stmt.where(ClubAsset.facility_id == facility_id)
+    if cost_min is not None:
+        stmt = stmt.where(ClubAsset.purchase_cost >= cost_min)
+    if cost_max is not None:
+        stmt = stmt.where(ClubAsset.purchase_cost <= cost_max)
+    if acquired_from is not None:
+        stmt = stmt.where(ClubAsset.purchase_date >= acquired_from)
+    if acquired_to is not None:
+        stmt = stmt.where(ClubAsset.purchase_date <= acquired_to)
     stmt = stmt.order_by(func.lower(ClubAsset.name))
     return (await session.execute(stmt)).scalars().all()
 

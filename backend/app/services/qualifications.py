@@ -13,10 +13,10 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import QualificationType, MemberQualification, FeeMember
+from app.models.db import QualificationType, MemberQualification, FeeMember, QualificationRole, ClubRole
 
 # (name, description, validity_months) — validity is a sensible DEFAULT the
 # club can edit; actual renewal cycles vary by state/association.
@@ -116,6 +116,38 @@ async def seed_starter_types(session: AsyncSession, org_id) -> int:
     return seeded
 
 
+# ─── Qualification ↔ role links ──────────────────────────────────────────────
+
+async def _roles_by_qualification(session: AsyncSession, org_id, qualification_ids) -> dict:
+    """qualification_id -> [{id, title}] for the given qualification ids."""
+    if not qualification_ids:
+        return {}
+    rows = (await session.execute(
+        select(QualificationRole.qualification_id, ClubRole.id, ClubRole.title)
+        .join(ClubRole, ClubRole.id == QualificationRole.role_id)
+        .where(QualificationRole.organisation_id == org_id,
+               QualificationRole.qualification_id.in_(qualification_ids))
+        .order_by(func.lower(ClubRole.title))
+    )).all()
+    out: dict = {}
+    for qid, role_id, title in rows:
+        out.setdefault(qid, []).append({"id": str(role_id), "title": title})
+    return out
+
+
+async def set_qualification_roles(session: AsyncSession, org_id, qualification_id, role_ids) -> None:
+    wanted = set()
+    for rid in (role_ids or []):
+        role = await session.get(ClubRole, rid)
+        if role is not None and role.organisation_id == org_id:
+            wanted.add(role.id)
+    await session.execute(delete(QualificationRole).where(
+        QualificationRole.organisation_id == org_id, QualificationRole.qualification_id == qualification_id))
+    for rid in wanted:
+        session.add(QualificationRole(organisation_id=org_id, qualification_id=qualification_id, role_id=rid))
+    await session.flush()
+
+
 # ─── Member qualifications ───────────────────────────────────────────────────
 
 async def list_member_qualifications(session: AsyncSession, org_id, member_id) -> list[dict]:
@@ -125,12 +157,18 @@ async def list_member_qualifications(session: AsyncSession, org_id, member_id) -
         .where(MemberQualification.organisation_id == org_id, MemberQualification.member_id == member_id)
         .order_by(QualificationType.name)
     )).all()
-    return [_qual_dict(q, t.name) for q, t in rows]
+    roles_map = await _roles_by_qualification(session, org_id, [q.id for q, _ in rows])
+    out = []
+    for q, t in rows:
+        d = _qual_dict(q, t.name)
+        d["roles"] = roles_map.get(q.id, [])
+        out.append(d)
+    return out
 
 
 async def add_qualification(session: AsyncSession, org_id, member_id, qualification_type_id, *,
                             obtained_at: Optional[date] = None, certificate_ref: Optional[str] = None,
-                            notes: Optional[str] = None) -> MemberQualification:
+                            notes: Optional[str] = None, role_ids=None) -> MemberQualification:
     qtype = await session.get(QualificationType, qualification_type_id)
     if qtype is None or str(qtype.organisation_id) != str(org_id):
         raise ValueError("Qualification type not found")
@@ -142,6 +180,8 @@ async def add_qualification(session: AsyncSession, org_id, member_id, qualificat
     )
     session.add(q)
     await session.flush()
+    if role_ids is not None:
+        await set_qualification_roles(session, org_id, q.id, role_ids)
     return q
 
 

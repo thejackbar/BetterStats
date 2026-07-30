@@ -22,9 +22,101 @@ from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import ClubEvent, EventRegistration
+from app.models.db import ClubEvent, EventRegistration, ClubEventType
 
 REGISTRATION_STATUSES = ("free", "awaiting_payment", "paid", "cancelled")
+
+# Public/social event kinds typical for a cricket club.
+STARTER_EVENT_TYPES = [
+    ("Social Night", "A casual club social."),
+    ("Awards Night", "Season presentation / awards."),
+    ("Quiz Night", "Trivia fundraiser."),
+    ("Curry Night", "Club curry/dinner night."),
+    ("Presentation Day", "Junior/senior presentation day."),
+    ("Fundraiser", "General fundraising event."),
+    ("Sponsors' Function", "Sponsor thank-you / networking."),
+    ("Season Launch", "Pre-season launch."),
+    ("Registration Day", "Sign-on / registration day."),
+    ("Working Bee", "Ground/clubhouse working bee."),
+    ("Other", "Anything else."),
+]
+
+# Committee-only / internal events.
+STARTER_COMMITTEE_EVENT_TYPES = [
+    ("Committee Meeting", "Regular committee meeting."),
+    ("Sub-committee Meeting", "A sub-committee meeting."),
+    ("AGM", "Annual General Meeting."),
+    ("Special General Meeting", "SGM / EGM."),
+    ("Selection Meeting", "Team selection."),
+    ("Budget / Finance Meeting", "Finance review."),
+    ("Stock Take", "Canteen/bar/equipment stock take."),
+    ("End of Season Review", "Season wrap-up / planning."),
+]
+
+
+def _event_type_dict(t: ClubEventType) -> dict:
+    return {
+        "id": str(t.id), "name": t.name, "description": t.description,
+        "is_committee_only": t.is_committee_only, "sort_order": t.sort_order, "is_active": t.is_active,
+    }
+
+
+# ─── Event types ─────────────────────────────────────────────────────────────
+async def list_event_types(session: AsyncSession, org_id, *, include_inactive: bool = False) -> list[ClubEventType]:
+    stmt = select(ClubEventType).where(ClubEventType.organisation_id == org_id)
+    if not include_inactive:
+        stmt = stmt.where(ClubEventType.is_active.is_(True))
+    stmt = stmt.order_by(ClubEventType.is_committee_only, ClubEventType.sort_order, func.lower(ClubEventType.name))
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def create_event_type(session: AsyncSession, org_id, *, name: str, description=None,
+                            is_committee_only: bool = False, sort_order: int = 0) -> ClubEventType:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Name is required")
+    existing = (await session.execute(
+        select(ClubEventType).where(ClubEventType.organisation_id == org_id,
+                                    func.lower(ClubEventType.name) == name.lower())
+    )).scalars().first()
+    if existing is not None:
+        if not existing.is_active:
+            existing.is_active = True
+            return existing
+        raise ValueError(f'An event type called "{name}" already exists')
+    t = ClubEventType(organisation_id=org_id, name=name[:120], description=description,
+                      is_committee_only=is_committee_only, sort_order=sort_order)
+    session.add(t)
+    await session.flush()
+    return t
+
+
+async def update_event_type(session: AsyncSession, t: ClubEventType, **fields) -> ClubEventType:
+    for f in ("name", "description", "is_committee_only", "sort_order", "is_active"):
+        if f in fields and fields[f] is not None:
+            setattr(t, f, fields[f])
+    return t
+
+
+async def archive_event_type(session: AsyncSession, t: ClubEventType) -> None:
+    t.is_active = False
+
+
+async def seed_starter_event_types(session: AsyncSession, org_id, *, committee_only: bool = False) -> int:
+    rows = STARTER_COMMITTEE_EVENT_TYPES if committee_only else STARTER_EVENT_TYPES
+    existing = {n.lower() for n in (await session.execute(
+        select(ClubEventType.name).where(ClubEventType.organisation_id == org_id)
+    )).scalars().all()}
+    seeded = 0
+    for i, (name, desc) in enumerate(rows):
+        if name.lower() in existing:
+            continue
+        session.add(ClubEventType(organisation_id=org_id, name=name, description=desc,
+                                  is_committee_only=committee_only, sort_order=i))
+        seeded += 1
+    if seeded:
+        await session.flush()
+    return seeded
 
 
 def _registration_dict(r: EventRegistration) -> dict:

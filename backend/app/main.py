@@ -16,7 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary, social_media, votes, public_votes
+    club_diary, social_media, votes, public_votes, roles_activities
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -3967,6 +3967,130 @@ async def lifespan(app: FastAPI):
         if await _crm_rules.seed_defaults(_crm_rules_session):
             await _crm_rules_session.commit()
 
+    # Migration 197: BetterClubManager — Roles & Activities taxonomy, Event
+    # Types, Volunteer/Qualification/Events/Bookings/Club-Diary extensions.
+    # Byte-identical to alembic/versions/197_roles_activities_events.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_role_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_role_types_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                role_type_id UUID REFERENCES club_role_types(id) ON DELETE SET NULL,
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_roles_org_title UNIQUE (organisation_id, title)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_club_roles_org ON club_roles(organisation_id, is_active)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_activity_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_activity_types_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_activities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                activity_type_id UUID REFERENCES club_activity_types(id) ON DELETE SET NULL,
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_activities_org_title UNIQUE (organisation_id, title)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_club_activities_org ON club_activities(organisation_id, is_active)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS volunteer_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                role_id UUID NOT NULL REFERENCES club_roles(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_volunteer_roles_member_role UNIQUE (member_id, role_id)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_volunteer_roles_member ON volunteer_roles(member_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS qualification_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                qualification_id UUID NOT NULL REFERENCES member_qualifications(id) ON DELETE CASCADE,
+                role_id UUID NOT NULL REFERENCES club_roles(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_qualification_roles_qual_role UNIQUE (qualification_id, role_id)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qualification_roles_qual ON qualification_roles(qualification_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_event_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                is_committee_only BOOLEAN NOT NULL DEFAULT FALSE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_event_types_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_diary_task_dependencies (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                definition_id UUID NOT NULL REFERENCES club_diary_task_definitions(id) ON DELETE CASCADE,
+                depends_on_definition_id UUID NOT NULL REFERENCES club_diary_task_definitions(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_club_diary_task_dependency UNIQUE (definition_id, depends_on_definition_id)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_club_diary_task_deps_def ON club_diary_task_dependencies(definition_id)"))
+        # Column additions
+        await conn.execute(text("ALTER TABLE club_events ADD COLUMN IF NOT EXISTS event_type_id UUID REFERENCES club_event_types(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE club_events ADD COLUMN IF NOT EXISTS organiser_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE club_events ADD COLUMN IF NOT EXISTS organiser_name TEXT"))
+        await conn.execute(text("ALTER TABLE volunteer_hours ADD COLUMN IF NOT EXISTS activity_id UUID REFERENCES club_activities(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS contact_name TEXT"))
+        await conn.execute(text("ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS contact_email TEXT"))
+        await conn.execute(text("ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS contact_mobile TEXT"))
+        await conn.execute(text("ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS owner_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS owner_name TEXT"))
+        await conn.execute(text("ALTER TABLE club_diary_categories ADD COLUMN IF NOT EXISTS color TEXT"))
+        await conn.execute(text("ALTER TABLE club_diary_task_definitions ADD COLUMN IF NOT EXISTS responsibility_role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE club_diary_task_definitions ADD COLUMN IF NOT EXISTS third_party TEXT"))
+        await conn.execute(text("ALTER TABLE club_diary_task_definitions ADD COLUMN IF NOT EXISTS budget_estimate NUMERIC(10, 2)"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS assigned_to_role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS start_date DATE"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS percent_complete INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS estimated_completion_date DATE"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS third_party TEXT"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS budget_estimate NUMERIC(10, 2)"))
+        await conn.execute(text("ALTER TABLE club_diary_task_occurrences ADD COLUMN IF NOT EXISTS actual_expenditure NUMERIC(10, 2)"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -4193,6 +4317,7 @@ app.include_router(events.router)        # Events/Ticketing admin — registrati
 app.include_router(events.public_router)  # Events/Ticketing public — unauthenticated event view + register (core, not a paid module)
 app.include_router(assets.router)        # Assets & Facilities (core capability, not a paid module)
 app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
+app.include_router(roles_activities.router)  # Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
 app.include_router(member_portal_admin.router)  # Member portal visibility check (core, no capability — see the router docstring)
 app.include_router(stripe_connect.router)       # Member portal: club-to-member Stripe Connect admin flow (core, flag-gated)
 app.include_router(public_stripe_connect.router)  # Member portal: Stripe Connect webhook (public, unauthenticated)
