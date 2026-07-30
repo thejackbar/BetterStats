@@ -11,7 +11,7 @@ const STATUS_STYLE = {
   dismissed:   'bg-pb-surface2 text-pb-faint border-pb-hairline',
 }
 const KIND_LABEL = { trial: 'Trial', subscribe: 'Subscribe', cancel: 'Cancel' }
-const SOURCE_LABEL = { app: 'In-app', super_admin: 'Super admin', twenty: 'CRM (Twenty)' }
+const SOURCE_LABEL = { app: 'In-app', super_admin: 'Super admin', twenty: 'CRM (legacy)' }
 
 function fmtDate(iso) {
   if (!iso) return '—'

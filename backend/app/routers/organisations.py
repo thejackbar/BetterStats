@@ -24,17 +24,29 @@ _background_tasks: set = set()
 logger = logging.getLogger(__name__)
 
 
-def _push_club_to_twenty(org_id) -> None:
-    """Fire-and-forget: push one club's Company fields to Twenty. No-op when
-    Twenty isn't configured; never raises into the request (mirrors
-    club_admin.py's identical helper — kept local since routers don't share
-    request-scoped helpers)."""
+def _sync_club_crm(org_id) -> None:
+    """Fire-and-forget: recompute the club's cached engagement score (which
+    enrols it on the CRM pipeline once its score is above zero — see
+    crm.sync_pipeline_membership) right after it's synced and linked to its
+    Marketing Directory row. Never raises into the request."""
     async def _run():
         try:
-            from app.services import twenty_sync
-            await twenty_sync.push_org_company(org_id)
+            from sqlalchemy.orm import selectinload
+            from app.models.db import async_session_maker, MarketingClub, Organisation
+            from app.services import crm as crm_service
+            async with async_session_maker() as session:
+                club = (await session.execute(
+                    select(MarketingClub).where(MarketingClub.existing_org_id == org_id)
+                )).scalar_one_or_none()
+                if club is None:
+                    return
+                org = await session.get(
+                    Organisation, org_id,
+                    options=[selectinload(Organisation.module_subscriptions)])
+                await crm_service.sync_engagement_promotion(session, club, org)
+                await session.commit()
         except Exception:
-            logger.exception("twenty push failed")
+            logger.exception("crm sync failed")
     task = asyncio.create_task(_run())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -116,9 +128,9 @@ async def _onboard_club_core(
     # revisits this club (club_directory._link_existing_org), which could be
     # days away. Same matching priority (PlayHQ id, then name), reversed to look
     # up FROM the org. Best-effort: a club that isn't in the directory at all is
-    # a normal no-op. Pushing to Twenty now (rather than waiting for the nightly
-    # refresh) is what makes "we synced the club" show up in the CRM lifecycle/
-    # engagement score right away.
+    # a normal no-op. Recomputing engagement now (rather than waiting for the
+    # nightly refresh) is what makes "we synced the club" show up in the CRM
+    # pipeline/engagement score right away.
     mc = await db.scalar(
         select(MarketingClub).where(MarketingClub.existing_org_id.is_(None),
                                     MarketingClub.playhq_id == org_id))
@@ -129,7 +141,7 @@ async def _onboard_club_core(
     if mc is not None:
         mc.existing_org_id = org.id
         await db.commit()
-        _push_club_to_twenty(org.id)
+        _sync_club_crm(org.id)
 
     return org, run_id, name
 

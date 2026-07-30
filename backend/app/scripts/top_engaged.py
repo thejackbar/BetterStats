@@ -3,7 +3,7 @@ top scores (e.g. the pile at 95-100) can be sanity-checked club by club rather
 than tuned blind: is a 100 deserved (heavy real activity) or over-credited
 (over-broad attribution, a shared officer email matching many clubs)?
 
-Read-only: it re-runs twenty_sync._engagement per club to pull the internal
+Read-only: it re-runs crm_sync._engagement per club to pull the internal
 breakdown fields, but never commits (rolls back at the end).
 
 USAGE (inside the backend container)
@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
-from app.services.twenty_sync import _engagement
+from app.services.crm_sync import _engagement
 
 
 async def _load_org(session, org_id):

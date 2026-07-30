@@ -742,13 +742,12 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
 
 # ─── Manual full engagement recompute (the "Recalculate" board button) ────────
 # Runs the SAME logic as `python -m app.scripts.recalc_engagement`: recompute and
-# re-cache every club's engagement score (twenty_sync._engagement, a local
-# read/compute — no Twenty calls) and re-run the score-based CRM auto-promotion,
-# so the board reflects the current scoring rules immediately instead of waiting
-# on the nightly (Twenty-gated) refresh or lazy per-event recomputes. A full
-# sweep takes minutes, well past nginx's 60s proxy timeout, so it runs as a
-# detached background task with a status the button polls — same pattern as the
-# marketing page's "Refresh Twenty" buttons.
+# re-cache every club's engagement score (crm_sync._engagement, a local
+# read/compute) and re-run the score-based CRM auto-promotion, so the board
+# reflects the current scoring rules immediately instead of waiting on the
+# nightly sweep or lazy per-event recomputes. A full sweep takes minutes, well
+# past nginx's 60s proxy timeout, so it runs as a detached background task with
+# a status the button polls.
 _engagement_recalc: dict = {
     "running": False, "started_at": None, "finished_at": None, "result": None, "error": None,
 }

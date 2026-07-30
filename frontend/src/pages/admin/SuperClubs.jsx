@@ -154,7 +154,7 @@ export default function SuperClubs() {
   const [syncMode, setSyncMode] = useState('any')
   const [syncFrom, setSyncFrom] = useState('')
   const [syncTo, setSyncTo] = useState('')
-  // Engagement score range (cached Twenty score, mirrors the Club Directory's
+  // Engagement score range (cached score, mirrors the Club Directory's
   // own >=/<= filter) + a sub-filter on which recorded action types feed it.
   const [engFrom, setEngFrom] = useState('')
   const [engTo, setEngTo] = useState('')
@@ -724,7 +724,7 @@ export default function SuperClubs() {
                   className={INPUT_CLS} />
                 <p className="font-mono text-[10px] text-pb-faintest mt-1">
                   How many days a direct "onboard my club" website enquiry holds a prospect at a
-                  flat 100/Hot engagement score in Twenty, before it decays back to the ordinary
+                  flat 100/Hot engagement score, before it decays back to the ordinary
                   recency/frequency score. Ends early if the club becomes a paying customer or is
                   marked Not Interested.
                 </p>

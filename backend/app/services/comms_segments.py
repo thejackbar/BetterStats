@@ -52,7 +52,7 @@ DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "
                    "is_trialing", "requested_trial", "had_demo", "visited_page"}
 # Numeric club-level metrics: page views / distinct visitors (from the same
 # UTM-resolved usage_events attribution the Club Directory + engagement score
-# use) and the cached Twenty engagement score. gte/lte only (no strict < / >
+# use) and the cached engagement score. gte/lte only (no strict < / >
 # — mirrors the Club Directory's own engagement-score filter).
 DIR_METRIC_FIELDS = {"page_views", "distinct_visitors", "engagement_score"}
 DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS

@@ -1579,7 +1579,45 @@ to be a plain `<textarea>` + a read-only iframe. Both now share one editor,
 - **No backend change** — tidying happens entirely client-side before the
   existing `html`/`body_html` string fields are saved.
 
-## Marketing Club Directory — Twenty sync fixes (Jul 2026)
+## Twenty CRM decommissioned — replaced by the BetterCricket CRM (Jul 2026)
+
+Twenty is gone. Every path that read from or wrote to the Twenty API, and every
+job/endpoint/button that recomputed or refreshed a value/score/setting FOR
+Twenty, was removed (migration 199 drops `twenty_links` and the
+`club_request_events.twenty_task_*` columns). The in-house **BetterCricket CRM**
+(`services/crm.py` + `services/crm_rules.py`, Super Admin → CRM,
+`SuperCrm.jsx`) is now the only sales pipeline. So when reading the older
+Twenty-heavy sections BELOW this note, treat them as history — the Twenty API,
+`twenty_client`/`twenty_leads_tasks`/`twenty_inbound`/`twenty_opportunity`, the
+`bootstrap_twenty`/`reconcile_twenty`/`import_twenty_pipeline` scripts, the
+`/webhooks/twenty` receiver, `pipeline_gauge`, and the `TWENTY_*` settings no
+longer exist.
+
+- **Engagement scoring was retained, not deleted** — it's BetterCricket's own
+  data and the CRM board reads it. The scoring engine was lifted out of the old
+  `twenty_sync.py` into **`services/crm_sync.py`** (same computation, no external
+  call): `_engagement` (+ `batch_web_stats`/`batch_email_stats`),
+  `_apply_engagement_cache` (writes `marketing_clubs.engagement_score`/
+  `.engagement_tier`/`.engagement_scored_at`), `_onboarding_signal`,
+  `_module_split`, and the find-or-create helpers `_resolve_onboarding_club`/
+  `_resolve_self_serve_club`. Any "Refresh Twenty scores" language now means a
+  local recompute (`crm.sync_engagement_promotion` per club; the full sweep is
+  still `scripts/recalc_engagement.py` + the scheduler's
+  `crm_global_engagement_sweep`).
+- **Every former Twenty push is now a local CRM sync.** A club enquiry
+  (`crm.sync_deal_for_enquiry`), a trial request/start or subscription change
+  (`club_admin._sync_club_crm`, `stripe_billing._sync_crm`), a self-serve signup
+  (`crm.sync_self_serve_trial_registration`), an org onboard
+  (`organisations._sync_club_crm`), and a BetterComms send all recompute
+  engagement + advance the platform deal; none call an external service. The
+  "Export to Twenty" / "Refresh Twenty *" buttons were removed from
+  `SuperMarketing.jsx`; **"Push to BetterCricket CRM"** is the surviving
+  bulk-enrol action.
+- **Anti-pattern**: don't reintroduce a `twenty_sync`/`twenty_client` import or a
+  `_push_*_to_twenty` helper. Scoring lives in `crm_sync`; pipeline moves live in
+  `crm`/`crm_rules`.
+
+## Marketing Club Directory — Twenty sync fixes (Jul 2026, superseded — Twenty removed)
 
 Two related fixes to the super-admin Club Directory (`/admin/super/marketing`)'s
 Twenty CRM integration, prompted by a live "Gateway Time-out" on Refresh

@@ -1021,18 +1021,9 @@ export const api = {
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
   mktExportComms: (payload) =>
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
-  mktExportTwenty: (payload) =>
-    request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
-  mktExportTwentyStatus: () => request('/club-admin/marketing/export-twenty/status'),
   mktPushToCrm: (payload) =>
     request('/club-admin/marketing/push-to-crm', { method: 'POST', body: JSON.stringify(payload) }),
   mktPushToCrmStatus: () => request('/club-admin/marketing/push-to-crm/status'),
-  mktRefreshTwentyEngagement: () =>
-    request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
-  mktRefreshTwentyEngagementStatus: () => request('/club-admin/marketing/refresh-twenty-engagement/status'),
-  mktRefreshTwentyLeadsTasks: () =>
-    request('/club-admin/marketing/refresh-twenty-leads-tasks', { method: 'POST' }),
-  mktRefreshTwentyLeadsTasksStatus: () => request('/club-admin/marketing/refresh-twenty-leads-tasks/status'),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktUpdateContact: (contactId, patch) =>

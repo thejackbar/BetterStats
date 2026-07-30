@@ -228,7 +228,7 @@ const CHANNEL_LABELS = {
   manual: 'Manual',
   auto_enquiry: 'Auto (enquiry)',
   auto_trial: 'Auto (trial)',
-  twenty_import: 'Twenty import',
+  twenty_import: 'Imported (legacy)',
 }
 const channelLabel = (v) => CHANNEL_LABELS[v] || v
 

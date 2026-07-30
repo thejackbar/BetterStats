@@ -638,8 +638,7 @@ async def _resolve_outreach_org(session: AsyncSession, organisation_id: Optional
 
 def _assoc_names(club: MarketingClub) -> list[str]:
     # Guard non-dict entries (a null / stray string in the associations JSONB would
-    # otherwise AttributeError and 500 the whole CSV export) — same guard as
-    # twenty_sync._club_assocs.
+    # otherwise AttributeError and 500 the whole CSV export).
     return [a["name"] for a in (club.associations or [])
             if isinstance(a, dict) and a.get("name")]
 
@@ -1151,6 +1150,47 @@ def _clean_modules(values) -> list:
     return out
 
 
+async def _queue_module_trial_requests(session, org, module_keys, *, source: str,
+                                       ext_key: "str | None" = None) -> list:
+    """Queue a trial ``ModuleActionRequest`` for each of ``module_keys`` on a
+    synced club's org — the actionable super-admin queue item behind a Club
+    Directory trial-module change. Deduped: skips a module already held or
+    already outstanding (also on ``ext_key``). A no-op for an un-synced club
+    (no org — a ModuleActionRequest requires one). Does NOT commit; the caller
+    owns the transaction."""
+    from app.auth.modules import billing_key_for
+    from app.models.db import ModuleActionRequest, OrgModuleSubscription
+    module_keys = sorted(set(module_keys or []))
+    if org is None or not module_keys:
+        return []
+    held = {
+        billing_key_for(k) for k in (await session.execute(
+            select(OrgModuleSubscription.module_key)
+            .where(OrgModuleSubscription.organisation_id == org.id)
+        )).scalars().all()
+    }
+    created = []
+    for module_key in module_keys:
+        if module_key in held:
+            continue
+        ext_ref = f"{ext_key}:{module_key}" if ext_key else None
+        if (await session.execute(select(ModuleActionRequest.id).where(
+                ModuleActionRequest.organisation_id == org.id,
+                ModuleActionRequest.module_key == module_key,
+                ModuleActionRequest.kind == "trial",
+                ModuleActionRequest.status == "outstanding"))).first():
+            continue
+        if ext_ref and (await session.execute(select(ModuleActionRequest.id).where(
+                ModuleActionRequest.external_ref == ext_ref))).first():
+            continue
+        session.add(ModuleActionRequest(
+            organisation_id=org.id, module_key=module_key, kind="trial",
+            status="outstanding", source=source,
+            note="Trial modules updated in the Club Directory", external_ref=ext_ref))
+        created.append(module_key)
+    return created
+
+
 async def set_sales_state(session: AsyncSession, club_id: str, *,
                           trial_modules=None, requested_trial_modules=None,
                           demo_status=..., not_interested=None) -> Optional[dict]:
@@ -1158,11 +1198,10 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     automated source). Only the fields passed are changed. Returns the new state,
     or None if the club isn't found.
 
-    Adding a module to Trial Modules OR Requested Trial here queues the same
-    super-admin action-queue request the Twenty CRM webhook raises when a
-    salesperson does the equivalent edit on the Company (see
-    twenty_inbound.request_trial_modules): a real ModuleActionRequest if the club
-    is already synced, else a Twenty Task asking for it to be synced first.
+    Adding a module to Trial Modules OR Requested Trial here queues a
+    super-admin action-queue request (see _queue_module_trial_requests): a real
+    ModuleActionRequest when the club is already synced, else a no-op (a request
+    needs an org).
     Requested Trial is the "a club asked us for a trial" signal (e.g. by phone/
     email, logged here by a super admin) — it needs the same follow-up action as
     Trial Modules, just earlier in the pipeline, so it raises the identical
@@ -1192,32 +1231,21 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     added_modules = sorted(added_trial | added_requested)
     if added_modules:
         try:
-            from app.services.twenty_inbound import request_trial_modules
             org = (await session.get(Organisation, club.existing_org_id)
                    if club.existing_org_id else None)
-            await request_trial_modules(session, club, org, added_modules,
-                                        source="app", ext_key=f"app:{club.grassroots_guid}")
+            await _queue_module_trial_requests(
+                session, org, added_modules, source="app",
+                ext_key=f"app:{club.grassroots_guid}")
+            await session.commit()
         except Exception:  # noqa: BLE001 - queueing the follow-up must never block the save
             logger.exception("club_directory: failed to queue trial request for %s", club.id)
     if added_modules or became_in_trial:
-        # Requesting or starting a trial here is as strong a buying signal as a
-        # direct "onboard my club" enquiry — force the same immediate Hot (100)
-        # + Lead treatment rather than letting it filter through as partial
-        # credit in the gradual engagement formula (see push_onboarding_enquiry).
-        try:
-            from app.services.twenty_sync import push_club_and_contacts
-            await push_club_and_contacts(
-                club.id, engagement_override={
-                    "engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
-        except Exception:  # noqa: BLE001 - the CRM push must never block the save
-            logger.exception("club_directory: failed to push trial engagement for %s", club.id)
-        # Local CRM pipeline equivalent — advance (or create) this club's
+        # Requesting or starting a trial here advances (or creates) this club's
         # platform deal per the super-admin-configured 'trial_started' /
-        # 'trial_requested' automation rule (services/crm_rules.py), same
-        # trigger moment as the Twenty push above. Prefers 'trial_started'
-        # whenever a module is actually being trialed now (added_trial or
-        # became_in_trial) — 'trial_requested' only fires when this save was
-        # purely adding a REQUESTED (not yet granted) module.
+        # 'trial_requested' automation rule (services/crm_rules.py). Prefers
+        # 'trial_started' whenever a module is actually being trialed now
+        # (added_trial or became_in_trial) — 'trial_requested' only fires when
+        # this save was purely adding a REQUESTED (not yet granted) module.
         try:
             from sqlalchemy.orm import selectinload
             from app.services import crm_rules
@@ -1232,10 +1260,10 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
                 await sync_platform_deal_for_club(
                     session, club, stage_key=match["stage_key"], source="auto_trial",
                     module_keys=deal_modules, advance_only=not match["force"])
-            # Also check the score-based promotion right now, independent of
-            # whether Twenty is configured — harmless no-op once the deal above
-            # is already past Engaged (trial always is), but keeps this call
-            # site consistent with every other discrete-event trigger.
+            # Also check the score-based promotion right now — harmless no-op
+            # once the deal above is already past Engaged (trial always is), but
+            # keeps this call site consistent with every other discrete-event
+            # trigger.
             org = (await session.get(Organisation, club.existing_org_id,
                                      options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
@@ -1642,7 +1670,7 @@ _PATH_CODE = "split_part(split_part(ue.path, '?', 1), '/', 2)"
 # The per-event single-club resolution, as a correlated scalar (references the
 # outer ``ue``). COALESCE applies the priority order; each subquery is LIMIT 1 so
 # a colliding ``utm_code`` can't multiply the row. Exposed on its own so the
-# engagement score (twenty_sync._engagement) attributes a visit the SAME way this
+# engagement score (crm_sync._engagement) attributes a visit the SAME way this
 # panel does — resolving each visit to ONE club rather than the old any-overlap
 # match that credited every club whose code merely collided with the path/UTM.
 def _resolved_cid_sql(utm_id: str, utm_source: str, path_code: str) -> str:
@@ -1707,7 +1735,7 @@ _RESOLVED_VISITS = (
     # keeps riding along on every later page view from that tab, including a
     # staff member's own authenticated admin browsing — which would otherwise
     # get misattributed to a prospect club as "visits"/"pages viewed" and
-    # corrupt the engagement score built on this same CTE (twenty_sync.py
+    # corrupt the engagement score built on this same CTE (crm_sync.py
     # _engagement). Same guard usage.py's campaigns()/live() already use to
     # keep staff activity out of visitor numbers.
     "AND ue.user_id IS NULL "

@@ -54,7 +54,6 @@ from app.services import comms_segments
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
-from app.services import twenty_sync
 from app.services.club_directory import CA_EMAIL_DOMAINS, club_visit_stats
 from app.services import name_format
 from app.services.send_rate_limiter import send_limiter
@@ -1669,29 +1668,36 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     WHERE r.campaign_id = :cid AND r.status = 'sent'
                       AND cc.marketing_club_id IS NOT NULL)
             """), {"now": now, "cid": uuid.UUID(campaign_id)})
-            # Every email sent should upsert a record in Twenty: for a
-            # marketing-outreach send, the club (Company) and the officer(s) just
-            # emailed (People) enter the CRM subset now if they weren't already —
-            # no manual "export to Twenty" click required first.
-            sent_officers = (await s.execute(text("""
-                SELECT DISTINCT cc.marketing_club_id, mcc.id
+            # Every marketing-outreach send is an engagement signal: collect the
+            # clubs whose officer(s) were just emailed so the CRM can recompute
+            # each one's cached engagement score below — which enrols the club on
+            # the sales pipeline once its score is above zero (see
+            # crm.sync_pipeline_membership), with no manual step required first.
+            sent_clubs = (await s.execute(text("""
+                SELECT DISTINCT cc.marketing_club_id
                 FROM comms_recipients r
                 JOIN comms_contacts cc ON cc.id = r.contact_id
-                JOIN marketing_club_contacts mcc
-                  ON mcc.marketing_club_id = cc.marketing_club_id
-                 AND lower(mcc.email) = lower(cc.email)
                 WHERE r.campaign_id = :cid AND r.status = 'sent'
                   AND cc.marketing_club_id IS NOT NULL
-            """), {"cid": uuid.UUID(campaign_id)})).all()
+            """), {"cid": uuid.UUID(campaign_id)})).scalars().all()
             await s.commit()
-        by_club: dict = {}
-        for club_id, contact_id in sent_officers:
-            by_club.setdefault(club_id, []).append(contact_id)
-        for club_id, contact_ids in by_club.items():
+        from sqlalchemy.orm import selectinload
+        from app.models.db import MarketingClub, Organisation
+        from app.services import crm as crm_service
+        for club_id in sent_clubs:
             try:
-                await twenty_sync.push_club_and_contacts(club_id, contact_ids)
+                async with async_session_maker() as s2:
+                    club = await s2.get(MarketingClub, club_id)
+                    if club is None:
+                        continue
+                    org = (await s2.get(
+                                Organisation, club.existing_org_id,
+                                options=[selectinload(Organisation.module_subscriptions)])
+                           if club.existing_org_id else None)
+                    await crm_service.sync_engagement_promotion(s2, club, org)
+                    await s2.commit()
             except Exception:  # noqa: BLE001 - a CRM hiccup must never affect the send
-                logger.exception("twenty push_club_and_contacts failed for club %s", club_id)
+                logger.exception("crm engagement recompute failed for club %s", club_id)
         logger.info("BetterComms: campaign %s sent=%d failed=%d", campaign_id, sent, failed)
     except Exception as e:  # never let the task die silently
         logger.error("BetterComms send failed for %s: %s", campaign_id, e, exc_info=True)
@@ -1786,8 +1792,7 @@ async def request_limit_increase(
     db: AsyncSession = Depends(get_db),
 ):
     """A club asks BetterCricket to lift it out of the sandbox. Queues a
-    super-admin decision, records telemetry, and raises an automated Twenty task.
-    One open request at a time.
+    super-admin decision and records telemetry. One open request at a time.
 
     Production sending is a paid-only feature: a club trialling BetterAdmin
     (self-serve trial registration, Phase 11 — see
@@ -1827,9 +1832,9 @@ async def request_limit_increase(
     )
     db.add(req)
     await db.flush()
-    # Telemetry + automated Twenty CRM task (uniform across every club→BC request).
+    # Telemetry (uniform across every club→BetterCricket request).
     metrics = await comms_limits.deliverability_metrics(db, club.id)
-    ev = await club_requests.add_request_event(
+    await club_requests.add_request_event(
         db, org_id=club.id, request_type="comms_tier_increase",
         summary=f"BetterComms: {club.name} requests production sending limit",
         detail={"reason": req.reason, "requested_cap": req.requested_cap,
@@ -1837,7 +1842,6 @@ async def request_limit_increase(
         source="bettercomms", requested_by=user.id,
         ref_table="comms_limit_requests", ref_id=req.id)
     await db.commit()
-    club_requests.fire_twenty_task(ev.id)
     return {"status": "pending", "request": _limit_request_out(req)}
 
 

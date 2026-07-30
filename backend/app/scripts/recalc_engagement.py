@@ -3,30 +3,25 @@ re-cache it onto marketing_clubs, then re-run the CRM auto-promotion so the
 Super Admin CRM board (/admin/super/crm) reflects the new scores.
 
 WHY THIS EXISTS
-    twenty_sync._engagement() caches its result onto the club row itself
+    crm_sync._engagement() caches its result onto the club row itself
     (marketing_clubs.engagement_score / .engagement_tier / .engagement_scored_at
     — see _apply_engagement_cache), and the CRM board reads that cached number
     (crm.py builds each deal's "engagement_score" straight from the club row).
-    Scores are normally refreshed lazily — the nightly job, a BetterComms send,
-    a manual "Refresh Twenty scores" — and the built-in refresh_engagement()
-    only touches clubs already exported to Twenty. After a change to the scoring
-    weights, every cached number is stale until its club is next touched. This
-    script forces a full, immediate recompute across ALL marketing_clubs so the
-    board is correct straight away.
+    Scores are normally refreshed lazily — on each real signal event (an enquiry,
+    a trial request/grant, a subscription change) that already has a club in
+    hand. After a change to the scoring weights, every cached number is stale
+    until its club is next touched. This script forces a full, immediate
+    recompute across ALL marketing_clubs so the board is correct straight away.
 
 WHAT IT DOES PER CLUB
     crm.sync_engagement_promotion(session, club, org):
       1. _engagement() — recomputes and re-caches score + tier (a handful of
-         indexed reads over usage_events / email_events / etc; no Twenty calls,
-         so it works whether or not Twenty is configured).
+         indexed reads over usage_events / email_events / etc; a pure local
+         read/compute with no external call).
       2. maybe_promote_by_engagement_score() — re-applies the configured
          'engagement_score' CRM automation rules, promoting a club's deal to the
          right stage for its new score (forward-only; a no-op when no rule
          qualifies or the club has no deal yet).
-
-    It does NOT push to Twenty — that is the external CRM and is refreshed by its
-    own jobs / the "Refresh Twenty scores" button. This script is only about the
-    internal board's cached numbers.
 
 USAGE (inside the backend container — see the deploy notes in CLAUDE.md)
     # every club
@@ -52,7 +47,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services import crm as crm_service
-from app.services import twenty_sync
+from app.services import crm_sync
 
 logger = logging.getLogger("recalc_engagement")
 
@@ -142,8 +137,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
         # a pure in-memory calc for the common (prospect) case, so 6k clubs run
         # in minutes. The scoring is byte-for-byte identical (see --verify).
         print("  building batch web/email stats (one pass over usage_events + email_events) ...")
-        web_map = await twenty_sync.batch_web_stats(session)
-        email_map = await twenty_sync.batch_email_stats(session)
+        web_map = await crm_sync.batch_web_stats(session)
+        email_map = await crm_sync.batch_email_stats(session)
         print(f"  batch stats ready: {len(web_map)} clubs with web activity, "
               f"{len(email_map)} with email activity")
 
@@ -232,7 +227,7 @@ async def verify(sample: int, name: str | None = None) -> None:
     web/email maps injected, once with the original per-club queries — and report
     any club whose score, tier, or any underlying web/email aggregate differs.
     Never persists (rolls back)."""
-    from app.services.twenty_sync import _engagement
+    from app.services.crm_sync import _engagement
     async with async_session_maker() as session:
         idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
         if name:
@@ -241,8 +236,8 @@ async def verify(sample: int, name: str | None = None) -> None:
         rows = (await session.execute(idq)).all()
         print(f"Verifying batch vs per-club for {len(rows)} club(s) ...")
         print("  building batch web/email stats ...")
-        web_map = await twenty_sync.batch_web_stats(session)
-        email_map = await twenty_sync.batch_email_stats(session)
+        web_map = await crm_sync.batch_web_stats(session)
+        email_map = await crm_sync.batch_email_stats(session)
 
         checked = 0
         mismatches = 0
@@ -278,7 +273,7 @@ async def verify_fast(sample: int, name: str | None = None) -> None:
     club whose score, tier, or underlying web aggregate differs. Never persists.
     A clean pass means crm.check_web_signal_promotion's live per-event recompute
     is trustworthy."""
-    from app.services.twenty_sync import _engagement
+    from app.services.crm_sync import _engagement
     async with async_session_maker() as session:
         idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
         if name:

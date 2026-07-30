@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities
 from app.jobs.scheduler import start_scheduler, stop_scheduler
@@ -370,8 +370,8 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS not_interested "
             "BOOLEAN NOT NULL DEFAULT FALSE"))
-        # Cached Twenty engagementScore/-Tier, written by every _engagement() call —
-        # see the column comment in models/db.py for why.
+        # Cached engagement score/tier, written by every crm_sync._engagement()
+        # call — see the column comment in models/db.py for why.
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score INTEGER"))
         await conn.execute(text(
@@ -753,22 +753,6 @@ async def lifespan(app: FastAPI):
         # branch); the only lookup key on that path that wasn't indexed (migration 121).
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_organisations_slug ON organisations(slug)"))
-        # Twenty CRM integration: membership ledger mapping a BetterCricket entity
-        # (club / person / association) to its Twenty record id. A row exists only
-        # for the targeted subset exported to Twenty, so it doubles as "what's in
-        # the CRM" and makes upserts idempotent (content_hash skips no-op updates).
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS twenty_links (
-                entity_type TEXT NOT NULL,
-                bc_id TEXT NOT NULL,
-                twenty_id TEXT NOT NULL,
-                content_hash TEXT,
-                last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (entity_type, bc_id)
-            )
-        """))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_twenty_links_twenty ON twenty_links(twenty_id)"))
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
@@ -1181,7 +1165,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_source "
             "ON usage_events(traffic_source) WHERE traffic_source IS NOT NULL"
         ))
-        # Migration 133: index the org_id branch of twenty_sync._engagement's
+        # Migration 133: index the org_id branch of crm_sync._engagement's
         # usage_events scan (a customer/trial club's authenticated in-app
         # activity) — previously unindexed.
         await conn.execute(text(
@@ -1200,7 +1184,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_type_created "
             "ON usage_events(visitor_id, event_type, created_at) WHERE visitor_id IS NOT NULL"
         ))
-        # Materialised prospect-club attribution. twenty_sync._engagement's web
+        # Materialised prospect-club attribution. crm_sync._engagement's web
         # query resolves each event to a club via the 7-subquery _RESOLVED_CID
         # expression; filtering on that computed value forces a full re-resolution
         # of the table per club (~6s each) — fine for a batch sweep, far too slow
@@ -1775,8 +1759,8 @@ async def lifespan(app: FastAPI):
         ))
         # BetterComms sending tiers (migration 125): per-club sandbox→production
         # send tier + optional daily-cap override, the tier-increase request
-        # queue, and the generic club→BetterCricket request telemetry (feeds a
-        # Twenty CRM task). Every club starts in 'sandbox' and EARNS production by
+        # queue, and the generic club→BetterCricket request telemetry. Every club
+        # starts in 'sandbox' and EARNS production by
         # request + super-admin approval — so there is deliberately NO boot-time
         # promotion here (an earlier version blanket-set every club to production
         # on each boot, which is why every club showed 'production'; migration 129
@@ -1847,8 +1831,6 @@ async def lifespan(app: FastAPI):
                 requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
                 ref_table TEXT,
                 ref_id UUID,
-                twenty_task_id TEXT,
-                twenty_task_status TEXT NOT NULL DEFAULT 'pending',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
@@ -2952,7 +2934,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS country TEXT"))
         # First-touch signup attribution (migration 161) — set only by the
         # public self-serve registration (routers/public_self_serve.py) so ad
-        # performance can be joined against trial usage / Twenty engagement
+        # performance can be joined against trial usage / engagement
         # in the meta_ads ad-signups report.
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_source TEXT"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_attribution JSONB"))
@@ -4372,7 +4354,6 @@ app.include_router(public_square.router)                                        
 app.include_router(public_xero.router)                                                    # BetterFees (Xero OAuth callback)
 app.include_router(public_stripe.router)                                                  # Billing (Stripe webhook, signature-verified)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
-app.include_router(pipeline_gauge.router)                                                 # Twenty CRM dashboard gauge (own HTTP Basic Auth, not require_module)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
 app.include_router(fantasy.router, dependencies=[Depends(require_module("fantasy"))])      # BetterFantasyCricket

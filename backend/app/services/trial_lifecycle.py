@@ -1,17 +1,14 @@
 """Trial lifecycle notifications + onboarding nudges (Phase 16, see
 docs/self-serve-trial-onboarding-plan.md).
 
-Extends the daily-scan pattern already used for Twenty CRM Task-raising
-(twenty_leads_tasks._scan_trials_and_renewals) into real outbound email to
+A daily scan that turns trial-lifecycle events into real outbound email to
 the club's own primary admin. A trial club has nobody watching a CRM — these
-are the reminders that actually reach them. Deliberately CRM-independent
-(unlike the Twenty scan, this runs whether or not Twenty is configured) and
-scoped to every club with a module trial, not just the ones exported to
-Twenty.
+are the reminders that actually reach them. Scoped to every club with a
+module trial.
 
 Six nudge types, each checked against ``trial_lifecycle_nudges.dedupe_key``
-before sending and recorded only after a successful send (mirrors
-twenty_links' check/act/record shape) so the daily scan never re-sends the
+before sending and recorded only after a successful send (a check/act/record
+shape) so the daily scan never re-sends the
 same nudge twice, and a provider failure or crash mid-send gets retried on
 the next scan instead of being silently marked done:
 
@@ -46,8 +43,7 @@ from app.services import email_service
 
 logger = logging.getLogger(__name__)
 
-# Tunable windows (days) — mirrors the constants at the top of
-# twenty_leads_tasks.py.
+# Tunable windows (days).
 SCAN_LOOKBACK_DAYS = 2          # daily-job margin so a missed run doesn't drop an event
 TRIAL_ENDING_SOON_DAYS = 3
 NUDGE_HISTORICAL_DATA_DAYS = 5

@@ -685,11 +685,12 @@ class ModuleActionRequest(Base):
     """A request to change a club's module entitlement, actioned by a super admin
     (migration 119). A request never changes entitlement on its own — it queues an
     action. ``kind`` is trial / subscribe / cancel; ``source`` records where it came
-    from (app / super_admin / twenty). The super admin actions it from the queue;
+    from (app / super_admin). The super admin actions it from the queue;
     completing a trial request creates the trial (``result_subscription_id``).
 
     Mirrors the ClubOnboardingRequest pattern (super-admin actionable, lifecycle +
-    source + timestamps). ``external_ref`` dedupes a Twenty-origin request.
+    source + timestamps). ``external_ref`` dedupes a repeat request from the same
+    source.
     """
     __tablename__ = "module_action_requests"
 
@@ -698,14 +699,14 @@ class ModuleActionRequest(Base):
     module_key = Column(Text, nullable=False)
     kind = Column(Text, nullable=False)                 # trial | subscribe | cancel
     status = Column(Text, nullable=False, server_default="outstanding", default="outstanding")  # outstanding | completed | dismissed
-    source = Column(Text, nullable=False, server_default="app", default="app")  # app | super_admin | twenty
+    source = Column(Text, nullable=False, server_default="app", default="app")  # app | super_admin
     note = Column(Text, nullable=True)
     requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     requested_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     result_subscription_id = Column(UUID(as_uuid=True), ForeignKey("org_module_subscriptions.id", ondelete="SET NULL"), nullable=True)
-    external_ref = Column(Text, nullable=True)          # dedupe key for a Twenty-origin request
+    external_ref = Column(Text, nullable=True)          # dedupe key for a repeat request
 
 
 class BillingInvoice(Base):
@@ -852,7 +853,7 @@ class CommsLimitRequest(Base):
     Mirrors ModuleActionRequest: a request never changes the tier on its own, it
     queues a decision. The super admin approves (which sets the club's
     ``comms_tier`` / per-club cap) or denies. Creating one also emits a
-    ClubRequestEvent (telemetry + a Twenty task) via services/club_requests.py.
+    ClubRequestEvent (telemetry) via services/club_requests.py.
     """
     __tablename__ = "comms_limit_requests"
 
@@ -873,15 +874,12 @@ class CommsLimitRequest(Base):
 class ClubRequestEvent(Base):
     """Telemetry for EVERY club→BetterCricket request across the platform
     (migration 125): a BetterComms tier lift, a module trial/subscribe, and
-    future asks. One durable audit row per request, and the hook that fires an
-    automated Twenty CRM task so the back office actions it. Written by the
-    shared helper services/club_requests.py::record_club_request.
+    future asks. One durable audit row per request. Written by the shared helper
+    services/club_requests.py::add_request_event.
 
     ``request_type`` is a stable slug (comms_tier_increase | module_request | …);
     ``ref_table`` / ``ref_id`` point back at the domain row (e.g. the
-    comms_limit_requests row) so the CRM task and the workflow queue stay linked.
-    ``twenty_task_status`` tracks the best-effort CRM push (pending → created /
-    failed / skipped) without ever blocking the request itself.
+    comms_limit_requests row) so the audit row stays linked to it.
     """
     __tablename__ = "club_request_events"
 
@@ -890,12 +888,10 @@ class ClubRequestEvent(Base):
     request_type = Column(Text, nullable=False)
     summary = Column(Text, nullable=True)
     detail = Column(JSONB, nullable=True)
-    source = Column(Text, nullable=False, server_default="app", default="app")  # bettercomms | app | super_admin | twenty
+    source = Column(Text, nullable=False, server_default="app", default="app")  # bettercomms | app | super_admin
     requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     ref_table = Column(Text, nullable=True)
     ref_id = Column(UUID(as_uuid=True), nullable=True)
-    twenty_task_id = Column(Text, nullable=True)
-    twenty_task_status = Column(Text, nullable=False, server_default="pending", default="pending")  # pending | created | failed | skipped
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -3787,19 +3783,19 @@ class MarketingClub(Base):
     # Sales disposition: club contacted and explicitly not interested. Manual, and it
     # overrides the computed engagement tier in the CRM (never auto-recomputed away).
     not_interested = Column(Boolean, nullable=False, server_default="false", default=False)
-    # Cached copy of the last-computed Twenty engagementScore/-Tier — written by
-    # every _engagement() call (twenty_sync.py) regardless of what triggered it
-    # (manual export, bulk export, "Refresh Twenty scores", "Refresh Twenty
-    # leads/tasks", or a nightly job), so the Club Directory / BetterComms
-    # Contacts+Lists / Segments can filter on a real number without recomputing
-    # this per-club scan themselves. Can lag the live Twenty value by up to
-    # however long since this club's score was last (re)computed.
+    # Cached copy of the last-computed engagement score/tier — written by every
+    # crm_sync._engagement() call regardless of what triggered it (a single-club
+    # recompute on a live signal, or the full-table recalc sweep), so the CRM
+    # pipeline / Club Directory / BetterComms Contacts+Lists / Segments can filter
+    # on a real number without recomputing this per-club scan themselves. Can lag
+    # the live value by up to however long since this club's score was last
+    # (re)computed.
     engagement_score = Column(Integer, nullable=True)
     engagement_tier = Column(Text, nullable=True)
     engagement_scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # Day-over-day baseline for the CRM pipeline's engagement up/down arrow
     # (migration 192). There is no score-history table — _apply_engagement_cache
-    # (twenty_sync.py) rolls the then-current engagement_score into _prev the
+    # (crm_sync.py) rolls the then-current engagement_score into _prev the
     # first time it writes on a NEW calendar day, so _prev holds the last score
     # recorded on an earlier day and (current vs _prev) is the day-over-day
     # direction. _prev_date is the calendar day that _prev value belongs to.
@@ -4006,7 +4002,7 @@ class CrmDeal(Base):
     status = Column(Text, nullable=False, server_default="open", default="open")  # open | won | lost
     lost_reason = Column(Text, nullable=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import
+    source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import (legacy)
     # Migration 184: how this club came to be onboarded (independent of `source`,
     # which is about how the DEAL/row was created) — self_serve_trial |
     # super_admin_trial | direct_subscriber | none.

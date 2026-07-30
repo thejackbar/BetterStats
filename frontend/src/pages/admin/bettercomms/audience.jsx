@@ -194,7 +194,7 @@ export function EngagementFilterControls({ value, onChange, hasDirectory }) {
     <div className="flex items-center gap-1 flex-wrap">
       <input value={value.gte} onChange={e => onChange({ ...value, gte: e.target.value })}
         placeholder="score min" inputMode="numeric"
-        title="Cached Twenty engagement score — can lag the live value"
+        title="Cached engagement score — can lag the live value"
         className="w-20 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent" />
       <input value={value.lte} onChange={e => onChange({ ...value, lte: e.target.value })}
         placeholder="score max" inputMode="numeric"

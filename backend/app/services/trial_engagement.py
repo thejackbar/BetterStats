@@ -1,8 +1,8 @@
 """Self-serve trial engagement scoring — how far an unpaid prospect club has
 actually gone in setting BetterCricket up for itself, as opposed to merely
-existing in the system. Feeds ``twenty_sync._engagement()`` as a floor on top
-of the ordinary web/email recency+frequency formula, and is what
-``twenty_leads_tasks`` checks to auto-promote a club to a Twenty Opportunity.
+existing in the system. Feeds ``crm_sync._engagement()`` as a floor on top
+of the ordinary web/email recency+frequency formula, feeding the club's cached
+engagement score the CRM pipeline reads.
 
 Every action scored here can be performed by BetterCricket staff acting on a
 club's behalf (a Super Admin "acting as" the club) instead of the club's own
@@ -111,7 +111,7 @@ async def _last_wizard_step_actor(session: AsyncSession, org_id, step_key: str) 
 
 async def trial_depth_score(session: AsyncSession, org: Organisation) -> dict:
     """The trial-depth rollup for ONE prospect org (never called for a paying
-    customer — see twenty_sync._engagement). Only meaningful for a club that
+    customer — see crm_sync._engagement). Only meaningful for a club that
     actually exists in BetterCricket (has been onboarded/registered)."""
     has_primary = await org_has_primary_admin(session, org.id)
 

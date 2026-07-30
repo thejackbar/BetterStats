@@ -20,7 +20,6 @@ from app.models.db import ClubOnboardingRequest, get_db
 from app.services import meta_capi
 from app.services.crm import sync_deal_for_enquiry
 from app.services.login_audit import client_ip
-from app.services.twenty_sync import mark_contact_source, push_onboarding_enquiry
 from app.services.usage_tracker import record_event_bg
 
 logger = logging.getLogger(__name__)
@@ -122,20 +121,12 @@ async def submit_contact(
     )
     db.add(row)
     await db.commit()
-    # If this enquirer is already a Person in the CRM, record that they made
-    # contact via the website. Runs after the response so a CRM hiccup can't slow
-    # or fail the form (Formspree is the primary delivery either way).
-    background.add_task(mark_contact_source, email, "WEBSITE")
     # A direct "onboard my club" enquiry — from either this short CTA-modal form
     # or the full Contact page (both post here) — is the strongest buying signal
-    # a prospect can give, so the club is immediately upserted into Twenty as a
-    # Company + Lead at a forced Hot (100) engagement score, regardless of
-    # whether it was already exported. Backgrounded; never raises.
-    background.add_task(push_onboarding_enquiry, club_name=club, contact_name=name,
-                        email=email, phone=payload.phone)
-    # Same enquiry, the local CRM pipeline's equivalent of the Twenty push
-    # above — ensures a New Lead deal exists (or advances an existing one) so
-    # the pipeline stays in step with the same trigger. Best-effort.
+    # a prospect can give, so it ensures a platform deal exists (or advances an
+    # existing one) in the BetterCricket CRM pipeline and recomputes the club's
+    # engagement score. Runs after the response so a CRM hiccup can't slow or
+    # fail the form (Formspree is the primary delivery either way).
     background.add_task(sync_deal_for_enquiry, club_name=club, contact_name=name,
                         email=email, phone=payload.phone)
     # Server-side Lead event (Meta Conversions API), sharing the browser pixel's

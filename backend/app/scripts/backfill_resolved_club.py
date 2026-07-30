@@ -1,7 +1,7 @@
 """One-time backfill of usage_events.resolved_marketing_club_id.
 
 WHY
-    twenty_sync._engagement's web query normally resolves each event to a club
+    crm_sync._engagement's web query normally resolves each event to a club
     with the 7-subquery _RESOLVED_CID expression. That's correct but slow to run
     per club (a full table re-resolution ~6s each), which is why firing a
     single-club recompute on every live signal used to be unsafe. The

@@ -94,36 +94,6 @@ async def resolve_all_drafts():
                 logger.error(f"Draft auto-resolve failed for draft {d.id}: {e}")
 
 
-async def refresh_twenty_engagement():
-    """Recompute each exported club's engagement rollup (usage breadcrumbs move
-    daily, so the score/tier drifts even when nothing else about the club does)
-    and PATCH it onto its Twenty Company. Skipped unless Twenty is configured."""
-    if not settings.twenty_configured:
-        return
-    from app.services import twenty_sync
-    logger.info("Starting scheduled Twenty engagement refresh")
-    try:
-        stats = await twenty_sync.refresh_engagement()
-        logger.info(f"Twenty engagement refresh done: {stats}")
-    except Exception as e:
-        logger.error(f"Twenty engagement refresh failed: {e}")
-
-
-async def refresh_twenty_leads_tasks():
-    """Seed/refresh Leads from telemetry, mirror outstanding module requests to Tasks,
-    and scan trials + renewals into follow-up Tasks. Idempotent; the first run also
-    backfills whatever already qualifies. Skipped unless Twenty is configured."""
-    if not settings.twenty_configured:
-        return
-    from app.services import twenty_leads_tasks
-    logger.info("Starting scheduled Twenty leads/tasks refresh")
-    try:
-        stats = await twenty_leads_tasks.refresh_leads_and_tasks()
-        logger.info(f"Twenty leads/tasks refresh done: {stats}")
-    except Exception as e:
-        logger.error(f"Twenty leads/tasks refresh failed: {e}")
-
-
 # ─── CRM Sales Pipeline auto-recompute (Tier 2 incremental + Tier 3 global) ────
 # Both cadences are super-admin tunable from the pipeline's Settings modal
 # (platform_settings); the intervals are applied at boot and rescheduled live on
@@ -344,32 +314,9 @@ def start_scheduler():
         id="daily_fantasy_settle",
         replace_existing=True,
     )
-    # BetterCricket CRM — refresh each exported club's engagement score daily
-    # (usage breadcrumbs move even when the club record doesn't). No-op when
-    # Twenty isn't configured.
-    scheduler.add_job(
-        refresh_twenty_engagement,
-        trigger="cron",
-        hour=6,
-        minute=0,
-        id="daily_twenty_engagement",
-        replace_existing=True,
-    )
-    # BetterCricket CRM — seed/refresh Leads from telemetry and raise follow-up Tasks
-    # (outstanding module requests, expiring trials, upcoming renewals) daily. No-op
-    # when Twenty isn't configured.
-    scheduler.add_job(
-        refresh_twenty_leads_tasks,
-        trigger="cron",
-        hour=7,
-        minute=0,
-        id="daily_twenty_leads_tasks",
-        replace_existing=True,
-    )
     # Self-serve trial onboarding, Phase 16 — daily scan for trial lifecycle
     # events and onboarding nudges, emailed straight to the club's own admin.
-    # Right after the Twenty scan since it's conceptually adjacent (both read
-    # org_module_subscriptions). No-op unless a super admin has turned it on.
+    # No-op unless a super admin has turned it on.
     scheduler.add_job(
         send_trial_lifecycle_nudges,
         trigger="cron",
@@ -495,7 +442,7 @@ def start_scheduler():
         marketing_mode = "nightly batch 02:00"
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
-                "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
+                "Square 04:00, fantasy settle 05:00, "
                 "trial lifecycle nudges 08:00, Meta Ads snapshot hourly at :05, "
                 "draft tick /15min", marketing_mode)
 

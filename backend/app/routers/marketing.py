@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db, async_session_maker, MarketingClub, MarketingClubContact
 from app.routers.auth import require_super_admin
 from app.services import club_directory as cd
-from app.services import twenty_sync
+from app.services import crm_sync
 
 router = APIRouter(prefix="/club-admin/marketing", tags=["marketing"])
 
@@ -325,7 +325,7 @@ async def list_clubs(
             "demo_status": c.demo_status,
             "not_interested": bool(c.not_interested),
             # Cached at the last _engagement() computation (any trigger — see
-            # twenty_sync.py) — can lag reality up to however long since this
+            # crm_sync.py) — can lag reality up to however long since this
             # club was last (re)computed; engagement_scored_at says how stale.
             "engagement_score": c.engagement_score,
             "engagement_tier": c.engagement_tier,
@@ -410,25 +410,11 @@ async def export_comms(body: ExportBody, db: AsyncSession = Depends(get_db),
         filters=filters)
 
 
-class ExportTwentyBody(DirFilterFields):
-    # all | named | pst — which officers of each matched club to push.
-    contact_scope: str = "all"
-    # Honour the per-officer outreach tick (de-selected officers are skipped).
-    selected_only: bool = True
-    # Optional cap on clubs per run (None = all matched).
-    limit: Optional[int] = None
-
-
-# A Twenty export against the CRM's 100/min rate limit takes minutes for a big
-# filter — far longer than the nginx proxy timeout — so it runs in the background and
-# the UI polls /export-twenty/status. One at a time (overlapping runs compounded the
-# rate-limiting). State is in-process: a worker restart mid-run loses it, so a run
-# older than this is treated as stale and a new one is allowed.
+# A background job (the CRM push below) can take minutes for a big filter — far
+# longer than the nginx proxy timeout — so it runs detached and the UI polls a
+# status endpoint. State is in-process: a worker restart mid-run loses it, so a
+# run older than this is treated as stale and a new one is allowed.
 _EXPORT_STALE_SECS = 30 * 60
-_twenty_export: dict = {
-    "running": False, "started_at": None, "finished_at": None,
-    "result": None, "error": None,
-}
 
 
 def _now_iso() -> str:
@@ -439,9 +425,8 @@ def _settle_bg(state: dict, res):
     """Store a background job's result, translating the services' documented
     "never raises, returns {'error': ...} instead" convention into the state
     dict's own error field — so the UI poller's ``if (s.error)`` branch catches
-    a soft failure (e.g. "Twenty is not configured") the same way it catches a
-    hard exception, instead of trying to format an error dict as a success
-    result."""
+    a soft failure the same way it catches a hard exception, instead of trying
+    to format an error dict as a success result."""
     if isinstance(res, dict) and res.get("error"):
         state["result"], state["error"] = None, str(res["error"])
     else:
@@ -451,9 +436,8 @@ def _settle_bg(state: dict, res):
 def _bg_stale(state: dict) -> bool:
     """True if a background job's ``state`` dict claims to still be running but
     started long enough ago that it's more likely a worker restart lost track of
-    it — shared by the Twenty export, engagement refresh and leads/tasks refresh
-    runners below, all of which use the same running/started_at/finished_at/
-    result/error shape."""
+    it — used by the CRM push runner below, which uses the same running/
+    started_at/finished_at/result/error shape."""
     if not state["running"] or not state["started_at"]:
         return False
     try:
@@ -461,45 +445,6 @@ def _bg_stale(state: dict) -> bool:
         return (datetime.now(timezone.utc) - started).total_seconds() > _EXPORT_STALE_SECS
     except Exception:
         return True
-
-
-async def _export_twenty_bg(filters: dict, scope: str, selected_only: bool, limit):
-    try:
-        res = await twenty_sync.export_to_twenty(
-            filters=filters, contact_scope=scope, selected_only=selected_only, limit=limit)
-        _settle_bg(_twenty_export, res)
-    except Exception as e:  # noqa: BLE001 — never let a CRM error wedge the runner
-        _twenty_export["result"], _twenty_export["error"] = None, str(e)
-    finally:
-        _twenty_export["running"] = False
-        _twenty_export["finished_at"] = _now_iso()
-
-
-@router.post("/export-twenty")
-async def export_twenty(body: ExportTwentyBody, background: BackgroundTasks,
-                        db: AsyncSession = Depends(get_db),
-                        _=Depends(require_super_admin)):
-    """Kick off pushing the currently-filtered directory subset into Twenty CRM
-    (Companies + Associations + People) in the background and return immediately;
-    poll /export-twenty/status for progress + the result. Idempotent — re-running
-    upserts and skips unchanged records. Excluded clubs are always skipped."""
-    if _twenty_export["running"] and not _bg_stale(_twenty_export):
-        return {"status": "already_running", "started_at": _twenty_export["started_at"]}
-    filters = await cd.expand_shortcode(db, _filter_kwargs(
-        body.q, body.state, body.association, body.status, body.postcode_from,
-        body.postcode_to, body.contact, body.person, modes=_modes_from(body),
-        associations=body.associations, visited=body.visited, countries=body.countries))
-    scope = body.contact_scope if body.contact_scope in ("all", "named", "pst") else "all"
-    _twenty_export.update(running=True, started_at=_now_iso(), finished_at=None,
-                          result=None, error=None)
-    background.add_task(_export_twenty_bg, filters, scope, body.selected_only, body.limit)
-    return {"status": "started"}
-
-
-@router.get("/export-twenty/status")
-async def export_twenty_status(_=Depends(require_super_admin)):
-    """Current/last Twenty export state for the UI poller."""
-    return dict(_twenty_export)
 
 
 class PushToCrmBody(DirFilterFields):
@@ -533,11 +478,11 @@ async def push_to_crm(body: PushToCrmBody, background: BackgroundTasks,
                       db: AsyncSession = Depends(get_db),
                       _=Depends(require_super_admin)):
     """Upsert every club in the currently-filtered Club Directory result set
-    directly into BetterCricket's OWN platform CRM pipeline (not Twenty) at
+    directly into BetterCricket's OWN platform CRM pipeline at
     ``stage_key`` (default 'Manually Added') — a super admin explicitly
     deciding these clubs belong in the sales pipeline right now, distinct
     from the enquiry/trial/webhook signals that create a deal automatically.
-    Runs in the background (same pattern as /export-twenty) since a large
+    Runs in the background (same pattern as /push-to-crm) since a large
     filtered set means many individual upserts; poll /push-to-crm/status."""
     if _crm_push["running"] and not _bg_stale(_crm_push):
         return {"status": "already_running", "started_at": _crm_push["started_at"]}
@@ -554,90 +499,6 @@ async def push_to_crm(body: PushToCrmBody, background: BackgroundTasks,
 async def push_to_crm_status(_=Depends(require_super_admin)):
     """Current/last BetterCricket-CRM push state for the UI poller."""
     return dict(_crm_push)
-
-
-_twenty_engagement_refresh: dict = {
-    "running": False, "started_at": None, "finished_at": None,
-    "result": None, "error": None,
-}
-_twenty_leads_refresh: dict = {
-    "running": False, "started_at": None, "finished_at": None,
-    "result": None, "error": None,
-}
-
-
-async def _refresh_engagement_bg():
-    try:
-        res = await twenty_sync.refresh_engagement()
-        _settle_bg(_twenty_engagement_refresh, res)
-    except Exception as e:  # noqa: BLE001 — never let a CRM error wedge the runner
-        _twenty_engagement_refresh["result"], _twenty_engagement_refresh["error"] = None, str(e)
-    finally:
-        _twenty_engagement_refresh["running"] = False
-        _twenty_engagement_refresh["finished_at"] = _now_iso()
-
-
-async def _refresh_leads_tasks_bg():
-    from app.services import twenty_leads_tasks
-    try:
-        res = await twenty_leads_tasks.refresh_leads_and_tasks()
-        _settle_bg(_twenty_leads_refresh, res)
-    except Exception as e:  # noqa: BLE001 — never let a CRM error wedge the runner
-        _twenty_leads_refresh["result"], _twenty_leads_refresh["error"] = None, str(e)
-    finally:
-        _twenty_leads_refresh["running"] = False
-        _twenty_leads_refresh["finished_at"] = _now_iso()
-
-
-@router.post("/refresh-twenty-engagement")
-async def refresh_twenty_engagement(background: BackgroundTasks, _=Depends(require_super_admin)):
-    """Recompute the engagement rollup (score / tier / 30-day sessions / last seen)
-    for every club already in Twenty and PATCH it onto its Company. Runs daily on a
-    schedule too; this is the on-demand trigger. Only touches already-exported
-    clubs — it never pulls a new club into the CRM.
-
-    Same reasoning as /export-twenty: a PATCH per exported club against Twenty's
-    rate limit can comfortably exceed the nginx proxy timeout once there are more
-    than a few dozen exported clubs, so this runs in the background and the UI
-    polls /refresh-twenty-engagement/status."""
-    if _twenty_engagement_refresh["running"] and not _bg_stale(_twenty_engagement_refresh):
-        return {"status": "already_running", "started_at": _twenty_engagement_refresh["started_at"]}
-    _twenty_engagement_refresh.update(running=True, started_at=_now_iso(), finished_at=None,
-                                      result=None, error=None)
-    background.add_task(_refresh_engagement_bg)
-    return {"status": "started"}
-
-
-@router.get("/refresh-twenty-engagement/status")
-async def refresh_twenty_engagement_status(_=Depends(require_super_admin)):
-    """Current/last engagement-refresh state for the UI poller."""
-    return dict(_twenty_engagement_refresh)
-
-
-@router.post("/refresh-twenty-leads-tasks")
-async def refresh_twenty_leads_tasks(background: BackgroundTasks, _=Depends(require_super_admin)):
-    """Seed/refresh Leads from telemetry and raise follow-up Tasks for outstanding
-    module requests, expiring trials and upcoming renewals. Runs daily on a schedule
-    too; this is the on-demand trigger. Idempotent — the first run backfills whatever
-    already qualifies, later runs only add what's new. Only touches clubs already in
-    the CRM (a twenty_links row).
-
-    Same reasoning as /export-twenty: this walks every exported club and can make
-    several Twenty calls each, comfortably exceeding the nginx proxy timeout once
-    there's a meaningful number of exported clubs — runs in the background, poll
-    /refresh-twenty-leads-tasks/status."""
-    if _twenty_leads_refresh["running"] and not _bg_stale(_twenty_leads_refresh):
-        return {"status": "already_running", "started_at": _twenty_leads_refresh["started_at"]}
-    _twenty_leads_refresh.update(running=True, started_at=_now_iso(), finished_at=None,
-                                 result=None, error=None)
-    background.add_task(_refresh_leads_tasks_bg)
-    return {"status": "started"}
-
-
-@router.get("/refresh-twenty-leads-tasks/status")
-async def refresh_twenty_leads_tasks_status(_=Depends(require_super_admin)):
-    """Current/last leads/tasks-refresh state for the UI poller."""
-    return dict(_twenty_leads_refresh)
 
 
 class EmailedBody(BaseModel):
@@ -760,13 +621,13 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     if club.existing_org_id:
         org = await db.get(Organisation, club.existing_org_id,
                            options=[selectinload(Organisation.module_subscriptions)])
-    eng = await twenty_sync._engagement(db, club, org)
+    eng = await crm_sync._engagement(db, club, org)
 
     # Split email engagement into opens vs clicks (with their own decay points),
     # so the breakdown itemises them instead of lumping "email engagement". Uses
-    # the SAME per-event decay weights the score itself uses (twenty_sync), and
+    # the SAME per-event decay weights the score itself uses (crm_sync), and
     # the same attribution (this club's contact emails, or the linked org).
-    from app.services.twenty_sync import EMAIL_OPEN_DECAY as _OPEN, EMAIL_CLICK_DECAY as _CLICK
+    from app.services.crm_sync import EMAIL_OPEN_DECAY as _OPEN, EMAIL_CLICK_DECAY as _CLICK
 
     def _decay_case(kind, w):
         return (f"COALESCE(SUM(CASE "
@@ -800,7 +661,7 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     # plus recency, plus the intent bonuses. The setup/registration score is a
     # FLOOR (the score is the max of it and this activity tally), so it's only
     # shown as the driver when it actually beats the tally.
-    from app.services.twenty_sync import REACH_PER_VISITOR as _RPV, DEPTH_SCALE as _DS
+    from app.services.crm_sync import REACH_PER_VISITOR as _RPV, DEPTH_SCALE as _DS
 
     recency = eng.get("_recencyPts") or 0
     web = eng.get("_webDecayPts") or 0
@@ -835,11 +696,11 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     # Intent flags.
     intent_bonus = 0.0
     for flag, pts, label in (
-        (eng.get("_onboardingRequested"), twenty_sync.BONUS_ONBOARDING, "Onboarding enquiry"),
-        (eng.get("_visitedContact"), twenty_sync.BONUS_CONTACT_PAGE, "Visited the contact page"),
-        (req_trial, twenty_sync.BONUS_REQUESTED_TRIAL, "Requested a trial"),
-        (in_trial, twenty_sync.BONUS_IN_TRIAL, "Currently in a trial"),
-        (eng.get("_adSignup"), twenty_sync.BONUS_AD_SIGNUP, "Signed up from a paid ad"),
+        (eng.get("_onboardingRequested"), crm_sync.BONUS_ONBOARDING, "Onboarding enquiry"),
+        (eng.get("_visitedContact"), crm_sync.BONUS_CONTACT_PAGE, "Visited the contact page"),
+        (req_trial, crm_sync.BONUS_REQUESTED_TRIAL, "Requested a trial"),
+        (in_trial, crm_sync.BONUS_IN_TRIAL, "Currently in a trial"),
+        (eng.get("_adSignup"), crm_sync.BONUS_AD_SIGNUP, "Signed up from a paid ad"),
     ):
         if flag:
             add(label, pts, "intent")
