@@ -4113,6 +4113,17 @@ async def lifespan(app: FastAPI):
             "ON import_effective_deltas(player_id)"
         ))
 
+    # Migration 200: a real "last updated" per meta_ad_snapshots row.
+    # created_at is set once on INSERT; upsert_snapshot's ON CONFLICT DO
+    # UPDATE never touched it, so the Meta Ads HQ page's "Last updated" label
+    # (read from campaign_row.created_at) went stale after the first refresh
+    # of the day and didn't move again until the next day's first snapshot.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+        await conn.execute(text("UPDATE meta_ad_snapshots SET updated_at = created_at WHERE updated_at IS NULL"))
+        await conn.execute(text("ALTER TABLE meta_ad_snapshots ALTER COLUMN updated_at SET DEFAULT NOW()"))
+        await conn.execute(text("ALTER TABLE meta_ad_snapshots ALTER COLUMN updated_at SET NOT NULL"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

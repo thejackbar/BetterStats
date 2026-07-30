@@ -71,6 +71,22 @@ AD_DESTINATIONS = {
     "120249238467160121": {"campaign_id": "120249237210710121", "name": "Ad4_Legacy", "destination": "betterat.cricket/ (homepage)", "utm_content": "club_legacy"},
 }
 
+# Canonical `utm_campaign` value per Meta campaign this dashboard has ever
+# tracked — per docs/meta-ad-campaign-self-serve.md §4, every ad's
+# destination URL sets utm_campaign to the exact Ads Manager campaign name,
+# identical across every ad in it. That makes it a second, more resilient
+# way (alongside AD_DESTINATIONS' per-ad utm_content) to tie a real signup
+# back to a campaign: a new ad/creative added in Ads Manager needs its
+# utm_content added to AD_DESTINATIONS by hand before a signup through it
+# counts, but its utm_campaign was already right from the moment it was
+# built off this campaign's own destination-URL template — no code change
+# needed. See _attribution_matches_campaign().
+CAMPAIGN_UTM_NAMES = {
+    "120250149119070121": "BC_AU_Trials_CBO_Aug2026",
+    "120249890918010121": "BC_AU_SelfServe_Aug2026",
+    "120249237210710121": "BC_AU_Traffic_ClubHistory_Jul2026",
+}
+
 # The self-serve campaign optimises for CompleteRegistration (a finished
 # trial signup), so registrations count as conversions alongside classic
 # leads — one indicative Meta-side number. It's kept only as a reference
@@ -87,9 +103,33 @@ _LEAD_ACTION_TYPES = {
 # Single source of truth for pacing/insights maths — the dashboard reads
 # these back from get_latest_summary() rather than the frontend hardcoding
 # its own copy (that drifted once already, see the campaign-budget line on
-# the KPI card before this file owned it).
-CAMPAIGN_BUDGET_AUD = 750.0  # A$25/day CBO over the ~30-day pacing window
+# the KPI card before this file owned it). Also the default "how many days
+# back" window for the report endpoints below (registration funnel, selected/
+# searched clubs) — a plain lookback size, not itself a per-campaign figure.
+CAMPAIGN_BUDGET_AUD = 750.0  # A$25/day CBO over the ~30-day pacing window — current campaign's plan, and the fallback for one not in CAMPAIGN_PLANS
 CAMPAIGN_LENGTH_DAYS = 30
+
+# Real budget/length plan PER campaign (docs/meta-ad-campaign-self-serve.md;
+# the July and August campaigns ran to different budgets). Without this,
+# switching the dashboard's campaign picker (§ header) to an old/finished
+# campaign judged its pacing — "Overspending the budget pace" / "Under-
+# pacing", the "Spend $X of $750" KPI line, the "~30 days from launch"
+# header text — against the CURRENT campaign's own $750/30-day plan
+# regardless of what that older campaign's real plan was. get_latest_summary
+# resolves the active campaign's own plan via _campaign_plan() so those
+# notes only ever describe the campaign actually on screen.
+CAMPAIGN_PLANS: dict[str, tuple[float, int]] = {
+    "120250149119070121": (750.0, 30),  # BC_AU_Trials_CBO_Aug2026 — A$25/day CBO
+    "120249890918010121": (500.0, 30),  # BC_AU_SelfServe_Aug2026
+    "120249237210710121": (500.0, 30),  # BC_AU_Traffic_ClubHistory_Jul2026 (finished)
+}
+
+
+def _campaign_plan() -> tuple[float, int]:
+    """(budget_aud, length_days) for the CURRENT campaign — falls back to
+    CAMPAIGN_BUDGET_AUD/CAMPAIGN_LENGTH_DAYS for a campaign not yet added to
+    CAMPAIGN_PLANS (e.g. a brand new one just switched to)."""
+    return CAMPAIGN_PLANS.get(_campaign_id(), (CAMPAIGN_BUDGET_AUD, CAMPAIGN_LENGTH_DAYS))
 
 
 class MetaAdsError(Exception):
@@ -420,15 +460,25 @@ def ad_note(ad: dict, all_ads: list[dict]) -> str:
     return "Performing in line with the rest of the campaign. No action needed."
 
 
-def compute_funnel(campaign: dict) -> list[dict]:
+def compute_funnel(campaign: dict, club_selected: float = 0) -> list[dict]:
     """Ordered funnel stages, impressions through to a completed trial
     registration, each carrying what % of the top and of the PREVIOUS stage
     it represents — the numbers the KPI cards show individually, laid out so
-    the drop-off at each step is visible without anyone computing a ratio."""
+    the drop-off at each step is visible without anyone computing a ratio.
+
+    Every stage except "Club selected" is Meta's own ad-account number
+    (impressions/clicks/LPV/leads from Insights). "Club selected" is ours —
+    a real count of distinct Meta-driven visitors who picked a club in the
+    wizard (get_club_selected_count), regardless of whether they went on to
+    finish. It sits between landing_page_views and leads because that's
+    exactly where it happens in the wizard, and it's a genuine buying signal
+    worth tracking on its own — Meta's own "leads" reports the same moment
+    but is self-reported and can drift (see the leads_effective note)."""
     stages_raw = [
         ("impressions", "Impressions", campaign.get("impressions") or 0),
         ("link_clicks", "Link clicks", campaign.get("link_clicks") or 0),
         ("landing_page_views", "Landing page views", campaign.get("landing_page_views") or 0),
+        ("club_selected", "Club selected", club_selected or 0),
         ("leads", "Started registering (Meta-reported)", campaign.get("leads") or 0),
         ("registrations", "Completed registrations", campaign.get("registrations") or 0),
     ]
@@ -481,6 +531,26 @@ _META_VISITOR_SUBQUERY = """
               )
         )
 """
+
+
+async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> int:
+    """Real count of distinct Meta-driven visitors who picked a club in the
+    wizard (the `club_prepared` beacon), whether or not they ever went on to
+    finish registering — a genuine buying signal in its own right, tracked
+    as its own stage in compute_funnel() between landing_page_views and
+    leads. Scoped to Meta traffic only (the same signal get_selected_clubs
+    and get_searched_clubs use), so it lines up with the Meta-account
+    numbers on either side of it in that funnel rather than including
+    selections from organic/EDM/other traffic."""
+    count = (await db.execute(text(f"""
+        SELECT COUNT(DISTINCT visitor_id) FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND route = 'club_prepared'
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND visitor_id IS NOT NULL
+          AND {_META_VISITOR_SUBQUERY}
+    """), {"days": days})).scalar()
+    return int(count or 0)
 
 
 async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> list[dict]:
@@ -884,11 +954,11 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
         INSERT INTO meta_ad_snapshots
             (snapshot_date, level, ad_id, ad_name, campaign_id, spend, impressions, link_clicks,
              link_ctr, landing_page_views, cost_per_lpv, leads, recommendation, recommendation_status,
-             delivery_status)
+             delivery_status, updated_at)
         VALUES
             (:snapshot_date, :level, :ad_id, :ad_name, :campaign_id, :spend, :impressions, :link_clicks,
              :link_ctr, :landing_page_views, :cost_per_lpv, :leads, :recommendation, :recommendation_status,
-             :delivery_status)
+             :delivery_status, NOW())
         ON CONFLICT (snapshot_date, level, COALESCE(ad_id, ''), COALESCE(campaign_id, ''))
         DO UPDATE SET
             ad_name = EXCLUDED.ad_name,
@@ -901,7 +971,8 @@ async def upsert_snapshot(db: AsyncSession, snapshot_date: date, level: str, row
             leads = EXCLUDED.leads,
             recommendation = COALESCE(EXCLUDED.recommendation, meta_ad_snapshots.recommendation),
             recommendation_status = COALESCE(EXCLUDED.recommendation_status, meta_ad_snapshots.recommendation_status),
-            delivery_status = EXCLUDED.delivery_status
+            delivery_status = EXCLUDED.delivery_status,
+            updated_at = NOW()
     """), {
         "snapshot_date": snapshot_date,
         "level": level,
@@ -1025,6 +1096,26 @@ def _current_campaign_utm_contents() -> set[str]:
     }
 
 
+def _attribution_matches_campaign(attribution: dict | None) -> bool:
+    """True if a stored signup_attribution belongs to the CURRENT campaign
+    (_campaign_id()), checked two independent ways: its utm_content is one
+    AD_DESTINATIONS maps to this campaign, or its utm_campaign matches this
+    campaign's own canonical name in CAMPAIGN_UTM_NAMES. Either one is
+    enough — see CAMPAIGN_UTM_NAMES for why a campaign-name match alone is
+    the more resilient of the two (doesn't need AD_DESTINATIONS kept in sync
+    with every new ad). Used by get_registration_count() and the ad-signups
+    report (routers/meta_ads.py) so the two can never disagree."""
+    if not attribution:
+        return False
+    utm_content = (attribution.get("utm_content") or "").strip()
+    if utm_content and utm_content in _current_campaign_utm_contents():
+        return True
+    utm_campaign_name = CAMPAIGN_UTM_NAMES.get(_campaign_id())
+    if utm_campaign_name:
+        return (attribution.get("utm_campaign") or "").strip().lower() == utm_campaign_name.lower()
+    return False
+
+
 async def get_registration_count(db: AsyncSession) -> int:
     """Real, completed free-trial registrations attributed to the CURRENT
     Meta campaign — ground truth from our own DB (organisations.
@@ -1036,20 +1127,18 @@ async def get_registration_count(db: AsyncSession) -> int:
     can't tell a Meta-driven signup apart from one that came in through a
     different campaign (an EDM send, a "national-launch" push, organic
     traffic) that happens to carry its own utm tags. A club only counts here
-    if its own signup_attribution.utm_content matches one of THIS campaign's
-    ads, archived test signups are excluded (same default as the ad-signups
-    report and the main Club Directory)."""
+    if its signup_attribution matches THIS campaign
+    (_attribution_matches_campaign — by utm_content or utm_campaign),
+    archived test signups are excluded (same default as the ad-signups
+    report and the main Club Directory). Filtered in Python rather than SQL
+    — self-serve signup volume is small, and it keeps this in lockstep with
+    ad_signups()'s own filtering instead of two hand-matched queries."""
     await _use_active_campaign(db)
-    utm_contents = _current_campaign_utm_contents()
-    if not utm_contents:
-        return 0
-    count = (await db.execute(text("""
-        SELECT COUNT(*) FROM organisations
-        WHERE signup_source IS NOT NULL
-          AND archived_at IS NULL
-          AND signup_attribution->>'utm_content' = ANY(:utm_contents)
-    """), {"utm_contents": list(utm_contents)})).scalar()
-    return int(count or 0)
+    rows = (await db.execute(text("""
+        SELECT signup_attribution FROM organisations
+        WHERE signup_source IS NOT NULL AND archived_at IS NULL AND signup_attribution IS NOT NULL
+    """))).scalars().all()
+    return sum(1 for attribution in rows if _attribution_matches_campaign(attribution))
 
 
 async def get_latest_summary(db: AsyncSession) -> dict:
@@ -1060,6 +1149,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     was switched off, or (worse) a stale row for today under the old
     campaign could shadow the new one's."""
     await _use_active_campaign(db)
+    campaign_budget, campaign_length_days = _campaign_plan()
     campaign_row = (await db.execute(text("""
         SELECT * FROM meta_ad_snapshots
         WHERE level = 'campaign' AND campaign_id = :campaign_id
@@ -1072,8 +1162,8 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     if not campaign_row:
         return {"campaign": None, "ads": [], "recommendation": None,
                 "recommendation_status": None, "last_updated": None,
-                "leads_adjustment": adjustment, "campaign_budget": CAMPAIGN_BUDGET_AUD,
-                "campaign_length_days": CAMPAIGN_LENGTH_DAYS, "insights": []}
+                "leads_adjustment": adjustment, "campaign_budget": campaign_budget,
+                "campaign_length_days": campaign_length_days, "insights": []}
 
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
@@ -1120,20 +1210,22 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     # chart window — a fixed lookback covering the whole campaign length so
     # pacing maths isn't skewed by whatever `days` window the trend charts
     # happen to be showing at the time.
-    daily_history = await get_history(db, days=CAMPAIGN_LENGTH_DAYS + 5)
+    daily_history = await get_history(db, days=campaign_length_days + 5)
+    club_selected = await get_club_selected_count(db)
 
-    campaign["funnel"] = compute_funnel(campaign)
-    insights = build_insights(campaign, ads, daily_history, CAMPAIGN_BUDGET_AUD, CAMPAIGN_LENGTH_DAYS)
+    campaign["funnel"] = compute_funnel(campaign, club_selected)
+    insights = build_insights(campaign, ads, daily_history, campaign_budget, campaign_length_days)
 
     return {
         "campaign": campaign,
         "ads": ads,
         "recommendation": campaign_row["recommendation"],
         "recommendation_status": campaign_row["recommendation_status"],
-        "last_updated": campaign_row["created_at"].isoformat() if campaign_row["created_at"] else None,
+        "last_updated": (campaign_row["updated_at"] or campaign_row["created_at"]).isoformat()
+            if (campaign_row["updated_at"] or campaign_row["created_at"]) else None,
         "leads_adjustment": adjustment,
-        "campaign_budget": CAMPAIGN_BUDGET_AUD,
-        "campaign_length_days": CAMPAIGN_LENGTH_DAYS,
+        "campaign_budget": campaign_budget,
+        "campaign_length_days": campaign_length_days,
         "insights": insights,
     }
 

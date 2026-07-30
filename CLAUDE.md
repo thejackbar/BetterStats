@@ -2876,6 +2876,61 @@ while it's off — merge-safe ahead of campaign launch). The internal
   `org_module_subscriptions.id`), so a fresh ORM-created DB needs those
   defaults added by hand before the lifespan module backfill runs.
 
+## Meta Ads HQ — Club Selected stage, stale "last updated", undercounted registrations, per-campaign pacing (migration 200, Jul 2026)
+
+Four fixes to `/admin/super/meta-ads`, from live feedback.
+
+- **New "Club selected" funnel stage.** `compute_funnel()` used to jump
+  straight from `landing_page_views` to `leads` ("Started registering
+  (Meta-reported)") — the same click-a-club moment, but only Meta's own
+  self-reported number. A new `get_club_selected_count()` counts distinct
+  Meta-driven visitors who fired the wizard's `club_prepared` beacon (same
+  signal `get_selected_clubs`/`get_searched_clubs` already use, scoped to
+  Meta traffic via `_META_VISITOR_SUBQUERY`) and `compute_funnel()` now takes
+  it as a `club_selected` param, inserted as its own stage between
+  `landing_page_views` and `leads`. It's a real, ours-not-Meta's count of a
+  genuine buying signal — picking a club even without finishing — tracked
+  even for visitors who dropped off immediately after.
+- **"Last updated" was frozen after the first refresh of the day.**
+  `meta_ad_snapshots.created_at` is set once on INSERT; `upsert_snapshot`'s
+  `ON CONFLICT DO UPDATE` never touched it, so every later same-day refresh
+  (the daily job, a manual "Refresh now") updated the numbers but not the
+  timestamp the page reads for "Last updated". Migration 200 adds
+  `updated_at` (backfilled from `created_at`), `upsert_snapshot` now sets it
+  to `NOW()` on both the INSERT and the `DO UPDATE` branch, and
+  `get_latest_summary` reads it back instead of `created_at`.
+- **"Free trial registrations" undercounted real completions.**
+  `get_registration_count()` only counted a signup if its
+  `signup_attribution.utm_content` exactly matched an ad hand-mapped in the
+  hardcoded `AD_DESTINATIONS` dict — a new ad/creative built in Ads Manager
+  needs its `utm_content` added there by hand before a real registration
+  through it counts, and until then it silently reads as if nobody
+  registered. Added `CAMPAIGN_UTM_NAMES` (each campaign's own canonical
+  `utm_campaign` string, identical across every ad in it per
+  `docs/meta-ad-campaign-self-serve.md` §4's naming convention) and a shared
+  `_attribution_matches_campaign()` that counts a signup if EITHER its
+  `utm_content` is mapped to this campaign OR its `utm_campaign` matches the
+  campaign's own name — the latter needs no AD_DESTINATIONS entry, so a
+  brand-new ad counts correctly the moment it's built off the right
+  destination-URL template. `get_registration_count()` and the ad-signups
+  report (`routers/meta_ads.py::ad_signups`) both route through this one
+  function now instead of two hand-matched checks that could disagree.
+- **Headlines/pacing notes judged every campaign against the CURRENT one's
+  plan.** `CAMPAIGN_BUDGET_AUD`/`CAMPAIGN_LENGTH_DAYS` were flat constants
+  fed into `build_insights()` and the KPI "Spend $X of $750"/"~30 days from
+  launch" display regardless of which campaign the header's picker had
+  selected — so switching to an older, finished campaign (a different real
+  budget per the campaign doc) judged its pacing against the current
+  campaign's $750/30-day plan instead of its own, producing an "Overspending
+  the budget pace" / "Under-pacing" headline that didn't apply to the
+  campaign actually on screen. New `CAMPAIGN_PLANS` (campaign_id →
+  (budget, length_days)) + `_campaign_plan()` resolve the ACTIVE campaign's
+  own numbers; `get_latest_summary` threads them through everywhere the
+  flat constants used to be, falling back to `CAMPAIGN_BUDGET_AUD`/
+  `CAMPAIGN_LENGTH_DAYS` for a campaign not yet added to the map. The
+  per-endpoint `days` lookback defaults (registration funnel, selected/
+  searched clubs — a report window, not a budget figure) are untouched.
+
 ## Usage tracking — session duration, time on page, visitor journeys (migration 165, v8.75.0, Jul 2026)
 
 `usage_events` had club, page, and UTM/campaign granularity but nothing on how

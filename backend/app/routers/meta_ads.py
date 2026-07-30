@@ -223,10 +223,10 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     it's set whenever getAttribution() saw ANY click signal, which an EDM
     (email) send's own UTM-tagged link also carries. Scoped the same way
     get_registration_count() scopes the KPI card's own "actual
-    registrations" number: signup_attribution.utm_content has to match one
-    of settings.meta_campaign_id's own ads, via
-    meta_ads._current_campaign_utm_contents(). Without this an EDM-driven
-    signup would show up on the Meta Ads page as if an ad produced it.
+    registrations" number: signup_attribution has to match the CURRENT
+    campaign via meta_ads._attribution_matches_campaign() (by utm_content or
+    utm_campaign). Without this an EDM-driven signup would show up on the
+    Meta Ads page as if an ad produced it.
 
     The engagement score is the cached marketing_clubs value from the daily
     refresh (via the existing_org_id link), NOT a live _engagement() scan per
@@ -241,7 +241,6 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     from app.services.twenty_sync import _module_split
 
     await meta_ads._use_active_campaign(db)
-    utm_contents = meta_ads._current_campaign_utm_contents()
 
     orgs = (await db.execute(
         select(Organisation, MarketingClub.engagement_score, MarketingClub.engagement_scored_at)
@@ -251,7 +250,7 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     )).all()
     orgs = [
         (org, score, scored_at) for org, score, scored_at in orgs
-        if (org.signup_attribution or {}).get("utm_content") in utm_contents
+        if meta_ads._attribution_matches_campaign(org.signup_attribution)
     ]
 
     # Registration timestamps come from the self-serve idempotency keys (the
