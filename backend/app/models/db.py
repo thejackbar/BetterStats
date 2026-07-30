@@ -3880,7 +3880,7 @@ class CrmEvent(Base):
     # First Alert / Second Alert offsets — stored as a stable code, the actual
     # alert time is starts_at minus this offset (computed on read).
     ALERT_CODES = ("at_time", "5m", "10m", "15m", "30m", "1h", "2h", "1d", "2d", "1w")
-    EVENT_TYPES = ("call", "demo", "meeting", "review_deal", "other")
+    EVENT_TYPES = ("call", "demo", "meeting", "review_deal", "follow_up", "other")
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     deal_id = Column(UUID(as_uuid=True), ForeignKey("crm_deals.id", ondelete="SET NULL"), nullable=True)

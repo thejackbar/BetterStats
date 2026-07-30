@@ -1541,7 +1541,7 @@ async def list_activities(session: AsyncSession, *, deal_id=None, person_id=None
 
 # ─── Calendar events (scheduled, richer than an activity note) ───────────────
 
-EVENT_TYPES = ("call", "demo", "meeting", "review_deal", "other")
+EVENT_TYPES = ("call", "demo", "meeting", "review_deal", "follow_up", "other")
 ALERT_CODES = ("at_time", "5m", "10m", "15m", "30m", "1h", "2h", "1d", "2d", "1w")
 
 # Minutes-before-start each alert code represents (for computing the alert time

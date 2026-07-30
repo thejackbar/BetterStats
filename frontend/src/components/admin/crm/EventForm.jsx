@@ -9,6 +9,7 @@ export const EVENT_TYPE_OPTIONS = [
   { value: 'demo', label: 'Demo' },
   { value: 'meeting', label: 'Meeting' },
   { value: 'review_deal', label: 'Review Deal' },
+  { value: 'follow_up', label: 'Follow Up' },
   { value: 'other', label: 'Other' },
 ]
 export const EVENT_TYPE_LABELS = Object.fromEntries(EVENT_TYPE_OPTIONS.map(o => [o.value, o.label]))

@@ -90,7 +90,7 @@ class ActivityCreate(BaseModel):
 
 
 class EventCreate(BaseModel):
-    event_type: str = "meeting"          # call | demo | meeting | review_deal | other
+    event_type: str = "meeting"          # call | demo | meeting | review_deal | follow_up | other
     starts_at: datetime                  # future date & time (ISO)
     title: Optional[str] = None
     location: Optional[str] = None
