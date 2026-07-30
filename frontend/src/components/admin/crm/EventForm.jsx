@@ -149,6 +149,9 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
             {contactOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
+      </div>
+      {/* First alert sits to the left of Second alert on their own row. */}
+      <div className="flex flex-wrap gap-3">
         <Field label="First alert (optional)" width="200px">
           <Select value={form.first_alert} onChange={set('first_alert')}>
             {ALERT_OPTIONS.map(o => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
