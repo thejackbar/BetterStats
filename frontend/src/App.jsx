@@ -69,6 +69,7 @@ import Login from './pages/Login'
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
 const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
 const BetterClubManagerHome = lazy(() => import('./pages/admin/BetterClubManagerHome'))
+const ClubManagerApp = lazy(() => import('./pages/admin/clubmanager/redesign/ClubManagerApp'))
 const SetupWizard = lazy(() => import('./pages/admin/setup/SetupWizard'))
 const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
@@ -294,8 +295,9 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/betterstats" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="overview" /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="overview" /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
@@ -305,16 +307,16 @@ export default function App() {
           <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
-          <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
-          <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
-          <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
-          <Route path="/admin/roles" element={<ProtectedRoute requireRole="super_admin"><AdminRoles /></ProtectedRoute>} />
-          <Route path="/admin/activities" element={<ProtectedRoute requireRole="super_admin"><AdminActivities /></ProtectedRoute>} />
-          <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><AdminQualifications /></ProtectedRoute>} />
-          <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><AdminEvents /></ProtectedRoute>} />
-          <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
+          <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="committee" /></ProtectedRoute>} />
+          <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/roles" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/activities" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="events" /></ProtectedRoute>} />
+          <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="facilities" /></ProtectedRoute>} />
           <Route path="/admin/member-portal" element={<ProtectedRoute requireRole="super_admin"><AdminMemberPortal /></ProtectedRoute>} />
-          <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><AdminClubDiary /></ProtectedRoute>} />
+          <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="diary" /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute requireCore><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute requireCore><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute requireCore><AdminPartnershipRecords /></ProtectedRoute>} />
