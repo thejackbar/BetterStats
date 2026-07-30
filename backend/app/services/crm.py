@@ -809,6 +809,12 @@ async def hard_delete_registered_club(session: AsyncSession, org_id) -> None:
       no FK are cleaned explicitly — this list MUST stay in sync with
       club_admin.py::delete_club, which does the same (migration 142 fixed the
       FK-cascade drift that used to 500 this on a club with real data).
+    - Pre-deletes the per-game stat tables that carry an ON DELETE SET NULL FK
+      (partnerships / fall_of_wickets / bowler_wickets / milestones) BEFORE the
+      org delete — otherwise the cascade can still 500 with a spurious
+      "partnerships_game_id_fkey … game_id not present in games" (see the
+      inline note below). This is the fix for the reported CRM "delete
+      permanently" failure.
     - marketing_clubs.existing_org_id is ON DELETE SET NULL, so the club's Club
       Directory row is UNLINKED but KEPT — a delete of this kind must never
       remove the club from the Club Directory.
@@ -825,6 +831,48 @@ async def hard_delete_registered_club(session: AsyncSession, org_id) -> None:
     """), {"id": oid})
     for table in ("merge_logs", "merge_pair_ignores", "grade_merge_logs", "player_achievements"):
         await session.execute(text(f"DELETE FROM {table} WHERE org_id = CAST(:id AS UUID)"), {"id": oid})
+
+    # Pre-delete the per-game stat rows that carry an ON DELETE SET NULL FK to
+    # players (partnerships.batter1/2_id, fall_of_wickets.player_id,
+    # bowler_wickets.fielder_id) or, for milestones, an ON DELETE SET NULL FK
+    # to games. If these are left to the organisation-delete cascade below,
+    # the delete can 500 with a spurious
+    #   "partnerships_game_id_fkey ... Key (game_id)=(…) is not present in table games"
+    # (the reported Trinity College bug). Cause: when a single row references
+    # BOTH a to-be-deleted game (its game_id FK is ON DELETE CASCADE) AND a
+    # to-be-deleted player (its batter/fielder FK is ON DELETE SET NULL),
+    # Postgres can run the SET NULL *UPDATE* on that row after the game row is
+    # already gone, and the UPDATE re-validates the row's game_id FK against a
+    # now-missing game. The same fires for genuinely orphaned rows — a game_id
+    # no longer present in `games` at all (left behind while migration 142's FK
+    # was still NOT VALID) whose batter/fielder is one of this club's players.
+    # Deleting these rows up-front, scoped to this org's games and players,
+    # removes the SET NULL work entirely so the cascade never re-validates.
+    # The CASCADE-only stat tables (batting_innings / bowling_spells /
+    # fielding_stats / game_appearances) are safe to leave to the cascade — a
+    # cascade row-delete never re-validates a FK.
+    org_games = ("SELECT g.id FROM games g "
+                 "JOIN grades gr ON gr.id = g.grade_id "
+                 "JOIN seasons s ON s.id = gr.season_id "
+                 "WHERE s.organisation_id = CAST(:id AS UUID)")
+    org_players = "SELECT id FROM players WHERE organisation_id = CAST(:id AS UUID)"
+    await session.execute(text(
+        f"DELETE FROM partnerships p WHERE p.game_id IN ({org_games}) "
+        f"OR p.batter1_id IN ({org_players}) OR p.batter2_id IN ({org_players})"
+    ), {"id": oid})
+    await session.execute(text(
+        f"DELETE FROM fall_of_wickets f WHERE f.game_id IN ({org_games}) "
+        f"OR f.player_id IN ({org_players})"
+    ), {"id": oid})
+    await session.execute(text(
+        f"DELETE FROM bowler_wickets b WHERE b.game_id IN ({org_games}) "
+        f"OR b.bowler_id IN ({org_players}) OR b.fielder_id IN ({org_players})"
+    ), {"id": oid})
+    await session.execute(text(
+        f"DELETE FROM milestones m WHERE m.game_id IN ({org_games}) "
+        f"OR m.player_id IN ({org_players})"
+    ), {"id": oid})
+
     await session.execute(text("DELETE FROM organisations WHERE id = CAST(:id AS UUID)"), {"id": oid})
 
 
