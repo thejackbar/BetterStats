@@ -4096,6 +4096,23 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE club_roles ADD COLUMN IF NOT EXISTS is_committee BOOLEAN NOT NULL DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE committee_positions ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
 
+    # Migration 199: standalone index on import_effective_deltas.player_id.
+    # The only prior index was the composite (organisation_id, player_id) from
+    # migration 070. v_effective_player_season_stats's import branch selects
+    # from this table with no WHERE clause — org-scoping happens only via the
+    # outer join to `players` — so an unscoped leaderboard/milestones query
+    # (no season/grade picked) correlates it against `players` filtered by
+    # player_id ALONE, which the composite index can't serve. Postgres falls
+    # back to a full sequential scan of this platform-wide table once per
+    # outer row, turning an ordinary page load into a multi-minute hang for
+    # any club with a large roster. A standalone index fixes the lookup
+    # regardless of table size.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_import_deltas_player "
+            "ON import_effective_deltas(player_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
