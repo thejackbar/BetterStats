@@ -32,7 +32,7 @@ from typing import Optional
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Fixture, VoteBallot, VoteFixtureOverride, VoteSettings
+from app.models.db import Fixture, VoteBallot, VoteFixtureOverride, VoteNudge, VoteSettings
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,161 @@ async def eligible_from_source(db: AsyncSession, club, fixture, source: str) -> 
     return [], []
 
 
+async def scorecard_voter_counts(db: AsyncSession, org_id, game_ids: list) -> dict[str, int]:
+    """Batch version of ``eligible_players``' count only — one query for a
+    whole page of fixtures instead of one per row. Keyed on the game id
+    (``match_ref_id(fixture)``, stringified)."""
+    if not game_ids:
+        return {}
+    res = await db.execute(
+        text(
+            """
+            SELECT src.gid, COUNT(DISTINCT p.id)
+            FROM (
+                SELECT game_id AS gid, player_id FROM game_appearances WHERE game_id = ANY(:ids)
+                UNION ALL SELECT game_id, player_id FROM batting_innings WHERE game_id = ANY(:ids)
+                UNION ALL SELECT game_id, player_id FROM bowling_spells WHERE game_id = ANY(:ids)
+                UNION ALL SELECT game_id, player_id FROM fielding_stats WHERE game_id = ANY(:ids)
+            ) src
+            JOIN players p ON p.id = src.player_id AND p.organisation_id = :org
+            GROUP BY src.gid
+            """
+        ),
+        {"ids": game_ids, "org": org_id},
+    )
+    return {str(gid): n for gid, n in res.fetchall()}
+
+
+async def lineup_voter_counts(db: AsyncSession, org_id, fixture_ids: list) -> dict[str, int]:
+    """Batch version of ``lineup_players``' count only. Keyed on fixture id."""
+    if not fixture_ids:
+        return {}
+    res = await db.execute(
+        text(
+            "SELECT fixture_id, COUNT(DISTINCT player_id) FROM fixture_lineups "
+            "WHERE organisation_id = :org AND fixture_id = ANY(:ids) GROUP BY fixture_id"
+        ),
+        {"org": org_id, "ids": fixture_ids},
+    )
+    return {str(fid): n for fid, n in res.fetchall()}
+
+
+async def player_ballot_counts(db: AsyncSession, org_id, fixture_ids: list) -> dict[str, int]:
+    """Distinct PLAYER voters per fixture (excludes non-player/supporter
+    ballots) — the denominator side of "outstanding" is player voters only."""
+    if not fixture_ids:
+        return {}
+    res = await db.execute(
+        text(
+            "SELECT fixture_id, COUNT(DISTINCT voter_player_id) FROM vote_ballots "
+            "WHERE organisation_id = :org AND fixture_id = ANY(:ids) AND voter_player_id IS NOT NULL "
+            "GROUP BY fixture_id"
+        ),
+        {"org": org_id, "ids": fixture_ids},
+    )
+    return {str(fid): n for fid, n in res.fetchall()}
+
+
+def voters_expected_for(source: str, match_id, fixture_id, scorecard_counts: dict, lineup_counts: dict) -> int:
+    """The eligible-voter count for one fixture, from whichever batch count
+    map matches its resolved source. 'playhq' has no batch form — it needs a
+    live per-fixture Play.Cricket fetch, which the fixtures LIST view
+    deliberately avoids (see the 'ready' cheap-readiness comment in the
+    router) — so it reads 0 there; the fixture detail view (one fixture, one
+    live fetch is fine) resolves it properly via resolve_eligibility."""
+    if source == "scorecard":
+        return scorecard_counts.get(str(match_id), 0)
+    if source == "lineup":
+        return lineup_counts.get(str(fixture_id), 0)
+    return 0
+
+
+async def outstanding_voters(db: AsyncSession, org_id, eligible: list[dict], ballots: list[VoteBallot]) -> list[dict]:
+    """Eligible players who haven't voted yet, with enough contact info for
+    the hub's chase panel and the nudge endpoint. ``channel`` is 'email' when
+    the player has an address on file, else 'none' — this codebase has no
+    SMS/WhatsApp sending integration (BetterComms is email-only), so a nudge
+    can only ever be an email reminder."""
+    voted_pids = {str(b.voter_player_id) for b in ballots if b.voter_player_id}
+    missing = [p for p in eligible if p["id"] not in voted_pids]
+    if not missing:
+        return []
+    ids = [uuid.UUID(p["id"]) for p in missing]
+    res = await db.execute(
+        text("SELECT id, photo_url, email FROM players WHERE organisation_id = :org AND id = ANY(:ids)"),
+        {"org": org_id, "ids": ids},
+    )
+    info = {str(pid): {"photo_url": photo, "email": email} for pid, photo, email in res.fetchall()}
+    out = []
+    for p in missing:
+        ci = info.get(p["id"], {})
+        out.append({
+            "id": p["id"],
+            "name": p["name"],
+            "photo_url": ci.get("photo_url"),
+            "email": ci.get("email"),
+            "channel": "email" if ci.get("email") else "none",
+        })
+    return out
+
+
+NUDGE_COOLDOWN_HOURS = 24
+
+
+async def recently_nudged(db: AsyncSession, fixture_id, player_ids: list) -> set[str]:
+    """Player ids nudged for this fixture within the cooldown window."""
+    if not player_ids:
+        return set()
+    res = await db.execute(
+        text(
+            "SELECT DISTINCT player_id FROM vote_nudges "
+            "WHERE fixture_id = :fid AND player_id = ANY(:pids) "
+            "AND sent_at > now() - make_interval(hours => :hrs)"
+        ),
+        {"fid": fixture_id, "pids": player_ids, "hrs": NUDGE_COOLDOWN_HOURS},
+    )
+    return {str(r[0]) for r in res.fetchall()}
+
+
+async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, link_token: Optional[str]) -> tuple[bool, Optional[str]]:
+    """Email one outstanding voter a reminder, deep-linked straight to this
+    fixture's ballot. Returns (sent, failure_reason); never raises — a
+    provider hiccup on one player shouldn't fail the whole nudge batch."""
+    from app.config.settings import settings
+    from app.services import email_service
+
+    email = player.get("email")
+    if not email:
+        return False, "no_contact"
+
+    link = f"{settings.public_base_url}/vote/{link_token}?fixture={fixture.id}" if link_token else None
+    opponent = fixture.opponent_name or fixture.label or "TBC"
+    subject = f"{round_label_for(fixture)} v {opponent} — cast your vote"
+    first = (player.get("name") or "").split(" ")[0] or "there"
+    body_html = (
+        f"<p>Hi {first},</p>"
+        f"<p>Best-player votes are still open for <strong>{round_label_for(fixture)} v {opponent}</strong>. "
+        f"It takes about 30 seconds — no login needed.</p>"
+        + (f'<p><a href="{link}">Cast your vote</a></p>' if link else "")
+    )
+    body_text = f"Hi {first},\n\nBest-player votes are still open for {round_label_for(fixture)} v {opponent}.\n" + (link or "")
+    try:
+        msg = email_service.EmailMessage(
+            to_email=email, to_name=player.get("name"), subject=subject,
+            html=body_html, text=body_text,
+            from_email=settings.email_from_address, from_name=club.name or settings.email_from_name,
+            reply_to=settings.email_reply_to,
+        )
+        result = await email_service.get_email_provider().send(msg)
+    except Exception:
+        logger.exception("vote nudge send failed for player %s / fixture %s", player.get("id"), fixture.id)
+        return False, "send_failed"
+    if not result.ok:
+        return False, "send_failed"
+    db.add(VoteNudge(organisation_id=club.id, fixture_id=fixture.id, player_id=uuid.UUID(player["id"])))
+    return True, None
+
+
 def effective_source(cfg: dict, override: Optional[str]) -> str:
     """The fixture's own source override, else the club default."""
     if override in ELIGIBILITY_SOURCES:
@@ -388,6 +543,10 @@ def season_window(year: int) -> tuple[date, date]:
     return date(year, 7, 1), date(year + 1, 6, 30)
 
 
+def season_label(year: int) -> str:
+    return f"{year}/{str((year + 1) % 100).zfill(2)}"
+
+
 def round_key_for(fixture: Fixture) -> str:
     r = (fixture.round or "").strip()
     if r:
@@ -405,6 +564,13 @@ def round_label_for(fixture: Fixture) -> str:
     if fixture.played_on:
         return fixture.played_on.strftime("%d %b %Y")
     return "Unscheduled"
+
+
+def round_short_for(label: str) -> str:
+    """A compact round tag for the race chart's x-axis — "Round 8" -> "R8",
+    anything without a number (a final, an unscheduled date) -> unchanged."""
+    n = _round_numeric(label)
+    return f"R{n}" if n is not None else (label or "")
 
 
 def _round_numeric(label: str) -> Optional[int]:
@@ -553,8 +719,14 @@ async def build_leaderboard(
 
     values = cfg["ballot_values"]
     cumulative: dict[str, dict] = {}
+    grade_by_pid: dict[str, Optional[str]] = {}
     all_pids: set[str] = set()
     out_rounds: list[dict] = []
+    # A running-total history per player, one entry per COUNTED round —
+    # movement/form/cumulative below are all derived from this, not stored.
+    history: dict[str, list[int]] = {}
+    rank_snapshots: list[dict[str, int]] = []  # one {player_id: rank} per counted round
+    counted_round_count = 0
     cutoff_hit = False
     for rd in rounds:
         fixtures_out = []
@@ -593,29 +765,84 @@ async def build_leaderboard(
                             c["counts"][i2] += n
                     if r["points"] > 0 or r["raw"] > 0:
                         c["rounds"] += 1
+                    # Most-recently-played grade — a reasonable single tag for
+                    # a player who turns out for more than one grade.
+                    if eff_gid:
+                        grade_by_pid[r["player_id"]] = str(eff_gid)
         out_rounds.append({
             "key": rd["key"],
             "label": rd["label"],
+            "short": round_short_for(rd["label"]),
             "date": rd["date"].isoformat(),
             "fixtures": fixtures_out,
             "counted": not cutoff_hit,
         })
+        if not cutoff_hit:
+            counted_round_count += 1
+            # Snapshot this round's running total (for the race chart) and
+            # rank (for next-round's movement) for every player on the board
+            # so far — including those who didn't score this particular round.
+            for pid in cumulative:
+                history.setdefault(pid, []).append(cumulative[pid]["points"])
+            ranked = sorted(cumulative.keys(), key=lambda p: (-cumulative[p]["points"], -cumulative[p]["raw"]))
+            rank_snapshots.append({pid: i + 1 for i, pid in enumerate(ranked)})
         if through_round is not None and rd["key"] == through_round:
             cutoff_hit = True
 
+    # Left-pad each player's history to the full counted-round length — a
+    # player who first scored in round k had an implicit 0 total before that.
+    for pid, h in history.items():
+        if len(h) < counted_round_count:
+            history[pid] = [0] * (counted_round_count - len(h)) + h
+
+    movement: dict[str, int] = {}
+    if len(rank_snapshots) >= 2:
+        cur_ranks, prev_ranks = rank_snapshots[-1], rank_snapshots[-2]
+        for pid, r in cur_ranks.items():
+            movement[pid] = (prev_ranks[pid] - r) if pid in prev_ranks else 0
+
     names = await player_names(db, org_id, all_pids)
-    standings = [
-        {
+    grade_short_names = {gid: _grade_short(name) for gid, name in grade_names.items()}
+    standings = []
+    for pid, c in cumulative.items():
+        h = history.get(pid, [])
+        # Weekly deltas from the cumulative history — cumulative only ever
+        # grows, so a plain diff recovers each round's own contribution
+        # without a second pass over the fixtures.
+        weekly = [h[i] - (h[i - 1] if i > 0 else 0) for i in range(len(h))]
+        gid = grade_by_pid.get(pid)
+        standings.append({
             "player_id": pid,
             "name": names.get(pid, "Unknown"),
             "points": c["points"],
             "raw": c["raw"],
             "counts": c["counts"],
             "rounds": c["rounds"],
-        }
-        for pid, c in cumulative.items()
-    ]
+            "grade": grade_names.get(gid) if gid else None,
+            "grade_short": grade_short_names.get(gid) if gid else None,
+            "movement": movement.get(pid, 0),
+            "form": weekly[-5:],
+            "cumulative": h,
+            "round_gain": weekly[-1] if weekly else 0,
+        })
     standings.sort(key=lambda s: (-s["points"], -s["raw"], s["name"]))
+    for i, s in enumerate(standings):
+        s["tied"] = bool(i > 0 and s["points"] == standings[i - 1]["points"] and s["raw"] == standings[i - 1]["raw"])
+
+    # "What just happened" — the last COUNTED round's own results, for the
+    # race card and awards-night reveal caption.
+    last_round = None
+    counted_out = [r for r in out_rounds if r["counted"]]
+    if counted_out:
+        lr = counted_out[-1]
+        opponents = ", ".join(f"vs {fx['opponent'] or 'TBC'}" for fx in lr["fixtures"])
+        lr_results = []
+        for fx in lr["fixtures"]:
+            for r in fx["results"]:
+                if r["points"] > 0:
+                    lr_results.append({"player_id": r["player_id"], "name": names.get(r["player_id"], "Unknown"), "points": r["points"]})
+        lr_results.sort(key=lambda r: -r["points"])
+        last_round = {"label": lr["label"], "fixture": opponents, "results": lr_results}
 
     return {
         "year": year,
@@ -625,4 +852,14 @@ async def build_leaderboard(
         "rounds": out_rounds,
         "standings": standings,
         "through_round": through_round if cutoff_hit else None,
+        "last_round": last_round,
     }
+
+
+def _grade_short(name: str) -> str:
+    """A compact grade tag for a leaderboard row — "1st Grade" -> "1st",
+    "PSWL South" -> "PSWL", anything unmatched -> its first word."""
+    m = re.match(r"^(\d+(?:st|nd|rd|th))\b", name or "", re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return (name or "").split(" ")[0][:8] or "—"

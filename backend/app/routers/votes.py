@@ -230,46 +230,46 @@ async def list_vote_fixtures(
         )
     ]
 
-    fixtures = season_fixtures
-    if grade_id:
-        fixtures = [f for f in fixtures if str(grade_by_fixture.get(str(f.id))) == grade_id]
-    if round_key:
-        fixtures = [f for f in fixtures if vote_svc.round_key_for(f) == round_key.lower()]
-    if q:
-        ql = q.strip().lower()
-        fixtures = [f for f in fixtures if ql in (f.opponent_name or f.label or "").lower()]
-
-    fids = [f.id for f in fixtures]
-    match_ids = [vote_svc.match_ref_id(f) for f in fixtures]
+    # Batch queries run over the WHOLE season (not just the filtered subset)
+    # so the summary counters below reflect the real season state regardless
+    # of which grade/round/search the manager currently has selected — the
+    # same "options never collapse to the current filter" rule as grades/rounds.
+    season_fids = [f.id for f in season_fixtures]
+    season_match_ids = [vote_svc.match_ref_id(f) for f in season_fixtures]
 
     synced: set[str] = set()
     lineup_saved: set[str] = set()
     counts: dict[str, int] = {}
     overrides: dict[str, VoteFixtureOverride] = {}
-    if fids:
+    scorecard_counts: dict[str, int] = {}
+    lineup_counts: dict[str, int] = {}
+    player_counts: dict[str, int] = {}
+    if season_fids:
         from sqlalchemy import text
-        g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": match_ids})
+        g_res = await db.execute(text("SELECT id FROM games WHERE id = ANY(:ids)"), {"ids": season_match_ids})
         synced_games = {str(r[0]) for r in g_res.fetchall()}
-        synced = {str(f.id) for f in fixtures if str(vote_svc.match_ref_id(f)) in synced_games}
+        synced = {str(f.id) for f in season_fixtures if str(vote_svc.match_ref_id(f)) in synced_games}
         l_res = await db.execute(
             text("SELECT DISTINCT fixture_id FROM fixture_lineups "
                  "WHERE organisation_id = :org AND fixture_id = ANY(:ids)"),
-            {"org": club.id, "ids": fids},
+            {"org": club.id, "ids": season_fids},
         )
         lineup_saved = {str(r[0]) for r in l_res.fetchall()}
         c_res = await db.execute(
             text("SELECT fixture_id, COUNT(*) FROM vote_ballots "
                  "WHERE organisation_id = :org AND fixture_id = ANY(:ids) GROUP BY fixture_id"),
-            {"org": club.id, "ids": fids},
+            {"org": club.id, "ids": season_fids},
         )
         counts = {str(fid): n for fid, n in c_res.fetchall()}
         o_res = await db.execute(
-            select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id.in_(fids))
+            select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id.in_(season_fids))
         )
         overrides = {str(o.fixture_id): o for o in o_res.scalars().all()}
+        scorecard_counts = await vote_svc.scorecard_voter_counts(db, club.id, [gid for gid in season_match_ids if str(gid) in synced_games])
+        lineup_counts = await vote_svc.lineup_voter_counts(db, club.id, [fid for fid in season_fids if str(fid) in lineup_saved])
+        player_counts = await vote_svc.player_ballot_counts(db, club.id, season_fids)
 
-    out = []
-    for f in fixtures:
+    def _row(f: Fixture) -> dict:
         fid = str(f.id)
         ov = overrides.get(fid)
         source = vote_svc.effective_source(cfg, ov.eligibility_source if ov else None)
@@ -283,7 +283,11 @@ async def list_vote_fixtures(
         state = vote_svc.fixture_vote_state(f, cfg, ov.status if ov else None, ready, today)
         close = vote_svc.fixture_close_date(f, cfg)
         eff_gid = grade_by_fixture.get(fid)
-        out.append({
+        match_id = vote_svc.match_ref_id(f)
+        voters_expected = vote_svc.voters_expected_for(source, match_id, f.id, scorecard_counts, lineup_counts)
+        ballots = counts.get(fid, 0)
+        outstanding_count = max(0, voters_expected - player_counts.get(fid, 0)) if voters_expected else 0
+        return {
             "id": fid,
             "opponent": f.opponent_name or f.label,
             "round": vote_svc.round_label_for(f),
@@ -298,11 +302,43 @@ async def list_vote_fixtures(
             "has_lineup": fid in lineup_saved,
             "synced": fid in synced,
             "closes_on": close.isoformat() if close and state == "open" else None,
-            "ballots": counts.get(fid, 0),
-        })
+            "ballots": ballots,
+            "voters_expected": voters_expected,
+            "outstanding_count": outstanding_count,
+            "_round_key": vote_svc.round_key_for(f),
+        }
+
+    season_rows = [_row(f) for f in season_fixtures]
+    rows_by_id = {r["id"]: r for r in season_rows}
+
+    fixtures = season_fixtures
+    if grade_id:
+        fixtures = [f for f in fixtures if str(grade_by_fixture.get(str(f.id))) == grade_id]
+    if round_key:
+        fixtures = [f for f in fixtures if vote_svc.round_key_for(f) == round_key.lower()]
+    if q:
+        ql = q.strip().lower()
+        fixtures = [f for f in fixtures if ql in (f.opponent_name or f.label or "").lower()]
+    out = [{k: v for k, v in rows_by_id[str(f.id)].items() if k != "_round_key"} for f in fixtures]
+
+    # Counter strip — whole season, unaffected by the current filters.
+    round_keys_total = {r["_round_key"] for r in season_rows}
+    round_keys_with_ballots = {r["_round_key"] for r in season_rows if r["ballots"] > 0}
+    latest_round_key = season_rows[0]["_round_key"] if season_rows else None  # season_fixtures sorted newest-first
+    latest_round_rows = [r for r in season_rows if r["_round_key"] == latest_round_key] if latest_round_key else []
+    summary = {
+        "open": sum(1 for r in season_rows if r["state"] == "open"),
+        "awaiting_team": sum(1 for r in season_rows if r["state"] == "awaiting_team"),
+        "ballots_in": sum(r["ballots"] for r in latest_round_rows),
+        "ballots_expected": sum(r["voters_expected"] for r in latest_round_rows),
+        "rounds_counted": len(round_keys_with_ballots),
+        "rounds_total": len(round_keys_total),
+    }
+
     return {
         "year": year, "years": years or [year], "fixtures": out, "settings": _settings_payload(s),
         "grades": grades, "grade_id": grade_id, "rounds": rounds, "round_key": round_key, "q": q,
+        "summary": summary,
     }
 
 
@@ -348,6 +384,8 @@ async def fixture_detail(
         key=lambda r: (-r["points"], -r["raw"], r["name"]),
     )
 
+    outstanding = await vote_svc.outstanding_voters(db, club.id, eligible, ballots)
+
     return {
         "fixture": {
             "id": str(fx.id),
@@ -356,7 +394,9 @@ async def fixture_detail(
             "date": fx.played_on.isoformat() if fx.played_on else None,
             "state": state,
             "override": ov.status if ov else None,
+            "voters_expected": len(eligible),
         },
+        "outstanding": outstanding,
         "settings": _settings_payload(s),
         "eligibility": {
             "requested": elig["requested"],
@@ -594,6 +634,113 @@ async def set_fixture_source(
     return {"status": "ok", "eligibility_source": src or None}
 
 
+# ─── Bulk actions (Games hub) ────────────────────────────────────────────────
+
+class BulkStateBody(BaseModel):
+    fixture_ids: list[str]
+    action: str  # "open" | "lock"
+
+
+@router.post("/bulk-state")
+async def bulk_state(
+    body: BulkStateBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_VOTES)),
+):
+    """Open or lock several fixtures at once from the hub's multi-select.
+    Same per-fixture rules as the single lock/reopen endpoints; a fixture
+    that can't transition (no team list yet, for "open") is reported in
+    ``skipped`` rather than failing the whole request."""
+    if body.action not in ("open", "lock"):
+        raise HTTPException(status_code=400, detail="Action must be 'open' or 'lock'")
+    s = await vote_svc.get_settings(db, club.id)
+    cfg = vote_svc.effective_config(s)
+
+    updated = 0
+    skipped = []
+    for raw_id in body.fixture_ids:
+        try:
+            fx = await _org_fixture(db, club, raw_id)
+        except HTTPException:
+            skipped.append({"fixture_id": raw_id, "reason": "not_found"})
+            continue
+        if body.action == "lock":
+            await _set_override(db, club, fx, user.id, status="locked")
+            updated += 1
+            continue
+        ov = await vote_svc.get_override(db, fx.id)
+        elig = await vote_svc.resolve_eligibility(db, club, fx, cfg, ov.eligibility_source if ov else None)
+        if not elig["players"]:
+            skipped.append({"fixture_id": raw_id, "reason": "awaiting_team"})
+            continue
+        await _set_override(db, club, fx, user.id, status="reopened")
+        updated += 1
+    return {"updated": updated, "skipped": skipped}
+
+
+# ─── Nudge (email reminder) ──────────────────────────────────────────────────
+#
+# The design brief assumed automated SMS/WhatsApp reminders; this codebase has
+# no SMS/WhatsApp sending integration (BetterComms is email-only). A nudge is
+# therefore a reminder email to the player's stored address — a player with no
+# email simply can't be nudged this way (reason "no_contact"). Rate-limited to
+# one nudge per player per fixture per NUDGE_COOLDOWN_HOURS, same posture as
+# the BetterComms usage policy: never let a manager mashing the button spam a
+# player's inbox.
+
+class NudgeBody(BaseModel):
+    fixture_id: Optional[str] = None
+    fixture_ids: Optional[list[str]] = None
+    player_ids: Optional[list[str]] = None
+
+
+@router.post("/nudge")
+async def nudge(
+    body: NudgeBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_VOTES)),
+):
+    if not body.fixture_id and not body.fixture_ids:
+        raise HTTPException(status_code=400, detail="Provide fixture_id or fixture_ids")
+    s = await vote_svc.get_settings(db, club.id)
+    cfg = vote_svc.effective_config(s)
+
+    target_fixture_ids = [body.fixture_id] if body.fixture_id else list(body.fixture_ids or [])
+    targets: list[tuple[Fixture, dict, bool]] = []
+    for raw_id in target_fixture_ids:
+        try:
+            fx = await _org_fixture(db, club, raw_id)
+        except HTTPException:
+            continue
+        ov = await vote_svc.get_override(db, fx.id)
+        elig = await vote_svc.resolve_eligibility(db, club, fx, cfg, ov.eligibility_source if ov else None)
+        ballots_by_fx = await vote_svc.load_ballots_by_fixture(db, club.id, [fx.id])
+        outstanding = await vote_svc.outstanding_voters(db, club.id, elig["players"], ballots_by_fx.get(str(fx.id), []))
+        wanted = set(body.player_ids) if (body.fixture_id and body.player_ids) else None
+        candidates = [p for p in outstanding if wanted is None or p["id"] in wanted]
+        if not candidates:
+            continue
+        recent = await vote_svc.recently_nudged(db, fx.id, [uuid.UUID(p["id"]) for p in candidates])
+        for p in candidates:
+            targets.append((fx, p, p["id"] in recent))
+
+    sent = 0
+    failed = []
+    for fx, p, is_recent in targets:
+        if is_recent:
+            failed.append({"player_id": p["id"], "reason": "recently_nudged"})
+            continue
+        ok, reason = await vote_svc.send_nudge(db, club, fx, p, s.link_token if s else None)
+        if ok:
+            sent += 1
+        else:
+            failed.append({"player_id": p["id"], "reason": reason})
+    await db.commit()
+    return {"sent": sent, "failed": failed}
+
+
 # ─── Leaderboard ─────────────────────────────────────────────────────────────
 
 @router.get("/leaderboard")
@@ -632,4 +779,20 @@ async def leaderboard(
         ({"id": gid, "name": name} for gid, name in grades.items()),
         key=lambda g: g["name"],
     )
+
+    # Club/stage lockup for the leaderboard header and the awards-night stage.
+    board["club_name"] = club.name
+    board["club_short"] = _club_short(club.name, club.short_name)
+    board["season_label"] = vote_svc.season_label(year)
+    board["grade_name"] = grades.get(grade_id) if grade_id else "Whole club"
+    board["grade_id"] = grade_id
+    board["race_caption"] = None  # no synthesis attempted yet — nullable per the API contract
     return board
+
+
+def _club_short(name: Optional[str], short_name: Optional[str]) -> str:
+    if short_name:
+        return short_name.strip()[:6].upper()
+    words = [w for w in (name or "").split() if w]
+    initials = "".join(w[0] for w in words[:3]).upper()
+    return initials or "CC"

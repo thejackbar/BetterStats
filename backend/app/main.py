@@ -578,6 +578,20 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_player_name_aliases_player "
             "ON player_name_aliases(player_id)"))
+        # Votes redesign — nudge send log (migration 196), backs the
+        # one-nudge-per-player-per-fixture-per-24h rate limit.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS vote_nudges (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                fixture_id UUID NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_vote_nudges_fixture_player "
+            "ON vote_nudges(fixture_id, player_id, sent_at)"))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "
