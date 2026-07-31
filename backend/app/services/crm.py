@@ -1015,6 +1015,101 @@ async def set_point_of_contact(session: AsyncSession, deal_id, person_id) -> Crm
     return await link_deal_contact(session, deal_id, person_id, role_on_deal=POINT_OF_CONTACT_ROLE)
 
 
+async def best_known_contact_for_deal(session: AsyncSession, deal: CrmDeal) -> Optional[dict]:
+    """Best-known ``{full_name, email, phone}`` for a deal that has no linked
+    CRM contact yet — used both when a deal is auto-created (to seed its
+    contact) and by the backfill script. Sources, in priority order:
+
+      1. A ``MarketingClubContact`` on the deal's prospect club — preferring
+         the registering admin (``source='self_serve_trial'``), then the
+         lowest ``role_rank`` (office bearers sort to the top), then one that
+         actually carries an email.
+      2. The linked customer org's PRIMARY admin ``User`` (name / email /
+         mobile) — covers a deal on an already-onboarded club whose directory
+         row never captured a personal contact.
+      3. The marketing club's own ``contact_email`` / ``contact_phone`` role
+         mailbox, named after the club as a last resort.
+
+    Returns ``None`` when nothing usable is on file."""
+    # 1. A directory contact on the prospect club.
+    if deal.marketing_club_id is not None:
+        row = (await session.execute(
+            select(MarketingClubContact)
+            .where(MarketingClubContact.marketing_club_id == deal.marketing_club_id)
+            .order_by(
+                (MarketingClubContact.source == "self_serve_trial").desc(),
+                MarketingClubContact.role_rank.asc(),
+                (MarketingClubContact.email.isnot(None)).desc(),
+                MarketingClubContact.created_at.asc(),
+            ).limit(1)
+        )).scalars().first()
+        if row is not None and (row.full_name or row.email or row.mobile):
+            return {"full_name": row.full_name, "email": row.email, "phone": row.mobile}
+
+    # 2. The linked customer org's primary admin.
+    org_id = deal.organisation_id
+    if org_id is None and deal.marketing_club_id is not None:
+        club = await session.get(MarketingClub, deal.marketing_club_id)
+        org_id = club.existing_org_id if club else None
+    if org_id is not None:
+        user = (await session.execute(
+            select(User)
+            .join(ClubMembership, ClubMembership.user_id == User.id)
+            .where(ClubMembership.club_id == org_id)
+            .order_by(ClubMembership.is_primary_admin.desc(), ClubMembership.created_at.asc())
+            .limit(1)
+        )).scalars().first()
+        if user is not None:
+            name = (user.display_name
+                    or " ".join(p for p in (user.first_name, user.last_name) if p).strip()
+                    or None)
+            if name or user.email or user.mobile_number:
+                return {"full_name": name, "email": user.email, "phone": user.mobile_number}
+
+    # 3. The marketing club's own role mailbox.
+    if deal.marketing_club_id is not None:
+        club = await session.get(MarketingClub, deal.marketing_club_id)
+        if club is not None and (club.contact_email or club.contact_phone):
+            return {"full_name": club.name, "email": club.contact_email, "phone": club.contact_phone}
+
+    return None
+
+
+async def ensure_deal_contact(session: AsyncSession, deal: CrmDeal, *,
+                              full_name: Optional[str] = None, email: Optional[str] = None,
+                              phone: Optional[str] = None,
+                              set_poc: bool = True) -> Optional[CrmDealContact]:
+    """Resolve-or-create a ``CrmPerson`` from the given contact details (or,
+    when none are passed, the deal's best-known club contact) and link it to
+    ``deal``. A **no-op** — returns ``None`` — if the deal already has any
+    linked contact, or no usable contact details are available. When
+    ``set_poc`` is true (the default) the person is also flagged as the deal's
+    point of contact so it shows on the pipeline card, not just in the deal's
+    Contacts list. Caller commits."""
+    already = (await session.execute(
+        select(CrmDealContact.id).where(CrmDealContact.deal_id == deal.id).limit(1)
+    )).scalar_one_or_none()
+    if already is not None:
+        return None
+
+    name, mail, ph = (full_name or "").strip() or None, (email or "").strip() or None, (phone or "").strip() or None
+    if not (name or mail or ph):
+        best = await best_known_contact_for_deal(session, deal)
+        if best is None:
+            return None
+        name, mail, ph = best.get("full_name"), best.get("email"), best.get("phone")
+    if not (name or mail or ph):
+        return None
+
+    person = await resolve_person(
+        session, organisation_id=deal.organisation_id,
+        marketing_club_id=deal.marketing_club_id,
+        full_name=name or "Club contact", email=mail, phone=ph)
+    if set_poc:
+        return await set_point_of_contact(session, deal.id, person.id)
+    return await link_deal_contact(session, deal.id, person.id)
+
+
 async def clubs_by_ids(session: AsyncSession, club_ids) -> dict:
     """marketing_club_id -> MarketingClub, for the set of ids actually
     referenced by a batch of deals — avoids an N+1 query per deal when
@@ -1852,7 +1947,14 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
         deal.updated_at = func.now()
 
     if person_id:
-        await link_deal_contact(session, deal.id, person_id)
+        # On a brand-new deal, the first known contact is naturally its point
+        # of contact (so the pipeline card shows a name/email, not just the
+        # deal's Contacts list). On an existing deal, only link — never demote
+        # a point of contact a super admin may have set by hand.
+        if existing is None:
+            await set_point_of_contact(session, deal.id, person_id)
+        else:
+            await link_deal_contact(session, deal.id, person_id)
     return deal
 
 
@@ -1957,6 +2059,8 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
             deal = await sync_platform_deal_for_club(
                 session, club, stage_key="target", source="engagement",
                 module_keys=_DEFAULT_DEAL_MODULES)
+            # Seed the deal's contact from the club's best-known contact, if any.
+            await ensure_deal_contact(session, deal)
             await log_activity(
                 session, deal_id=deal.id, type="system",
                 body=f"Auto-added to pipeline (Target): engagement score {score}")
@@ -2359,11 +2463,19 @@ async def sync_self_serve_trial_registration(*, org_id, org_name: str, contact_n
     from app.services.twenty_sync import _resolve_self_serve_club
     try:
         async with async_session_maker() as session:
-            club, _contact = await _resolve_self_serve_club(
+            club, contact = await _resolve_self_serve_club(
                 session, org_id=org_id, org_name=org_name, contact_name=contact_name,
                 email=email, phone=phone)
             deal = await sync_self_serve_trial_deal(
                 session, club, lead_source=lead_source_from_attribution(attribution))
+            if deal is not None:
+                # Link the registering admin as the deal's point of contact —
+                # without this the deal card's Contact Name/Email/Mobile is
+                # empty even though the registration supplied all three.
+                await ensure_deal_contact(
+                    session, deal,
+                    full_name=contact_name or (contact.full_name if contact else "") or org_name,
+                    email=email, phone=phone)
             await session.commit()
             return {"deal_id": str(deal.id)} if deal else {"skipped": "no trial stage"}
     except Exception:  # noqa: BLE001 - a CRM hiccup can't undo the registration that already committed

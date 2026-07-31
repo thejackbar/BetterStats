@@ -1223,15 +1223,19 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
             from app.services import crm_rules
             from app.services.crm import (
                 ensure_platform_pipeline, sync_platform_deal_for_club, sync_engagement_promotion,
+                ensure_deal_contact,
             )
             trigger = "trial_started" if (added_trial or became_in_trial) else "trial_requested"
             pipeline = await ensure_platform_pipeline(session)
             match = await crm_rules.resolve(session, pipeline, trigger)
             if match is not None:
                 deal_modules = sorted(set(club.trial_modules or []) | set(added_modules))
-                await sync_platform_deal_for_club(
+                deal = await sync_platform_deal_for_club(
                     session, club, stage_key=match["stage_key"], source="auto_trial",
                     module_keys=deal_modules, advance_only=not match["force"])
+                # Seed the deal's contact from the club's best-known contact if
+                # it doesn't already have one (no-op otherwise).
+                await ensure_deal_contact(session, deal)
             # Also check the score-based promotion right now, independent of
             # whether Twenty is configured — harmless no-op once the deal above
             # is already past Engaged (trial always is), but keeps this call
@@ -1328,9 +1332,10 @@ async def push_clubs_to_crm(session: AsyncSession, filters: Optional[dict] = Non
             continue
         try:
             modules = sorted(set(club.trial_modules or []) | set(club.requested_trial_modules or []))
-            await crm_service.sync_platform_deal_for_club(
+            deal = await crm_service.sync_platform_deal_for_club(
                 session, club, stage_key=stage_key, source="manual",
                 module_keys=modules, advance_only=False)
+            await crm_service.ensure_deal_contact(session, deal)
             await session.commit()
             pushed += 1
         except Exception:  # noqa: BLE001 - one bad club can't stop the rest
