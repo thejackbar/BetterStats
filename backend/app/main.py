@@ -3891,6 +3891,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE crm_stages ADD COLUMN IF NOT EXISTS hidden_from_board BOOLEAN NOT NULL DEFAULT false"
         ))
+    # Persist the "Minimize this column" board preference per stage (mirrors
+    # hidden_from_board), so a collapsed column stays collapsed across sessions.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE crm_stages ADD COLUMN IF NOT EXISTS minimized BOOLEAN NOT NULL DEFAULT false"
+        ))
 
     # Migration 184: CRM deal onboarding method, lead source, discretionary discount.
     async with engine.begin() as conn:

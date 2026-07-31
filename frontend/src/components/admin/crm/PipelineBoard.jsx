@@ -36,12 +36,6 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
   const toast = useToast()
   const [draggingId, setDraggingId] = useState(null)
   const [overStageId, setOverStageId] = useState(null)
-  // Client-side only — "minimize" just narrows a column out of the way
-  // visually, it doesn't hide it from the board (that's the separate,
-  // persisted hidden_from_board flag below, still used for a stage nobody
-  // wants on the board at all). Not persisted on purpose: a per-viewer
-  // "get this out of my way for now" preference, not shared board state.
-  const [minimized, setMinimized] = useState(() => new Set())
   if (!board) return null
   const { stages, totals } = board
   const visibleStages = stages.filter(s => !s.hidden_from_board)
@@ -70,12 +64,15 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
     } catch (e) { toast.error(e.message || 'Could not update the stage') }
   }
 
-  const toggleMinimized = (stageId) => {
-    setMinimized(prev => {
-      const next = new Set(prev)
-      if (next.has(stageId)) next.delete(stageId); else next.add(stageId)
-      return next
-    })
+  // "Minimize this column" is now persisted per stage (like hidden_from_board
+  // above), so a collapsed column stays collapsed across sessions rather than
+  // resetting on every reload.
+  const setMinimized = async (stageId, minimized) => {
+    if (!client?.updateStage) return
+    try {
+      await client.updateStage(stageId, { minimized })
+      onMoved?.()
+    } catch (e) { toast.error(e.message || 'Could not update the stage') }
   }
 
   return (
@@ -108,14 +105,14 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
 
       <div className="flex gap-3 overflow-x-auto pb-2 items-stretch">
         {visibleStages.map(stage => {
-          const isMin = minimized.has(stage.id)
+          const isMin = !!stage.minimized
           if (isMin) {
             return (
               <div key={stage.id} className="w-9 shrink-0"
                 onDragOver={e => { if (draggingId) { e.preventDefault(); setOverStageId(stage.id) } }}
                 onDragLeave={() => setOverStageId(id => (id === stage.id ? null : id))}
                 onDrop={e => { e.preventDefault(); drop(stage.id) }}>
-                <button onClick={() => toggleMinimized(stage.id)} title={`Expand ${stage.name}`}
+                <button onClick={() => setMinimized(stage.id, false)} title={`Expand ${stage.name}`}
                   className={`w-full h-full pb-card px-1 py-2.5 flex flex-col items-center gap-2 hover:border-pb-accent/40 transition ${
                     overStageId === stage.id ? 'ring-2 ring-pb-accent/50 bg-pb-accent/5' : ''}`}>
                   <span className="text-pb-faint text-[13px] leading-none">›</span>
@@ -141,7 +138,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 <span className="font-mono text-[10px] text-pb-faintest" title="Stage default probability">
                   {stage.default_probability}%
                 </span>
-                <button onClick={() => toggleMinimized(stage.id)} title="Minimize this column"
+                <button onClick={() => setMinimized(stage.id, true)} title="Minimize this column"
                   className="text-pb-faintest hover:text-pb-accent text-[13px] leading-none px-0.5">‹</button>
               </div>
             </div>
