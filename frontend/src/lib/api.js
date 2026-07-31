@@ -1,10 +1,24 @@
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
+// Shown while the backend is briefly unavailable (e.g. during a deploy, when
+// nginx can't reach the backend and would otherwise surface a raw
+// "Bad Gateway"/"Service Unavailable"). Keep this friendly and reassuring.
+const BACKEND_DOWN_MESSAGE = 'System refreshing. Please wait a moment…'
+
+// A gateway/unavailable status means the backend is down, not a real app error.
+// Its statusText ("Bad Gateway" etc.) should never reach the user.
+function statusMessage(res) {
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    return BACKEND_DOWN_MESSAGE
+  }
+  return res.statusText
+}
+
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
   const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    const err = await res.json().catch(() => ({ detail: statusMessage(res) }))
     let detail
     if (Array.isArray(err.detail)) {
       detail = err.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
@@ -721,7 +735,7 @@ export const api = {
       method: 'POST', body: form, credentials: 'include',
     }).then(async res => {
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        const err = await res.json().catch(() => ({ detail: statusMessage(res) }))
         throw new Error(typeof err.detail === 'string' ? err.detail : `HTTP ${res.status}`)
       }
       return res.json()
