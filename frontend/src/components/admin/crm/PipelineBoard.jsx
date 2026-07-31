@@ -190,16 +190,26 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 // is the min over trial_days_remaining, so non-null ⇒ a live
                 // module trial exists.
                 const isTrialing = deal.min_trial_days_remaining != null
-                // A super admin can also register a trial at the prospect level
-                // (Club Directory sales-state) with no onboarded module trial /
-                // countdown — prospect_trial catches those so they still get a
-                // (staff) hourglass. Always staff-set, never self-serve.
-                const isProspectTrial = !!deal.prospect_trial
-                const showTrialBadge = !isSubscriber && (isTrialing || isProspectTrial)
-                // A self-serve trial (the club registered itself) is stamped
-                // onboarding_method='self_serve_trial'; a trial a BetterCricket
-                // admin set up leaves it unset. Drives bright vs pale hourglass.
-                const isSelfServeTrial = deal.onboarding_method === 'self_serve_trial'
+                // The hourglass reflects that the DEAL is a trial — shown when
+                // ANY of these say so, independent of whether a module-trial
+                // countdown exists (many staff-set trials have none, which is
+                // why they previously showed no badge):
+                //   - onboarding method is a trial (self-serve OR super-admin),
+                //   - the deal sits in a Trial stage ('trial' or
+                //     'self_serve_trial'),
+                //   - a live module-trial countdown (min_trial_days_remaining),
+                //   - a prospect-level Club Directory trial (prospect_trial).
+                const method = deal.onboarding_method
+                const inTrialStage = deal.stage_key === 'trial' || deal.stage_key === 'self_serve_trial'
+                const showTrialBadge = !isSubscriber && (
+                  method === 'self_serve_trial' || method === 'super_admin_trial' ||
+                  inTrialStage || isTrialing || !!deal.prospect_trial)
+                // Bright amber = the club self-registered its trial; pale amber
+                // = a BetterCricket admin set it up. Self-serve is signalled by
+                // the method (or the Self-Serve Trial stage when the method is
+                // unset); everything else reads as staff-set.
+                const isSelfServeTrial = method === 'self_serve_trial'
+                  || (!method && deal.stage_key === 'self_serve_trial')
                 // Onboarded-club context line (state + seasons/grades/players
                 // + setup progress + active-since), shown once a club is a
                 // subscriber or on trial — mirrors the All Clubs detail line.
