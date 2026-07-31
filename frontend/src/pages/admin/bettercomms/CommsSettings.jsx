@@ -27,6 +27,8 @@ export default function CommsSettings() {
   const [fromLocal, setFromLocal] = useState('')
   const [replyTo, setReplyTo] = useState('')
   const [footer, setFooter] = useState('')
+  const [autoRemove, setAutoRemove] = useState(true)
+  const [autoRemoveBusy, setAutoRemoveBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [saving, setSaving] = useState(false)
   const [suppressions, setSuppressions] = useState(null)
@@ -46,6 +48,7 @@ export default function CommsSettings() {
       setFromLocal(d.from_local || '')
       setReplyTo(d.reply_to || '')
       setFooter(d.sender_footer || '')
+      setAutoRemove(d.auto_remove_unsubscribed !== false)
     }).catch(e => setMsg({ kind: 'error', text: e.message }))
     api.commsListSuppressions().then(setSuppressions).catch(() => setSuppressions([]))
     // Super-admin only; a 403 for club admins just leaves the panel hidden.
@@ -100,6 +103,21 @@ export default function CommsSettings() {
       setSuppressions(list => (list || []).filter(r => r.email !== email))
       setMsg({ kind: 'ok', text: `${email} can be emailed again.` })
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
+  }
+
+  // Standalone toggle — saved on change (it lives near the top of the page, well
+  // above the main Save button, so it persists itself rather than waiting on it).
+  const toggleAutoRemove = async (next) => {
+    setAutoRemove(next); setAutoRemoveBusy(true); setMsg(null)
+    try {
+      await api.commsSetSettings({ auto_remove_unsubscribed: next })
+      setMsg({ kind: 'ok', text: next
+        ? 'On — unsubscribed and bounced contacts will be removed from all lists automatically.'
+        : 'Off — unsubscribed and bounced contacts stay on their lists (they\'re still skipped when sending).' })
+    } catch (e) {
+      setAutoRemove(!next)  // revert on failure
+      setMsg({ kind: 'error', text: e.message })
+    } finally { setAutoRemoveBusy(false) }
   }
 
   const save = async () => {
@@ -257,6 +275,22 @@ export default function CommsSettings() {
             </div>
           </div>
         )}
+
+        {/* Auto-remove unsubscribed/bounced contacts from all lists */}
+        <div className="pb-card p-4 mb-4">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" className="accent-pb-accent mt-0.5" checked={autoRemove}
+              disabled={autoRemoveBusy} onChange={e => toggleAutoRemove(e.target.checked)} />
+            <span>
+              <span className="text-sm text-pb-text font-medium">Auto-Remove Unsubscribed/Bounced Contacts from all Lists</span>
+              <span className="block text-pb-faintest text-xs mt-1 leading-relaxed">
+                When on, a contact that unsubscribes or is bounced / marks spam is removed from every
+                list it's on, so your lists only hold contactable people. They're always skipped when
+                sending regardless — this just keeps the lists themselves tidy.
+              </span>
+            </span>
+          </label>
+        </div>
 
         {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
         {isPlatform && (

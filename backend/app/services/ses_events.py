@@ -35,6 +35,7 @@ from app.models.db import EmailEvent, CommsContact, CommsRecipient, CommsCampaig
 from app.services.email_suppression import add_suppression
 from app.services import twenty_sync
 from app.services import ses_tenants
+from app.services import comms_lists
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,10 @@ async def _record(session: AsyncSession, etype: str, subtype, reason,
         await session.execute(
             update(CommsContact).where(func.lower(CommsContact.email) == e)
             .values(bounced=True, bounced_at=func.now()))
+        # Drop the dead address from every static list, for each club that has
+        # auto-remove enabled (a hard bounce is a fact about the mailbox, so it
+        # reaches every club that holds it).
+        await comms_lists.auto_remove_from_all_lists(session, email=e)
     elif complaint:
         # A spam complaint — global suppression; flag the sending club (if known)
         # and stop sending them marketing there.
@@ -275,6 +280,10 @@ async def _record(session: AsyncSession, etype: str, subtype, reason,
         await session.execute(q.values(
             complained=True, complained_at=func.now(),
             subscribed=False, unsubscribed_at=func.now()))
+        # Drop them from every static list too (scoped to the sending club when
+        # known, matching the subscribed flip above), if auto-remove is enabled.
+        await comms_lists.auto_remove_from_all_lists(
+            session, email=e, organisation_id=org_id)
 
     if rec is not None:
         if hard or complaint or etype == "reject":

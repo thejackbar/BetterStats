@@ -120,6 +120,17 @@ export default function CommsContacts() {
     run('bulkdel', async () => { const r = await api.commsBulkDeleteContacts([...selected]); clearSelection(); return r },
       r => `Deleted ${r.deleted} contact${r.deleted === 1 ? '' : 's'}.`)
   }
+  // Unsubscribed contacts in the current result set. When "Select all" is ticked
+  // and there's at least one, offer a one-click "Remove from all lists" — it drops
+  // those contacts from every static list (the contacts themselves are kept).
+  const unsubInResultSet = useMemo(() => visible.filter(c => c.subscribed === false), [visible])
+  const removeFromAllLists = () => {
+    const ids = unsubInResultSet.map(c => c.id)
+    if (!ids.length) return
+    if (!window.confirm(`Remove ${ids.length} unsubscribed contact${ids.length === 1 ? '' : 's'} from every list they're on? The contact${ids.length === 1 ? '' : 's'} will be kept, just taken off all lists.`)) return
+    run('rmlists', async () => { const r = await api.commsRemoveContactsFromAllLists(ids); return r },
+      r => `Removed ${r.contacts} contact${r.contacts === 1 ? '' : 's'} from all lists.`)
+  }
   // Drop any ticked ids that are no longer in the loaded set (e.g. after a delete).
   useEffect(() => {
     const present = new Set((data.contacts || []).map(c => c.id))
@@ -268,6 +279,12 @@ export default function CommsContacts() {
                 className="px-2.5 py-1.5 rounded text-xs font-medium border border-pb-red/40 text-pb-red hover:bg-pb-red/10 disabled:opacity-50">
                 {busy === 'bulkdel' ? 'Deleting…' : `Delete selected (${selected.size})`}
               </button>
+              {allShownSelected && unsubInResultSet.length > 0 && (
+                <button onClick={removeFromAllLists} disabled={busy === 'rmlists'}
+                  className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50">
+                  {busy === 'rmlists' ? 'Removing…' : `Remove from all lists (${unsubInResultSet.length})`}
+                </button>
+              )}
               <button onClick={clearSelection} className="text-xs text-pb-faint hover:text-pb-text">Clear selection</button>
             </>
           )}
