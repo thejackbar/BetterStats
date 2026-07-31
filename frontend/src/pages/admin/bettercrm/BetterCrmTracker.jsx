@@ -13,6 +13,7 @@ const clubClient = {
   getDeal: api.crmGetDeal,
   updateDeal: api.crmUpdateDeal,
   moveStage: api.crmMoveDealStage,
+  updateStage: api.crmUpdateStage,
   closeDeal: api.crmCloseDeal,
   archiveDeal: api.crmArchiveDeal,
   listActivities: api.crmListActivities,

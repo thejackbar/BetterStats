@@ -174,6 +174,7 @@ class StageCreate(BaseModel):
     is_won: bool = False
     is_lost: bool = False
     hidden_from_board: bool = False
+    minimized: bool = False
 
 
 class StageUpdate(BaseModel):
@@ -183,6 +184,7 @@ class StageUpdate(BaseModel):
     is_lost: Optional[bool] = None
     position: Optional[int] = None
     hidden_from_board: Optional[bool] = None
+    minimized: Optional[bool] = None
 
 
 # ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -388,7 +390,8 @@ async def club_add_stage(pipeline_id: str, body: StageCreate, club: Organisation
                          db: AsyncSession = Depends(get_db)):
     pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
     await crm_service.add_stage(db, pipeline, name=body.name, default_probability=body.default_probability,
-                                is_won=body.is_won, is_lost=body.is_lost, hidden_from_board=body.hidden_from_board)
+                                is_won=body.is_won, is_lost=body.is_lost, hidden_from_board=body.hidden_from_board,
+                                minimized=body.minimized)
     await db.commit()
     pipeline = await _pipeline_or_404(db, club.id, pipeline_id)
     return {"stages": crm_service.stage_dicts(pipeline)}
@@ -402,7 +405,7 @@ async def club_update_stage(stage_id: str, body: StageUpdate, club: Organisation
     await db.commit()
     return {"id": str(stage.id), "key": stage.key, "name": stage.name, "position": stage.position,
             "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost,
-            "hidden_from_board": stage.hidden_from_board}
+            "hidden_from_board": stage.hidden_from_board, "minimized": stage.minimized}
 
 
 @router.delete("/stages/{stage_id}", dependencies=[_require])
@@ -622,7 +625,8 @@ async def super_stages(db: AsyncSession = Depends(get_db)):
 async def super_add_stage(body: StageCreate, db: AsyncSession = Depends(get_db)):
     pipeline = await crm_service.ensure_platform_pipeline(db)
     await crm_service.add_stage(db, pipeline, name=body.name, default_probability=body.default_probability,
-                                is_won=body.is_won, is_lost=body.is_lost, hidden_from_board=body.hidden_from_board)
+                                is_won=body.is_won, is_lost=body.is_lost, hidden_from_board=body.hidden_from_board,
+                                minimized=body.minimized)
     await db.commit()
     pipeline = await crm_service.ensure_platform_pipeline(db)
     return {"stages": crm_service.stage_dicts(pipeline)}
@@ -635,7 +639,7 @@ async def super_update_stage(stage_id: str, body: StageUpdate, db: AsyncSession 
     await db.commit()
     return {"id": str(stage.id), "key": stage.key, "name": stage.name, "position": stage.position,
             "default_probability": stage.default_probability, "is_won": stage.is_won, "is_lost": stage.is_lost,
-            "hidden_from_board": stage.hidden_from_board}
+            "hidden_from_board": stage.hidden_from_board, "minimized": stage.minimized}
 
 
 @super_router.delete("/stages/{stage_id}", dependencies=[_super])

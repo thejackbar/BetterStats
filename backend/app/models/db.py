@@ -3961,6 +3961,11 @@ class CrmStage(Base):
     # the stage — a deal can still be filed into/out of it via the Stage
     # dropdown, which always lists every stage regardless of this flag.
     hidden_from_board = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Collapse a stage's column to a thin strip on the board (the "Minimize this
+    # column" control). Persisted per stage like hidden_from_board so the
+    # preference survives across sessions, rather than being a throwaway
+    # per-page-view toggle.
+    minimized = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
