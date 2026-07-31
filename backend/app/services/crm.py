@@ -1140,7 +1140,7 @@ async def ensure_deal_contact(session: AsyncSession, deal: CrmDeal, *,
     person = await resolve_person(
         session, organisation_id=deal.organisation_id,
         marketing_club_id=deal.marketing_club_id,
-        full_name=name or "Club contact", email=mail, phone=ph)
+        full_name=name or "Committee Members", email=mail, phone=ph)
     if set_poc:
         return await set_point_of_contact(session, deal.id, person.id)
     return await link_deal_contact(session, deal.id, person.id)
