@@ -2609,6 +2609,8 @@ export const api = {
   commsUpdateTemplate: (id, name, html) =>
     request(`/club-admin/comms/templates/${id}`, { method: 'PUT', body: JSON.stringify({ name, html }) }),
   commsDeleteTemplate: (id) => request(`/club-admin/comms/templates/${id}`, { method: 'DELETE' }),
+  commsDuplicateTemplate: (id) =>
+    request(`/club-admin/comms/templates/${id}/duplicate`, { method: 'POST' }),
   commsPreviewTemplate: (html, utm) =>
     request('/club-admin/comms/templates/preview', { method: 'POST', body: JSON.stringify({ html, utm }) }),
 
