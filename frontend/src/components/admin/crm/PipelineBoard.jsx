@@ -10,7 +10,7 @@ const BETTERSTATS_LOGO = moduleBrand('stats').logo
 // trial, a pale/greyed amber for a trial a BetterCricket admin set up for the
 // club. Same hourglass glyph either way; the colour carries the origin.
 const TRIAL_AMBER = '#F59E0B'
-const TRIAL_AMBER_MUTED = '#ad9049'
+const TRIAL_AMBER_MUTED = '#a6a39c'
 
 export const TIER_TONE = { HOT: 'red', WARM: 'amber', COLD: 'faint', NOT_INTERESTED: 'faint' }
 
@@ -190,6 +190,12 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 // is the min over trial_days_remaining, so non-null ⇒ a live
                 // module trial exists.
                 const isTrialing = deal.min_trial_days_remaining != null
+                // A super admin can also register a trial at the prospect level
+                // (Club Directory sales-state) with no onboarded module trial /
+                // countdown — prospect_trial catches those so they still get a
+                // (staff) hourglass. Always staff-set, never self-serve.
+                const isProspectTrial = !!deal.prospect_trial
+                const showTrialBadge = !isSubscriber && (isTrialing || isProspectTrial)
                 // A self-serve trial (the club registered itself) is stamped
                 // onboarding_method='self_serve_trial'; a trial a BetterCricket
                 // admin set up leaves it unset. Drives bright vs pale hourglass.
@@ -212,12 +218,12 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   onDragEnd={() => { setDraggingId(null); setOverStageId(null) }}
                   onClick={() => onOpenDeal(deal.id)}
                   className={`pb-card w-full text-left px-3 py-2.5 hover:border-pb-accent/40 transition cursor-pointer relative ${
-                    (isSubscriber || isTrialing) ? 'pr-7' : ''} ${
+                    (isSubscriber || showTrialBadge) ? 'pr-7' : ''} ${
                     deal.status !== 'open' ? 'opacity-60' : ''} ${draggingId === deal.id ? 'opacity-40' : ''}`}>
                   {isSubscriber ? (
                     <img src={BETTERSTATS_LOGO} alt="" title="Subscribed to a BetterCricket module"
                       className="absolute top-2 right-2 w-4 h-4 rounded shrink-0" />
-                  ) : isTrialing && (
+                  ) : showTrialBadge && (
                     <span title={isSelfServeTrial
                         ? 'Self-serve trial (club registered itself)'
                         : 'Trial set up by a BetterCricket admin'}

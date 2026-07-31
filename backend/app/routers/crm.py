@@ -731,6 +731,14 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         row["trial_days_remaining"] = trial_days
         row["min_trial_days_remaining"] = min(trial_days.values()) if trial_days else None
         row["subscribed_modules"] = (subscribed_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or []
+        # A super-admin-registered trial set in the Club Directory sales-state
+        # (marketing_clubs.trial_modules / demo_status='in_trial') — no
+        # automated source, so it's always staff-set. Unlike an onboarded
+        # module trial it has no OrgModuleSubscription countdown, so
+        # min_trial_days_remaining is null and it would otherwise show no trial
+        # badge at all. Surfaced so the card can still flag it as on-trial.
+        row["prospect_trial"] = bool(
+            club and ((club.trial_modules or []) or club.demo_status == "in_trial"))
         # Onboarded-club facts (seasons/grades/players/setup/active-since) for
         # the Kanban card's state line — only present for a linked, onboarded
         # club (a subscriber or trialing club); absent for a bare prospect.
