@@ -740,6 +740,57 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     return {"deals": out}
 
 
+# ─── Create a BetterComms List from the current deal result set ────────────────
+# The board/list "Create List" button turns the visible (filtered) deals into an
+# auto-generated BetterComms List in the marketing-outreach org, one contact per
+# deal. Two steps: /list-export/prepare resolves + matches each deal's contact
+# and returns anything the operator must resolve by hand; /list-export/commit
+# creates the list and populates it. See services/crm_list_export.py.
+class ListExportPrepareBody(BaseModel):
+    deal_ids: List[str] = []
+
+
+class ListExportResolution(BaseModel):
+    club_id: Optional[str] = None
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    name: Optional[str] = None
+
+
+class ListExportCommitBody(BaseModel):
+    name: str
+    matched_contact_ids: List[str] = []
+    resolutions: List[ListExportResolution] = []
+
+
+@super_router.post("/list-export/prepare", dependencies=[_super])
+async def super_list_export_prepare(body: ListExportPrepareBody,
+                                    db: AsyncSession = Depends(get_db)):
+    from app.services import crm_list_export
+    result = await crm_list_export.prepare_list_from_deals(db, body.deal_ids)
+    if result.get("error"):
+        raise HTTPException(status_code=409, detail=result.get("detail") or result["error"])
+    return result
+
+
+@super_router.post("/list-export/commit", dependencies=[_super])
+async def super_list_export_commit(body: ListExportCommitBody,
+                                   db: AsyncSession = Depends(get_db)):
+    from app.services import crm_list_export
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A list name is required")
+    result = await crm_list_export.commit_list_from_deals(
+        db, name=name,
+        matched_contact_ids=body.matched_contact_ids,
+        resolutions=[r.model_dump() for r in body.resolutions],
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=409, detail=result.get("detail") or result["error"])
+    return result
+
+
 # ─── Manual full engagement recompute (the "Recalculate" board button) ────────
 # Runs the SAME logic as `python -m app.scripts.recalc_engagement`: recompute and
 # re-cache every club's engagement score (twenty_sync._engagement, a local

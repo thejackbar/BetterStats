@@ -127,6 +127,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS active_club_id UUID "
             "REFERENCES organisations(id) ON DELETE SET NULL"
         ))
+        # Per-account UI preferences bag (migration 204) — persists a super
+        # admin's UI choices (e.g. CRM stage filter buttons) across sessions.
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_preferences "
+            "JSONB NOT NULL DEFAULT '{}'::jsonb"
+        ))
         # BetterSelect: player → selection-pool team assignment (migration 053).
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "
@@ -2022,6 +2028,13 @@ async def lifespan(app: FastAPI):
         """))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_comms_lists_org ON comms_lists(organisation_id)"))
+        # Manual vs auto-generated lists (migration 203) — the Lists page groups
+        # them into separate sections for super admins; auto lists are minted by
+        # other BetterCricket functions (e.g. the CRM Sales Pipeline).
+        await conn.execute(text(
+            "ALTER TABLE comms_lists ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'"))
+        await conn.execute(text(
+            "ALTER TABLE comms_lists ADD COLUMN IF NOT EXISTS origin TEXT"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS comms_list_members (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -44,6 +44,12 @@ class User(Base):
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
     last_notification_seen_at = Column(TIMESTAMP(timezone=True), nullable=True)
     last_seen_app_version = Column(Text, nullable=True)
+    # Per-account UI preferences (migration 204) — a small namespaced JSON bag
+    # so a super admin's UI choices survive across sessions and devices
+    # (localStorage is per-browser only). First consumer: the CRM Sales
+    # Pipeline stage filter buttons (namespace 'crm_stage_filters'). Read/
+    # merged via GET/PATCH /club-admin/account/ui-prefs.
+    ui_preferences = Column(JSONB, nullable=False, server_default="{}", default=dict)
     # Super admins (Better staff) manage every club, not just one. active_club_id
     # is the club they are currently "acting as" — every club-scoped request
     # resolves to it instead of their home membership club. NULL = act as the
@@ -3659,6 +3665,14 @@ class CommsList(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
+    # 'manual' = created by hand via the Lists page Create button; 'auto' =
+    # minted by another BetterCricket function (migration 203) — the first is
+    # the CRM Sales Pipeline "Create List" action. The Lists page groups the
+    # two into separate sections for super admins. `origin` is a short label
+    # for what generated an auto list (e.g. "CRM Sales Pipeline"), NULL for a
+    # manual one.
+    source = Column(Text, nullable=False, server_default="manual", default="manual")
+    origin = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

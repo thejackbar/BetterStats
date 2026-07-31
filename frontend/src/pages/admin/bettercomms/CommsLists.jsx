@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
@@ -332,7 +333,21 @@ function ListRow({ l, selected, onToggle, onDelete, onRenamed, first }) {
   )
 }
 
+// One card of list rows. Extracted so the manually-created and auto-generated
+// sections render identically.
+function ListsCard({ rows, selected, onToggle, onDelete, onRenamed }) {
+  return (
+    <div className="pb-card overflow-hidden mb-4">
+      {rows.map((l, i) => (
+        <ListRow key={l.id} l={l} first={i === 0} selected={selected?.id === l.id}
+          onToggle={onToggle} onDelete={onDelete} onRenamed={onRenamed} />
+      ))}
+    </div>
+  )
+}
+
 export default function CommsLists() {
+  const { user } = useAuth()
   const [lists, setLists] = useState(null)
   const [selected, setSelected] = useState(null)
   const [newName, setNewName] = useState('')
@@ -369,6 +384,13 @@ export default function CommsLists() {
 
   const toggle = (l) => setSelected(selected?.id === l.id ? null : l)
 
+  const manualLists = useMemo(() => (lists || []).filter(l => l.source !== 'auto'), [lists])
+  const autoLists = useMemo(() => (lists || []).filter(l => l.source === 'auto'), [lists])
+  // Split into two labelled sections for super admins, or whenever an
+  // auto-generated list exists (an ordinary club admin only ever has manual
+  // lists, so their page keeps the single flat list it always had).
+  const showSections = !!user?.can_switch_clubs || autoLists.length > 0
+
   return (
     <BetterCommsLayout title="Lists">
       {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
@@ -390,13 +412,28 @@ export default function CommsLists() {
         <div className="text-pb-faint text-sm">Loading…</div>
       ) : lists.length === 0 ? (
         <div className="text-pb-faintest text-sm">No lists yet.</div>
+      ) : !showSections ? (
+        <ListsCard rows={manualLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
       ) : (
-        <div className="pb-card overflow-hidden mb-4">
-          {lists.map((l, i) => (
-            <ListRow key={l.id} l={l} first={i === 0} selected={selected?.id === l.id}
-              onToggle={toggle} onDelete={del} onRenamed={rename} />
-          ))}
-        </div>
+        <>
+          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mb-2">Your lists</div>
+          {manualLists.length === 0 ? (
+            <div className="text-pb-faintest text-sm mb-4">No lists you've created by hand yet.</div>
+          ) : (
+            <ListsCard rows={manualLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
+          )}
+
+          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mt-6 mb-1">Auto-generated lists</div>
+          <div className="text-pb-faintest text-xs mb-2 max-w-2xl">
+            Lists built for you by other BetterCricket tools (for example the CRM Sales Pipeline "Create List"
+            action). Rename, manage or delete them like any other list.
+          </div>
+          {autoLists.length === 0 ? (
+            <div className="text-pb-faintest text-sm mb-4">Nothing here yet. Use a tool like the CRM Sales Pipeline to create one.</div>
+          ) : (
+            <ListsCard rows={autoLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
+          )}
+        </>
       )}
 
       {selected && <ListDetail list={selected} lists={lists || []} onChanged={load} />}

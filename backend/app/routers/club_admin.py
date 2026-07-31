@@ -2824,6 +2824,39 @@ async def get_account_plan(
     }
 
 
+# ─── Per-account UI preferences (migration 204) ──────────────────────────────
+# A small namespaced JSON bag on the user row so a super admin's UI choices
+# survive across sessions and devices (localStorage is per-browser only). Any
+# logged-in admin may read/write their OWN prefs; a namespace is an opaque
+# top-level key (e.g. 'crm_stage_filters'). The PATCH shallow-merges by
+# namespace — send {namespace: value} to set it, {namespace: null} to clear it.
+class UiPrefsPatch(BaseModel):
+    prefs: dict = {}
+
+
+@router.get("/account/ui-prefs")
+async def get_ui_prefs(current_user: User = Depends(get_current_user)):
+    return {"prefs": current_user.ui_preferences or {}}
+
+
+@router.patch("/account/ui-prefs")
+async def patch_ui_prefs(
+    data: UiPrefsPatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current = dict(current_user.ui_preferences or {})
+    for key, value in (data.prefs or {}).items():
+        if value is None:
+            current.pop(key, None)
+        else:
+            current[key] = value
+    # Reassign (not mutate) so SQLAlchemy detects the JSONB change.
+    current_user.ui_preferences = current
+    await db.commit()
+    return {"prefs": current}
+
+
 @router.post("/modules/{module_key}/start-trial")
 async def start_own_module_trial(
     module_key: str,
