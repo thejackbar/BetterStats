@@ -2971,6 +2971,43 @@ async def create_template(
     return _template_out(t, full=True)
 
 
+def _copy_name(base: str, existing: set[str]) -> str:
+    """Pick a unique "<base> - copy" name, bumping "(N)" until it's free."""
+    candidate = f"{base} - copy"
+    if candidate not in existing:
+        return candidate
+    n = 1
+    while f"{candidate} ({n})" in existing:
+        n += 1
+    return f"{candidate} ({n})"
+
+
+@router.post("/templates/{template_id}/duplicate")
+async def duplicate_template(
+    template_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    src = await _template_or_404(db, club, template_id)
+    existing = set((await db.execute(
+        select(CommsTemplate.name).where(CommsTemplate.organisation_id == club.id)
+    )).scalars().all())
+    t = CommsTemplate(
+        organisation_id=club.id,
+        name=_copy_name(src.name, existing),
+        html=src.html or "",
+    )
+    db.add(t)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A template with that name already exists")
+    await db.refresh(t)
+    return _template_out(t, full=True)
+
+
 async def _template_or_404(db: AsyncSession, club: Organisation, tid: str) -> CommsTemplate:
     try:
         u = uuid.UUID(tid)

@@ -158,9 +158,17 @@ export default function CommsTemplates() {
   // the list". Harmless on the very first mount, since editing is already null.
   useEffect(() => { setEditing(null) }, [location.key])
 
+  const [duplicatingId, setDuplicatingId] = useState(null)
+
   const openExisting = async (t) => {
     try { setEditing(await api.commsGetTemplate(t.id)) }
     catch (e) { setError(e.message) }
+  }
+  const duplicate = async (t) => {
+    setError(''); setDuplicatingId(t.id)
+    try { await api.commsDuplicateTemplate(t.id); load() }
+    catch (e) { setError(e.message) }
+    finally { setDuplicatingId(null) }
   }
   const onSaved = () => { setEditing(null); load() }
   const onDeleted = () => { setEditing(null); load() }
@@ -193,11 +201,19 @@ export default function CommsTemplates() {
       ) : (
         <div className="pb-card overflow-hidden">
           {templates.map((t, i) => (
-            <button key={t.id} onClick={() => openExisting(t)}
-              className={`w-full text-left flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <div className="text-pb-text text-sm truncate">{t.name}</div>
-              <span className="text-pb-faint text-xs shrink-0">Edit →</span>
-            </button>
+            <div key={t.id}
+              className={`flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
+              <button onClick={() => openExisting(t)} className="flex-1 text-left min-w-0">
+                <div className="text-pb-text text-sm truncate">{t.name}</div>
+              </button>
+              <div className="flex items-center gap-4 shrink-0">
+                <button onClick={() => duplicate(t)} disabled={duplicatingId === t.id}
+                  className="text-pb-faint text-xs hover:text-pb-text disabled:opacity-60">
+                  {duplicatingId === t.id ? 'Duplicating…' : 'Duplicate'}
+                </button>
+                <button onClick={() => openExisting(t)} className="text-pb-faint text-xs hover:text-pb-text">Edit →</button>
+              </div>
+            </div>
           ))}
         </div>
       )}
