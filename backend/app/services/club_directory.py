@@ -205,6 +205,44 @@ async def _link_existing_org(session: AsyncSession, club: MarketingClub) -> None
     club.existing_org_id = org_id
 
 
+async def link_org_to_marketing_club(session: AsyncSession, org) -> "Optional[MarketingClub]":
+    """The reverse of ``_link_existing_org``: given an already-onboarded
+    ``Organisation``, find the directory ``MarketingClub`` that represents it
+    and stamp its ``existing_org_id`` so the CRM/outreach can see it as a
+    customer. Match order mirrors ``_link_existing_org`` — PlayHQ routingCode,
+    then the CA org guid (``Organisation.id`` == ``grassroots_guid``), then an
+    exact case-insensitive name — and only ever links a club whose
+    ``existing_org_id`` is still NULL (never repoints one already tied to a
+    different org). Returns the linked (or already-linked) club, else None.
+
+    Why this exists: a self-serve registration links the club at signup
+    (``twenty_sync._resolve_self_serve_club``), but a club a super admin
+    onboards/syncs and then trials has its directory row left UNLINKED — so
+    ``trial_days_remaining_by_club`` / ``subscribed_modules_by_club`` (and
+    every CRM card badge that reads them: expired-trial state, the trial
+    hourglass) can't see the org's subscription at all. Caller commits."""
+    already = await session.scalar(
+        select(MarketingClub).where(MarketingClub.existing_org_id == org.id).limit(1))
+    if already is not None:
+        return already
+    club = None
+    if getattr(org, "playhq_id", None):
+        club = await session.scalar(select(MarketingClub).where(
+            MarketingClub.playhq_id == org.playhq_id,
+            MarketingClub.existing_org_id.is_(None)).limit(1))
+    if club is None:
+        club = await session.scalar(select(MarketingClub).where(
+            func.lower(MarketingClub.grassroots_guid) == str(org.id).lower(),
+            MarketingClub.existing_org_id.is_(None)).limit(1))
+    if club is None and org.name:
+        club = await session.scalar(select(MarketingClub).where(
+            func.lower(MarketingClub.name) == org.name.lower(),
+            MarketingClub.existing_org_id.is_(None)).limit(1))
+    if club is not None:
+        club.existing_org_id = org.id
+    return club
+
+
 async def _upsert_club(session: AsyncSession, org: dict) -> bool:
     """Insert or refresh one club from a search result. Returns True if newly
     inserted. Leaves ``associations`` untouched (NULL stays the enrichment

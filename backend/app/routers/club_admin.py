@@ -101,16 +101,24 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
         if not crm_trigger:
             return
         try:
-            from app.models.db import async_session_maker, MarketingClub
+            from app.models.db import async_session_maker
             from app.services import crm as crm_service, crm_rules
+            from app.services.club_directory import link_org_to_marketing_club
             async with async_session_maker() as session:
                 if crm_trigger == "subscription_cancelled":
                     held = await _org_billable_module_keys(session, org_id)
                     if held:
                         return
-                mc = (await session.execute(
-                    select(MarketingClub).where(MarketingClub.existing_org_id == org_id)
-                )).scalar_one_or_none()
+                org = await session.get(Organisation, org_id,
+                                        options=[selectinload(Organisation.module_subscriptions)])
+                if org is None:
+                    return
+                # A super-admin-onboarded club's directory row is often left
+                # unlinked (only self-serve links it at signup). Link it now, so
+                # the deal's card can see this org's subscription/trial state —
+                # without this the trial event below finds no deal to advance and
+                # the card shows neither an expired-trial badge nor an hourglass.
+                mc = await link_org_to_marketing_club(session, org)
                 if mc is None:
                     return
                 pipeline = await crm_service.ensure_platform_pipeline(session)
@@ -126,8 +134,6 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                 # change is exactly the kind of discrete event that shouldn't wait
                 # for the sweep. Harmless no-op once the deal above is already past
                 # Engaged (e.g. a trial_started rule's own move to Trial).
-                org = await session.get(Organisation, org_id,
-                                        options=[selectinload(Organisation.module_subscriptions)])
                 await crm_service.sync_engagement_promotion(session, mc, org)
                 await session.commit()
         except Exception:
