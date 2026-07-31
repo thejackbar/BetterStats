@@ -433,7 +433,7 @@ function buildBoard(stages, deals) {
     return {
       id: stage.id, key: stage.key, name: stage.name, position: stage.position,
       default_probability: stage.default_probability, is_won: stage.is_won, is_lost: stage.is_lost,
-      hidden_from_board: stage.hidden_from_board,
+      hidden_from_board: stage.hidden_from_board, minimized: stage.minimized,
       deal_count: stageDeals.length, value_cents: stageValue, weighted_value_cents: stageWeighted,
       deals: stageDeals,
     }
