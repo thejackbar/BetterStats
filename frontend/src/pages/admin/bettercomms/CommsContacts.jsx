@@ -4,7 +4,7 @@ import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, emptyFilters, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
   emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
-  matchesUnsubscribed, UnsubscribedToggle } from './audience'
+  matchesUnsubscribed, UnsubscribedToggle, unsubscribedTitle } from './audience'
 
 function Stat({ label, value, tone }) {
   return (
@@ -325,6 +325,7 @@ export default function CommsContacts() {
                 {c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Excluded from outreach by BetterCricket">excluded</span>}
                 {c.suppressed && !c.bounced && !c.complained && !c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Globally suppressed">supp</span>}
                 <button onClick={() => toggleSub(c)} disabled={busy === `t${c.id}`}
+                  title={c.subscribed ? undefined : (unsubscribedTitle(c) || undefined)}
                   className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 disabled:opacity-50 ${
                     c.subscribed ? 'text-green-500 border-green-500/40' : 'text-pb-faint border-pb-faint/30'}`}>
                   {c.subscribed ? 'subscribed' : 'unsubscribed'}
@@ -418,7 +419,7 @@ export function ContactDetailModal({ id, onClose, onSaved }) {
               <div className="text-sm text-pb-text mb-1">{d.email}</div>
               <div className="flex flex-wrap gap-1.5 mb-4">
                 <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">{d.source}</span>
-                <span className={`font-mono text-[9px] uppercase tracking-wide2 border rounded px-1.5 py-0.5 ${d.subscribed ? 'text-green-500 border-green-500/40' : 'text-pb-faint border-pb-faint/30'}`}>{d.subscribed ? 'subscribed' : 'unsubscribed'}</span>
+                <span title={d.subscribed ? undefined : (unsubscribedTitle(d) || undefined)} className={`font-mono text-[9px] uppercase tracking-wide2 border rounded px-1.5 py-0.5 ${d.subscribed ? 'text-green-500 border-green-500/40' : 'text-pb-faint border-pb-faint/30'}`}>{d.subscribed ? 'subscribed' : 'unsubscribed'}</span>
                 {d.bounced && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">bounced</span>}
                 {d.complained && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">complaint</span>}
                 {d.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">excluded</span>}

@@ -5,7 +5,7 @@ import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
   emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
-  matchesUnsubscribed, UnsubscribedToggle } from './audience'
+  matchesUnsubscribed, UnsubscribedToggle, unsubscribedTitle } from './audience'
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -64,7 +64,7 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
           <span className="text-pb-faintest text-[11px] ml-2 truncate">{[c.club, c.state].filter(Boolean).join(' · ')}</span>
         )}
       </button>
-      {c.subscribed === false && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint border border-pb-faint/30 rounded px-1.5 py-0.5 shrink-0" title="Unsubscribed">unsubscribed</span>}
+      {c.subscribed === false && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint border border-pb-faint/30 rounded px-1.5 py-0.5 shrink-0" title={unsubscribedTitle(c) || 'Unsubscribed'}>unsubscribed</span>}
       {c.suppressed && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5 shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded">supp</span>}
       {action}
     </div>

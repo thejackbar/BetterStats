@@ -128,6 +128,26 @@ export function matchesUnsubscribed(c, mode) {
   if (mode === 'subscribed') return c.subscribed !== false
   return true
 }
+// Hover text for an unsubscribed contact's badge. Prefers the unsubscribe moment
+// ("Unsubscribed on …"); if we don't have that but the address hard-bounced, show
+// the bounce moment instead ("Bounced on …"). Returns '' when we know neither, so
+// callers can leave the title off rather than show an empty tooltip.
+export function unsubscribedTitle(c) {
+  if (c.unsubscribed_at) return `Unsubscribed on ${formatDateTime(c.unsubscribed_at)}`
+  if (c.bounced && c.bounced_at) return `Bounced on ${formatDateTime(c.bounced_at)}`
+  return ''
+}
+
+// dd Mmm yyyy hh:mm in the browser's local time, e.g. "3 Aug 2026 14:07".
+function formatDateTime(iso) {
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  const day = d.getDate()
+  const month = d.toLocaleString('en-AU', { month: 'short' })
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${day} ${month} ${d.getFullYear()} ${hh}:${mm}`
+}
 export function UnsubscribedToggle({ value, onChange }) {
   const opts = [['all', 'All'], ['subscribed', 'Subscribed'], ['unsubscribed', 'Unsubscribed']]
   return (

@@ -171,6 +171,10 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
         "source": c.source,
         "subscribed": c.subscribed,
         "bounced": c.bounced,
+        # When the address unsubscribed / hard-bounced (nullable — we don't always
+        # have the moment). Powers the "Unsubscribed on …" / "Bounced on …" hover.
+        "unsubscribed_at": c.unsubscribed_at.isoformat() if c.unsubscribed_at else None,
+        "bounced_at": c.bounced_at.isoformat() if c.bounced_at else None,
         "complained": complained,
         "excluded": c.excluded,
         # True if the address can't receive a send: bounced / complaint / admin
@@ -2202,6 +2206,8 @@ async def get_contact(
     return {
         "id": str(c.id), "email": c.email, "name": c.name, "source": c.source,
         "subscribed": c.subscribed, "bounced": c.bounced,
+        "unsubscribed_at": c.unsubscribed_at.isoformat() if c.unsubscribed_at else None,
+        "bounced_at": c.bounced_at.isoformat() if c.bounced_at else None,
         "complained": getattr(c, "complained", False), "excluded": c.excluded,
         "tags": c.tags or [],
         "marketing_club": ({
