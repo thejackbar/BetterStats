@@ -34,7 +34,7 @@ function initRow(u) {
   return { ...u, mode, first, last, email }
 }
 
-export default function CreateListModal({ open, onClose, deals, defaultName = '' }) {
+export default function CreateListModal({ open, onClose, deals, defaultName = '', filterSummary = [] }) {
   const toast = useToast()
   const [step, setStep] = useState('name')
   const [name, setName] = useState(defaultName)
@@ -141,8 +141,12 @@ export default function CreateListModal({ open, onClose, deals, defaultName = ''
     footer = <Btn variant="primary" sm onClick={close}>Done</Btn>
   }
 
+  const missingContact = (d) => !(d.point_of_contact_name || '').trim()
+  const missingEmail = (d) => !validEmail(d.point_of_contact_email)
+  const missingCount = (deals || []).filter(d => missingContact(d) || missingEmail(d)).length
+
   return (
-    <Modal open={open} onClose={close} wide={step === 'resolve' || step === 'confirm'}
+    <Modal open={open} onClose={close} wide={step === 'name' || step === 'resolve' || step === 'confirm'}
       title="Create a BetterComms list" footer={footer}>
       {err && <div className="text-pb-red text-[13px] mb-3">{err}</div>}
 
@@ -153,6 +157,76 @@ export default function CreateListModal({ open, onClose, deals, defaultName = ''
             <span className="text-pb-text font-medium">{dealIds.length}</span> deal{dealIds.length === 1 ? '' : 's'} currently shown,
             one contact per deal.
           </div>
+
+          {/* Which searches / filters / ranges produced this result set. */}
+          <div className="rounded-lg border border-pb-hairline px-3 py-2.5">
+            <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1.5">Filters applied</div>
+            {filterSummary.length === 0 ? (
+              <div className="text-[12.5px] text-pb-faintest">No filters — every deal in the pipeline.</div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {filterSummary.map((f, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-full border border-pb-hairline2 px-2 py-0.5 text-[11.5px]">
+                    <span className="text-pb-faint">{f.label}:</span>
+                    <span className="text-pb-text font-medium">{f.value}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* The deals in the set, so it's clear who's about to be included and
+              which ones are missing a contact name or email. */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-pb-faint">
+                Deals in this list ({deals.length})
+              </div>
+              {missingCount > 0 && (
+                <Pill tone="red">{missingCount} missing contact or email</Pill>
+              )}
+            </div>
+            <div className="max-h-[44vh] overflow-y-auto rounded-lg border border-pb-hairline">
+              <table className="w-full text-[13px]">
+                <thead className="sticky top-0 bg-pb-surface">
+                  <tr className="text-left text-pb-faint border-b border-pb-hairline">
+                    <th className="px-3 py-2 font-medium">Contact name</th>
+                    <th className="px-3 py-2 font-medium">Email</th>
+                    <th className="px-3 py-2 font-medium">Club</th>
+                    <th className="px-3 py-2 font-medium">Stage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deals.length === 0 && (
+                    <tr><td colSpan={4} className="px-3 py-6 text-center text-pb-faintest">No deals selected.</td></tr>
+                  )}
+                  {deals.map(d => (
+                    <tr key={d.id} className="border-b border-pb-hairline last:border-0">
+                      <td className="px-3 py-2">
+                        {missingContact(d)
+                          ? <span className="text-pb-red">Missing</span>
+                          : <span className="text-pb-text">{d.point_of_contact_name}</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {missingEmail(d)
+                          ? <span className="text-pb-red">{d.point_of_contact_email ? 'Invalid email' : 'Missing'}</span>
+                          : <span className="text-pb-text">{d.point_of_contact_email}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-pb-faint">{d.marketing_club_name || d.title || '—'}</td>
+                      <td className="px-3 py-2 text-pb-faint">{d.stage_name || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {missingCount > 0 && (
+              <div className="text-[11.5px] text-pb-faint mt-1.5">
+                Deals missing a contact name or a valid email are highlighted. You can fill them in at the next step;
+                any left without a valid email won't receive an email and won't be added to the list.
+              </div>
+            )}
+          </div>
+
           <Field label="List name">
             <TextInput autoFocus value={name} onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') onContinue() }}
