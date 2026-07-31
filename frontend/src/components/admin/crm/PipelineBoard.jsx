@@ -10,7 +10,7 @@ const BETTERSTATS_LOGO = moduleBrand('stats').logo
 // trial, a pale/greyed amber for a trial a BetterCricket admin set up for the
 // club. Same hourglass glyph either way; the colour carries the origin.
 const TRIAL_AMBER = '#F59E0B'
-const TRIAL_AMBER_MUTED = '#B9A87F'
+const TRIAL_AMBER_MUTED = '#ad9049'
 
 export const TIER_TONE = { HOT: 'red', WARM: 'amber', COLD: 'faint', NOT_INTERESTED: 'faint' }
 
