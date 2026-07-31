@@ -1478,6 +1478,13 @@ export const api = {
   metaAdsCampaigns: () => request('/club-admin/meta-ads/campaigns'),
   metaAdsSetCampaign: (campaignId) =>
     request('/club-admin/meta-ads/campaign', { method: 'POST', body: JSON.stringify({ campaign_id: campaignId }) }),
+  // "Counting since" cutoff — excludes data from before it out of the
+  // on-site funnel/table numbers and Meta's own campaign insights (never the
+  // "Free trial registrations" KPI, which always counts every real
+  // completed registration). Pass null/omit `since` to clear it.
+  metaAdsCountingSince: () => request('/club-admin/meta-ads/counting-since'),
+  metaAdsSetCountingSince: (since) =>
+    request('/club-admin/meta-ads/counting-since', { method: 'POST', body: JSON.stringify({ since }) }),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>

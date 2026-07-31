@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import text
@@ -277,6 +278,46 @@ async def set_active_meta_campaign_id(db: AsyncSession, campaign_id: str) -> str
     )
     await db.commit()
     return cid
+
+
+_META_ADS_SINCE_KEY = "meta_ads_counting_since"
+
+
+async def get_meta_ads_since(db: AsyncSession) -> str | None:
+    """ISO datetime a super admin has set as the Meta Ads HQ dashboard's
+    "counting since" cutoff — data from before it is excluded from the
+    on-site funnel/table numbers (Club selected, the registration-wizard
+    funnel, Clubs selected/searched, Meta's own campaign insights) so old
+    test traffic or a noisy launch period doesn't skew a fresh read of the
+    campaign. Deliberately does NOT affect get_registration_count() — a
+    genuine completed registration always counts regardless of when it
+    happened, see meta_ads.py."""
+    settings = await get_settings(db)
+    v = settings.get(_META_ADS_SINCE_KEY)
+    return v if isinstance(v, str) and v.strip() else None
+
+
+async def set_meta_ads_since(db: AsyncSession, since: str | None) -> str | None:
+    """Set (or clear, with None/empty) the cutoff. `since` must be an ISO
+    8601 datetime string when provided. Commits. Returns the stored value."""
+    since = (since or "").strip() or None
+    if since:
+        try:
+            datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("since must be an ISO 8601 datetime")
+    current = await get_settings(db)
+    out = dict(current)
+    if since:
+        out[_META_ADS_SINCE_KEY] = since
+    else:
+        out.pop(_META_ADS_SINCE_KEY, None)
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(out)},
+    )
+    await db.commit()
+    return since
 
 
 _HIDDEN_META_SELECTIONS_KEY = "meta_ads_hidden_selections"

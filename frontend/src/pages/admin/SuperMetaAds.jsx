@@ -55,6 +55,18 @@ function fmtDay(iso) {
   if (!iso) return ''
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Perth' })
 }
+// `<input type="datetime-local">` needs "YYYY-MM-DDTHH:mm" in the WALL-CLOCK
+// timezone we're editing in (Perth, matching every other timestamp on this
+// page) — formatToParts sidesteps toISOString's UTC conversion.
+function isoToPerthInput(iso) {
+  if (!iso) return ''
+  const parts = new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date(iso))
+  const get = (t) => parts.find((p) => p.type === t)?.value
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
+}
 
 function ChartTooltip({ active, payload, label, money }) {
   if (!active || !payload?.length) return null
@@ -408,6 +420,10 @@ export default function SuperMetaAds() {
   const [activeCampaignId, setActiveCampaignId] = useState('')
   const [switchingCampaign, setSwitchingCampaign] = useState(false)
 
+  const [editingSince, setEditingSince] = useState(false)
+  const [sinceInput, setSinceInput] = useState('')
+  const [savingSince, setSavingSince] = useState(false)
+
   const load = useCallback(() => {
     setLoading(true)
     api.metaAdsSummary()
@@ -505,6 +521,48 @@ export default function SuperMetaAds() {
     }
   }
 
+  // "Counting since" cutoff — excludes data from before it out of the
+  // on-site funnel/table numbers and Meta's own campaign insights. The
+  // "Free trial registrations" KPI is deliberately never affected by it
+  // (see meta_ads.get_registration_count).
+  const openSinceEditor = () => {
+    setSinceInput(isoToPerthInput(summary?.counting_since) || '2026-07-28T06:00')
+    setEditingSince(true)
+  }
+
+  const applySince = async () => {
+    if (!sinceInput) return
+    setSavingSince(true)
+    setError('')
+    try {
+      await api.metaAdsSetCountingSince(`${sinceInput}:00+08:00`)
+      setEditingSince(false)
+      load()  // re-pull every panel now the cutoff has changed
+      const h = await api.metaAdsHistory(trendDays)
+      setHistory(h.days || [])
+    } catch (e) {
+      setError(e.message || 'Could not set the counting-since cutoff.')
+    } finally {
+      setSavingSince(false)
+    }
+  }
+
+  const clearSince = async () => {
+    setSavingSince(true)
+    setError('')
+    try {
+      await api.metaAdsSetCountingSince(null)
+      setEditingSince(false)
+      load()
+      const h = await api.metaAdsHistory(trendDays)
+      setHistory(h.days || [])
+    } catch (e) {
+      setError(e.message || 'Could not clear the counting-since cutoff.')
+    } finally {
+      setSavingSince(false)
+    }
+  }
+
   const budget = summary?.campaign_budget ?? DEFAULT_BUDGET
   const lengthDays = summary?.campaign_length_days ?? DEFAULT_LENGTH_DAYS
 
@@ -536,6 +594,60 @@ export default function SuperMetaAds() {
           )}
           <span className="text-sm text-pb-dim">&middot; ~{lengthDays} days from launch</span>
           {switchingCampaign && <span className="font-mono text-[10px] text-pb-faint">switching&hellip;</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+          {editingSince ? (
+            <>
+              <input
+                type="datetime-local"
+                value={sinceInput}
+                onChange={(e) => setSinceInput(e.target.value)}
+                disabled={savingSince}
+                className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 font-mono text-[10px] text-pb-text disabled:opacity-50"
+              />
+              <button
+                onClick={applySince}
+                disabled={savingSince || !sinceInput}
+                className="font-mono text-[9px] uppercase tracking-wide2 text-pb-accent hover:underline disabled:opacity-50"
+              >
+                Apply
+              </button>
+              <button
+                onClick={() => setEditingSince(false)}
+                disabled={savingSince}
+                className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:underline disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <span
+                className="font-mono text-[10px] text-pb-faint"
+                title="Excludes earlier data from the funnel/table numbers and Meta's own insights — never from Free trial registrations, which always counts every real completed registration."
+              >
+                {summary?.counting_since
+                  ? <>Counting since {fmtTime(summary.counting_since)}</>
+                  : 'Counting since launch (no reset)'}
+              </span>
+              <button
+                onClick={openSinceEditor}
+                disabled={savingSince}
+                className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-pb-text hover:underline disabled:opacity-50"
+              >
+                Reset from&hellip;
+              </button>
+              {summary?.counting_since && (
+                <button
+                  onClick={clearSince}
+                  disabled={savingSince}
+                  className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-red-300 hover:underline disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-3">

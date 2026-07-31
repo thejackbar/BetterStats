@@ -7,6 +7,8 @@ load); ``/refresh`` does a live pull and updates it on demand.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -18,6 +20,8 @@ from app.routers.auth import require_super_admin
 from app.config.settings import settings
 from app.services import meta_ads
 from app.services.meta_ads import MetaAdsError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/club-admin/meta-ads", tags=["meta-ads"])
 
@@ -105,6 +109,49 @@ async def set_active_campaign(
         await platform_settings.set_active_meta_campaign_id(db, body.campaign_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    data = await meta_ads.get_latest_summary(db)
+    data["token_configured"] = settings.meta_ads_configured
+    return data
+
+
+class CountingSinceIn(BaseModel):
+    since: str | None = None  # ISO 8601 datetime, or None/omitted to clear
+
+
+@router.get("/counting-since")
+async def counting_since(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
+    """The current "counting since" cutoff (platform_settings.
+    meta_ads_counting_since) — data from before it is excluded from the
+    on-site funnel/table numbers and Meta's own campaign insights (never
+    from the "Free trial registrations" KPI, which always counts every real
+    completed registration). Null means no cutoff (the default: lifetime
+    numbers)."""
+    from app.services import platform_settings
+    return {"since": await platform_settings.get_meta_ads_since(db)}
+
+
+@router.post("/counting-since")
+async def set_counting_since(
+    body: CountingSinceIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Set (or clear, by omitting `since`) the cutoff, then immediately
+    re-pull Meta's own insights with the new date range (like Refresh now)
+    so the KPI numbers reflect it right away instead of waiting for the next
+    scheduled snapshot. A Meta pull failure here is non-fatal — the on-site
+    funnel/table numbers (computed live on every page load) already respect
+    the new cutoff regardless."""
+    from app.services import platform_settings
+    try:
+        await platform_settings.set_meta_ads_since(db, body.since)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if settings.meta_ads_configured:
+        try:
+            await meta_ads.run_snapshot(db)
+        except MetaAdsError:
+            logger.exception("Meta Ads: snapshot re-pull after counting-since change failed")
     data = await meta_ads.get_latest_summary(db)
     data["token_configured"] = settings.meta_ads_configured
     return data

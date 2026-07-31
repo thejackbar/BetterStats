@@ -2931,6 +2931,78 @@ Four fixes to `/admin/super/meta-ads`, from live feedback.
   per-endpoint `days` lookback defaults (registration funnel, selected/
   searched clubs — a report window, not a budget figure) are untouched.
 
+### Counting-since cutoff + broader registration matching (migration 201, Jul 2026)
+
+Follow-up the same day: the "Club selected" stage above (17) read LOWER
+than "Started registering (Meta-reported)" (20, 117.6% "continued"), and the
+registration-wizard funnel showed "Club selected" (25) higher than "Club
+searched" (13, 192.3%) — both impossible in a real funnel, the tell that
+early/test traffic before the campaign was actually clean was still baked
+into every number. Separately, "Completed registrations" read 1 when it
+should have read 2 (two real signups, "Alvie" and "Altona North"), per
+direct correction.
+
+- **A super-admin-settable "counting since" cutoff** excludes data from
+  before it out of the on-site funnel/table numbers AND Meta's own campaign
+  insights — but deliberately NEVER the "Free trial registrations" KPI,
+  which always counts every real completed registration however long ago it
+  happened (a genuine registration must never disappear from the books just
+  because the reporting window reset). `platform_settings.get_meta_ads_since`/
+  `set_meta_ads_since` store an ISO datetime in the existing JSONB singleton
+  (key `meta_ads_counting_since`, no schema migration needed for the setting
+  itself). `meta_ads.py` resolves it into a `_counting_since` ContextVar
+  alongside the active campaign (`_use_active_campaign` now sets both) so the
+  many no-`db` helper functions can read it via `_since()`.
+- **DB-side windows**: `_SINCE_LOWER_BOUND` — `GREATEST(NOW() - (:days *
+  INTERVAL '1 day'), COALESCE(:since, '-infinity'::timestamptz))` — replaces
+  every `NOW() - (:days * INTERVAL '1 day')` bound across
+  `_META_VISITOR_SUBQUERY`, `get_club_selected_count`,
+  `get_registration_step_funnel`, `get_selected_clubs`, `get_searched_clubs`
+  (both the beacon/ack/registration sources and the meta-visitor detection
+  subquery they all embed). A cutoff only ever narrows the window, never
+  widens it past the requested `days` — `GREATEST` always picks the more
+  recent bound.
+- **Meta-side numbers** use `_date_range_params()`: the ordinary
+  `date_preset: maximum` when no cutoff is set, else a `time_range` from the
+  cutoff's DATE (Meta's insights API has no hour precision, unlike our own
+  usage_events) through today. Threaded into `fetch_campaign_totals`,
+  `fetch_per_ad`, `fetch_daily_trend`, `fetch_ad_daily_trend` — so a cutoff
+  resets Meta's own impressions/clicks/LPV/spend/leads too, not just the
+  on-site funnel. These come from STORED snapshot rows on ordinary page
+  load, so a cutoff set purely via migration/lifespan-seed doesn't visibly
+  change them until the next `run_snapshot()` (the daily job, or Refresh
+  now) — the UI's own "Reset from…" control (below) triggers one
+  immediately so the change is visible without waiting.
+- **Migration 201** seeds the initial cutoff (2026-07-28 06:00
+  Australia/Perth) once, guarded by a SEPARATE `meta_ads_counting_since_seeded`
+  marker rather than by whether the value itself is present — so a super
+  admin later clearing the cutoff from the UI (back to unfiltered lifetime
+  numbers) can't have it silently reinstated by the next app restart
+  re-running the idempotent lifespan mirror.
+- **UI**: a "Counting since {time} (Perth)" line under the campaign picker
+  in `SuperMetaAds.jsx`'s header, with "Reset from…" (a `datetime-local`
+  input, submitted as Perth-offset `+08:00`) and "Clear". Backed by `GET`/
+  `POST /club-admin/meta-ads/counting-since` — POST re-runs `run_snapshot`
+  (best-effort, like Refresh now) before returning the fresh summary, and
+  the frontend re-pulls every panel (`load()`) since the DB-windowed
+  numbers change immediately regardless of the Meta re-pull's success.
+- **Registration matching broadened a third way.** `_attribution_matches_campaign`
+  now also accepts a plain Meta click signal (a fb/ig/meta `utm_source`, or a
+  facebook/instagram `click_source`) as a last-resort match, alongside the
+  existing exact `utm_content`/`utm_campaign` checks — a genuine
+  Meta-driven registration shouldn't silently vanish from the count just
+  because its UTM tags don't exactly match a hand-maintained mapping. In
+  practice only one campaign has ever been live at a time, so "a Meta click
+  happened" is a good enough stand-in for "it was THIS campaign" once the
+  more precise checks come up empty. `get_registration_count` remains
+  completely unwindowed by the counting-since cutoff (unchanged from the
+  fix above). **If a real registration still doesn't count** after this
+  (e.g. its `signup_attribution` is genuinely null — no UTM/click signal
+  captured at all), the existing manual `+`/`-` adjustment on the "Free
+  trial registrations" KPI card (with a note) is the documented way to
+  correct it — it was already built for exactly this "our tracking didn't
+  capture it" case, not a new addition here.
+
 ## Usage tracking — session duration, time on page, visitor journeys (migration 165, v8.75.0, Jul 2026)
 
 `usage_events` had club, page, and UTM/campaign granularity but nothing on how

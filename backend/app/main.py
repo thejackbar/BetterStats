@@ -4124,6 +4124,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE meta_ad_snapshots ALTER COLUMN updated_at SET DEFAULT NOW()"))
         await conn.execute(text("ALTER TABLE meta_ad_snapshots ALTER COLUMN updated_at SET NOT NULL"))
 
+    # Migration 201: seed the Meta Ads HQ dashboard's initial "counting since"
+    # cutoff (2026-07-28 06:00 Perth) so a noisy early/test period doesn't
+    # skew the on-site funnel numbers. Guarded by a separate `_seeded` marker,
+    # NOT by whether the value itself is set — a super admin clearing the
+    # cutoff later must not have it silently reinstated by the next restart.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            UPDATE platform_settings
+            SET settings = settings || jsonb_build_object(
+                    'meta_ads_counting_since', '2026-07-28T06:00:00+08:00',
+                    'meta_ads_counting_since_seeded', true
+                ),
+                updated_at = NOW()
+            WHERE id = 1 AND NOT (settings ? 'meta_ads_counting_since_seeded')
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

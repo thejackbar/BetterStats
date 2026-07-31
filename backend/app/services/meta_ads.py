@@ -10,6 +10,7 @@ outage surfaces as a typed error on the HQ page instead of a 500.
 from __future__ import annotations
 
 import contextvars
+import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -34,19 +35,60 @@ TIMEOUT = 20.0
 _active_campaign: "contextvars.ContextVar[str | None]" = contextvars.ContextVar(
     "meta_active_campaign", default=None)
 
+# A super-admin-set "counting since" cutoff (platform_settings.get_meta_ads_since)
+# — data from before it is excluded from the on-site funnel/table numbers and
+# Meta's own campaign insights, so a noisy launch period or old test traffic
+# doesn't skew a fresh read. None (the default) means no cutoff — unchanged
+# lifetime behaviour. Resolved alongside the active campaign since almost every
+# caller of _use_active_campaign wants both.
+_counting_since: "contextvars.ContextVar[datetime | None]" = contextvars.ContextVar(
+    "meta_counting_since", default=None)
+
 
 def _campaign_id() -> str:
     return _active_campaign.get() or settings.meta_campaign_id
 
 
+def _since() -> datetime | None:
+    return _counting_since.get()
+
+
 async def _use_active_campaign(db: "AsyncSession") -> str:
-    """Resolve the super-admin-selected active campaign from platform_settings
-    and pin it for the current request. Call at the top of every public entry
-    point that scopes by campaign. Lazy import dodges a services import cycle."""
+    """Resolve the super-admin-selected active campaign AND counting-since
+    cutoff from platform_settings, pinning both for the current request. Call
+    at the top of every public entry point that scopes by campaign. Lazy
+    import dodges a services import cycle."""
     from app.services import platform_settings
     cid = await platform_settings.get_active_meta_campaign_id(db)
     _active_campaign.set(cid)
+    since_iso = await platform_settings.get_meta_ads_since(db)
+    since_dt = None
+    if since_iso:
+        try:
+            since_dt = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
+        except ValueError:
+            since_dt = None
+    _counting_since.set(since_dt)
     return cid
+
+
+def _date_range_params() -> dict:
+    """The date-scoping params for a Graph API insights call: the ordinary
+    lifetime `date_preset: maximum` (unchanged default behaviour), or —
+    when a counting-since cutoff is set (_since()) — a `time_range` from
+    that date through today, so Meta's own campaign/ad totals reset the
+    same way the on-site funnel numbers do. Meta's time_range is date-only
+    (no hour precision), so an exact "6am" cutoff only applies to our own
+    usage_events-derived numbers (_SINCE_LOWER_BOUND); this rounds down to
+    the whole day it falls on."""
+    since = _since()
+    if not since:
+        return {"date_preset": "maximum"}
+    return {"time_range": json.dumps({
+        "since": since.date().isoformat(),
+        "until": date.today().isoformat(),
+    })}
+
 
 # Ad -> destination map (§1 of the spec). Stable IDs; the live API response's
 # ad_name/ad_id are preferred where available, this is the fallback label.
@@ -232,12 +274,13 @@ def _parse_row(row: dict) -> dict:
 
 
 async def fetch_campaign_totals() -> dict:
-    """Campaign-level totals for the whole lifetime of the campaign."""
+    """Campaign-level totals for the whole lifetime of the campaign, or since
+    the counting-since cutoff when one is set (see _date_range_params)."""
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "campaign",
         "fields": "spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
         "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
-        "date_preset": "maximum",
+        **_date_range_params(),
     })
     data = body.get("data") or []
     if not data:
@@ -266,12 +309,13 @@ async def fetch_ad_delivery_statuses() -> dict[str, str]:
 
 
 async def fetch_per_ad() -> list[dict]:
-    """Per-ad totals (level=ad) for the campaign."""
+    """Per-ad totals (level=ad) for the campaign, or since the counting-since
+    cutoff when one is set."""
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "ad",
         "fields": "ad_id,ad_name,spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
         "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
-        "date_preset": "maximum",
+        **_date_range_params(),
     })
     rows = [_parse_row(r) for r in (body.get("data") or [])]
     delivery_statuses = await fetch_ad_delivery_statuses()
@@ -285,12 +329,15 @@ async def fetch_per_ad() -> list[dict]:
 
 
 async def fetch_daily_trend(days: int = 14) -> list[dict]:
-    """One row per day, campaign level, for the trend charts."""
+    """One row per day, campaign level, for the trend charts. Since the
+    counting-since cutoff when one is set — a shorter range than `days`
+    just means fewer rows come back, the trailing rows[-days:] trim below
+    still applies harmlessly."""
     body = await _get(f"/act_{settings.meta_ad_account_id}/insights", {
         "level": "campaign",
         "fields": "spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
         "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
-        "date_preset": "maximum",
+        **_date_range_params(),
         "time_increment": 1,
     })
     rows = [_parse_row(r) for r in (body.get("data") or [])]
@@ -308,7 +355,7 @@ async def fetch_ad_daily_trend(days: int = 30) -> list[dict]:
         "level": "ad",
         "fields": "ad_id,ad_name,spend,impressions,inline_link_clicks,inline_link_click_ctr,actions,cost_per_action_type",
         "filtering": f'[{{"field":"campaign.id","operator":"IN","value":["{_campaign_id()}"]}}]',
-        "date_preset": "maximum",
+        **_date_range_params(),
         "time_increment": 1,
     })
     rows = [_parse_row(r) for r in (body.get("data") or [])]
@@ -511,16 +558,25 @@ REGISTRATION_STEP_ORDER = [
 ]
 
 
+# The lower bound every windowed usage_events query below uses: the ordinary
+# rolling "last :days days", but never earlier than a super-admin-set
+# counting-since cutoff (platform_settings.get_meta_ads_since / _since()) when
+# one is set — GREATEST(...) picks whichever bound is LATER (more recent), so
+# a cutoff only ever narrows the window, never widens it past the requested
+# `days`. :since is NULL (no cutoff) by default, in which case COALESCE falls
+# back to '-infinity' and this is exactly the old "last :days days" behaviour.
+_SINCE_LOWER_BOUND = "GREATEST(NOW() - (:days * INTERVAL '1 day'), COALESCE(:since, '-infinity'::timestamptz))"
+
 # A visitor counts as "Meta-driven" if any of their events in the window
 # carries a Meta signal — the same detection the Usage page uses for its FB/IG
 # split (a fb/ig/meta utm_source, an fbclid/igshid on the URL, or a resolved
 # facebook/instagram traffic_source). Keeps the wizard funnel and the
 # selected-clubs table to Meta traffic only, so an organic or EDM signup that
 # reached /trial some other way never shows on the Meta Ads dashboard.
-_META_VISITOR_SUBQUERY = """
+_META_VISITOR_SUBQUERY = f"""
         visitor_id IN (
             SELECT DISTINCT visitor_id FROM usage_events
-            WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
+            WHERE created_at >= {_SINCE_LOWER_BOUND}
               AND visitor_id IS NOT NULL
               AND (
                 traffic_source IN ('facebook', 'instagram')
@@ -546,10 +602,10 @@ async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_
         SELECT COUNT(DISTINCT visitor_id) FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND visitor_id IS NOT NULL
           AND {_META_VISITOR_SUBQUERY}
-    """), {"days": days})).scalar()
+    """), {"days": days, "since": _since()})).scalar()
     return int(count or 0)
 
 
@@ -562,14 +618,15 @@ async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LE
     SelfServeTrialModal.jsx's trackFunnelStep calls), same
     key/label/value/pct_of_top/pct_of_prev shape as compute_funnel() so the
     frontend can reuse the same FunnelChart component."""
-    rows = (await db.execute(text("""
+    await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
+    rows = (await db.execute(text(f"""
         SELECT route, COUNT(DISTINCT visitor_id) AS n
         FROM usage_events
         WHERE event_type = 'self_serve_step'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND visitor_id IS NOT NULL
         GROUP BY route
-    """), {"days": days})).mappings().all()
+    """), {"days": days, "since": _since()})).mappings().all()
     counts = {r["route"]: int(r["n"]) for r in rows}
 
     top = counts.get(REGISTRATION_STEP_ORDER[0][0], 0)
@@ -615,7 +672,6 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     Selections made before the beacon captured the club AND that never reached
     the Terms step are unidentifiable; those are returned only as an
     `anonymous` count so the total still reconciles with the funnel."""
-    window = {"days": days}
     # Every started club stays in this list — it's the follow-up tool for hot
     # leads who didn't finish, so a non-Meta start is never hidden. Instead each
     # club is TAGGED (`via_meta`) with whether it came through the ad: completed
@@ -624,9 +680,10 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # whether any of the club's visitors carried a Meta signal. The COUNTED "Meta
     # leads" numbers stay Meta-scoped elsewhere; this list is deliberately
     # all-source so no lead is lost.
-    await _use_active_campaign(db)
+    await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
+    window = {"days": days, "since": _since()}
     utm_contents = set(_current_campaign_utm_contents())
-    _META_SOURCES = {"fb", "facebook", "meta", "ig", "instagram"}
+    _META_SOURCES = _META_ATTRIBUTION_SOURCES  # same set _attribution_matches_campaign uses
 
     # (1) Beacon rows that carry a club name (going forward), each tagged with
     # whether any of its visitors was Meta-driven. Plus a count of the ones that
@@ -641,35 +698,38 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
         GROUP BY 1, 2
     """), window)).mappings().all()
 
-    anon = (await db.execute(text("""
+    anon = (await db.execute(text(f"""
         SELECT COUNT(DISTINCT visitor_id) AS n
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND visitor_id IS NOT NULL
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NULL
     """), window)).scalar() or 0
 
     # (2) Terms-step acknowledgements — carry the club name and an email.
-    ack_rows = (await db.execute(text("""
+    ack_rows = (await db.execute(text(f"""
         SELECT club_name, MIN(email) AS email,
                MIN(accepted_at) AS first_at, MAX(accepted_at) AS last_at
         FROM self_serve_acknowledgements
-        WHERE accepted_at >= NOW() - (:days * INTERVAL '1 day')
+        WHERE accepted_at >= {_SINCE_LOWER_BOUND}
         GROUP BY club_name
     """), window)).mappings().all()
 
     # (3) Completed self-serve registrations — the org plus when it was created
     # (orgs carry no created_at; the idempotency key holds the timestamp).
     # All completions are listed; utm_content / utm_source come back so each one
-    # can be tagged Meta-or-not in Python below.
-    done_rows = (await db.execute(text("""
+    # can be tagged Meta-or-not in Python below. Windowed like every other
+    # source here (this is the "Clubs selected in the wizard" TABLE, not the
+    # "Free trial registrations" KPI count — get_registration_count() is
+    # deliberately never windowed, see its own docstring).
+    done_rows = (await db.execute(text(f"""
         SELECT o.name AS club_name, o.slug, o.id::text AS org_id,
                MIN(k.created_at) AS at,
                MIN(o.signup_attribution->>'utm_content') AS utm_content,
@@ -677,7 +737,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         FROM organisations o
         JOIN self_serve_idempotency_keys k ON k.org_id = o.id
         WHERE o.signup_source IS NOT NULL
-          AND k.created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND k.created_at >= {_SINCE_LOWER_BOUND}
         GROUP BY o.name, o.slug, o.id
     """), window)).mappings().all()
 
@@ -773,7 +833,8 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     Meta ad, and — the point of the table — whether it was ever `selected`
     (clicked into the wizard). Test noise flagged on the selected-clubs table is
     hidden here too, keyed on the same normalised club name."""
-    window = {"days": days}
+    await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
+    window = {"days": days, "since": _since()}
 
     # Clubs typed into the search box, grouped by the top result the search
     # returned, tagged Meta-or-not, with a sample of the literal search terms.
@@ -791,7 +852,7 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_searched'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
         GROUP BY 1, 2
     """), window)).mappings().all()
@@ -800,12 +861,12 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # wizard) in the same window — a searched club present here converted, the
     # rest are searched-only. Keyed by normalised name, so it lines up with the
     # search rows' own grouping regardless of which org_id each side captured.
-    selected_keys = set((await db.execute(text("""
+    selected_keys = set((await db.execute(text(f"""
         SELECT DISTINCT lower(TRIM(metadata->>'club_name')) AS k
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
     """), window)).scalars().all())
 
@@ -1096,24 +1157,43 @@ def _current_campaign_utm_contents() -> set[str]:
     }
 
 
+# Same "was this click Meta at all" signal get_selected_clubs/get_searched_clubs/
+# _META_VISITOR_SUBQUERY already use elsewhere on this dashboard — the loosest
+# (and last-resort) of _attribution_matches_campaign's three checks.
+_META_ATTRIBUTION_SOURCES = {"fb", "facebook", "meta", "ig", "instagram"}
+
+
 def _attribution_matches_campaign(attribution: dict | None) -> bool:
-    """True if a stored signup_attribution belongs to the CURRENT campaign
-    (_campaign_id()), checked two independent ways: its utm_content is one
-    AD_DESTINATIONS maps to this campaign, or its utm_campaign matches this
-    campaign's own canonical name in CAMPAIGN_UTM_NAMES. Either one is
-    enough — see CAMPAIGN_UTM_NAMES for why a campaign-name match alone is
-    the more resilient of the two (doesn't need AD_DESTINATIONS kept in sync
-    with every new ad). Used by get_registration_count() and the ad-signups
-    report (routers/meta_ads.py) so the two can never disagree."""
+    """True if a stored signup_attribution counts as a registration for the
+    CURRENT campaign (_campaign_id()), checked three independent ways — any
+    one is enough:
+    1. its utm_content is one AD_DESTINATIONS maps to this campaign;
+    2. its utm_campaign matches this campaign's own canonical name in
+       CAMPAIGN_UTM_NAMES (more resilient than (1) — doesn't need
+       AD_DESTINATIONS kept in sync with every new ad);
+    3. it otherwise carries a plain Meta click signal (a fb/ig/meta
+       utm_source, or a facebook/instagram click_source) — the loosest
+       check, but a genuine Meta-driven registration shouldn't silently
+       vanish from the count just because its UTM tags don't exactly match
+       a hand-maintained mapping. In practice only one campaign has ever
+       been live at a time, so "a Meta click happened" is a good enough
+       stand-in for "it was THIS campaign" when the more precise checks
+       above come up empty.
+    Used by get_registration_count() and the ad-signups report
+    (routers/meta_ads.py) so the two can never disagree."""
     if not attribution:
         return False
     utm_content = (attribution.get("utm_content") or "").strip()
     if utm_content and utm_content in _current_campaign_utm_contents():
         return True
     utm_campaign_name = CAMPAIGN_UTM_NAMES.get(_campaign_id())
-    if utm_campaign_name:
-        return (attribution.get("utm_campaign") or "").strip().lower() == utm_campaign_name.lower()
-    return False
+    if utm_campaign_name and (attribution.get("utm_campaign") or "").strip().lower() == utm_campaign_name.lower():
+        return True
+    utm_source = (attribution.get("utm_source") or "").strip().lower()
+    if utm_source in _META_ATTRIBUTION_SOURCES:
+        return True
+    click_source = (attribution.get("click_source") or "").strip().lower()
+    return click_source in {"facebook", "instagram"}
 
 
 async def get_registration_count(db: AsyncSession) -> int:
@@ -1125,14 +1205,17 @@ async def get_registration_count(db: AsyncSession) -> int:
     CompleteRegistration) and can double-count across the pixel/CAPI
     action-type split (see the "2 conversions" investigation) — they also
     can't tell a Meta-driven signup apart from one that came in through a
-    different campaign (an EDM send, a "national-launch" push, organic
-    traffic) that happens to carry its own utm tags. A club only counts here
-    if its signup_attribution matches THIS campaign
-    (_attribution_matches_campaign — by utm_content or utm_campaign),
-    archived test signups are excluded (same default as the ad-signups
-    report and the main Club Directory). Filtered in Python rather than SQL
-    — self-serve signup volume is small, and it keeps this in lockstep with
-    ad_signups()'s own filtering instead of two hand-matched queries."""
+    different (non-Meta) channel (an EDM send, organic traffic) that happens
+    to carry its own utm tags. A club only counts here if its
+    signup_attribution matches (_attribution_matches_campaign — by
+    utm_content, utm_campaign, or a plain Meta click signal), archived test
+    signups are excluded (same default as the ad-signups report and the main
+    Club Directory). Deliberately NOT windowed by the counting-since cutoff
+    (_since()) that scopes the funnel/table numbers above it on the
+    dashboard — a genuine completed registration always counts, however long
+    ago it happened. Filtered in Python rather than SQL — self-serve signup
+    volume is small, and it keeps this in lockstep with ad_signups()'s own
+    filtering instead of two hand-matched queries."""
     await _use_active_campaign(db)
     rows = (await db.execute(text("""
         SELECT signup_attribution FROM organisations
@@ -1163,7 +1246,8 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         return {"campaign": None, "ads": [], "recommendation": None,
                 "recommendation_status": None, "last_updated": None,
                 "leads_adjustment": adjustment, "campaign_budget": campaign_budget,
-                "campaign_length_days": campaign_length_days, "insights": []}
+                "campaign_length_days": campaign_length_days, "insights": [],
+                "counting_since": _since().isoformat() if _since() else None}
 
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
@@ -1227,6 +1311,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         "campaign_budget": campaign_budget,
         "campaign_length_days": campaign_length_days,
         "insights": insights,
+        "counting_since": _since().isoformat() if _since() else None,
     }
 
 
