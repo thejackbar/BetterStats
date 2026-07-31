@@ -1079,32 +1079,19 @@ export default function SuperCrm() {
     })
   }, [deals, filters])
 
-  // Sorts WITHIN each stage — buildBoard groups by stage in whatever order
-  // it's handed, so sorting the flat list first sorts each resulting column.
+  const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
+
+  // ONE sort, shared by the "Sort by" pills (in the filter bar) AND the List
+  // view's clickable column headers — so both controls drive the same order on
+  // BOTH views. Previously the List kept its own separate sort state and the
+  // pills only ever fed the Board, so clicking a pill did nothing on the List
+  // (reported broken). The pills expose club/value/engagement; the headers
+  // expose every column — one keyFns map, keyed on `sortBy`, serves them all.
+  // On the Board this sorts the flat list before buildBoard groups it, so each
+  // stage column ends up sorted; on the List it's rendered directly.
   const sortedDeals = useMemo(() => {
     if (!sortBy) return filteredDeals
     const dir = sortDir === 'desc' ? -1 : 1
-    const key = sortBy === 'club' ? (d => (d.marketing_club_name || d.title || '').toLowerCase())
-      : sortBy === 'value' ? (d => d.effective_value_cents ?? d.value_cents ?? 0)
-      : (d => d.engagement_score ?? -1)
-    return [...filteredDeals].sort((a, b) => {
-      const av = key(a), bv = key(b)
-      if (av < bv) return -1 * dir
-      if (av > bv) return 1 * dir
-      return 0
-    })
-  }, [filteredDeals, sortBy, sortDir])
-
-  const board = useMemo(() => buildBoard(stages, sortedDeals), [stages, sortedDeals])
-  const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
-
-  // The List view sorts independently of the Board's "sort within stage"
-  // control — every visible column, not just the four the Board exposes.
-  const [listSortBy, setListSortBy] = useState('')
-  const [listSortDir, setListSortDir] = useState('asc')
-  const listSortedDeals = useMemo(() => {
-    if (!listSortBy) return filteredDeals
-    const dir = listSortDir === 'desc' ? -1 : 1
     const keyFns = {
       club: d => (d.marketing_club_name || d.title || '').toLowerCase(),
       poc: d => (d.point_of_contact_name || '').toLowerCase(),
@@ -1115,18 +1102,23 @@ export default function SuperCrm() {
       source: d => (channelLabel(d.acquisition_channel) || '').toLowerCase(),
       status: d => d.status || '',
     }
-    const key = keyFns[listSortBy] || (() => 0)
+    const key = keyFns[sortBy] || (() => 0)
     return [...filteredDeals].sort((a, b) => {
       const av = key(a), bv = key(b)
       if (av < bv) return -1 * dir
       if (av > bv) return 1 * dir
       return 0
     })
-  }, [filteredDeals, listSortBy, listSortDir, stages])
+  }, [filteredDeals, sortBy, sortDir, stages])
 
+  const board = useMemo(() => buildBoard(stages, sortedDeals), [stages, sortedDeals])
+
+  // A List column-header click toggles the SAME sort state the pills use, so
+  // clicking "Value" in the table and the "Dollar value" pill stay in sync
+  // (and the pill lights up to match a header the user clicked, and vice versa).
   const clickListSort = (key) => {
-    if (listSortBy !== key) { setListSortBy(key); setListSortDir('asc'); return }
-    setListSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    if (sortBy !== key) { setSortBy(key); setSortDir('asc'); return }
+    setSortDir(d => d === 'asc' ? 'desc' : 'asc')
   }
 
   return (
@@ -1180,24 +1172,24 @@ export default function SuperCrm() {
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="text-left text-pb-faint border-b border-pb-hairline">
-                      <SortableTh label="Club" sortKey="club" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Point of contact" sortKey="poc" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Stage" sortKey="stage" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Value" sortKey="value" align="right" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Weighted" sortKey="weighted" align="right" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Engagement" sortKey="engagement" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Source" sortKey="source" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
-                      <SortableTh label="Status" sortKey="status" sortBy={listSortBy} sortDir={listSortDir} onSort={clickListSort} />
+                      <SortableTh label="Club" sortKey="club" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Point of contact" sortKey="poc" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Stage" sortKey="stage" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Value" sortKey="value" align="right" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Weighted" sortKey="weighted" align="right" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Engagement" sortKey="engagement" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Source" sortKey="source" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
+                      <SortableTh label="Status" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={clickListSort} />
                       <th className="px-3 py-2 font-medium">Next event</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {listSortedDeals.length === 0 && (
+                    {sortedDeals.length === 0 && (
                       <tr><td colSpan={9} className="px-3 py-6 text-center text-pb-faintest">
                         {deals.length === 0 ? 'No deals yet.' : 'No deals match these filters.'}
                       </td></tr>
                     )}
-                    {listSortedDeals.map(d => (
+                    {sortedDeals.map(d => (
                       <tr key={d.id} onClick={() => setOpenDealId(d.id)}
                         className={`border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer ${
                           d.is_customer ? 'border-l-2 border-l-emerald-500/70' : ''}`}>
