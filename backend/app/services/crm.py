@@ -1114,19 +1114,26 @@ async def best_known_contact_for_deal(session: AsyncSession, deal: CrmDeal) -> O
 async def ensure_deal_contact(session: AsyncSession, deal: CrmDeal, *,
                               full_name: Optional[str] = None, email: Optional[str] = None,
                               phone: Optional[str] = None,
-                              set_poc: bool = True) -> Optional[CrmDealContact]:
+                              set_poc: bool = True, force: bool = False) -> Optional[CrmDealContact]:
     """Resolve-or-create a ``CrmPerson`` from the given contact details (or,
     when none are passed, the deal's best-known club contact) and link it to
-    ``deal``. A **no-op** — returns ``None`` — if the deal already has any
-    linked contact, or no usable contact details are available. When
-    ``set_poc`` is true (the default) the person is also flagged as the deal's
-    point of contact so it shows on the pipeline card, not just in the deal's
-    Contacts list. Caller commits."""
-    already = (await session.execute(
-        select(CrmDealContact.id).where(CrmDealContact.deal_id == deal.id).limit(1)
-    )).scalar_one_or_none()
-    if already is not None:
-        return None
+    ``deal``. A **no-op** — returns ``None`` — if the deal already has a linked
+    contact, or no usable contact details are available. When ``set_poc`` is
+    true (the default) the person is also flagged as the deal's point of
+    contact so it shows on the pipeline card, not just in the deal's Contacts
+    list.
+
+    ``force=True`` (used by the backfill's "all deals" mode) skips the
+    already-has-a-contact short-circuit, re-resolving the best-known contact
+    and re-pointing the deal at it — an existing point of contact is demoted
+    (kept as a linked contact, just no longer the POC), never deleted, so no
+    history is lost. Caller commits."""
+    if not force:
+        already = (await session.execute(
+            select(CrmDealContact.id).where(CrmDealContact.deal_id == deal.id).limit(1)
+        )).scalar_one_or_none()
+        if already is not None:
+            return None
 
     name, mail, ph = (full_name or "").strip() or None, (email or "").strip() or None, (phone or "").strip() or None
     if not (name or mail or ph):
