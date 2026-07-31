@@ -24,6 +24,24 @@ export function EngagementArrow({ dir }) {
   )
 }
 
+// The trial badge: a small amber hourglass shown top-right of a deal card when
+// the club is registered and trialing at least one module but not yet paying
+// for any (the subscriber logo takes precedence — see the board render). Amber
+// (#F59E0B) matches the rest of the trial UI (TrialBanner, the days-remaining
+// chips on this same card). Inline SVG so it stays crisp at 16px.
+function TrialHourglassIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" className={className}
+      role="img" aria-label="On trial">
+      <path d="M6 3h12" />
+      <path d="M6 21h12" />
+      <path d="M8 3v3.5a4 4 0 0 0 1.6 3.2L12 12l2.4-2.3A4 4 0 0 0 16 6.5V3" />
+      <path d="M8 21v-3.5a4 4 0 0 1 1.6-3.2L12 12l2.4 2.3A4 4 0 0 1 16 17.5V21" />
+    </svg>
+  )
+}
+
 // A Kanban-style pipeline board — one column per stage, drag-and-drop
 // enabled (native HTML5 DnD, no library) between any two columns. `client`
 // (the same scope-specific api.js bundle DealDetailModal takes) is what
@@ -182,11 +200,16 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   onDragEnd={() => { setDraggingId(null); setOverStageId(null) }}
                   onClick={() => onOpenDeal(deal.id)}
                   className={`pb-card w-full text-left px-3 py-2.5 hover:border-pb-accent/40 transition cursor-pointer relative ${
-                    isSubscriber ? 'pr-7' : ''} ${
+                    (isSubscriber || isTrialing) ? 'pr-7' : ''} ${
                     deal.status !== 'open' ? 'opacity-60' : ''} ${draggingId === deal.id ? 'opacity-40' : ''}`}>
-                  {isSubscriber && (
+                  {isSubscriber ? (
                     <img src={BETTERSTATS_LOGO} alt="" title="Subscribed to a BetterCricket module"
                       className="absolute top-2 right-2 w-4 h-4 rounded shrink-0" />
+                  ) : isTrialing && (
+                    <span title="Registered — on trial (no paid module yet)"
+                      className="absolute top-2 right-2 w-4 h-4 shrink-0">
+                      <TrialHourglassIcon className="w-4 h-4" />
+                    </span>
                   )}
                   <div className="font-medium text-[13px] truncate mb-1">{deal.title}</div>
                   {deal.point_of_contact_name && (
