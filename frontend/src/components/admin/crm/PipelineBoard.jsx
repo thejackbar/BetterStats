@@ -6,6 +6,12 @@ import { moduleBrand } from '../../../lib/moduleBrand'
 
 const BETTERSTATS_LOGO = moduleBrand('stats').logo
 
+// Trial badge colours — bright amber for a club that self-registered its own
+// trial, a pale/greyed amber for a trial a BetterCricket admin set up for the
+// club. Same hourglass glyph either way; the colour carries the origin.
+const TRIAL_AMBER = '#F59E0B'
+const TRIAL_AMBER_MUTED = '#B9A87F'
+
 export const TIER_TONE = { HOT: 'red', WARM: 'amber', COLD: 'faint', NOT_INTERESTED: 'faint' }
 
 // A small solid arrow showing whether a club's engagement score moved since the
@@ -27,11 +33,13 @@ export function EngagementArrow({ dir }) {
 // The trial badge: a small amber hourglass shown top-right of a deal card when
 // the club is registered and trialing at least one module but not yet paying
 // for any (the subscriber logo takes precedence — see the board render). Amber
-// (#F59E0B) matches the rest of the trial UI (TrialBanner, the days-remaining
-// chips on this same card). Inline SVG so it stays crisp at 16px.
-function TrialHourglassIcon({ className = '' }) {
+// matches the rest of the trial UI (TrialBanner, the days-remaining chips on
+// this same card); a bright vs pale/greyed amber distinguishes a self-serve
+// trial from one a BetterCricket admin set up. Inline SVG so it stays crisp at
+// 16px.
+function TrialHourglassIcon({ className = '', color = TRIAL_AMBER }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2"
+    <svg viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round" className={className}
       role="img" aria-label="On trial">
       <path d="M6 3h12" />
@@ -182,6 +190,10 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                 // is the min over trial_days_remaining, so non-null ⇒ a live
                 // module trial exists.
                 const isTrialing = deal.min_trial_days_remaining != null
+                // A self-serve trial (the club registered itself) is stamped
+                // onboarding_method='self_serve_trial'; a trial a BetterCricket
+                // admin set up leaves it unset. Drives bright vs pale hourglass.
+                const isSelfServeTrial = deal.onboarding_method === 'self_serve_trial'
                 // Onboarded-club context line (state + seasons/grades/players
                 // + setup progress + active-since), shown once a club is a
                 // subscriber or on trial — mirrors the All Clubs detail line.
@@ -206,9 +218,12 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                     <img src={BETTERSTATS_LOGO} alt="" title="Subscribed to a BetterCricket module"
                       className="absolute top-2 right-2 w-4 h-4 rounded shrink-0" />
                   ) : isTrialing && (
-                    <span title="Registered — on trial (no paid module yet)"
+                    <span title={isSelfServeTrial
+                        ? 'Self-serve trial (club registered itself)'
+                        : 'Trial set up by a BetterCricket admin'}
                       className="absolute top-2 right-2 w-4 h-4 shrink-0">
-                      <TrialHourglassIcon className="w-4 h-4" />
+                      <TrialHourglassIcon className="w-4 h-4"
+                        color={isSelfServeTrial ? TRIAL_AMBER : TRIAL_AMBER_MUTED} />
                     </span>
                   )}
                   <div className="font-medium text-[13px] truncate mb-1">{deal.title}</div>
