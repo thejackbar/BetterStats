@@ -2510,6 +2510,8 @@ export const api = {
     request(`/club-admin/comms/contacts/${id}`, { method: 'DELETE' }),
   commsBulkDeleteContacts: (contactIds) =>
     request('/club-admin/comms/contacts/bulk-delete', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  commsRemoveContactsFromAllLists: (contactIds) =>
+    request('/club-admin/comms/contacts/remove-from-all-lists', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
   commsImportContacts: (text) =>
     request('/club-admin/comms/contacts/import', { method: 'POST', body: JSON.stringify({ text }) }),
   commsSyncFromClub: () =>

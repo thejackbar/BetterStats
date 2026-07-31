@@ -1773,6 +1773,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_from_local TEXT"
         ))
+        # Auto-remove unsubscribed/bounced contacts from all static lists
+        # (migration 202); default on. See services/comms_lists.py.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "comms_auto_remove_unsubscribed BOOLEAN NOT NULL DEFAULT true"
+        ))
         # BetterComms sending tiers (migration 125): per-club sandbox→production
         # send tier + optional daily-cap override, the tier-increase request
         # queue, and the generic club→BetterCricket request telemetry (feeds a

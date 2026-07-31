@@ -51,6 +51,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
+from app.services import comms_lists
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
@@ -984,6 +985,28 @@ async def bulk_delete_contacts(
     return {"deleted": len(contacts)}
 
 
+class RemoveFromListsIn(BaseModel):
+    contact_ids: List[str]
+
+
+@router.post("/contacts/remove-from-all-lists")
+async def remove_contacts_from_all_lists(
+    data: RemoveFromListsIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Drop the given contacts from every static list they belong to (the Contacts
+    page's "Remove from all lists" bulk action for unsubscribed contacts). This is
+    a manual, explicit action, so it runs regardless of the club's
+    auto-remove setting. Org-scoped; ids that aren't this org's are ignored. The
+    contacts themselves are kept — only their list memberships are removed."""
+    contacts, removed = await comms_lists.remove_from_all_lists(
+        db, data.contact_ids, club.id)
+    await db.commit()
+    return {"contacts": contacts, "removed": removed}
+
+
 class ContactImport(BaseModel):
     text: str  # pasted emails / "Name <email>" / CSV "name,email" — one per line
 
@@ -1861,6 +1884,8 @@ async def get_settings(
         # so the Settings screen can show a live "from x@domain" preview.
         "from_local": club.comms_from_local or "",
         "from_address": _from_address(club),
+        # Auto-remove unsubscribed/bounced contacts from all lists (default on).
+        "auto_remove_unsubscribed": bool(club.comms_auto_remove_unsubscribed),
         "provider": provider_status(),
         "subscribed_contacts": total,
     }
@@ -1871,6 +1896,7 @@ class SettingsIn(BaseModel):
     reply_to: Optional[str] = None
     sender_footer: Optional[str] = None
     from_local: Optional[str] = None
+    auto_remove_unsubscribed: Optional[bool] = None
 
 
 @router.put("/settings")
@@ -1894,6 +1920,8 @@ async def update_settings(
         # Sanitise to valid local-part chars; blank reverts to the slug default.
         cleaned = re.sub(r"[^a-z0-9._-]", "", (data.from_local or "").strip().lower())
         org.comms_from_local = cleaned or None
+    if data.auto_remove_unsubscribed is not None:
+        org.comms_auto_remove_unsubscribed = bool(data.auto_remove_unsubscribed)
     await db.commit()
     return {"status": "ok", "from_address": _from_address(org)}
 
