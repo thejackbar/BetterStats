@@ -682,9 +682,9 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     # column for that one field, same posture as iq_team._safe elsewhere in
     # this codebase.
     try:
-        poc_by_deal = await crm_service.poc_names_by_deal(db, (d.id for d in deals))
+        poc_by_deal = await crm_service.poc_contacts_by_deal(db, (d.id for d in deals))
     except Exception:  # noqa: BLE001
-        logger.exception("super_list_deals: poc_names_by_deal failed")
+        logger.exception("super_list_deals: poc_contacts_by_deal failed")
         poc_by_deal = {}
     try:
         channel_by_club = await crm_service.acquisition_channels_by_club(db, club_by_id)
@@ -721,7 +721,9 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     for d in deals:
         club = club_by_id.get(d.marketing_club_id)
         row = crm_service._deal_dict(d, stage_by_id.get(d.stage_id), club)
-        row["point_of_contact_name"] = poc_by_deal.get(d.id)
+        poc = poc_by_deal.get(d.id) or {}
+        row["point_of_contact_name"] = poc.get("name")
+        row["point_of_contact_email"] = poc.get("email")
         row["marketing_club_state"] = club.state if club else None
         row["marketing_club_association"] = club.association_name if club else None
         row["acquisition_channel"] = (channel_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or d.source

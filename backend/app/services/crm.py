@@ -1026,18 +1026,20 @@ async def clubs_by_ids(session: AsyncSession, club_ids) -> dict:
     return {c.id: c for c in rows}
 
 
-async def poc_names_by_deal(session: AsyncSession, deal_ids) -> dict:
-    """deal_id -> its designated point of contact's full name, batched for
-    the platform deal list's search/filter bar (poc_name)."""
+async def poc_contacts_by_deal(session: AsyncSession, deal_ids) -> dict:
+    """deal_id -> {"name", "email"} for its designated point of contact,
+    batched for the platform deal list's search/filter bar (poc_name) AND
+    the "Create a BetterComms list" preview (which shows the email and
+    highlights a deal missing either one)."""
     ids = list(deal_ids)
     if not ids:
         return {}
     rows = (await session.execute(
-        select(CrmDealContact.deal_id, CrmPerson.full_name)
+        select(CrmDealContact.deal_id, CrmPerson.full_name, CrmPerson.email)
         .join(CrmPerson, CrmPerson.id == CrmDealContact.person_id)
         .where(CrmDealContact.deal_id.in_(ids), CrmDealContact.role_on_deal == POINT_OF_CONTACT_ROLE)
     )).all()
-    return {deal_id: name for deal_id, name in rows}
+    return {deal_id: {"name": name, "email": email} for deal_id, name, email in rows}
 
 
 async def acquisition_channels_by_club(session: AsyncSession, club_by_id: dict) -> dict:

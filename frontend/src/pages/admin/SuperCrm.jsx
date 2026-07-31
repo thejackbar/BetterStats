@@ -302,6 +302,77 @@ const ONBOARDING_OPTIONS = [
   { value: 'not_onboarded', label: 'Not Onboarded' },
 ]
 
+const STATUS_LABELS = { open: 'Open', won: 'Won', lost: 'Lost', '': 'All statuses' }
+const ONBOARDING_LABELS = Object.fromEntries(ONBOARDING_OPTIONS.map(o => [o.value, o.label]))
+
+// A short "$1,000" style label. minValue/maxValue are dollars (not cents).
+const fmtDollars = (v) => `$${Number(v).toLocaleString()}`
+
+// Human-readable summary of every active search / filter / range that produced
+// the current result set, as {label, value} chips — used by the "Create a
+// BetterComms list" modal so a super admin can see exactly which criteria are
+// baked into the list they're about to create. Only deviations from the
+// cleared state (EMPTY_FILTERS) are listed; an empty array means "no filters —
+// every deal in the pipeline".
+function buildFilterSummary(filters, { owners, stages, status }) {
+  const out = []
+  const push = (label, value) => out.push({ label, value })
+  const ownerName = (id) => owners.find(o => o.id === id)?.name || id
+  const stageName = (key) => stages.find(s => s.key === key)?.name || key
+
+  if (status) push('Status', STATUS_LABELS[status] || status)
+  if (filters.q.trim()) push('Search', filters.q.trim())
+  if (filters.ownerId) push('Owner', filters.ownerId === '__unassigned__' ? 'Unassigned' : ownerName(filters.ownerId))
+  if (filters.state) push('State', filters.state)
+  if (filters.association.trim()) push('Association', filters.association.trim())
+  if (filters.leadSource) {
+    const o = LEAD_SOURCE_OPTIONS.find(x => x.value === filters.leadSource)
+    push('Lead source', o?.label || filters.leadSource)
+  }
+  if (filters.onboarding) push('Onboarding', ONBOARDING_LABELS[filters.onboarding] || filters.onboarding)
+  if (filters.modules.length) push('Product interest', filters.modules.map(moduleLabel).join(', '))
+
+  if (filters.minValue !== '' || filters.maxValue !== '') {
+    const lo = filters.minValue !== '' ? fmtDollars(filters.minValue) : null
+    const hi = filters.maxValue !== '' ? fmtDollars(filters.maxValue) : null
+    push('Value', lo && hi ? `${lo} – ${hi}` : lo ? `≥ ${lo}` : `≤ ${hi}`)
+  }
+  if (filters.minScore !== '' || filters.maxScore !== '') {
+    const lo = filters.minScore !== '' ? filters.minScore : null
+    const hi = filters.maxScore !== '' ? filters.maxScore : null
+    push('Engagement', lo != null && hi != null ? `${lo} – ${hi}` : lo != null ? `≥ ${lo}` : `≤ ${hi}`)
+  }
+  if (filters.minTrialDays !== '' || filters.maxTrialDays !== '') {
+    const lo = filters.minTrialDays !== '' ? filters.minTrialDays : null
+    const hi = filters.maxTrialDays !== '' ? filters.maxTrialDays : null
+    push('Trial expiring in', (lo != null && hi != null ? `${lo} – ${hi}` : lo != null ? `≥ ${lo}` : `≤ ${hi}`) + ' days')
+  }
+  if (filters.activeTrials) push('Active trials', 'yes')
+  if (filters.trialExpired) push('Expired trials', 'yes')
+  if (filters.customersOnly) push('Customers only', 'yes')
+
+  const sm = filters.stageModes || {}
+  const inc = Object.keys(sm).filter(k => sm[k] === 'include').map(stageName)
+  const exc = Object.keys(sm).filter(k => sm[k] === 'exclude').map(stageName)
+  if (inc.length) push('Stages (only)', inc.join(', '))
+  if (exc.length) push('Stages (exclude)', exc.join(', '))
+
+  const windowText = (mode, from, to) => {
+    if (mode === 'today') return 'Today'
+    if (mode === 'future') return 'Future'
+    if (mode === 'range') return `${from || '…'} → ${to || '…'}`
+    return null
+  }
+  const nd = windowText(filters.newDealsMode, filters.newDealsFrom, filters.newDealsTo)
+  if (nd && filters.newDealsMode !== 'any') push('New deals', nd)
+  const na = windowText(filters.activityMode, filters.activityFrom, filters.activityTo)
+  if (na && filters.activityMode !== 'any') push('New activity', na)
+  const ev = windowText(filters.eventsMode, filters.eventsFrom, filters.eventsTo)
+  if (ev && filters.eventsMode !== 'all') push('Events', ev)
+
+  return out
+}
+
 // Sort-within-stage: a horizontal row of mutually exclusive buttons, each
 // cycling not-selected -> asc -> desc, instead of a dropdown + direction
 // toggle pair.
@@ -1333,7 +1404,8 @@ export default function SuperCrm() {
         </>
       )}
 
-      <CreateListModal open={showCreateList} onClose={() => setShowCreateList(false)} deals={filteredDeals} />
+      <CreateListModal open={showCreateList} onClose={() => setShowCreateList(false)} deals={filteredDeals}
+        filterSummary={buildFilterSummary(filters, { owners, stages, status })} />
       <NewDealModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)}
         onManageStages={() => { setShowSettings(false); setShowStages(true) }} />
