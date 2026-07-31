@@ -10,6 +10,7 @@ import { PbSpinner } from '../../lib/presskit'
 import PipelineBoard, { TIER_TONE, EngagementArrow } from '../../components/admin/crm/PipelineBoard'
 import DealDetailModal from '../../components/admin/crm/DealDetailModal'
 import ManageStagesModal from '../../components/admin/crm/ManageStagesModal'
+import CreateListModal from '../../components/admin/crm/CreateListModal'
 import CrmEventsView from '../../components/admin/crm/CrmEventsView'
 import { CalendarIcon, eventSummaryText } from '../../components/admin/crm/EventForm'
 import {
@@ -232,10 +233,25 @@ const CHANNEL_LABELS = {
 }
 const channelLabel = (v) => CHANNEL_LABELS[v] || v
 
+// Tri-state stage filter buttons (one per pipeline stage), below the module
+// chips. Each cycles off → exclude (red) → include (green) → off, mirroring the
+// Club Directory's category filter chips. `stageModes` maps a stage KEY to
+// '' | 'include' | 'exclude'; an empty ('') key is dropped so the map stays {}
+// when nothing is set (keeps the EMPTY_FILTERS "active" comparison honest).
+const STAGE_MODE_CYCLE = { '': 'exclude', exclude: 'include', include: '' }
+const STAGE_MODE_STYLE = {
+  '': 'border-pb-hairline2 text-pb-faint hover:text-pb-text',
+  exclude: 'border-red-500/50 text-red-300 bg-red-500/10',
+  include: 'border-emerald-500/50 text-emerald-300 bg-emerald-500/10',
+}
+const STAGE_MODE_PREFIX = { '': '', exclude: '✕ ', include: '✓ ' }
+
 const EMPTY_FILTERS = {
   q: '', ownerId: '', modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', leadSource: '',
   onboarding: '', minTrialDays: '', maxTrialDays: '',
+  // Per-stage include/exclude filter: { stageKey: 'include' | 'exclude' }.
+  stageModes: {},
   activeTrials: false, trialExpired: false, customersOnly: false,
   // "New Deals" (deal-card creation date) + "New Deal Activity" (latest tracked
   // change) recency windows: 'any' (no filter) | 'today' | 'range'.
@@ -588,7 +604,7 @@ function DateWindowFilter({ label, title, mode, from, to, onChange }) {
   )
 }
 
-function FilterBar({ filters, setFilters, owners, stateOptions, associationOptions, resultCount, sortBy, sortDir, onSortChange }) {
+function FilterBar({ filters, setFilters, owners, stages, stateOptions, associationOptions, resultCount, sortBy, sortDir, onSortChange }) {
   // Open by default — a filter bar that starts collapsed hides the very
   // controls someone opened this page to use (per direct instruction).
   const [open, setOpen] = useState(true)
@@ -596,6 +612,16 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
   const toggleModule = (key) => setFilters(f => ({
     ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
   }))
+  // Cycle one stage's filter mode. Dropping an emptied key keeps stageModes {}
+  // when nothing is set.
+  const cycleStage = (key) => setFilters(f => {
+    const cur = f.stageModes?.[key] || ''
+    const next = STAGE_MODE_CYCLE[cur]
+    const sm = { ...(f.stageModes || {}) }
+    if (next) sm[key] = next; else delete sm[key]
+    return { ...f, stageModes: sm }
+  })
+  const anyStageMode = Object.keys(filters.stageModes || {}).length > 0
   const toggleBool = (key) => setFilters(f => ({ ...f, [key]: !f[key] }))
   // Any deviation from the cleared state counts as active. A plain field-by-
   // field truthiness check can't tell the recency dropdowns' 'any' default
@@ -733,6 +759,30 @@ function FilterBar({ filters, setFilters, owners, stateOptions, associationOptio
             {onSortChange && <span className="w-px self-stretch bg-pb-hairline2" />}
             {onSortChange && <SortButtons sortBy={sortBy} sortDir={sortDir} onChange={onSortChange} />}
           </div>
+          {/* Row 4: per-stage include/exclude filter chips (tri-state) — below
+              the module chips, one button per pipeline stage. */}
+          {(stages || []).length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1">
+              <span className="text-[11px] text-pb-faint mr-0.5">Stages</span>
+              <div className="flex flex-wrap gap-1.5">
+                {stages.map(s => {
+                  const m = filters.stageModes?.[s.key] || ''
+                  return (
+                    <button key={s.key || s.id} type="button" onClick={() => cycleStage(s.key)}
+                      title="Click to cycle: off → exclude → include"
+                      className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${STAGE_MODE_STYLE[m]}`}>
+                      {STAGE_MODE_PREFIX[m]}{s.name}
+                    </button>
+                  )
+                })}
+              </div>
+              {anyStageMode && (
+                <button type="button" onClick={() => setFilters(f => ({ ...f, stageModes: {} }))}
+                  className="text-[11px] text-pb-faint hover:text-pb-red underline underline-offset-2">Clear stages</button>
+              )}
+              <span className="text-pb-faintest text-[10.5px]">click to cycle: off → exclude → include</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -921,6 +971,13 @@ export default function SuperCrm() {
   const [sortDir, setSortDir] = useState('asc')
   const [recalcRunning, setRecalcRunning] = useState(false)
   const recalcPollRef = useRef(null)
+  const [showCreateList, setShowCreateList] = useState(false)
+  // Per-super-admin-user stage filter persistence (server-side, so it survives
+  // across sessions and devices). `prefsLoaded` gates the board so the saved
+  // stage filters are applied BEFORE anything renders. `lastSavedStageRef`
+  // seeds from the loaded value so hydration doesn't immediately re-save.
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
+  const lastSavedStageRef = useRef(null)
 
   // opts.silent — used by the background live-refresh below, so a transient
   // network blip mid-poll never pops an error toast (a user-initiated load
@@ -939,6 +996,39 @@ export default function SuperCrm() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.superCrmOwners().then(r => setOwners(r.owners || [])).catch(() => {}) }, [])
+
+  // Restore this super admin's saved stage filter selection before the board
+  // renders (gated by prefsLoaded). Only 'include'/'exclude' values are kept.
+  useEffect(() => {
+    let alive = true
+    api.getUiPrefs().then(r => {
+      if (!alive) return
+      const saved = r?.prefs?.crm_stage_filters
+      const clean = {}
+      if (saved && typeof saved === 'object') {
+        for (const [k, v] of Object.entries(saved)) {
+          if (v === 'include' || v === 'exclude') clean[k] = v
+        }
+      }
+      lastSavedStageRef.current = JSON.stringify(clean)
+      if (Object.keys(clean).length) setFilters(f => ({ ...f, stageModes: clean }))
+    }).catch(() => { lastSavedStageRef.current = JSON.stringify({}) })
+      .finally(() => { if (alive) setPrefsLoaded(true) })
+    return () => { alive = false }
+  }, [])
+
+  // Persist stage filter changes (debounced). Guards on prefsLoaded and compares
+  // to the last-saved snapshot so hydration and no-op filter edits don't write.
+  useEffect(() => {
+    if (!prefsLoaded) return
+    const cur = JSON.stringify(filters.stageModes || {})
+    if (cur === lastSavedStageRef.current) return
+    lastSavedStageRef.current = cur
+    const t = setTimeout(() => {
+      api.setUiPrefs({ crm_stage_filters: filters.stageModes || {} }).catch(() => {})
+    }, 500)
+    return () => clearTimeout(t)
+  }, [filters.stageModes, prefsLoaded])
 
   // Live refresh — the board/list is otherwise refetch-on-load only, so a deal,
   // stage promotion or engagement score changed in the background (a trial
@@ -1027,9 +1117,16 @@ export default function SuperCrm() {
     const maxScore = filters.maxScore !== '' ? Number(filters.maxScore) : null
     const minTrialDays = filters.minTrialDays !== '' ? Number(filters.minTrialDays) : null
     const maxTrialDays = filters.maxTrialDays !== '' ? Number(filters.maxTrialDays) : null
+    // Per-stage include/exclude: any 'exclude' stage drops the deal; if any
+    // stage is set to 'include', the deal must be in one of them (whitelist).
+    const sm = filters.stageModes || {}
+    const stageInc = Object.keys(sm).filter(k => sm[k] === 'include')
+    const stageExc = Object.keys(sm).filter(k => sm[k] === 'exclude')
     return deals.filter(d => {
       if (needle && !`${d.title} ${d.marketing_club_name || ''} ${d.point_of_contact_name || ''}`
         .toLowerCase().includes(needle)) return false
+      if (stageExc.includes(d.stage_key)) return false
+      if (stageInc.length && !stageInc.includes(d.stage_key)) return false
       if (filters.ownerId === '__unassigned__' ? d.owner_user_id : (filters.ownerId && d.owner_user_id !== filters.ownerId)) return false
       if (filters.modules.length && !filters.modules.some(m => (d.module_keys || []).includes(m))) return false
       if (minValueCents != null && (d.effective_value_cents ?? d.value_cents) < minValueCents) return false
@@ -1142,6 +1239,9 @@ export default function SuperCrm() {
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'events' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Events</button>
           <button onClick={() => setView('dashboard')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'dashboard' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Dashboard</button>
+          <span title="Create a BetterComms list from the deals currently shown (one contact per deal)">
+            <Btn variant="ghost" sm onClick={() => setShowCreateList(true)} disabled={filteredDeals.length === 0}>Create List</Btn>
+          </span>
           <span title="Recompute every club's engagement score now and re-run auto-promotions, then refresh the board (runs in the background — takes a few minutes)">
             <Btn variant="ghost" sm onClick={runRecalc} disabled={recalcRunning}>
               {recalcRunning ? 'Recalculating…' : 'Recalculate'}
@@ -1152,13 +1252,13 @@ export default function SuperCrm() {
         </div>
       </div>
 
-      {loading ? <PbSpinner message="Loading pipeline…" /> : view === 'events' ? (
+      {(loading || !prefsLoaded) ? <PbSpinner message="Loading pipeline…" /> : view === 'events' ? (
         <CrmEventsView owners={owners} />
       ) : view === 'dashboard' ? (
         <CrmDashboard deals={deals} stages={stages} />
       ) : (
         <>
-          <FilterBar filters={filters} setFilters={setFilters} owners={owners} stateOptions={stateOptions}
+          <FilterBar filters={filters} setFilters={setFilters} owners={owners} stages={stages} stateOptions={stateOptions}
             associationOptions={associationOptions} resultCount={filteredDeals.length}
             sortBy={sortBy} sortDir={sortDir} onSortChange={(key, dir) => { setSortBy(key); setSortDir(dir) }} />
 
@@ -1241,6 +1341,7 @@ export default function SuperCrm() {
         </>
       )}
 
+      <CreateListModal open={showCreateList} onClose={() => setShowCreateList(false)} deals={filteredDeals} />
       <NewDealModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)}
         onManageStages={() => { setShowSettings(false); setShowStages(true) }} />

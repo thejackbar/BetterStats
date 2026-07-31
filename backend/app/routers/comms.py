@@ -2481,7 +2481,13 @@ async def list_lists(
     )).scalars().all()
     out = []
     for l in rows:
-        out.append({"id": str(l.id), "name": l.name, "count": await _list_count(db, l.id)})
+        out.append({
+            "id": str(l.id), "name": l.name, "count": await _list_count(db, l.id),
+            # 'manual' (hand-created) vs 'auto' (minted by another BetterCricket
+            # function, e.g. the CRM Sales Pipeline). The Lists page groups them.
+            "source": getattr(l, "source", None) or "manual",
+            "origin": getattr(l, "origin", None),
+        })
     return out
 
 
@@ -2499,7 +2505,7 @@ async def create_list(
     name = (data.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="A list name is required")
-    lst = CommsList(organisation_id=club.id, name=name)
+    lst = CommsList(organisation_id=club.id, name=name, source="manual")
     db.add(lst)
     try:
         await db.commit()
@@ -2507,7 +2513,7 @@ async def create_list(
         await db.rollback()
         raise HTTPException(status_code=409, detail="A list with that name already exists")
     await db.refresh(lst)
-    return {"id": str(lst.id), "name": lst.name, "count": 0}
+    return {"id": str(lst.id), "name": lst.name, "count": 0, "source": "manual", "origin": None}
 
 
 @router.put("/lists/{list_id}")

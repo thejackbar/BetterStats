@@ -900,6 +900,11 @@ export const api = {
   },
   superCrmRecalcEngagement: () => request('/club-admin/super/crm/recalc-engagement', { method: 'POST' }),
   superCrmRecalcEngagementStatus: () => request('/club-admin/super/crm/recalc-engagement/status'),
+  // Turn the current filtered deal set into an auto-generated BetterComms List.
+  superCrmListExportPrepare: (dealIds) =>
+    request('/club-admin/super/crm/list-export/prepare', { method: 'POST', body: JSON.stringify({ deal_ids: dealIds }) }),
+  superCrmListExportCommit: (data) =>
+    request('/club-admin/super/crm/list-export/commit', { method: 'POST', body: JSON.stringify(data) }),
   superCrmGetSettings: () => request('/club-admin/super/crm/settings'),
   superCrmUpdateSettings: (data) => request('/club-admin/super/crm/settings', { method: 'PATCH', body: JSON.stringify(data) }),
   superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
@@ -1634,6 +1639,11 @@ export const api = {
   // Account / plan status page (Phase 19) — per-module Subscribed / In Trial /
   // Trial Expired / Never Trialed status plus trial/subscribe eligibility.
   accountGetPlan: () => request('/club-admin/account/plan'),
+  // Per-account UI preferences (namespaced JSON). getUiPrefs -> { prefs }.
+  // setUiPrefs shallow-merges by namespace (send { ns: value }, or { ns: null }
+  // to clear). Persists across sessions/devices, unlike localStorage.
+  getUiPrefs: () => request('/club-admin/account/ui-prefs'),
+  setUiPrefs: (prefs) => request('/club-admin/account/ui-prefs', { method: 'PATCH', body: JSON.stringify({ prefs }) }),
   // Self-service instant trial start / cancel (Dashboard "START TRIAL" and the
   // Account page's per-row actions) — bypass the module-requests queue entirely.
   startModuleTrial: (moduleKey) =>
