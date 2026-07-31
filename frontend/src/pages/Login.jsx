@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../lib/api'
 
@@ -262,9 +262,17 @@ function ForgotPassword({ onBack }) {
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const inviteToken = searchParams.get('invite')
   const resetToken = searchParams.get('reset')
+
+  // Where the user was headed before ProtectedRoute bounced them here (set as
+  // navigation state). Fall back to the dashboard for a direct visit to /login.
+  const from = location.state?.from
+  const redirectTo = from
+    ? `${from.pathname || '/admin'}${from.search || ''}${from.hash || ''}`
+    : '/admin'
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -279,7 +287,7 @@ export default function Login() {
     setLoading(true)
     try {
       await login(username.trim(), password)
-      navigate('/admin')
+      navigate(redirectTo, { replace: true })
     } catch (err) {
       setError(err.message || 'Invalid username or password')
     } finally {
