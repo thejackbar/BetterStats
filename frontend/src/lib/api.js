@@ -1465,13 +1465,16 @@ export const api = {
   metaAdsLeadAdjustments: () => request('/club-admin/meta-ads/leads/adjustments'),
   metaAdsAdSignups: () => request('/club-admin/meta-ads/ad-signups'),
   metaAdsRegistrationFunnel: (days = 30) => request(`/club-admin/meta-ads/registration-funnel?days=${days}`),
-  metaAdsSelectedClubs: (days = 30) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
+  // "Clubs selected"/"Clubs searched" are a follow-up/lead-management list,
+  // not a funnel-stat window — default to a full year so a super admin sees
+  // every past lead, not just the last 30 days (server caps at 730).
+  metaAdsSelectedClubs: (days = 365) => request(`/club-admin/meta-ads/selected-clubs?days=${days}`),
   // Clubs typed into the search box (results loaded) but not necessarily
   // clicked — the interest before a selection. See searched-clubs endpoint.
-  metaAdsSearchedClubs: (days = 30) => request(`/club-admin/meta-ads/searched-clubs?days=${days}`),
-  metaAdsHideSelection: (name, days = 30) =>
+  metaAdsSearchedClubs: (days = 365) => request(`/club-admin/meta-ads/searched-clubs?days=${days}`),
+  metaAdsHideSelection: (name, days = 365) =>
     request(`/club-admin/meta-ads/selected-clubs/hide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
-  metaAdsUnhideSelection: (name, days = 30) =>
+  metaAdsUnhideSelection: (name, days = 365) =>
     request(`/club-admin/meta-ads/selected-clubs/unhide?days=${days}`, { method: 'POST', body: JSON.stringify({ name }) }),
   // Campaign picker — list the ad account's campaigns + which one the dashboard
   // is scoped to, and switch it (stored in the DB, no .env edit / redeploy).

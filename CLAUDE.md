@@ -3003,6 +3003,59 @@ direct correction.
   correct it — it was already built for exactly this "our tracking didn't
   capture it" case, not a new addition here.
 
+### The cutoff over-applied to the lead tables, a conflated Meta "leads" figure, and a shared-IP rate-limit bug (Jul 2026)
+
+Immediate follow-up, from live feedback on the fixes above: "Clubs
+selected"/"Clubs searched" had emptied out to the cutoff window when they're
+meant to be a standing follow-up list, "Club selected" (14) read LOWER than
+Meta's own "Started registering" (20, 142.9% "continued"), and the wizard
+funnel showed "Club selected" (18) higher than "Club searched" (13,
+138.5%) — backwards for a funnel where selecting requires searching first.
+
+- **The "Clubs selected"/"Clubs searched" TABLES are no longer windowed by
+  the counting-since cutoff.** Only the funnel STAT counts
+  (`get_club_selected_count`, `get_registration_step_funnel`, Meta's own
+  campaign insights) reset with the cutoff — these two tables are a
+  follow-up/lead-management list ("who do we chase up"), and a super admin
+  resetting the funnel to a clean baseline still wants every past lead
+  listed, not dropped from view. `_meta_visitor_subquery(bound)` is now a
+  factory so both a since-aware (`_META_VISITOR_SUBQUERY`, funnel stats) and
+  a plain days-only (`_META_VISITOR_SUBQUERY_PLAIN`, the tables) variant
+  share one template instead of drifting. The router/frontend default window
+  for these two endpoints also grew from 30 to 365 days (server caps at
+  730, new `TABLE_DAYS_DEFAULT`/`TABLE_DAYS_MAX` in `routers/meta_ads.py`) —
+  "I want to see all the clubs selected and searched for."
+- **Meta's own "leads" figure (campaign["leads"], "Started registering
+  (Meta-reported)") was conflating two funnel stages.** `_LEAD_ACTION_TYPES`
+  used to sum BOTH the genuine `lead` action (fired at club-pick, step 1)
+  AND `complete_registration` (fired at the final step) into one number —
+  double-counting every completer and inflating the figure above our own
+  real "Club selected" count even once both were scoped to the same date
+  window. Trimmed to just the Lead action types; CompleteRegistration stays
+  tracked separately via `get_registration_count()` (unchanged), never
+  blended back in.
+- **`/track-step`'s rate limiter was keyed by IP, starving beacons across
+  visitors who share one.** The likely cause of "more people selected a club
+  than ever searched for one" in the wizard funnel: `handleClubClick`
+  (`Trial.jsx`) only ever fires `club_prepared` for a click on a search
+  result row, which by construction can't happen without `club_searched`
+  having already fired for that same visitor — so a genuine per-visitor gap
+  shouldn't be possible. But `/track-step`'s limiter was keyed by
+  `client_ip(request)` at 60/hour, shared across every beacon type AND every
+  visitor behind that IP — and Meta ad-click traffic disproportionately
+  arrives via the Facebook/Instagram in-app browser's own proxy and mobile
+  carrier CGNAT, both of which put MANY distinct real visitors behind one
+  apparent IP. A busy shared IP could exhaust the quota, silently dropping
+  a *different* visitor's beacon (fire-and-forget, no retry) — and because
+  `club_searched` fires earlier and more often per visitor than the
+  one-shot `club_prepared`, it's the more likely of the two to get starved
+  out from under someone else's traffic first. Now keyed by `visitor_id`
+  when present (falling back to IP only when storage is blocked and no
+  visitor_id was sent) — unlike `/search` (which genuinely needs an IP-based
+  cap to protect the CA upstream API regardless of who's asking), `/track-
+  step` only ever writes to our own DB, so there's no abuse-surface reason
+  to keep the shared-IP keying that was causing this.
+
 ## Usage tracking — session duration, time on page, visitor journeys (migration 165, v8.75.0, Jul 2026)
 
 `usage_events` had club, page, and UTM/campaign granularity but nothing on how

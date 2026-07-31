@@ -129,17 +129,21 @@ CAMPAIGN_UTM_NAMES = {
     "120249237210710121": "BC_AU_Traffic_ClubHistory_Jul2026",
 }
 
-# The self-serve campaign optimises for CompleteRegistration (a finished
-# trial signup), so registrations count as conversions alongside classic
-# leads — one indicative Meta-side number. It's kept only as a reference
-# figure now (campaign["leads"]) — the authoritative "did someone actually
-# register for the trial" count is get_registration_count() below, which
-# reads our own ad-signups ground truth (organisations.signup_attribution)
-# instead of trusting Meta's action-type rollup, which conflates reaching
-# the trial form (a Lead) with actually finishing it (a CompleteRegistration).
+# campaign["leads"] (shown as "Started registering (Meta-reported)", the
+# funnel stage right after "Club selected") counts ONLY the genuine Meta Lead
+# action — fired the moment a prospect picks a club, step 1 of the wizard.
+# Deliberately does NOT also sum complete_registration/
+# offsite_conversion.fb_pixel_complete_registration: an earlier version of
+# this set blended BOTH action types together, which conflates two DIFFERENT
+# funnel stages into one number (everyone who picked a club PLUS everyone who
+# ALSO went on to finish, double-counting every completer) — the reason this
+# figure used to read higher than our own real "Club selected" count even
+# once both were scoped to the same date window. CompleteRegistration is
+# tracked as its own, more trustworthy figure via get_registration_count()
+# below (our own DB ground truth, organisations.signup_attribution) — never
+# blended back into this one.
 _LEAD_ACTION_TYPES = {
     "lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead",
-    "complete_registration", "offsite_conversion.fb_pixel_complete_registration",
 }
 
 # Single source of truth for pacing/insights maths — the dashboard reads
@@ -573,10 +577,11 @@ _SINCE_LOWER_BOUND = "GREATEST(NOW() - (:days * INTERVAL '1 day'), COALESCE(:sin
 # facebook/instagram traffic_source). Keeps the wizard funnel and the
 # selected-clubs table to Meta traffic only, so an organic or EDM signup that
 # reached /trial some other way never shows on the Meta Ads dashboard.
-_META_VISITOR_SUBQUERY = f"""
+def _meta_visitor_subquery(created_at_bound: str) -> str:
+    return f"""
         visitor_id IN (
             SELECT DISTINCT visitor_id FROM usage_events
-            WHERE created_at >= {_SINCE_LOWER_BOUND}
+            WHERE created_at >= {created_at_bound}
               AND visitor_id IS NOT NULL
               AND (
                 traffic_source IN ('facebook', 'instagram')
@@ -587,6 +592,15 @@ _META_VISITOR_SUBQUERY = f"""
               )
         )
 """
+
+
+# Since-aware — for the funnel STAT counts (get_club_selected_count), which
+# reset with the counting-since cutoff.
+_META_VISITOR_SUBQUERY = _meta_visitor_subquery(_SINCE_LOWER_BOUND)
+# Plain days-only, unaffected by the cutoff — for the "Clubs selected"/"Clubs
+# searched" TABLES (get_selected_clubs/get_searched_clubs), which stay a full
+# follow-up/lead-management list regardless of the funnel reset.
+_META_VISITOR_SUBQUERY_PLAIN = _meta_visitor_subquery("NOW() - (:days * INTERVAL '1 day')")
 
 
 async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> int:
@@ -680,8 +694,14 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # whether any of the club's visitors carried a Meta signal. The COUNTED "Meta
     # leads" numbers stay Meta-scoped elsewhere; this list is deliberately
     # all-source so no lead is lost.
-    await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
-    window = {"days": days, "since": _since()}
+    #
+    # Deliberately NOT windowed by the counting-since cutoff (_since()) —
+    # unlike the funnel STAT counts above it on the dashboard, this table is a
+    # follow-up/lead-management tool ("who do we chase up") and a super admin
+    # asking to reset the funnel to a clean baseline still wants every past
+    # lead listed here, not to have them drop out of view.
+    await _use_active_campaign(db)
+    window = {"days": days}
     utm_contents = set(_current_campaign_utm_contents())
     _META_SOURCES = _META_ATTRIBUTION_SOURCES  # same set _attribution_matches_campaign uses
 
@@ -694,42 +714,39 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MIN(created_at)          AS first_at,
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
-               bool_or({_META_VISITOR_SUBQUERY}) AS via_meta
+               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= {_SINCE_LOWER_BOUND}
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
         GROUP BY 1, 2
     """), window)).mappings().all()
 
-    anon = (await db.execute(text(f"""
+    anon = (await db.execute(text("""
         SELECT COUNT(DISTINCT visitor_id) AS n
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= {_SINCE_LOWER_BOUND}
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND visitor_id IS NOT NULL
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NULL
     """), window)).scalar() or 0
 
     # (2) Terms-step acknowledgements — carry the club name and an email.
-    ack_rows = (await db.execute(text(f"""
+    ack_rows = (await db.execute(text("""
         SELECT club_name, MIN(email) AS email,
                MIN(accepted_at) AS first_at, MAX(accepted_at) AS last_at
         FROM self_serve_acknowledgements
-        WHERE accepted_at >= {_SINCE_LOWER_BOUND}
+        WHERE accepted_at >= NOW() - (:days * INTERVAL '1 day')
         GROUP BY club_name
     """), window)).mappings().all()
 
     # (3) Completed self-serve registrations — the org plus when it was created
     # (orgs carry no created_at; the idempotency key holds the timestamp).
     # All completions are listed; utm_content / utm_source come back so each one
-    # can be tagged Meta-or-not in Python below. Windowed like every other
-    # source here (this is the "Clubs selected in the wizard" TABLE, not the
-    # "Free trial registrations" KPI count — get_registration_count() is
-    # deliberately never windowed, see its own docstring).
-    done_rows = (await db.execute(text(f"""
+    # can be tagged Meta-or-not in Python below.
+    done_rows = (await db.execute(text("""
         SELECT o.name AS club_name, o.slug, o.id::text AS org_id,
                MIN(k.created_at) AS at,
                MIN(o.signup_attribution->>'utm_content') AS utm_content,
@@ -737,7 +754,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         FROM organisations o
         JOIN self_serve_idempotency_keys k ON k.org_id = o.id
         WHERE o.signup_source IS NOT NULL
-          AND k.created_at >= {_SINCE_LOWER_BOUND}
+          AND k.created_at >= NOW() - (:days * INTERVAL '1 day')
         GROUP BY o.name, o.slug, o.id
     """), window)).mappings().all()
 
@@ -832,9 +849,13 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     it, a sample of the literal search terms, whether the search came through a
     Meta ad, and — the point of the table — whether it was ever `selected`
     (clicked into the wizard). Test noise flagged on the selected-clubs table is
-    hidden here too, keyed on the same normalised club name."""
-    await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
-    window = {"days": days, "since": _since()}
+    hidden here too, keyed on the same normalised club name.
+
+    Deliberately NOT windowed by the counting-since cutoff (_since()) — same
+    reasoning as get_selected_clubs: this is a follow-up/lead-management
+    list, not a funnel stat, so a reset shouldn't drop past leads from view."""
+    await _use_active_campaign(db)
+    window = {"days": days}
 
     # Clubs typed into the search box, grouped by the top result the search
     # returned, tagged Meta-or-not, with a sample of the literal search terms.
@@ -845,14 +866,14 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
                COUNT(*)                   AS searches,
-               bool_or({_META_VISITOR_SUBQUERY}) AS via_meta,
+               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta,
                (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
                   FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
                )[1:5] AS queries
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_searched'
-          AND created_at >= {_SINCE_LOWER_BOUND}
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
         GROUP BY 1, 2
     """), window)).mappings().all()
@@ -861,12 +882,12 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # wizard) in the same window — a searched club present here converted, the
     # rest are searched-only. Keyed by normalised name, so it lines up with the
     # search rows' own grouping regardless of which org_id each side captured.
-    selected_keys = set((await db.execute(text(f"""
+    selected_keys = set((await db.execute(text("""
         SELECT DISTINCT lower(TRIM(metadata->>'club_name')) AS k
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= {_SINCE_LOWER_BOUND}
+          AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
     """), window)).scalars().all())
 

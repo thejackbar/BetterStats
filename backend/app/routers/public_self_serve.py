@@ -139,9 +139,21 @@ async def track_step(data: TrackStepRequest, request: Request):
     Lead and CompleteRegistration events) can be broken down step by step on
     the Meta Ads dashboard. Written into usage_events like every other
     beacon — no dedicated table. `step` is checked against an allowlist so
-    this can't be used to write arbitrary strings."""
+    this can't be used to write arbitrary strings.
+
+    Rate-limited per VISITOR when one is present, falling back to per-IP only
+    when it isn't (storage blocked). Unlike /search (protects an external
+    upstream — genuinely needs to cap by IP regardless of who's asking) this
+    is our own cheap DB write, so keying by IP bought nothing but a real
+    failure mode: many real Meta-ad visitors sharing one apparent IP (mobile
+    carrier NAT, or the Facebook in-app browser's own proxy — the majority of
+    this traffic) shared ONE 60/hour quota, so a busy visitor could silently
+    starve another's beacons out from under them — the likely cause of the
+    Meta Ads dashboard's "more people selected a club than ever searched for
+    one" — a distinct visitor_id can't spend another visitor's step budget."""
+    limiter_key = (data.visitor_id or "").strip()[:64] or client_ip(request)
     rate_limit.enforce(
-        f"pubss:step:{client_ip(request)}", STEP_LIMIT, STEP_WINDOW,
+        f"pubss:step:{limiter_key}", STEP_LIMIT, STEP_WINDOW,
         detail="Too many requests.",
     )
     step = (data.step or "").strip()

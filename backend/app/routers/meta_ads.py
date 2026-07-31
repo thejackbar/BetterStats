@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/club-admin/meta-ads", tags=["meta-ads"])
 
+# The "Clubs selected"/"Clubs searched" tables are a follow-up/lead-management
+# list, not a funnel stat window — a super admin wants to see every past lead,
+# not just the last CAMPAIGN_LENGTH_DAYS (30). Distinct from the funnel/
+# insights endpoints' `le=90`, which bound a genuine reporting window.
+TABLE_DAYS_DEFAULT = 365
+TABLE_DAYS_MAX = 730
+
 
 class LeadAdjustmentIn(BaseModel):
     delta: int = Field(..., ge=-100000, le=100000)
@@ -195,7 +202,7 @@ async def registration_funnel(
 
 @router.get("/selected-clubs")
 async def selected_clubs(
-    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -214,7 +221,7 @@ class HideSelectionIn(BaseModel):
 @router.post("/selected-clubs/hide")
 async def hide_selected_club(
     body: HideSelectionIn,
-    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -234,7 +241,7 @@ async def hide_selected_club(
 @router.post("/selected-clubs/unhide")
 async def unhide_selected_club(
     body: HideSelectionIn,
-    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -247,7 +254,7 @@ async def unhide_selected_club(
 
 @router.get("/searched-clubs")
 async def searched_clubs(
-    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):

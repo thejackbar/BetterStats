@@ -846,7 +846,7 @@ export default function SuperMetaAds() {
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-                    Clubs selected in the wizard (last 30 days)
+                    Clubs selected in the wizard (all-time)
                   </div>
                   <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
                     <span>
@@ -926,7 +926,7 @@ export default function SuperMetaAds() {
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-                    Clubs searched in the wizard (last 30 days)
+                    Clubs searched in the wizard (all-time)
                   </div>
                   <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
                     <span>
