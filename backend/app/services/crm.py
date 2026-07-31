@@ -1018,38 +1018,49 @@ async def set_point_of_contact(session: AsyncSession, deal_id, person_id) -> Crm
 async def best_known_contact_for_deal(session: AsyncSession, deal: CrmDeal) -> Optional[dict]:
     """Best-known ``{full_name, email, phone}`` for a deal that has no linked
     CRM contact yet — used both when a deal is auto-created (to seed its
-    contact) and by the backfill script. Sources, in priority order:
+    contact) and by the backfill script. Sources, in strict priority order:
 
-      1. A ``MarketingClubContact`` on the deal's prospect club — preferring
-         the registering admin (``source='self_serve_trial'``), then the
-         lowest ``role_rank`` (office bearers sort to the top), then one that
-         actually carries an email.
-      2. The linked customer org's PRIMARY admin ``User`` (name / email /
-         mobile) — covers a deal on an already-onboarded club whose directory
-         row never captured a personal contact.
-      3. The marketing club's own ``contact_email`` / ``contact_phone`` role
+      1. The **self-serve registering admin** — the
+         ``MarketingClubContact`` with ``source='self_serve_trial'`` on the
+         deal's prospect club (the person who actually signed the club up).
+      2. The linked customer org's **PRIMARY admin ``User``** — the club-admin
+         details shown on ``/admin/super/clubs`` (name / email / mobile). The
+         authoritative account record, so it beats any generic directory row.
+      3. Any other ``MarketingClubContact`` on the club — office bearers
+         first (lowest ``role_rank``), then one that carries an email, then
+         the oldest.
+      4. The marketing club's own ``contact_email`` / ``contact_phone`` role
          mailbox, named after the club as a last resort.
 
     Returns ``None`` when nothing usable is on file."""
-    # 1. A directory contact on the prospect club.
-    if deal.marketing_club_id is not None:
+    club_id = deal.marketing_club_id
+
+    def _from_contact_row(row) -> Optional[dict]:
+        if row is not None and (row.full_name or row.email or row.mobile):
+            return {"full_name": row.full_name, "email": row.email, "phone": row.mobile}
+        return None
+
+    # 1. The self-serve registering admin.
+    if club_id is not None:
         row = (await session.execute(
             select(MarketingClubContact)
-            .where(MarketingClubContact.marketing_club_id == deal.marketing_club_id)
+            .where(MarketingClubContact.marketing_club_id == club_id,
+                   MarketingClubContact.source == "self_serve_trial")
             .order_by(
-                (MarketingClubContact.source == "self_serve_trial").desc(),
-                MarketingClubContact.role_rank.asc(),
                 (MarketingClubContact.email.isnot(None)).desc(),
                 MarketingClubContact.created_at.asc(),
             ).limit(1)
         )).scalars().first()
-        if row is not None and (row.full_name or row.email or row.mobile):
-            return {"full_name": row.full_name, "email": row.email, "phone": row.mobile}
+        got = _from_contact_row(row)
+        if got is not None:
+            return got
 
-    # 2. The linked customer org's primary admin.
+    # 2. The linked customer org's PRIMARY admin (the /admin/super/clubs
+    #    club-admin details) — authoritative, so it ranks above the generic
+    #    directory rows below.
     org_id = deal.organisation_id
-    if org_id is None and deal.marketing_club_id is not None:
-        club = await session.get(MarketingClub, deal.marketing_club_id)
+    if org_id is None and club_id is not None:
+        club = await session.get(MarketingClub, club_id)
         org_id = club.existing_org_id if club else None
     if org_id is not None:
         user = (await session.execute(
@@ -1060,15 +1071,33 @@ async def best_known_contact_for_deal(session: AsyncSession, deal: CrmDeal) -> O
             .limit(1)
         )).scalars().first()
         if user is not None:
-            name = (user.display_name
-                    or " ".join(p for p in (user.first_name, user.last_name) if p).strip()
+            # Prefer the full first+last name (what the registration form
+            # captured, e.g. "Andrew Auciello") over a short display_name
+            # ("Andrew").
+            name = (" ".join(p for p in (user.first_name, user.last_name) if p).strip()
+                    or user.display_name
                     or None)
             if name or user.email or user.mobile_number:
                 return {"full_name": name, "email": user.email, "phone": user.mobile_number}
 
-    # 3. The marketing club's own role mailbox.
-    if deal.marketing_club_id is not None:
-        club = await session.get(MarketingClub, deal.marketing_club_id)
+    # 3. Any other directory contact on the club (office bearers first).
+    if club_id is not None:
+        row = (await session.execute(
+            select(MarketingClubContact)
+            .where(MarketingClubContact.marketing_club_id == club_id)
+            .order_by(
+                MarketingClubContact.role_rank.asc(),
+                (MarketingClubContact.email.isnot(None)).desc(),
+                MarketingClubContact.created_at.asc(),
+            ).limit(1)
+        )).scalars().first()
+        got = _from_contact_row(row)
+        if got is not None:
+            return got
+
+    # 4. The marketing club's own role mailbox.
+    if club_id is not None:
+        club = await session.get(MarketingClub, club_id)
         if club is not None and (club.contact_email or club.contact_phone):
             return {"full_name": club.name, "email": club.contact_email, "phone": club.contact_phone}
 

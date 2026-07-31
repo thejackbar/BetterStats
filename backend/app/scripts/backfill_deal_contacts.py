@@ -11,9 +11,11 @@ WHY
 
 WHAT
     For every OPEN, non-archived deal that has NO linked contact, resolve the
-    club's best-known contact (crm.best_known_contact_for_deal — the
-    registering admin's MarketingClubContact, else the linked org's primary
-    admin, else the club's role mailbox) and link it as the point of contact.
+    club's best-known contact (crm.best_known_contact_for_deal, in priority
+    order: the self-serve registering admin, else the linked org's PRIMARY
+    admin user — the /admin/super/clubs club-admin details, else any other
+    directory contact, else the club's role mailbox) and link it as the point
+    of contact.
     Idempotent and resumable: a deal that already has a contact is skipped, so
     a re-run only touches the ones still missing one. Deals a super admin
     closed (won/lost) or archived are left alone — the pipeline only shows the
