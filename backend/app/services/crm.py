@@ -1026,9 +1026,12 @@ async def best_known_contact_for_deal(session: AsyncSession, deal: CrmDeal) -> O
       2. The linked customer org's **PRIMARY admin ``User``** — the club-admin
          details shown on ``/admin/super/clubs`` (name / email / mobile). The
          authoritative account record, so it beats any generic directory row.
-      3. Any other ``MarketingClubContact`` on the club — office bearers
-         first (lowest ``role_rank``), then one that carries an email, then
-         the oldest.
+      3. Any other ``MarketingClubContact`` on the club — the usual reason a
+         deal exists for a club that never onboarded (anonymous page views
+         tracked via the club's utm_code put it on the board). Here the point
+         is to end up with someone we can actually contact, so a row that
+         carries an **email** wins first, then one that also has a **name**,
+         then the most senior officer (lowest ``role_rank``), then the oldest.
       4. The marketing club's own ``contact_email`` / ``contact_phone`` role
          mailbox, named after the club as a last resort.
 
@@ -1080,14 +1083,18 @@ async def best_known_contact_for_deal(session: AsyncSession, deal: CrmDeal) -> O
             if name or user.email or user.mobile_number:
                 return {"full_name": name, "email": user.email, "phone": user.mobile_number}
 
-    # 3. Any other directory contact on the club (office bearers first).
+    # 3. Any other directory contact on the club — for a club that never
+    #    onboarded (on the board via anonymous utm_code page views) the goal
+    #    is a contactable person: prefer a row with an email, then one that
+    #    also has a name, then the most senior officer.
     if club_id is not None:
         row = (await session.execute(
             select(MarketingClubContact)
             .where(MarketingClubContact.marketing_club_id == club_id)
             .order_by(
-                MarketingClubContact.role_rank.asc(),
                 (MarketingClubContact.email.isnot(None)).desc(),
+                (MarketingClubContact.full_name.isnot(None)).desc(),
+                MarketingClubContact.role_rank.asc(),
                 MarketingClubContact.created_at.asc(),
             ).limit(1)
         )).scalars().first()
