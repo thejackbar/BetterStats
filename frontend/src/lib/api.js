@@ -392,6 +392,29 @@ export const api = {
   volunteerDeleteHours: (id) =>
     request(`/club-admin/volunteers/hours/${id}`, { method: 'DELETE' }),
 
+  // BetterClubManager Roster (core capability, not a paid module)
+  rosterAreas: () => request('/club-admin/roster/areas'),
+  rosterCreateArea: (data) => request('/club-admin/roster/areas', { method: 'POST', body: JSON.stringify(data) }),
+  rosterUpdateArea: (id, data) => request(`/club-admin/roster/areas/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rosterDeleteArea: (id) => request(`/club-admin/roster/areas/${id}`, { method: 'DELETE' }),
+  rosterSeedStarter: () => request('/club-admin/roster/areas/seed-starter', { method: 'POST' }),
+  rosterReorderAreas: (areaIds) => request('/club-admin/roster/areas/reorder', { method: 'POST', body: JSON.stringify({ area_ids: areaIds }) }),
+  rosterAddPattern: (areaId, data) => request(`/club-admin/roster/areas/${areaId}/patterns`, { method: 'POST', body: JSON.stringify(data) }),
+  rosterDeletePattern: (id) => request(`/club-admin/roster/patterns/${id}`, { method: 'DELETE' }),
+  rosterGetSettings: () => request('/club-admin/roster/settings'),
+  rosterSetSettings: (data) => request('/club-admin/roster/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  rosterWeek: (weekStart) => request(`/club-admin/roster/week${weekStart ? '?week_start=' + weekStart : ''}`),
+  rosterAssign: (weekId, shiftId, memberId) => request(`/club-admin/roster/week/${weekId}/assign`, { method: 'POST', body: JSON.stringify({ shift_id: shiftId, member_id: memberId }) }),
+  rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),
+  rosterPublish: (weekId) => request(`/club-admin/roster/week/${weekId}/publish`, { method: 'POST' }),
+  rosterReset: (weekId) => request(`/club-admin/roster/week/${weekId}/reset`, { method: 'POST' }),
+  rosterClearConfig: () => request('/club-admin/roster/clear-config', { method: 'POST' }),
+  facilityRequests: () => request('/club-admin/facility-requests'),
+  facilityRequestCreate: (data) => request('/club-admin/facility-requests', { method: 'POST', body: JSON.stringify(data) }),
+  facilityRequestApprove: (id, force) => request(`/club-admin/facility-requests/${id}/approve${force ? '?force=true' : ''}`, { method: 'POST' }),
+  facilityRequestDecline: (id) => request(`/club-admin/facility-requests/${id}/decline`, { method: 'POST' }),
+  facilityRequestsClear: () => request('/club-admin/facility-requests/clear', { method: 'POST' }),
+
   // Qualification Management (core capability, not a paid module)
   qualListTypes: (includeInactive) =>
     request(`/club-admin/qualifications/types${includeInactive ? '?include_inactive=true' : ''}`),
@@ -474,6 +497,8 @@ export const api = {
   // Assets & Facilities (core capability, not a paid module)
   assetsListFacilities: (includeInactive) =>
     request(`/club-admin/assets/facilities${includeInactive ? '?include_inactive=true' : ''}`),
+  assetsSeedFacilities: () => request('/club-admin/assets/facilities/seed-starter', { method: 'POST' }),
+  assetsSeedItems: () => request('/club-admin/assets/items/seed-starter', { method: 'POST' }),
   assetsCreateFacility: (data) =>
     request('/club-admin/assets/facilities', { method: 'POST', body: JSON.stringify(data) }),
   assetsUpdateFacility: (id, data) =>

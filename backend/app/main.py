@@ -16,7 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary, social_media, votes, public_votes, roles_activities, club_room
+    club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -4253,6 +4253,94 @@ async def lifespan(app: FastAPI):
             WHERE id = 1 AND NOT (settings ? 'meta_ads_counting_since_seeded')
         """))
 
+    # Migration 208: BetterClubManager Roster — operational areas, shift
+    # patterns, roster weeks/shifts, settings + a per-volunteer weekly cap.
+    # Byte-identical to alembic/versions/208_roster.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_areas (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                department TEXT,
+                color TEXT,
+                required_role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL,
+                required_qualification_type_id UUID REFERENCES qualification_types(id) ON DELETE SET NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_areas_org ON roster_areas(organisation_id, is_active)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_shift_patterns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                area_id UUID NOT NULL REFERENCES roster_areas(id) ON DELETE CASCADE,
+                day_of_week INTEGER NOT NULL,
+                start_time NUMERIC(4,2) NOT NULL,
+                end_time NUMERIC(4,2) NOT NULL,
+                headcount INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_shift_patterns_area ON roster_shift_patterns(area_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_weeks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                week_start DATE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_roster_weeks_org_week UNIQUE (organisation_id, week_start)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_shifts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                roster_week_id UUID NOT NULL REFERENCES roster_weeks(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                area_id UUID NOT NULL REFERENCES roster_areas(id) ON DELETE CASCADE,
+                day_of_week INTEGER NOT NULL,
+                start_time NUMERIC(4,2) NOT NULL,
+                end_time NUMERIC(4,2) NOT NULL,
+                assignee_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_shifts_week ON roster_shifts(roster_week_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_settings (
+                organisation_id UUID PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
+                enforce_qualifications BOOLEAN NOT NULL DEFAULT TRUE,
+                weekly_shift_cap INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("ALTER TABLE volunteer_profiles ADD COLUMN IF NOT EXISTS max_shifts_per_week INTEGER"))
+
+    # Migration 209: BetterClubManager Facilities — booking-requests approval
+    # queue. Byte-identical to alembic/versions/209_facility_booking_requests.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS facility_booking_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                facility_id UUID NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                starts_at TIMESTAMPTZ NOT NULL,
+                ends_at TIMESTAMPTZ NOT NULL,
+                requester_name TEXT,
+                requester_email TEXT,
+                note TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                decided_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_facility_booking_requests_org ON facility_booking_requests(organisation_id, status)"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -4481,6 +4569,8 @@ app.include_router(assets.router)        # Assets & Facilities (core capability,
 app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
 app.include_router(club_room.router)     # Club Room Mode — TV slideshow (core capability, not a paid module)
 app.include_router(roles_activities.router)  # Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
+app.include_router(roster.router)        # BetterClubManager Roster — weekly volunteer roster (core capability, not a paid module)
+app.include_router(facility_requests.router)  # BetterClubManager Facilities — booking-requests approval queue (core capability, not a paid module)
 app.include_router(member_portal_admin.router)  # Member portal visibility check (core, no capability — see the router docstring)
 app.include_router(stripe_connect.router)       # Member portal: club-to-member Stripe Connect admin flow (core, flag-gated)
 app.include_router(public_stripe_connect.router)  # Member portal: Stripe Connect webhook (public, unauthenticated)
