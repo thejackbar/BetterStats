@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../../../lib/api'
 import { C, MONO, ACCENT } from './ui'
-import { buildSlots } from './model'
 import clubLogo from '../../../../assets/modules/betterclubmanager.svg'
 import Today from './screens/Today'
 import Roster from './screens/Roster'
@@ -12,7 +11,6 @@ import ClubDiary from './screens/ClubDiary'
 import Facilities from './screens/Facilities'
 import Events from './screens/Events'
 import AreasRoles from './screens/AreasRoles'
-import PersonDrawer from './parts/PersonDrawer'
 
 // The redesigned BetterClubManager surface: one self-contained shell with its
 // own 232px sidebar and eight internally-navigated screens, faithfully porting
@@ -34,7 +32,7 @@ const NAV_ICONS = {
 const NAV = [
   { key: 'overview', label: 'Today' },
   { heading: 'PEOPLE' },
-  { key: 'roster', label: 'Roster', badge: true },
+  { key: 'roster', label: 'Roster' },
   { key: 'directory', label: 'Directory' },
   { key: 'committee', label: 'Committee' },
   { heading: 'CLUB' },
@@ -59,7 +57,6 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
     return {
       screen: initialScreen,
       view: 'people',
-      slots: buildSlots(),
       dragId: null, dragPerson: null, overCell: null,
       selected: null, person: null, task: null, toast: null,
       openExpanded: false,
@@ -96,7 +93,6 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
 
   const narrow = st.w < 1280
   const opts = { enforceQualifications: st.enforceQualifications, weeklyShiftCap: st.weeklyShiftCap }
-  const openCount = st.slots.filter(x => !x.assignee).length
 
   const goScreen = (key) => patch({ screen: key, navOpen: false })
 
@@ -150,9 +146,6 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
                 style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '8px 16px', fontSize: 13.5, background: active ? 'rgba(99,102,241,0.1)' : 'transparent', color: active ? C.accent : C.faint, border: 'none', borderRight: active ? `2px solid ${C.accent}` : '2px solid transparent', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}>
                 <NavIcon name={item.key} />
                 <span>{item.label}</span>
-                {item.badge && openCount > 0 && (
-                  <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 9.5, padding: '1px 6px', borderRadius: 999, background: 'rgba(245,181,66,0.15)', color: C.warn }}>{openCount}</span>
-                )}
               </button>
             )
           })}
@@ -164,8 +157,6 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
         <Screen st={st} patch={patch} opts={opts} narrow={narrow} />
       </div>
 
-      {/* Roster person drawer (Roster is still on demo data until its backend lands) */}
-      {st.person && <PersonDrawer personId={st.person} slots={st.slots} opts={opts} onClose={() => patch({ person: null })} />}
     </div>
   )
 }

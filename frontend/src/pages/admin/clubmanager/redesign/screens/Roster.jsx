@@ -1,131 +1,195 @@
+import { useState, useEffect } from 'react'
+import { api } from '../../../../../lib/api'
 import { C, MONO, ScreenHeader, NavToggle, Toast, initials } from '../ui'
-import { AREAS, DOW, DATES, PEOPLE, RULES, personById, checkAssign, bestFor, fmtHour } from '../model'
 
-// Roster — build and publish the repeating weekly roster. Two drag directions:
-// in People view a shift chip is dragged onto a person's day cell (or the Open
-// row); in Areas view a volunteer card from the side panel is dragged onto a
-// shift. Every rule violation is derived on the drop through the rules engine.
-export default function Roster({ st, patch, opts, narrow }) {
-  const slots = st.slots
+// Roster on the real backend. Operational areas + shift patterns are config; a
+// roster week materialises shifts from the patterns; assignments run through the
+// server rules engine (and are mirrored client-side here for candidate ranking).
+
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+function fmtHour(h) {
+  const hh = Math.floor(h), mm = Math.round((h - hh) * 60)
+  if (hh === 24) return '12am'
+  const ampm = hh >= 12 && hh < 24 ? 'pm' : 'am'
+  let base = hh % 12; if (base === 0) base = 12
+  return base + (mm ? ':' + String(mm).padStart(2, '0') : '') + ampm
+}
+function weekDates(weekStartISO) {
+  const start = weekStartISO ? new Date(weekStartISO + 'T00:00:00') : new Date()
+  return DOW.map((_, i) => {
+    const d = new Date(start); d.setDate(start.getDate() + i)
+    return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]
+  })
+}
+const DEFAULT_CAP = 3
+
+// Client mirror of services/roster.check_assignment.
+function checkClient(area, shift, cand, shifts, settings) {
+  const blocks = [], warns = []
+  const cap = settings.weekly_shift_cap || cand.max_shifts || DEFAULT_CAP
+  if (area.required_qualification_type_id && !cand.qual_type_ids.includes(area.required_qualification_type_id)) {
+    (settings.enforce_qualifications === false ? warns : blocks).push('Missing ' + (area.required_qualification_name || 'required qualification'))
+  }
+  if (!cand.available_days.includes(shift.day_of_week)) blocks.push('Not available ' + DOW[shift.day_of_week])
+  const mine = shifts.filter(s => s.assignee_member_id === cand.member_id && s.id !== shift.id)
+  if (mine.some(s => s.day_of_week === shift.day_of_week && s.start_time < shift.end_time && shift.start_time < s.end_time)) blocks.push('Overlaps another shift')
+  if (area.required_role_id && !cand.role_ids.includes(area.required_role_id)) warns.push('Not in the ' + (area.required_role_name || 'required') + ' role')
+  if (mine.length + 1 > cap) warns.push('Over their ' + cap + '-shift weekly cap')
+  if (mine.length + 1 >= 4) warns.push('Heavy week — spread the load')
+  if (cand.player_id && shift.day_of_week === 5 && shift.start_time < 18.5) warns.push('May be selected to play Saturday')
+  return { blocks, warns }
+}
+
+export default function Roster({ st, patch, narrow }) {
+  const [data, setData] = useState(null)  // { week, areas, candidates, settings }
+  const [shifts, setShifts] = useState([])
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => api.rosterWeek().then(res => { setData(res); setShifts(res.week.shifts || []) }).catch(e => setErr(String(e?.message || e)))
+  useEffect(() => { load() }, [])
+
   const view = st.view
   const gridCols = narrow ? '176px repeat(7, minmax(0, 1fr))' : '216px repeat(7, minmax(150px, 1fr))'
-  const open = slots.filter(x => !x.assignee)
-  const filled = slots.length - open.length
-  const pct = Math.round((filled / slots.length) * 100)
 
-  // ── assignment through the rules engine ─────────────────────────────────
-  const assign = (slotId, personId) => patch(s => {
-    const next = s.slots.map(x => ({ ...x }))
-    const slot = next.find(x => x.id === slotId)
-    if (!slot) return {}
-    if (!personId) {
-      slot.assignee = null; slot.warns = []
-      return { slots: next, toast: { tone: 'info', title: 'Shift returned to Open.', body: AREAS[slot.area].name + ' · ' + DOW[slot.day] } }
-    }
-    const p = personById(personId)
-    const res = checkAssign(p, slot, next, opts)
-    if (res.blocks.length) return { toast: { tone: 'block', title: 'Can’t roster ' + p.name + ' here.', body: res.blocks.join(' · ') } }
-    slot.assignee = personId; slot.warns = res.warns
-    return {
-      slots: next,
-      toast: res.warns.length
-        ? { tone: 'warn', title: p.name + ' rostered with a warning.', body: res.warns.join(' · ') }
-        : { tone: 'ok', title: p.name + ' rostered.', body: AREAS[slot.area].name + ' · ' + DOW[slot.day] + ' ' + fmtHour(slot.start) + '–' + fmtHour(slot.end) },
-    }
-  })
+  const Header = ({ children }) => (
+    <ScreenHeader>
+      <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
+      <div>
+        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Roster</h1>
+        <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faint, marginTop: 2 }}>{data?.week ? 'WEEK OF ' + weekDates(data.week.week_start)[0].toUpperCase() + (data.week.status === 'published' ? ' · PUBLISHED' : '') : 'THIS WEEK'}</div>
+      </div>
+      {children}
+    </ScreenHeader>
+  )
 
-  const autoFill = () => patch(s => {
-    const next = s.slots.map(x => ({ ...x }))
-    let placed = 0
-    next.filter(x => !x.assignee).forEach(slot => {
-      const ranked = bestFor(slot, next, opts)
-      const best = ranked.filter(x => x.res.warns.length === 0)[0] || ranked[0]
-      if (best) { slot.assignee = best.p.id; slot.warns = best.res.warns; placed++ }
-    })
-    const still = next.filter(x => !x.assignee).length
-    return { slots: next, toast: { tone: placed ? 'ok' : 'warn', title: 'Auto-fill proposed ' + placed + ' assignment' + (placed === 1 ? '' : 's') + '.', body: still ? still + ' shift' + (still === 1 ? '' : 's') + ' still need a qualified volunteer — check the amber chips.' : 'Every shift is covered. Review the amber chips, then publish.' } }
-  })
+  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load the roster.' : 'Loading the roster…'}</div></div>
 
-  const publish = () => patch({ toast: open.length
-    ? { tone: 'warn', title: 'Published with ' + open.length + ' open shift' + (open.length === 1 ? '' : 's') + '.', body: 'Volunteers can self-nominate for the gaps; you confirm each one.' }
-    : { tone: 'ok', title: 'Week published.', body: 'Everyone rostered gets their shift and a check-in tap that logs their hours.' } })
+  const { areas, candidates, settings } = data
+  const areaById = {}; areas.forEach(a => { areaById[a.id] = a })
+  const candById = {}; candidates.forEach(c => { candById[c.member_id] = c })
 
-  // ── drag helpers ────────────────────────────────────────────────────────
-  const cellDrop = (key, personId) => ({
-    onDragOver: e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (st.overCell !== key) patch({ overCell: key }) },
-    onDragLeave: () => { if (st.overCell === key) patch({ overCell: null }) },
-    onDrop: e => { e.preventDefault(); const id = st.dragId; patch({ overCell: null, dragId: null }); if (id) assign(id, personId) },
-  })
-  const slotDrop = (slotId) => {
-    const key = 'slot-' + slotId
-    return {
-      onDragOver: e => { if (!st.dragPerson) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (st.overCell !== key) patch({ overCell: key }) },
-      onDragLeave: () => { if (st.overCell === key) patch({ overCell: null }) },
-      onDrop: e => { e.preventDefault(); const pid = st.dragPerson; patch({ overCell: null, dragPerson: null }); if (pid) assign(slotId, pid) },
-    }
-  }
-
-  const cellStyle = (isOver, extra) => ({ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, ...(isOver ? { background: 'rgba(99,102,241,0.14)', boxShadow: 'inset 0 0 0 1.5px #6366F1' } : {}), ...extra })
-
-  // A draggable shift chip (People view + Open row).
-  const ShiftChip = ({ slot, inOpen, count }) => {
-    const a = AREAS[slot.area]
-    const warned = slot.warns && slot.warns.length
+  // no config yet → offer to seed a starter set (also handy for testing)
+  if (areas.length === 0) {
     return (
-      <div draggable
-        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: slot.id, selected: slot.id }) }}
-        onDragEnd={() => patch({ dragId: null, overCell: null })}
-        onClick={() => patch({ selected: slot.id })}
-        style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
-          border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color} 40%, transparent)`)}`,
-          background: inOpen ? 'rgba(245,181,66,0.10)' : `color-mix(in srgb, ${a.color} 13%, transparent)`,
-          color: inOpen ? C.warn : a.color }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: a.color }} />
-          <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{count > 1 ? a.name + ' ×' + count : a.name}</span>
-          {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <Header />
+        <div style={{ padding: 24, maxWidth: '46rem' }}>
+          <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 22, fontSize: 13.5, color: C.dim, lineHeight: 1.6 }}>
+            No operational areas set up yet. An area is a slice of club work (Bar, Umpires, Groundsman…) with its own weekly shift pattern, the role that covers it and the qualification that gates it. Add a starter set to see the weekly roster generate — you can rename, re-time or remove them afterwards in Areas &amp; Roles.
+            <div style={{ marginTop: 14 }}>
+              <button disabled={busy} onClick={async () => { setBusy(true); await api.rosterSeedStarter().catch(() => {}); await load(); setBusy(false) }}
+                style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Setting up…' : 'Set up starter areas'}</button>
+            </div>
+          </div>
         </div>
-        <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{fmtHour(slot.start)}–{fmtHour(slot.end)}</div>
       </div>
     )
   }
 
-  // ── People view: person rows ────────────────────────────────────────────
-  const rows = PEOPLE.map(p => {
-    const mine = slots.filter(x => x.assignee === p.id)
-    const cap = opts.weeklyShiftCap || p.max
-    const loadPct = Math.min(100, Math.round((mine.length / cap) * 100))
-    const over = mine.length > cap
-    return { p, mine, cap, loadPct, over }
+  const DATES = weekDates(data.week.week_start)
+  const open = shifts.filter(x => !x.assignee_member_id)
+  const filled = shifts.length - open.length
+  const pct = shifts.length ? Math.round((filled / shifts.length) * 100) : 0
+
+  const doAssign = async (shiftId, memberId) => {
+    const res = await api.rosterAssign(data.week.id, shiftId, memberId).catch(() => ({ ok: false, blocks: ['Network error'] }))
+    if (!res.ok) {
+      const cand = candById[memberId]
+      patch({ toast: { tone: 'block', title: cand ? 'Can’t roster ' + cand.name + ' here.' : 'Could not update the shift.', body: (res.blocks || []).join(' · ') } })
+      return
+    }
+    if (res.cleared) {
+      setShifts(prev => prev.map(s => s.id === shiftId ? { ...s, assignee_member_id: null, assignee_name: null, warnings: [] } : s))
+      const sh = shifts.find(s => s.id === shiftId); const a = sh && areaById[sh.area_id]
+      patch({ toast: { tone: 'info', title: 'Shift returned to Open.', body: a ? a.name + ' · ' + DOW[sh.day_of_week] : '' } })
+      return
+    }
+    setShifts(prev => prev.map(s => s.id === shiftId ? { ...s, assignee_member_id: memberId, assignee_name: res.assignee_name, warnings: res.warns || [] } : s))
+    const sh = shifts.find(s => s.id === shiftId); const a = sh && areaById[sh.area_id]
+    patch({ toast: (res.warns && res.warns.length)
+      ? { tone: 'warn', title: res.assignee_name + ' rostered with a warning.', body: res.warns.join(' · ') }
+      : { tone: 'ok', title: res.assignee_name + ' rostered.', body: a ? a.name + ' · ' + DOW[sh.day_of_week] + ' ' + fmtHour(sh.start_time) + '–' + fmtHour(sh.end_time) : '' } })
+  }
+  const autoFill = async () => {
+    setBusy(true)
+    const res = await api.rosterAutofill(data.week.id).catch(() => null)
+    setBusy(false)
+    if (!res) return
+    setShifts(res.shifts || shifts)
+    patch({ toast: { tone: res.placed ? 'ok' : 'warn', title: 'Auto-fill proposed ' + res.placed + ' assignment' + (res.placed === 1 ? '' : 's') + '.', body: res.remaining ? res.remaining + ' shift' + (res.remaining === 1 ? '' : 's') + ' still need a qualified, available volunteer.' : 'Every shift is covered. Review the amber chips, then publish.' } })
+  }
+  const publish = async () => {
+    const res = await api.rosterPublish(data.week.id).catch(() => null)
+    if (!res) return
+    setData(d => ({ ...d, week: { ...d.week, status: 'published' } }))
+    patch({ toast: res.open
+      ? { tone: 'warn', title: 'Published with ' + res.open + ' open shift' + (res.open === 1 ? '' : 's') + '.', body: 'Volunteers can self-nominate for the gaps; you confirm each one.' }
+      : { tone: 'ok', title: 'Week published.', body: 'Everyone rostered gets their shift and a check-in tap that logs their hours.' } })
+  }
+  const resetWeek = async () => {
+    if (!window.confirm('Reset this week? Every assignment is cleared and the shifts are regenerated from your patterns. This only affects this week.')) return
+    const res = await api.rosterReset(data.week.id).catch(() => null)
+    if (!res) return
+    setShifts(res.shifts || [])
+    setData(d => ({ ...d, week: { ...d.week, status: 'draft' } }))
+    patch({ toast: { tone: 'info', title: 'Week reset.', body: 'Every shift is open again.' } })
+  }
+
+  const cellDrop = (key, personId) => ({
+    onDragOver: e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (st.overCell !== key) patch({ overCell: key }) },
+    onDragLeave: () => { if (st.overCell === key) patch({ overCell: null }) },
+    onDrop: e => { e.preventDefault(); const id = st.dragId; patch({ overCell: null, dragId: null }); if (id) doAssign(id, personId) },
   })
+  const slotDrop = (shiftId) => {
+    const key = 'slot-' + shiftId
+    return {
+      onDragOver: e => { if (!st.dragPerson) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (st.overCell !== key) patch({ overCell: key }) },
+      onDragLeave: () => { if (st.overCell === key) patch({ overCell: null }) },
+      onDrop: e => { e.preventDefault(); const pid = st.dragPerson; patch({ overCell: null, dragPerson: null }); if (pid) doAssign(shiftId, pid) },
+    }
+  }
+  const cellStyle = (isOver, extra) => ({ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, ...(isOver ? { background: 'rgba(99,102,241,0.14)', boxShadow: 'inset 0 0 0 1.5px #6366F1' } : {}), ...extra })
 
-  // ── Areas view: department bands + area rows ─────────────────────────────
-  const depts = []
-  Object.keys(AREAS).forEach(k => { if (depts.indexOf(AREAS[k].dept) === -1) depts.push(AREAS[k].dept) })
+  const ShiftChip = ({ shift, inOpen, count }) => {
+    const a = areaById[shift.area_id] || {}
+    const warned = shift.warnings && shift.warnings.length
+    return (
+      <div draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => patch({ selected: shift.id })}
+        style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
+          border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || '#6366F1'} 40%, transparent)`)}`,
+          background: inOpen ? 'rgba(245,181,66,0.10)' : `color-mix(in srgb, ${a.color || '#6366F1'} 13%, transparent)`, color: inOpen ? C.warn : (a.color || C.accent) }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: a.color || '#6366F1' }} />
+          <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{count > 1 ? a.name + ' ×' + count : a.name}</span>
+          {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{fmtHour(shift.start_time)}–{fmtHour(shift.end_time)}</div>
+      </div>
+    )
+  }
 
-  // ── side panel ──────────────────────────────────────────────────────────
-  const sel = st.selected ? slots.find(x => x.id === st.selected) : null
-  const cands = sel ? bestFor(sel, slots, opts) : PEOPLE.map(p => ({ p, res: { warns: [] }, load: slots.filter(x => x.assignee === p.id).length }))
-  const candidates = cands.slice(0, 12)
+  const sel = st.selected ? shifts.find(x => x.id === st.selected) : null
+  const selArea = sel ? areaById[sel.area_id] : null
+  const ranked = sel ? candidates.map(c => ({ c, res: checkClient(selArea, sel, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
+    .filter(x => x.res.blocks.length === 0).sort((a, b) => (a.res.warns.length * 10 + a.load) - (b.res.warns.length * 10 + b.load))
+    : candidates.map(c => ({ c, res: { warns: [] }, load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
+  const candList = ranked.slice(0, 14)
 
-  // ── open shifts row: collapse identical unfilled slots ──────────────────
   const openCells = DOW.map((_, d) => {
     const groups = []
-    open.filter(x => x.day === d).forEach(x => {
-      const g = groups.find(y => y.slot.area === x.area && y.slot.start === x.start && y.slot.end === x.end)
-      if (g) g.count++; else groups.push({ slot: x, count: 1 })
+    open.filter(x => x.day_of_week === d).forEach(x => {
+      const g = groups.find(y => areaById[y.shift.area_id]?.name === areaById[x.area_id]?.name && y.shift.start_time === x.start_time && y.shift.end_time === x.end_time)
+      if (g) g.count++; else groups.push({ shift: x, count: 1 })
     })
     return { d, groups }
   })
 
+  const depts = []; areas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <ScreenHeader>
-        <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-        <div>
-          <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Roster</h1>
-          <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faint, marginTop: 2 }}>WEEK OF MON 3 NOV 2026</div>
-        </div>
+      <Header>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
           {['people', 'areas'].map(v => (
             <button key={v} onClick={() => patch({ view: v, selected: null })} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', textTransform: 'capitalize', background: view === v ? 'rgba(99,102,241,0.15)' : 'transparent', color: view === v ? C.accent : C.faint }}>{v}</button>
@@ -134,24 +198,21 @@ export default function Roster({ st, patch, opts, narrow }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginLeft: 'auto', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }}>
             <span style={{ fontWeight: 700, fontSize: 18, color: C.text, fontVariantNumeric: 'tabular-nums' }}>{filled}</span>
-            <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {slots.length} FILLED</span>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {shifts.length} FILLED</span>
           </div>
-          <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} />
-          </div>
+          <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
           <button onClick={() => patch(s => ({ panelOpen: !s.panelOpen }))} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(st.panelOpen ? { border: '1px solid rgba(99,102,241,0.45)', color: C.accent, background: 'rgba(99,102,241,0.10)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{st.panelOpen ? 'Hide candidates' : 'Candidates'}</button>
-          <button onClick={autoFill} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Auto-fill open shifts</button>
+          <button disabled={busy} onClick={autoFill} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Auto-fill open shifts</button>
+          <button onClick={resetWeek} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer' }}>Reset</button>
           <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
         </div>
-      </ScreenHeader>
+      </Header>
 
       <Toast toast={st.toast} onClear={() => patch({ toast: null })} />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'stretch' }}>
         <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
           <div style={{ minWidth: narrow ? 0 : 1266 }}>
-
-            {/* header row */}
             <div style={{ display: 'grid', gridTemplateColumns: gridCols, position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
               <div style={{ padding: '10px 14px', borderRight: `1px solid ${C.hair}`, fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, display: 'flex', alignItems: 'center' }}>{view === 'areas' ? 'OPERATIONAL AREA' : 'VOLUNTEER'}</div>
               {DOW.map((d, i) => (
@@ -162,7 +223,6 @@ export default function Roster({ st, patch, opts, narrow }) {
               ))}
             </div>
 
-            {/* open shifts row (People view only) */}
             {view === 'people' && (
               <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair2}`, background: 'rgba(245,181,66,0.04)' }}>
                 <div style={{ padding: '12px 14px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 3, justifyContent: 'center' }}>
@@ -175,7 +235,7 @@ export default function Roster({ st, patch, opts, narrow }) {
                   const hidden = groups.length - shown.length
                   return (
                     <div key={d} style={cellStyle(st.overCell === key)} {...cellDrop(key, null)}>
-                      {shown.map(g => <ShiftChip key={g.slot.id} slot={g.slot} inOpen count={g.count} />)}
+                      {shown.map(g => <ShiftChip key={g.shift.id} shift={g.shift} inOpen count={g.count} />)}
                       {(hidden > 0 || (st.openExpanded && groups.length > 2)) && (
                         <button onClick={() => patch(s => ({ openExpanded: !s.openExpanded }))} style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.warn, background: 'transparent', border: '1px dashed rgba(245,181,66,0.4)', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', textAlign: 'left' }}>{hidden > 0 ? '+ ' + hidden + ' more' : 'show less'}</button>
                       )}
@@ -185,77 +245,76 @@ export default function Roster({ st, patch, opts, narrow }) {
               </div>
             )}
 
-            {/* People view rows */}
-            {view === 'people' && rows.map(({ p, mine, cap, loadPct, over }) => (
-              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
-                <div onClick={() => patch({ person: p.id })} style={{ padding: '10px 14px', borderRight: `1px solid ${C.hair}`, cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                    <span style={{ width: 28, height: 28, borderRadius: '50%', background: C.surface2, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(p.name)}</span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.roles.join(' · ') || 'No roles set'}</div>
+            {view === 'people' && candidates.map(p => {
+              const mine = shifts.filter(x => x.assignee_member_id === p.member_id)
+              const cap = settings.weekly_shift_cap || p.max_shifts || DEFAULT_CAP
+              const loadPct = Math.min(100, Math.round((mine.length / cap) * 100))
+              const over = mine.length > cap
+              return (
+                <div key={p.member_id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
+                  <div style={{ padding: '10px 14px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                      <span style={{ width: 28, height: 28, borderRadius: '50%', background: C.surface2, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(p.name)}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.available_days.length ? 'Avail ' + p.available_days.map(d => DOW[d]).join(' ') : 'No availability set'}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
+                      <div style={{ flex: 1, height: 4, borderRadius: 2, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: loadPct + '%', background: over ? C.block : C.accent }} /></div>
+                      <span style={{ fontFamily: MONO, fontSize: 9.5, color: over ? C.block : C.faint }}>{mine.length}/{cap}</span>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
-                    <div style={{ flex: 1, height: 4, borderRadius: 2, background: C.surface2, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: loadPct + '%', background: over ? C.block : C.accent }} />
-                    </div>
-                    <span style={{ fontFamily: MONO, fontSize: 9.5, color: over ? C.block : C.faint }}>{mine.length}/{cap}</span>
-                  </div>
+                  {DOW.map((_, d) => {
+                    const key = p.member_id + '-' + d
+                    const chips = mine.filter(x => x.day_of_week === d)
+                    const avail = p.available_days.includes(d)
+                    return (
+                      <div key={d} style={cellStyle(st.overCell === key, avail ? {} : { background: 'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(58,63,80,0.10) 6px, rgba(58,63,80,0.10) 12px)' })} {...cellDrop(key, p.member_id)}>
+                        {chips.map(x => <ShiftChip key={x.id} shift={x} />)}
+                        {!chips.length && !avail && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest, letterSpacing: '0.08em', margin: 'auto' }}>UNAVAILABLE</div>}
+                      </div>
+                    )
+                  })}
                 </div>
-                {DOW.map((_, d) => {
-                  const key = p.id + '-' + d
-                  const chips = mine.filter(x => x.day === d)
-                  const avail = p.days.includes(d)
-                  return (
-                    <div key={d} style={cellStyle(st.overCell === key, avail ? {} : { background: 'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(58,63,80,0.10) 6px, rgba(58,63,80,0.10) 12px)' })} {...cellDrop(key, p.id)}>
-                      {chips.map(x => <ShiftChip key={x.id} slot={x} />)}
-                      {!chips.length && !avail && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest, letterSpacing: '0.08em', margin: 'auto' }}>UNAVAILABLE</div>}
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
+              )
+            })}
 
-            {/* Areas view rows */}
             {view === 'areas' && depts.map(dept => (
               <div key={dept}>
                 <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}`, background: C.surface }}>
                   <div style={{ padding: '8px 14px', fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.dim, gridColumn: '1 / -1' }}>{dept}</div>
                 </div>
-                {Object.keys(AREAS).filter(k => AREAS[k].dept === dept).map(k => {
-                  const a = AREAS[k]
-                  const mine = slots.filter(x => x.area === k)
-                  const filledN = mine.filter(x => x.assignee).length
+                {areas.filter(a => (a.department || 'Areas') === dept).map(a => {
+                  const mine = shifts.filter(x => x.area_id === a.id)
+                  const filledN = mine.filter(x => x.assignee_member_id).length
                   return (
-                    <div key={k} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
+                    <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                       <div style={{ padding: '10px 14px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color }} />
+                          <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || '#6366F1' }} />
                           <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{a.name}</span>
                           <span style={{ fontFamily: MONO, fontSize: 9.5, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
                         </div>
-                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{a.qual ? a.role + ' · ' + a.qual : a.role}</div>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{[a.required_role_name, a.required_qualification_name].filter(Boolean).join(' · ') || 'No role/qual set'}</div>
                       </div>
                       {DOW.map((_, d) => (
                         <div key={d} style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, background: d >= 5 ? 'rgba(99,102,241,0.03)' : undefined }}>
-                          {mine.filter(x => x.day === d).map(x => {
-                            const who = x.assignee ? personById(x.assignee) : null
-                            const warned = x.warns && x.warns.length
+                          {mine.filter(x => x.day_of_week === d).map(x => {
+                            const warned = x.warnings && x.warnings.length
                             const over = st.overCell === 'slot-' + x.id
                             return (
                               <div key={x.id} onClick={() => patch({ selected: x.id })} {...slotDrop(x.id)}
                                 style={{ borderRadius: 7, padding: '6px 8px', cursor: 'pointer', userSelect: 'none',
-                                  border: `1px solid ${who ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
-                                  background: who ? `color-mix(in srgb, ${a.color} 13%, transparent)` : 'rgba(245,181,66,0.10)',
-                                  color: who ? a.color : C.warn,
-                                  ...(over ? { boxShadow: '0 0 0 1.5px #6366F1' } : {}),
-                                  ...(st.selected === x.id ? { outline: '1.5px solid #6366F1', outlineOffset: 1 } : {}) }}>
+                                  border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || '#6366F1'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
+                                  background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || '#6366F1'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
+                                  color: x.assignee_member_id ? (a.color || C.accent) : C.warn,
+                                  ...(over ? { boxShadow: '0 0 0 1.5px #6366F1' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid #6366F1', outlineOffset: 1 } : {}) }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                  <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(who ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{who ? who.name : 'OPEN'}</span>
+                                  <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
                                   {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
                                 </div>
-                                <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{fmtHour(x.start)}–{fmtHour(x.end)}</div>
+                                <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
                               </div>
                             )
                           })}
@@ -269,24 +328,23 @@ export default function Roster({ st, patch, opts, narrow }) {
           </div>
         </div>
 
-        {/* Side panel */}
         {st.panelOpen && (
           <aside className="pb-scroll" style={narrow
             ? { width: 320, maxWidth: '92vw', position: 'fixed', right: 0, top: 0, bottom: 0, zIndex: 65, borderLeft: `1px solid ${C.hair2}`, background: C.surface, overflowY: 'auto', padding: 16, boxShadow: '0 0 40px rgba(0,0,0,0.5)' }
             : { width: 296, flex: '0 0 296px', borderLeft: `1px solid ${C.hair}`, background: C.surface, overflowY: 'auto', padding: 16 }}>
-            {sel && (
+            {sel && selArea && (
               <div>
                 <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>BEST FIT FOR THIS SHIFT</div>
                 <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12, marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: AREAS[sel.area].color }} />
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{AREAS[sel.area].name}</span>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: selArea.color || '#6366F1' }} />
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{selArea.name}</span>
                   </div>
-                  <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{DOW[sel.day]} {fmtHour(sel.start)}–{fmtHour(sel.end)}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{AREAS[sel.area].qual ? 'Requires ' + AREAS[sel.area].role + ' · ' + AREAS[sel.area].qual : 'Requires ' + AREAS[sel.area].role}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{[selArea.required_role_name, selArea.required_qualification_name].filter(Boolean).join(' · ') || 'No requirement'}</div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button onClick={() => { if (cands[0]) assign(sel.id, cands[0].p.id) }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Fill best match</button>
-                    <button onClick={() => { assign(sel.id, null); patch({ selected: null }) }} style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>
+                    <button onClick={() => { if (candList[0]) doAssign(sel.id, candList[0].c.member_id) }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Fill best match</button>
+                    <button onClick={() => { doAssign(sel.id, null); patch({ selected: null }) }} style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>
                   </div>
                 </div>
               </div>
@@ -294,41 +352,25 @@ export default function Roster({ st, patch, opts, narrow }) {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest }}>{sel ? 'RANKED CANDIDATES' : 'VOLUNTEER POOL'}</span>
-              <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint }}>{candidates.length} people</span>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint }}>{candList.length} people</span>
             </div>
             <div style={{ fontSize: 11.5, color: C.faint, lineHeight: 1.45, marginBottom: 10 }}>{view === 'areas' ? 'Drag a volunteer onto a shift, or select a shift to rank them.' : 'Drag a shift between rows, or select one to rank candidates.'}</div>
+            {candidates.length === 0 && <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>No volunteers yet. Add volunteer profiles (with availability) in the Directory/Volunteers so they can be rostered.</div>}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {candidates.map(({ p, res, load }) => (
-                <div key={p.id} draggable
-                  onClick={() => { if (sel) assign(sel.id, p.id); else patch({ person: p.id }) }}
-                  onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragPerson: p.id }) }}
-                  onDragEnd={() => patch({ dragPerson: null, overCell: null })}
+              {candList.map(({ c, res, load }) => (
+                <div key={c.member_id} draggable onClick={() => { if (sel) doAssign(sel.id, c.member_id) }} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragPerson: c.member_id }) }} onDragEnd={() => patch({ dragPerson: null, overCell: null })}
                   style={{ background: C.surface2, border: `1px solid ${sel && !res.warns.length ? 'rgba(99,102,241,0.35)' : C.hair}`, borderRadius: 8, padding: '9px 10px', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 26, height: 26, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(p.name)}</span>
+                    <span style={{ width: 26, height: 26, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(c.name)}</span>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sel ? (res.warns.length ? res.warns[0] : 'Clear match · ' + load + ' shift' + (load === 1 ? '' : 's')) : (p.roles.join(' · ') || 'No roles set')}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sel ? (res.warns.length ? res.warns[0] : 'Clear match · ' + load + ' shift' + (load === 1 ? '' : 's')) : (load + ' shift' + (load === 1 ? '' : 's') + ' this week')}</div>
                     </div>
-                    {sel && (
-                      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'rgba(99,102,241,0.15)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>
-                    )}
+                    {sel && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'rgba(99,102,241,0.15)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>}
                   </div>
                 </div>
               ))}
-            </div>
-
-            <div style={{ marginTop: 18, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
-              <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>RULES APPLIED</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {RULES.map((r, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 11.5, color: C.dim, lineHeight: 1.35 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: r.tone === 'block' ? C.block : C.warn }} />
-                    <span>{r.label}</span>
-                  </div>
-                ))}
-              </div>
             </div>
           </aside>
         )}

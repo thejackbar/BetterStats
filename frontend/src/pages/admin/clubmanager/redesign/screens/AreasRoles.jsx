@@ -10,24 +10,25 @@ export default function AreasRoles({ st, patch, narrow }) {
   const tab = st.setupTab || 'roles'
   const [data, setData] = useState(null)
 
-  useEffect(() => {
-    let alive = true
-    Promise.all([
-      api.raRoles().catch(() => ({ roles: [] })),
-      api.raActivities().catch(() => ({ activities: [] })),
-      api.qualListTypes().catch(() => ([])),
-    ]).then(([rolesRes, actRes, qualRes]) => {
-      if (!alive) return
-      setData({
-        roles: rolesRes?.roles || rolesRes || [],
-        activities: actRes?.activities || actRes || [],
-        quals: qualRes?.types || qualRes || [],
-      })
+  const [busy, setBusy] = useState(false)
+  const load = () => Promise.all([
+    api.raRoles().catch(() => ({ roles: [] })),
+    api.raActivities().catch(() => ({ activities: [] })),
+    api.qualListTypes().catch(() => ([])),
+    api.rosterAreas().catch(() => ({ areas: [] })),
+  ]).then(([rolesRes, actRes, qualRes, areaRes]) => {
+    setData({
+      roles: rolesRes?.roles || rolesRes || [],
+      activities: actRes?.activities || actRes || [],
+      quals: qualRes?.types || qualRes || [],
+      areas: areaRes?.areas || areaRes || [],
     })
-    return () => { alive = false }
-  }, [])
+  })
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
+  const fmtHour = (h) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); if (hh === 24) return '12am'; let b = hh % 12; if (b === 0) b = 12; return b + (mm ? ':' + String(mm).padStart(2, '0') : '') + (hh >= 12 && hh < 24 ? 'pm' : 'am') }
+  const DOWL = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -109,11 +110,46 @@ export default function AreasRoles({ st, patch, narrow }) {
         </div>
       )}
 
-      {tab === 'areas' && (
-        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '46rem' }}>
-          <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 22, fontSize: 13, color: C.dim, lineHeight: 1.6 }}>
-            Operational areas — a slice of club work with its own weekly shift pattern, the role that covers it and the qualification that gates it — are part of the roster, which is being built next. Once it lands you'll define your areas here and the weekly roster generates from them.
-          </div>
+      {data && tab === 'areas' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '68rem' }}>
+          <p style={{ fontSize: 13, color: C.dim, margin: '0 0 18px', lineHeight: 1.55, maxWidth: '46rem' }}>An operational area is a slice of club work with its own weekly shift pattern, the role that can cover it, and the qualification that gates it. Change a pattern here and next week's roster is generated from it.</p>
+          {data.areas.length === 0 ? (
+            <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 22, fontSize: 13.5, color: C.dim, lineHeight: 1.6 }}>
+              No operational areas yet. Add a starter set (Bar, Umpires, Groundsman…) — matched to your existing roles and qualifications where the names line up — and edit from there.
+              <div style={{ marginTop: 14 }}>
+                <button disabled={busy} onClick={async () => { setBusy(true); await api.rosterSeedStarter().catch(() => {}); await load(); setBusy(false) }} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Setting up…' : 'Add starter areas'}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+              {[...new Set(data.areas.map(a => a.department || 'Areas'))].map(dept => (
+                <div key={dept}>
+                  <div style={cap}>{dept}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {data.areas.filter(a => (a.department || 'Areas') === dept).map(a => {
+                      const slots = (a.patterns || []).reduce((n, p) => n + (p.headcount || 1), 0)
+                      return (
+                        <div key={a.id} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 9, padding: '13px 15px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: 3, background: a.color || '#6366F1', flexShrink: 0 }} />
+                            <span style={{ fontSize: 14.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{a.name}</span>
+                            <span style={{ fontFamily: MONO, fontSize: 10, color: C.dim, flexShrink: 0 }}>{slots} shift{slots === 1 ? '' : 's'} / week</span>
+                          </div>
+                          <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, margin: '6px 0 9px' }}>{[a.required_role_name, a.required_qualification_name ? 'must hold ' + a.required_qualification_name : null].filter(Boolean).join(' · ') || 'No role or qualification set'}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                            {(a.patterns || []).map((p, i) => (
+                              <span key={i} style={{ fontFamily: MONO, fontSize: 9.5, padding: '3px 7px', borderRadius: 5, background: `color-mix(in srgb, ${a.color || '#6366F1'} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${a.color || '#6366F1'} 35%, transparent)`, color: a.color || '#6366F1' }}>{DOWL[p.day_of_week]} {fmtHour(p.start_time)}–{fmtHour(p.end_time)}{p.headcount > 1 ? ' ×' + p.headcount : ''}</span>
+                            ))}
+                            {(a.patterns || []).length === 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>No shift pattern set</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
