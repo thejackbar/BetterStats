@@ -114,6 +114,7 @@ export default function AdminSettings() {
   const [logoUrl, setLogoUrl] = useState(null)
   const [logoBusy, setLogoBusy] = useState(false)
   const [logoEditorSource, setLogoEditorSource] = useState(null)
+  const [pinInput, setPinInput] = useState('')
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -133,6 +134,7 @@ export default function AdminSettings() {
         public_show_opening: !!s.public_show_opening,
         public_show_gender: !!s.public_show_gender,
         include_fill_ins_in_stats: !!s.include_fill_ins_in_stats,
+        password_protected: !!s.password_protected,
       })
     }).catch(() => {})
   }, [])
@@ -225,14 +227,20 @@ export default function AdminSettings() {
     setSaving(true)
     setMsg('')
     try {
-      await api.adminPatchSettings({ ...form, theme_config: theme })
+      const payload = { ...form, theme_config: theme }
+      if (/^\d{4}$/.test(pinInput)) payload.access_pin = pinInput
+      await api.adminPatchSettings(payload)
+      setPinInput('')
       flash('Settings saved')
+      api.adminGetSettings().then(setSettings).catch(() => {})
     } catch (err) {
       flashError(err.message)
     } finally {
       setSaving(false)
     }
   }
+
+  const canEnablePasswordProtect = settings && ['trial', 'active'].includes(settings.subscription_status)
 
   if (!settings) return (
     <AdminLayout>
@@ -543,6 +551,50 @@ export default function AdminSettings() {
                 <span className="font-mono text-[10px] text-pb-faintest block">Off shows those two cards with registered players only</span>
               </span>
             </label>
+          </div>
+
+          {/* --- Password protection --- */}
+          <div className="pt-5 pb-hairline-t">
+            <label className={LABEL}>Password protection</label>
+            <p className="font-mono text-[10px] text-pb-faintest mb-3">
+              Make your public page private behind a 4-digit PIN — share it internally
+              (committee, teammates) without it being publicly visible. This doesn't
+              affect your own admin login.
+            </p>
+            <label className={`flex items-start gap-2.5 ${canEnablePasswordProtect || form.password_protected ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+              <input type="checkbox" checked={!!form.password_protected}
+                disabled={!canEnablePasswordProtect && !form.password_protected}
+                onChange={e => setForm(f => ({ ...f, password_protected: e.target.checked }))}
+                className="accent-pb-accent mt-0.5 shrink-0" />
+              <span className="leading-tight">
+                <span className="text-pb-text text-sm">Password protect this page</span>
+                <span className="font-mono text-[10px] text-pb-faintest block">
+                  {settings?.password_protect_reason === 'trial_ended'
+                    ? "Currently locked by BetterCricket (trial ended) — get in touch to unlock."
+                    : 'Visitors must enter the PIN below to view your public page'}
+                </span>
+              </span>
+            </label>
+            {!canEnablePasswordProtect && !form.password_protected && (
+              <p className="font-mono text-[10px] text-pb-faintest mt-2">
+                Only available while your club is on a trial or an active subscription.
+              </p>
+            )}
+            <div className="mt-3 max-w-[220px]">
+              <label className={LABEL}>{settings?.has_pin ? 'Change PIN' : 'Set a 4-digit PIN'}</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={pinInput}
+                onChange={e => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder={settings?.has_pin ? '••••' : '0000'}
+                className={INPUT_CLS + ' font-mono tracking-[0.3em] text-center'}
+              />
+              {settings?.has_pin && !pinInput && (
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">Leave blank to keep the current PIN</p>
+              )}
+            </div>
           </div>
 
           <div className="pt-2 flex items-center gap-4">

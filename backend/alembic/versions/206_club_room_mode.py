@@ -9,14 +9,14 @@ club_room_media: shared image pool for admin-uploaded custom images and
 social-post exports saved from the BetterSocials composer, bytes stored
 in-table like every other image feature in this app.
 
-Revision ID: 205
-Revises: 204
+Revision ID: 206
+Revises: 205
 Create Date: 2026-08-02
 """
 from alembic import op
 
-revision = '205'
-down_revision = '204'
+revision = '206'
+down_revision = '205'
 branch_labels = None
 depends_on = None
 

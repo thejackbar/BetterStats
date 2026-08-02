@@ -20,6 +20,7 @@ import { useClubData } from '../hooks/useClubData'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import TeamBadge from '../components/TeamBadge'
 import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner, Btn } from '../lib/presskit'
@@ -263,7 +264,7 @@ export default function LineupsPage() {
   const { clubSlug } = useParams()
   const [searchParams] = useSearchParams()
   const matchId = searchParams.get('match')
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   usePageMeta({
     title: club?.name ? `${club.name} Lineups — BetterCricket` : null,
@@ -311,6 +312,7 @@ export default function LineupsPage() {
     finally { setLoadingMore(false) }
   }
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 

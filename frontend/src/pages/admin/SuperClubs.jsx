@@ -106,6 +106,7 @@ export default function SuperClubs() {
     member_portal_override: '',
     merch_storefront_override: '',
     comms_tier: 'sandbox', comms_sandbox_cap: '', comms_production_cap: '', comms_monthly_cap: '',
+    password_protected: false, password_protect_reason: '', access_pin: '', _hasPin: false,
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [pmModalClub, setPmModalClub] = useState(null) // club object | null
@@ -377,6 +378,10 @@ export default function SuperClubs() {
       comms_sandbox_cap: club.comms_sandbox_cap ?? '',
       comms_production_cap: club.comms_production_cap ?? '',
       comms_monthly_cap: club.comms_monthly_cap ?? '',
+      password_protected: !!club.password_protected,
+      password_protect_reason: club.password_protect_reason || '',
+      access_pin: '',
+      _hasPin: !!club.has_pin,
     })
     setClubAdmins([])
     api.superListClubAdmins(club.id).then(d => setClubAdmins(Array.isArray(d) ? d : [])).catch(() => {})
@@ -556,6 +561,13 @@ export default function SuperClubs() {
         comms_sandbox_cap: editForm.comms_sandbox_cap === '' ? null : Number(editForm.comms_sandbox_cap),
         comms_production_cap: editForm.comms_production_cap === '' ? null : Number(editForm.comms_production_cap),
         comms_monthly_cap: editForm.comms_monthly_cap === '' ? null : Number(editForm.comms_monthly_cap),
+        password_protect_reason: editForm.password_protected ? (editForm.password_protect_reason || 'draft') : null,
+      }
+      delete payload._hasPin
+      if (/^\d{4}$/.test(editForm.access_pin || '')) {
+        payload.access_pin = editForm.access_pin
+      } else {
+        delete payload.access_pin
       }
       await api.superPatchClub(editId, payload)
       setMsg('Club updated')
@@ -1505,6 +1517,51 @@ export default function SuperClubs() {
                           <option key={s.key} value={s.key}>{s.label}{s.live ? '' : ' (locks modules)'}</option>
                         ))}
                       </select>
+                    </div>
+                    <div className="col-span-2 pt-2 pb-hairline-t">
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Public access</label>
+                      <p className="font-mono text-[10px] text-pb-faintest mb-2">
+                        Independent of the Active/Inactive pill above — Password Protected gates the
+                        public page behind a 4-digit PIN instead of taking it fully offline.
+                      </p>
+                      <label className="flex items-start gap-2.5 cursor-pointer mb-2">
+                        <input type="checkbox" checked={!!editForm.password_protected}
+                          onChange={e => {
+                            const on = e.target.checked
+                            if (on && !window.confirm('This will hide the club\'s public page behind a PIN. Continue?')) return
+                            setEditForm(f => ({ ...f, password_protected: on, password_protect_reason: on ? (f.password_protect_reason || 'draft') : '' }))
+                          }}
+                          className="accent-pb-accent mt-0.5 shrink-0" />
+                        <span className="leading-tight">
+                          <span className="text-pb-text text-sm">Password protected</span>
+                          <span className="font-mono text-[10px] text-pb-faintest block">
+                            {editForm.password_protected ? '' : 'Off = follows the Active/Inactive pill as normal'}
+                          </span>
+                        </span>
+                      </label>
+                      {editForm.password_protected && (
+                        <div className="grid grid-cols-2 gap-3 mt-2">
+                          <div>
+                            <label className="font-mono text-[10px] text-pb-faint block mb-1">Reason</label>
+                            <select value={editForm.password_protect_reason || 'draft'}
+                              onChange={e => setEditForm(f => ({ ...f, password_protect_reason: e.target.value }))}
+                              className={INPUT_CLS}>
+                              <option value="draft">Draft (voluntary privacy)</option>
+                              <option value="trial_ended">Trial ended (sales conversion)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="font-mono text-[10px] text-pb-faint block mb-1">
+                              {editForm._hasPin ? 'Change PIN' : 'Set 4-digit PIN'}
+                            </label>
+                            <input type="text" inputMode="numeric" maxLength={4}
+                              value={editForm.access_pin}
+                              onChange={e => setEditForm(f => ({ ...f, access_pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                              placeholder={editForm._hasPin ? '••••' : '0000'}
+                              className={INPUT_CLS + ' font-mono tracking-[0.3em] text-center'} />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Billing cycle</label>

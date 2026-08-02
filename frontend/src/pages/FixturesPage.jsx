@@ -11,6 +11,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 
 function fmtDay(d) {
@@ -67,7 +68,7 @@ function FixtureRow({ fx, clubSlug }) {
 
 export default function FixturesPage() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   usePageMeta({
     title: club?.name ? `${club.name} Fixtures — BetterCricket` : null,
@@ -96,6 +97,7 @@ export default function FixturesPage() {
     return [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))
   }, [fixtures])
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 

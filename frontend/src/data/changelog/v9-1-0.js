@@ -1,7 +1,7 @@
 export default {
-  version: 'v8.100.0',
+  version: 'v9.1.0',
   date: '2026-08-02',
-  sortKey: '2026-08-02T10:00:00Z',
+  sortKey: '2026-08-02T12:00:00Z',
   title: 'Club Room Mode: a TV slideshow for the club room',
   items: [
     'New "Club Room Mode" under BetterStats (Records & content). Build a playlist of sponsors, upcoming fixtures and lineups, saved social posts and your own uploaded images, then leave it running full-screen on a TV.',
