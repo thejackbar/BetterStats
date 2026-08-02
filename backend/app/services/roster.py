@@ -434,11 +434,10 @@ async def seed_starter_areas(db: AsyncSession, org_id) -> int:
         return 0
     roles = {r["title"].lower(): str(r["id"]) for r in (await db.execute(text("SELECT id, title FROM club_roles WHERE organisation_id=:org AND is_active=TRUE"), {"org": org_id})).mappings().all()}
     quals = {q["name"].lower(): str(q["id"]) for q in (await db.execute(text("SELECT id, name FROM qualification_types WHERE organisation_id=:org AND is_active=TRUE"), {"org": org_id})).mappings().all()}
-    # Establish the Departments catalogue for the departments the starter areas
-    # use, so the area form's dropdown is populated too (create_department is
-    # idempotent — reactivates/reuses an existing same-named row).
-    for dept in dict.fromkeys(a["department"] for a in STARTER_AREAS if a.get("department")):
-        await create_department(db, org_id, name=dept)
+    # Also lay down the full Departments Starter Pack (idempotent), so the area
+    # form's dropdown is populated and the areas below link to real catalogue
+    # entries — same as Roles seeding the full Role Types pack.
+    await seed_starter_departments(db, org_id)
     seeded = 0
     for a in STARTER_AREAS:
         aid = await create_area(db, org_id, name=a["name"], department=a["department"], color=a["color"],
