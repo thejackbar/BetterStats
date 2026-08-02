@@ -16,7 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary, social_media, votes, public_votes, roles_activities
+    club_diary, social_media, votes, public_votes, roles_activities, club_room
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -133,6 +133,47 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_preferences "
             "JSONB NOT NULL DEFAULT '{}'::jsonb"
         ))
+        # Club Room Mode (migration 205) — the TV-loop slideshow. Defensive
+        # idempotent creates so the API boots even if alembic hasn't run yet.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_room_settings (
+                organisation_id UUID PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT false,
+                rotation_seconds INTEGER NOT NULL DEFAULT 15,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_room_slides (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                slide_type TEXT NOT NULL,
+                title TEXT,
+                config JSONB NOT NULL DEFAULT '{}'::jsonb,
+                duration_seconds INTEGER,
+                position INTEGER NOT NULL DEFAULT 0,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_room_slides_org "
+            "ON club_room_slides(organisation_id, position)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_room_media (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                source TEXT NOT NULL DEFAULT 'upload',
+                caption TEXT,
+                image_data BYTEA NOT NULL,
+                image_mime TEXT NOT NULL,
+                created_by UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_room_media_org "
+            "ON club_room_media(organisation_id, source, created_at DESC)"))
         # BetterSelect: player → selection-pool team assignment (migration 053).
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "
@@ -4391,6 +4432,7 @@ app.include_router(events.router)        # Events/Ticketing admin — registrati
 app.include_router(events.public_router)  # Events/Ticketing public — unauthenticated event view + register (core, not a paid module)
 app.include_router(assets.router)        # Assets & Facilities (core capability, not a paid module)
 app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
+app.include_router(club_room.router)     # Club Room Mode — TV slideshow (core capability, not a paid module)
 app.include_router(roles_activities.router)  # Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
 app.include_router(member_portal_admin.router)  # Member portal visibility check (core, no capability — see the router docstring)
 app.include_router(stripe_connect.router)       # Member portal: club-to-member Stripe Connect admin flow (core, flag-gated)

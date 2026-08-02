@@ -1999,6 +1999,50 @@ export const api = {
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
 
+  // ─── Club Room Mode ────────────────────────────────────────────────────────
+  clubRoomGetSettings: () => request('/club-admin/club-room/settings'),
+  clubRoomPatchSettings: (data) =>
+    request('/club-admin/club-room/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  clubRoomCreateSlide: (data) =>
+    request('/club-admin/club-room/slides', { method: 'POST', body: JSON.stringify(data) }),
+  clubRoomPatchSlide: (id, data) =>
+    request(`/club-admin/club-room/slides/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  clubRoomDeleteSlide: (id) =>
+    request(`/club-admin/club-room/slides/${id}`, { method: 'DELETE' }),
+  clubRoomReorderSlides: (items) =>
+    request('/club-admin/club-room/slides/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  clubRoomListMedia: (source) =>
+    request(`/club-admin/club-room/media${source ? `?source=${source}` : ''}`),
+  clubRoomUploadMedia: (file, caption) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (caption) form.append('caption', caption)
+    return fetch(`${BASE}/club-admin/club-room/media`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  clubRoomSaveSocialExport: (blob, caption) => {
+    const form = new FormData()
+    form.append('file', blob, 'post.png')
+    if (caption) form.append('caption', caption)
+    return fetch(`${BASE}/club-admin/club-room/media/social-export`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  clubRoomDeleteMedia: (id) =>
+    request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
+  clubRoomPlay: () => request('/club-admin/club-room/play'),
+
   // ─── Front-end Website (public) ───────────────────────────────────────────
   webGetSite: (slug) => request(`/clubs/${slug}/website`),
   webListNews: (slug, { limit = 24, offset = 0 } = {}) =>

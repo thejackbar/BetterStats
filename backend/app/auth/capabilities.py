@@ -52,6 +52,7 @@ MANAGE_VOLUNTEERS = "manage_volunteers"       # Volunteer profiles + hours ledge
 MANAGE_QUALIFICATIONS = "manage_qualifications"  # Qualification types + member qualifications/expiry
 MANAGE_ASSETS = "manage_assets"               # Club assets, facilities, bookings, maintenance logs
 MANAGE_CLUB_DIARY = "manage_club_diary"       # Annual/recurring compliance & maintenance task calendar
+MANAGE_CLUB_ROOM = "manage_club_room"         # Club Room Mode: playlist + slides + custom images
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -84,6 +85,7 @@ ALL_CAPABILITIES = (
     MANAGE_QUALIFICATIONS,
     MANAGE_ASSETS,
     MANAGE_CLUB_DIARY,
+    MANAGE_CLUB_ROOM,
 )
 
 

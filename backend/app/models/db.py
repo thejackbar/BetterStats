@@ -500,6 +500,57 @@ class SocialMediaAsset(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+# ─── Club Room Mode (migration 205) ───────────────────────────────────────────
+# A club-configured, auto-rotating slideshow (sponsors / fixtures & lineups /
+# recent social posts / custom images) meant to be left running full-screen on
+# a TV in the club room. One settings row per club, an ordered list of
+# playlist entries (each expands into one or more rendered slides on read —
+# e.g. a "sponsors" entry becomes one slide per sponsor), and a shared media
+# pool for both admin-uploaded images and social-post exports saved from the
+# BetterSocials composer.
+
+class ClubRoomSettings(Base):
+    __tablename__ = "club_room_settings"
+
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled = Column(Boolean, nullable=False, default=False)
+    rotation_seconds = Column(Integer, nullable=False, default=15)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubRoomSlide(Base):
+    __tablename__ = "club_room_slides"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slide_type = Column(Text, nullable=False)  # 'sponsors' | 'fixtures' | 'social_posts' | 'custom_images'
+    title = Column(Text, nullable=True)
+    config = Column(JSONB, nullable=False, default=dict)
+    duration_seconds = Column(Integer, nullable=True)  # overrides the club's default rotation_seconds
+    position = Column(Integer, nullable=False, default=0)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubRoomMedia(Base):
+    __tablename__ = "club_room_media"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source = Column(Text, nullable=False, default="upload")  # 'upload' | 'social_export'
+    caption = Column(Text, nullable=True)
+    image_data = Column(LargeBinary, nullable=False)
+    image_mime = Column(Text, nullable=False)
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 # ─── Front-end Website CMS (migration 069) ───────────────────────────────────
 # All website content is org-scoped and Core (every club gets the website; the
 # MANAGE_WEBSITE capability gates editing). Images persist as DB blobs so they

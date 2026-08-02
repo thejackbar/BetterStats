@@ -31,6 +31,7 @@ export const CAP = {
   MANAGE_QUALIFICATIONS: 'manage_qualifications',
   MANAGE_ASSETS: 'manage_assets',
   MANAGE_CLUB_DIARY: 'manage_club_diary',
+  MANAGE_CLUB_ROOM: 'manage_club_room',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -65,4 +66,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_QUALIFICATIONS, label: 'Manage qualifications', hint: 'Accreditations, WWCC, First Aid — with expiry tracking' },
   { key: CAP.MANAGE_ASSETS, label: 'Manage assets & facilities', hint: 'Club property, grounds/clubhouse bookings, maintenance logs' },
   { key: CAP.MANAGE_CLUB_DIARY, label: 'Manage club diary', hint: 'Annual/recurring compliance & maintenance task calendar' },
+  { key: CAP.MANAGE_CLUB_ROOM, label: 'Manage Club Room Mode', hint: 'TV slideshow playlist, slides and custom images' },
 ]

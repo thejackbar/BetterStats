@@ -54,6 +54,7 @@ export const GROUPS = [
       { to: '/admin/yearbook', label: 'Yearbooks', icon: 'sheet', cap: CAP.MANAGE_YEARBOOKS, desc: 'Write and publish season yearbooks.' },
       { to: '/admin/reports', label: 'Saved Reports', icon: 'ladders', cap: CAP.MANAGE_REPORTS, desc: 'Your saved stat reports.' },
       { to: '/admin/sponsors', label: 'Sponsors', icon: 'share', cap: CAP.MANAGE_SPONSORS, desc: 'Manage the sponsors shown on your site.' },
+      { to: '/admin/club-room', label: 'Club Room Mode', icon: 'tv', cap: CAP.MANAGE_CLUB_ROOM, desc: 'Set up a TV slideshow of sponsors, fixtures, lineups and more.' },
     ],
   },
 ]

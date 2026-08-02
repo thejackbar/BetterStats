@@ -125,6 +125,8 @@ const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const SuperCrmTargets = lazy(() => import('./pages/admin/SuperCrmTargets'))
 const SuperCrmAutomation = lazy(() => import('./pages/admin/SuperCrmAutomation'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
+const AdminClubRoom = lazy(() => import('./pages/admin/AdminClubRoom'))
+const ClubRoomPlayer = lazy(() => import('./pages/admin/ClubRoomPlayer'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
 const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail'))
@@ -358,6 +360,11 @@ export default function App() {
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
+          <Route path="/admin/club-room" element={<ProtectedRoute requireCore><AdminClubRoom /></ProtectedRoute>} />
+          {/* Standalone full-screen player, no surrounding sidebar — same pattern as
+              /admin/yearbook: a club leaves this open on a TV, so a refresh must land
+              straight back on the stage, not inside the app chrome. */}
+          <Route path="/admin/club-room/play" element={<ProtectedRoute requireCore><ClubRoomPlayer /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute requireCore><AdminYearbook /></ProtectedRoute>} />
