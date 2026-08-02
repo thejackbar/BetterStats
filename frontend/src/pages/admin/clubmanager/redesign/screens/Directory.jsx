@@ -3,16 +3,23 @@ import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 
 // Directory — one record per person, on REAL club data. The person spine is
-// fee_members (the club's member list; a member's player_id links to a stats
-// player where one exists, and is NULL for a non-player — a committee member,
-// life member, canteen parent, etc.). We union that with the club's players so
-// every player still appears, then enrich with volunteer roles/hours and
-// expiring qualifications. Committee position and family cross-links land with
-// those screens; per-person quals and hours-by-activity load lazily on select.
+// fee_members (a member's player_id links to a stats player where one exists,
+// and is NULL for a non-player: committee member, life member, canteen parent,
+// third party…). Players belong to Stats/Core and appear read-through; a
+// player gets a member row lazily the first time ClubManager assigns them a
+// role. ClubManager owns adding/editing non-player people and their roles here.
 
-const DIR_SEGS = ['All', 'Committee', 'Volunteer', 'Parent', 'Player']
+const DIR_SEGS = ['All', 'Player', 'Volunteer', 'Committee', 'Parent', 'Third party']
+const CATS = [
+  { value: 'volunteer', label: 'Volunteer' },
+  { value: 'parent', label: 'Parent' },
+  { value: 'committee', label: 'Committee' },
+  { value: 'third_party', label: 'Third party' },
+  { value: 'official', label: 'Official (umpire, scorer…)' },
+  { value: 'life_member', label: 'Life member' },
+  { value: 'other', label: 'Other' },
+]
 
-// Real "today" qualification status (the fixtures used a fixed season day).
 function qualStatus(expiryISO) {
   if (!expiryISO) return { key: 'current', label: 'NO EXPIRY', fg: C.ok }
   const days = Math.round((new Date(expiryISO) - new Date()) / 86400000)
@@ -25,72 +32,19 @@ function fmtExpiry(iso) {
   const d = new Date(iso)
   return 'expires ' + d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + ' ' + d.getFullYear()
 }
-const roleName = (r) => typeof r === 'string' ? r : (r?.name || r?.role_name || r?.label || '')
 
 export default function Directory({ st, patch, narrow }) {
   const [people, setPeople] = useState(null)   // null = loading
   const [err, setErr] = useState(null)
-  // lazily-loaded per-person detail, keyed by member_id
+  const [roleCatalogue, setRoleCatalogue] = useState([])   // general (non-committee) club roles
   const [detail, setDetail] = useState({})     // { [memberId]: { quals, hours } }
+  const [busy, setBusy] = useState(false)
+  const [modal, setModal] = useState(null)     // null | { editId, form }
 
+  const reload = () => api.dirPeople().then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
   useEffect(() => {
-    let alive = true
-    Promise.all([
-      api.feeAllMembers().catch(() => ({ members: [] })),
-      api.adminListPlayers().catch(() => []),
-      api.volunteerDirectory().catch(() => ({ volunteers: [] })),
-      api.qualExpiringReport(3650).catch(() => []),
-    ]).then(([membersRes, playersRes, volRes, expRes]) => {
-      if (!alive) return
-      const members = (membersRes?.members || membersRes || [])
-      const players = Array.isArray(playersRes) ? playersRes : (playersRes?.players || [])
-      const vols = (volRes?.volunteers || volRes || [])
-      const expRows = Array.isArray(expRes) ? expRes : (expRes?.expiring || expRes?.items || [])
-
-      const playerById = {}
-      players.forEach(p => { playerById[p.id] = p })
-      const volByMember = {}
-      vols.forEach(v => { if (v.member_id) volByMember[v.member_id] = v })
-      // expiring-qual count per member (guarded — the report's member key varies)
-      const expByMember = {}
-      expRows.forEach(r => {
-        const mid = r.member_id || r.fee_member_id || r.memberId
-        if (mid) expByMember[mid] = (expByMember[mid] || 0) + 1
-      })
-
-      const seenPlayer = new Set()
-      const list = members.map(m => {
-        if (m.player_id) seenPlayer.add(m.player_id)
-        const player = m.player_id ? playerById[m.player_id] : null
-        const vol = volByMember[m.member_id]
-        const roles = (vol?.roles || []).map(roleName).filter(Boolean)
-        const segs = []
-        if (m.player_id) segs.push('Player')
-        if (vol) segs.push('Volunteer')
-        return {
-          key: m.member_id, memberId: m.member_id, playerId: m.player_id || null,
-          name: m.full_name, email: m.email || '', phone: m.mobile || '',
-          photo: player?.photo_url || null,
-          roles, interested: (vol?.roles_interested || []).map(roleName).filter(Boolean),
-          totalHours: Number(vol?.total_hours || 0),
-          flagged: expByMember[m.member_id] || 0,
-          segs,
-        }
-      })
-      // players with no member row still appear as people
-      players.forEach(p => {
-        if (seenPlayer.has(p.id)) return
-        list.push({
-          key: 'player:' + p.id, memberId: null, playerId: p.id,
-          name: p.display_name || p.name, email: '', phone: '',
-          photo: p.photo_url || null, roles: [], interested: [], totalHours: 0, flagged: 0,
-          segs: ['Player'],
-        })
-      })
-      list.sort((a, b) => a.name.localeCompare(b.name))
-      setPeople(list)
-    }).catch(e => { if (alive) setErr(String(e?.message || e)) })
-    return () => { alive = false }
+    reload()
+    api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee))).catch(() => {})
   }, [])
 
   const q = (st.dirQuery || '').toLowerCase()
@@ -98,24 +52,24 @@ export default function Directory({ st, patch, narrow }) {
   const roleFilter = st.dirRole || null
   const expiringOnly = !!st.dirExpiring
 
+  const roleTitles = (p) => (p.roles || []).map(r => r.title)
   const list = (people || []).filter(p => {
     if (seg !== 'All' && !p.segs.includes(seg)) return false
-    if (roleFilter && !p.roles.includes(roleFilter)) return false
+    if (roleFilter && !roleTitles(p).includes(roleFilter)) return false
     if (expiringOnly && !p.flagged) return false
-    if (q && !(p.name.toLowerCase().includes(q) || p.roles.join(' ').toLowerCase().includes(q))) return false
+    if (q && !(p.name.toLowerCase().includes(q) || roleTitles(p).join(' ').toLowerCase().includes(q))) return false
     return true
   })
 
   const selId = st.dirSel && (people || []).some(p => p.key === st.dirSel) ? st.dirSel : (list[0] ? list[0].key : null)
   const sel = (people || []).find(p => p.key === selId) || null
 
-  // lazily load the selected person's quals + hours-by-activity
   useEffect(() => {
-    if (!sel || !sel.memberId || detail[sel.memberId]) return
+    if (!sel || !sel.member_id || detail[sel.member_id]) return
     let alive = true
     Promise.all([
-      api.qualListMemberQualifications(sel.memberId).catch(() => []),
-      api.volunteerListHours(sel.memberId).catch(() => []),
+      api.qualListMemberQualifications(sel.member_id).catch(() => []),
+      api.volunteerListHours(sel.member_id).catch(() => []),
     ]).then(([qRes, hRes]) => {
       if (!alive) return
       const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
@@ -128,24 +82,64 @@ export default function Directory({ st, patch, narrow }) {
         byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
       })
       const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
-      setDetail(d => ({ ...d, [sel.memberId]: { quals, hours } }))
+      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours } }))
     })
     return () => { alive = false }
-  }, [sel?.memberId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sel?.member_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const det = sel && sel.memberId ? detail[sel.memberId] : null
+  const det = sel && sel.member_id ? detail[sel.member_id] : null
   const quals = (det?.quals || []).map(qq => ({ ...qq, st: qualStatus(qq.expiry) }))
   const hours = det?.hours || []
+
+  // ── mutations ──────────────────────────────────────────────────────────────
+  const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', notes: '' } })
+  const openEdit = (p) => setModal({ editId: p.member_id, form: { full_name: p.name, email: p.email, mobile: p.phone, member_category: p.category || 'other', notes: '' } })
+  const setForm = (k, v) => setModal(m => ({ ...m, form: { ...m.form, [k]: v } }))
+  const saveMember = async () => {
+    const f = modal.form
+    if (!(f.full_name || '').trim()) return
+    setBusy(true)
+    try {
+      if (modal.editId) { await api.dirUpdateMember(modal.editId, f); await reload() }
+      else { const r = await api.dirCreateMember(f); await reload(); patch({ dirSel: r.member_id }) }
+      setModal(null)
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const archive = async (p) => {
+    if (!p.member_id) return
+    if (!window.confirm('Archive ' + p.name + '? They can be restored later, and their history is kept.')) return
+    setBusy(true); try { await api.dirArchiveMember(p.member_id); await reload(); patch({ dirSel: null }) } finally { setBusy(false) }
+  }
+  const assignRole = async (p, roleId) => {
+    if (!roleId) return
+    setBusy(true)
+    try {
+      let memberId = p.member_id
+      if (!memberId) { const r = await api.dirEnsureMemberForPlayer(p.player_id); memberId = r.member_id }
+      await api.dirAddRole(memberId, roleId)
+      await reload(); patch({ dirSel: memberId })
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const removeRole = async (p, roleId) => {
+    if (!p.member_id) return
+    setBusy(true); try { await api.dirRemoveRole(p.member_id, roleId); await reload() } finally { setBusy(false) }
+  }
 
   const pill = (active, tone = 'accent') => {
     const on = { accent: ['rgba(99,102,241,0.45)', 'rgba(99,102,241,0.12)', C.accent], amber: ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', C.warn] }[tone]
     return { padding: '5px 11px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: `1px solid ${active ? on[0] : C.hair2}`, background: active ? on[1] : 'transparent', color: active ? on[2] : C.dim }
   }
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
+  const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '8px 11px', color: C.text, fontSize: 13, outline: 'none', width: '100%' }
+  const btnP = { padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }
+  const btnS = { padding: '6px 12px', borderRadius: 7, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }
   const avatar = (size, fs = 10) => ({ width: size, height: size, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: fs, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' })
   const Avatar = ({ p, size, fs }) => p?.photo
     ? <img src={p.photo} alt="" style={{ ...avatar(size, fs), objectFit: 'cover' }} />
     : <span style={avatar(size, fs)}>{initials(p.name)}</span>
+
+  const assignedIds = new Set((sel?.roles || []).map(r => r.id))
+  const unassignedRoles = roleCatalogue.filter(r => !assignedIds.has(r.id))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -156,11 +150,12 @@ export default function Directory({ st, patch, narrow }) {
           <Caption tone={C.faint} style={{ marginTop: 2 }}>One record per person · {list.length}{people ? ' of ' + people.length : ''} shown</Caption>
         </div>
         <input placeholder="Search name or role…" value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
-          style={{ flex: 1, minWidth: 200, maxWidth: 340, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
+          style={{ flex: 1, minWidth: 180, maxWidth: 300, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : s + 's'}</button>)}
+          {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : (s === 'Third party' ? 'Third parties' : s + 's')}</button>)}
           <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
+          <button onClick={openAdd} style={btnP}>+ Add person</button>
         </div>
       </ScreenHeader>
 
@@ -174,10 +169,10 @@ export default function Directory({ st, patch, narrow }) {
                 <Avatar p={p} size={30} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.roles.join(' · ') || (p.playerId ? 'Player' : 'Member')}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{roleTitles(p).join(' · ') || (p.segs[0] || 'Member')}</div>
                 </div>
                 {p.flagged > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.warn, flexShrink: 0 }} />}
-                {p.totalHours > 0 && <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, flexShrink: 0 }}>{p.totalHours}h</span>}
+                {p.total_hours > 0 && <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, flexShrink: 0 }}>{p.total_hours}h</span>}
               </div>
             ))}
             {people && list.length === 0 && <div style={{ padding: '20px 12px', fontSize: 13, color: C.faint }}>Nobody matches those filters.</div>}
@@ -195,14 +190,18 @@ export default function Directory({ st, patch, narrow }) {
                   {sel.segs.map(s => <span key={s} style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.dim }}>{s}</span>)}
                 </div>
               </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                {sel.member_id && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
+                {sel.member_id && <button onClick={() => archive(sel)} style={{ ...btnS, color: C.faint }}>Archive</button>}
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 22 }}>
               {[
-                { value: sel.totalHours + 'h', label: 'HOURS THIS SEASON' },
+                { value: (sel.total_hours || 0) + 'h', label: 'HOURS THIS SEASON' },
                 { value: '—', label: 'SHIFTS THIS WEEK' },
                 { value: '—', label: 'DIARY TASKS' },
-                { value: String(sel.flagged), label: 'QUALS TO RENEW' },
+                { value: String(sel.flagged || 0), label: 'QUALS TO RENEW' },
               ].map((s, i) => (
                 <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
                   <div style={{ fontWeight: 700, fontSize: 19, color: C.accent, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
@@ -214,15 +213,22 @@ export default function Directory({ st, patch, narrow }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '22px 28px' }}>
               <section>
                 <div style={cap}>ROLES</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                  {sel.roles.map(r => <span key={r} onClick={() => patch({ dirRole: r, dirSeg: 'All' })} style={{ background: 'rgba(99,102,241,0.15)', color: C.accent, borderRadius: 5, padding: '3px 9px', fontSize: 12.5, cursor: 'pointer' }}>{r}</span>)}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                  {(sel.roles || []).map(r => (
+                    <span key={r.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(99,102,241,0.15)', color: C.accent, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                      <span onClick={() => patch({ dirRole: r.title, dirSeg: 'All' })} style={{ cursor: 'pointer' }}>{r.title}</span>
+                      <span onClick={() => removeRole(sel, r.id)} title="Remove role" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                    </span>
+                  ))}
+                  {(sel.roles || []).length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No club roles assigned.</span>}
                 </div>
-                {sel.roles.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No club roles assigned.</div>}
-                {sel.interested.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
-                    {sel.interested.map(r => <span key={r} style={{ border: `1px dashed ${C.faintest}`, color: C.dim, borderRadius: 5, padding: '3px 9px', fontSize: 12.5 }}>{r} · interested</span>)}
-                  </div>
-                )}
+                <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}>
+                  <select disabled={busy || unassignedRoles.length === 0} value="" onChange={e => assignRole(sel, e.target.value)} style={{ ...inp, width: 'auto', flex: 1, maxWidth: 240, opacity: busy ? 0.6 : 1 }}>
+                    <option value="">{unassignedRoles.length ? '+ Assign a role…' : 'All roles assigned'}</option>
+                    {unassignedRoles.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+                  </select>
+                </div>
+                {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assigning a role adds this player to the member directory.</div>}
               </section>
 
               <section>
@@ -237,9 +243,9 @@ export default function Directory({ st, patch, narrow }) {
                       <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 7px', borderRadius: 4, border: `1px solid ${qq.st.fg}66`, color: qq.st.fg, flexShrink: 0 }}>{qq.st.label}</span>
                     </div>
                   ))}
-                  {sel.memberId && !det && <div style={{ fontSize: 13, color: C.faint }}>Loading…</div>}
-                  {det && quals.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>None recorded.</div>}
-                  {!sel.memberId && <div style={{ fontSize: 13, color: C.faint }}>Not a member record — add them to track qualifications.</div>}
+                  {sel.member_id && !det && <div style={{ fontSize: 13, color: C.faint }}>Loading…</div>}
+                  {det && quals.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>None recorded. Assigning qualifications lands next.</div>}
+                  {!sel.member_id && <div style={{ fontSize: 13, color: C.faint }}>Assign a role first to start tracking qualifications.</div>}
                 </div>
               </section>
 
@@ -263,7 +269,9 @@ export default function Directory({ st, patch, narrow }) {
 
               <section>
                 <div style={cap}>COMMITTEE &amp; FAMILY</div>
-                <div style={{ fontSize: 13, color: C.faint, lineHeight: 1.5 }}>Committee position and linked family show here once those screens are wired to live data.</div>
+                <div style={{ fontSize: 13, color: C.faint, lineHeight: 1.5 }}>
+                  {sel.segs.includes('Committee') ? 'Holds a committee position. ' : ''}Committee-position and family assignment land in the next update.
+                </div>
               </section>
             </div>
 
@@ -273,6 +281,27 @@ export default function Directory({ st, patch, narrow }) {
           </div>
         )}
       </div>
+
+      {modal && (
+        <div onClick={() => setModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 'min(460px, 100%)', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>{modal.editId ? 'Edit person' : 'Add a person'}</div>
+            <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>{modal.editId ? 'Update this person’s details.' : 'Add a non-playing member or third party. Players are managed in Stats.'}</div>
+            <div style={{ display: 'grid', gap: 11 }}>
+              <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>NAME *<input value={modal.form.full_name} onChange={e => setForm('full_name', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11 }}>
+                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>EMAIL<input value={modal.form.email} onChange={e => setForm('email', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
+                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MOBILE<input value={modal.form.mobile} onChange={e => setForm('mobile', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
+              </div>
+              <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>TYPE<select value={modal.form.member_category} onChange={e => setForm('member_category', e.target.value)} style={{ ...inp, marginTop: 4 }}>{CATS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+              <button onClick={() => setModal(null)} style={btnS}>Cancel</button>
+              <button onClick={saveMember} disabled={busy || !(modal.form.full_name || '').trim()} style={{ ...btnP, opacity: (busy || !(modal.form.full_name || '').trim()) ? 0.6 : 1 }}>{modal.editId ? 'Save' : 'Add person'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

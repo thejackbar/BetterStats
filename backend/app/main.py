@@ -16,7 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, \
+    club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
@@ -4372,6 +4372,13 @@ async def lifespan(app: FastAPI):
         """))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_departments_org ON roster_departments(organisation_id, is_active)"))
 
+    # Migration 212: BetterClubManager Directory — non-player people + third
+    # parties on the shared fee_members spine. Byte-identical to
+    # alembic/versions/212_member_directory.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS member_category TEXT"))
+        await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -4600,6 +4607,7 @@ app.include_router(assets.router)        # Assets & Facilities (core capability,
 app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
 app.include_router(club_room.router)     # Club Room Mode — TV slideshow (core capability, not a paid module)
 app.include_router(roles_activities.router)  # Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
+app.include_router(directory.router)     # BetterClubManager Directory — non-player people + third parties (core capability, not a paid module)
 app.include_router(roster.router)        # BetterClubManager Roster — weekly volunteer roster (core capability, not a paid module)
 app.include_router(facility_requests.router)  # BetterClubManager Facilities — booking-requests approval queue (core capability, not a paid module)
 app.include_router(member_portal_admin.router)  # Member portal visibility check (core, no capability — see the router docstring)

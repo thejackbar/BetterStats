@@ -392,6 +392,16 @@ export const api = {
   volunteerDeleteHours: (id) =>
     request(`/club-admin/volunteers/hours/${id}`, { method: 'DELETE' }),
 
+  // BetterClubManager Directory (core capability, not a paid module)
+  dirPeople: () => request('/club-admin/directory/people'),
+  dirCreateMember: (data) => request('/club-admin/directory/people', { method: 'POST', body: JSON.stringify(data) }),
+  dirUpdateMember: (id, data) => request(`/club-admin/directory/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  dirArchiveMember: (id) => request(`/club-admin/directory/people/${id}/archive`, { method: 'POST' }),
+  dirRestoreMember: (id) => request(`/club-admin/directory/people/${id}/restore`, { method: 'POST' }),
+  dirEnsureMemberForPlayer: (playerId) => request(`/club-admin/directory/players/${playerId}/ensure-member`, { method: 'POST' }),
+  dirAddRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles`, { method: 'POST', body: JSON.stringify({ role_id: roleId }) }),
+  dirRemoveRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles/${roleId}`, { method: 'DELETE' }),
+
   // BetterClubManager Roster (core capability, not a paid module)
   rosterAreas: () => request('/club-admin/roster/areas'),
   rosterCreateArea: (data) => request('/club-admin/roster/areas', { method: 'POST', body: JSON.stringify(data) }),
