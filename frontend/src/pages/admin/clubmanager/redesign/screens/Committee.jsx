@@ -36,6 +36,24 @@ export default function Committee({ st, patch, narrow }) {
   const tab = st.cteTab || 'meetings'
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
+  const [dragId, setDragId] = useState(null)
+  const [overId, setOverId] = useState(null)
+
+  // Reorder a position before another and persist the new sequence.
+  const movePosition = (fromId, toId) => {
+    setDragId(null); setOverId(null)
+    if (!fromId || fromId === toId) return
+    setData(d => {
+      const arr = [...d.positions]
+      const fi = arr.findIndex(p => p.id === fromId)
+      const ti = arr.findIndex(p => p.id === toId)
+      if (fi < 0 || ti < 0) return d
+      const [moved] = arr.splice(fi, 1)
+      arr.splice(ti, 0, moved)
+      api.committeeReorderPositions(arr.map(p => p.id)).catch(() => {})
+      return { ...d, positions: arr }
+    })
+  }
 
   useEffect(() => {
     let alive = true
@@ -186,11 +204,24 @@ export default function Committee({ st, patch, narrow }) {
               <span>{vacancies.length} position{vacancies.length === 1 ? '' : 's'} unfilled — {vacancies.map(v => v.name).join(', ')}.</span>
             </div>
           )}
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, marginBottom: 8 }}>DRAG THE GRIP TO REORDER</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {positions.map(p => {
               const t = p.current_term
+              const dragging = dragId === p.id
+              const isOver = overId === p.id && dragId && dragId !== p.id
               return (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.surface, border: `1px solid ${t ? C.hair : 'rgba(245,181,66,0.35)'}`, borderRadius: 8, padding: '11px 13px' }}>
+                <div key={p.id}
+                  onDragOver={e => { if (dragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== p.id) setOverId(p.id) } }}
+                  onDrop={e => { e.preventDefault(); movePosition(dragId, p.id) }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surface, borderRadius: 8, padding: '11px 13px',
+                    border: `1px solid ${isOver ? C.accent : (t ? C.hair : 'rgba(245,181,66,0.35)')}`,
+                    boxShadow: isOver ? 'inset 0 2px 0 #6366F1' : undefined, opacity: dragging ? 0.5 : 1 }}>
+                  <span draggable
+                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(p.id) }}
+                    onDragEnd={() => { setDragId(null); setOverId(null) }}
+                    title="Drag to reorder"
+                    style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, padding: '0 2px', flexShrink: 0, userSelect: 'none' }}>⠿</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, color: C.dim }}>{p.name}</div>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: t ? C.text : C.warn }}>{t ? t.holder_name : 'Vacant'}</div>
