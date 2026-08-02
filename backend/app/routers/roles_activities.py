@@ -32,15 +32,18 @@ async def _or_404(db: AsyncSession, model, club: Organisation, row_id: str):
     return row
 
 
+# name/title are Optional so a PATCH that only carries sort_order (drag-reorder)
+# validates — creation is still guarded by the service layer, which raises
+# "Name/Title is required" (→ 422) when it's missing or blank.
 class TypeUpsert(BaseModel):
-    name: str
+    name: Optional[str] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
 
 
 class RoleUpsert(BaseModel):
-    title: str
+    title: Optional[str] = None
     role_type_id: Optional[str] = None
     description: Optional[str] = None
     is_committee: Optional[bool] = None
@@ -49,7 +52,7 @@ class RoleUpsert(BaseModel):
 
 
 class ActivityUpsert(BaseModel):
-    title: str
+    title: Optional[str] = None
     activity_type_id: Optional[str] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None

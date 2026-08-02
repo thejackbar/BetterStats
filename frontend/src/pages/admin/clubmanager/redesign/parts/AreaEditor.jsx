@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO } from '../ui'
+import EntityManager, { reorderBySortOrder } from './EntityManager'
 
 // Full editor for roster Operational Areas: Starter Pack, create/edit/delete,
 // drag-reorder, and a nested shift-pattern editor per area (add/remove the
-// repeating weekly shifts the roster generates from).
+// repeating weekly shifts the roster generates from). Each area's Department is
+// picked from a managed catalogue (with an inline "new" option), and that
+// catalogue is CRUD'd + seeded in the "Manage departments" panel at the bottom.
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const SWATCHES = ['#f5b542', '#f97316', '#3b82f6', '#06b6d4', '#16c784', '#a855f7', '#6366F1', '#ef5b5b']
@@ -18,6 +21,8 @@ export default function AreaEditor() {
   const [areas, setAreas] = useState(null)
   const [roles, setRoles] = useState([])
   const [quals, setQuals] = useState([])
+  const [departments, setDepartments] = useState([])
+  const [newDept, setNewDept] = useState(false)  // area form: "＋ New department" chosen
   const [busy, setBusy] = useState(false)
   const [editId, setEditId] = useState(null)
   const [adding, setAdding] = useState(false)
@@ -28,23 +33,34 @@ export default function AreaEditor() {
   const [overId, setOverId] = useState(null)
 
   const refresh = () => api.rosterAreas().then(r => setAreas(r?.areas || r || []))
+  const reloadDepartments = () => api.rosterDepartments().then(r => setDepartments(r?.departments || r || [])).catch(() => {})
   useEffect(() => {
     refresh()
     api.raRoles().then(r => setRoles(r?.roles || r || [])).catch(() => {})
     api.qualListTypes().then(r => setQuals(r?.types || r || [])).catch(() => {})
+    reloadDepartments()
   }, [])
 
   const blank = { name: '', department: '', color: SWATCHES[0], required_role_id: '', required_qualification_type_id: '' }
-  const startAdd = () => { setForm({ ...blank }); setAdding(true); setEditId(null) }
-  const startEdit = (a) => { setForm({ name: a.name || '', department: a.department || '', color: a.color || SWATCHES[0], required_role_id: a.required_role_id || '', required_qualification_type_id: a.required_qualification_type_id || '' }); setEditId(a.id); setAdding(false) }
-  const cancel = () => { setAdding(false); setEditId(null) }
+  const startAdd = () => { setForm({ ...blank }); setNewDept(false); setAdding(true); setEditId(null) }
+  const startEdit = (a) => { setForm({ name: a.name || '', department: a.department || '', color: a.color || SWATCHES[0], required_role_id: a.required_role_id || '', required_qualification_type_id: a.required_qualification_type_id || '' }); setNewDept(false); setEditId(a.id); setAdding(false) }
+  const cancel = () => { setAdding(false); setEditId(null); setNewDept(false) }
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const submit = async () => {
     if (!form.name) return
     setBusy(true)
-    const body = { name: form.name, department: form.department || null, color: form.color || null, required_role_id: form.required_role_id || null, required_qualification_type_id: form.required_qualification_type_id || null }
-    try { if (editId) await api.rosterUpdateArea(editId, body); else await api.rosterCreateArea(body); await refresh(); cancel() } finally { setBusy(false) }
+    const dept = (form.department || '').trim()
+    const body = { name: form.name, department: dept || null, color: form.color || null, required_role_id: form.required_role_id || null, required_qualification_type_id: form.required_qualification_type_id || null }
+    try {
+      // A department typed in the "new" field that isn't in the catalogue yet is
+      // added to it, so it shows in the dropdown from now on.
+      if (dept && !departments.some(d => d.name.toLowerCase() === dept.toLowerCase())) {
+        await api.rosterCreateDepartment({ name: dept }).catch(() => {})
+      }
+      if (editId) await api.rosterUpdateArea(editId, body); else await api.rosterCreateArea(body)
+      await refresh(); await reloadDepartments(); cancel()
+    } finally { setBusy(false) }
   }
   const remove = async (a) => { if (!window.confirm('Remove the "' + a.name + '" area and its shift patterns?')) return; setBusy(true); try { await api.rosterDeleteArea(a.id); await refresh() } finally { setBusy(false) } }
   const seed = async () => { setBusy(true); try { await api.rosterSeedStarter(); await refresh() } finally { setBusy(false) } }
@@ -67,11 +83,23 @@ export default function AreaEditor() {
   }
 
   const roleOpts = roles.filter(r => !r.is_committee)
+  // A stored department value that isn't (any longer) in the catalogue — show it
+  // in the free-text field so it's editable rather than silently lost.
+  const deptIsCustom = !!(form.department && !departments.some(d => d.name.toLowerCase() === (form.department || '').toLowerCase()))
   const formCard = (
     <div style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 9, padding: 14, marginBottom: 10 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>NAME *<input value={form.name} onChange={e => setF('name', e.target.value)} style={{ ...inp, marginTop: 3 }} /></label>
-        <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>DEPARTMENT<input value={form.department} placeholder="e.g. Food & Beverage" onChange={e => setF('department', e.target.value)} style={{ ...inp, marginTop: 3 }} /></label>
+        <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>DEPARTMENT
+          <select value={(newDept || deptIsCustom) ? '__new__' : (form.department || '')}
+            onChange={e => { const v = e.target.value; if (v === '__new__') { setNewDept(true); if (!deptIsCustom) setF('department', '') } else { setNewDept(false); setF('department', v) } }}
+            style={{ ...inp, marginTop: 3 }}>
+            <option value="">None</option>
+            {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+            <option value="__new__">＋ New department…</option>
+          </select>
+          {(newDept || deptIsCustom) && <input value={form.department} placeholder="New department name" onChange={e => setF('department', e.target.value)} style={{ ...inp, marginTop: 6 }} />}
+        </label>
         <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>ROLE THAT COVERS IT<select value={form.required_role_id} onChange={e => setF('required_role_id', e.target.value)} style={{ ...inp, marginTop: 3 }}><option value="">Any role</option>{roleOpts.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>
         <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>QUALIFICATION THAT GATES IT<select value={form.required_qualification_type_id} onChange={e => setF('required_qualification_type_id', e.target.value)} style={{ ...inp, marginTop: 3 }}><option value="">None</option>{quals.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}</select></label>
       </div>
@@ -145,6 +173,34 @@ export default function AreaEditor() {
         })}
         {areas.length === 0 && !adding && <div style={{ fontSize: 13, color: C.faint }}>No operational areas yet.</div>}
       </div>
+
+      <DeptPanel reload={reloadDepartments} />
+    </div>
+  )
+}
+
+// Collapsible "Manage departments" panel — CRUD + Starter Pack + drag-reorder
+// for the catalogue that feeds each area's Department dropdown above.
+function DeptPanel({ reload }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 24, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, padding: 0 }}>
+        <span style={{ fontSize: 11, color: C.faint, width: 10 }}>{open ? '▾' : '▸'}</span>Manage departments
+        <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, fontWeight: 400 }}>FOOD &amp; BEVERAGE · CRICKET OPERATIONS…</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 14 }}>
+          <EntityManager
+            describe="Departments group your operational areas. Pick one when adding an area above."
+            load={() => api.rosterDepartments().then(r => r?.departments || r || [])}
+            fields={[{ key: 'name', label: 'Department name', type: 'text', required: true, span: 2 }]}
+            onCreate={v => api.rosterCreateDepartment(v)} onUpdate={(id, v) => api.rosterUpdateDepartment(id, v)} onDelete={id => api.rosterDeleteDepartment(id)}
+            onReorder={reorderBySortOrder(api.rosterUpdateDepartment)} onChanged={reload}
+            seed={{ label: 'Add Departments Starter Pack', fn: () => api.rosterSeedDepartments() }}
+            primaryKey="name" addLabel="Add department" emptyText="No departments yet." />
+        </div>
+      )}
     </div>
   )
 }

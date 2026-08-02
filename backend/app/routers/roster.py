@@ -97,6 +97,59 @@ async def seed_starter(_: User = _cap, club: Organisation = Depends(get_current_
     return {"seeded": seeded}
 
 
+# ── departments (managed catalogue feeding the area form's dropdown) ─────────
+class DepartmentUpsert(BaseModel):
+    name: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class DeptReorderBody(BaseModel):
+    department_ids: list[str]
+
+
+@router.get("/departments")
+async def get_departments(_: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"departments": await svc.list_departments(db, club.id)}
+
+
+@router.post("/departments")
+async def create_department(data: DepartmentUpsert, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        did = await svc.create_department(db, club.id, name=data.name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"id": did}
+
+
+@router.patch("/departments/{dept_id}")
+async def update_department(dept_id: str, data: DepartmentUpsert, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.update_department(db, club.id, dept_id, **data.model_dump(exclude_unset=True))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/departments/{dept_id}")
+async def delete_department(dept_id: str, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.delete_department(db, club.id, dept_id)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/departments/reorder")
+async def reorder_departments(data: DeptReorderBody, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.reorder_departments(db, club.id, data.department_ids)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/departments/seed-starter")
+async def seed_departments(_: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    seeded = await svc.seed_starter_departments(db, club.id)
+    await db.commit()
+    return {"seeded": seeded}
+
+
 @router.post("/areas/{area_id}/patterns")
 async def add_pattern(area_id: str, data: PatternCreate, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     pid = await svc.add_pattern(db, club.id, area_id, day_of_week=data.day_of_week, start_time=data.start_time, end_time=data.end_time, headcount=data.headcount)

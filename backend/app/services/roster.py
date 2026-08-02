@@ -90,6 +90,98 @@ async def reorder_areas(db: AsyncSession, org_id, area_ids) -> None:
         await db.execute(text("UPDATE roster_areas SET sort_order=:i WHERE id=:id AND organisation_id=:org"), {"i": i, "id": aid, "org": org_id})
 
 
+# ── departments (a managed catalogue that feeds the area form's dropdown) ─────
+STARTER_DEPARTMENTS = [
+    "Cricket Operations", "Food & Beverage", "Grounds & Facilities",
+    "Committee & Administration", "Coaching & Development", "Events & Fundraising",
+]
+
+
+async def list_departments(db: AsyncSession, org_id) -> list[dict]:
+    rows = (await db.execute(text("""
+        SELECT id, name, sort_order, is_active FROM roster_departments
+        WHERE organisation_id = :org AND is_active = TRUE
+        ORDER BY sort_order, lower(name)
+    """), {"org": org_id})).mappings().all()
+    return [{"id": str(r["id"]), "name": r["name"], "sort_order": r["sort_order"], "is_active": r["is_active"]} for r in rows]
+
+
+async def create_department(db: AsyncSession, org_id, *, name) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Name is required")
+    # Reactivate an archived same-named department rather than colliding on the
+    # unique (org, name) index; otherwise create fresh at the end of the order.
+    existing = (await db.execute(text(
+        "SELECT id, is_active FROM roster_departments WHERE organisation_id=:org AND lower(name)=lower(:name)"
+    ), {"org": org_id, "name": name})).mappings().first()
+    if existing is not None:
+        if not existing["is_active"]:
+            await db.execute(text("UPDATE roster_departments SET is_active=TRUE WHERE id=:id"), {"id": existing["id"]})
+        return str(existing["id"])
+    did = uuid.uuid4()
+    n = (await db.execute(text("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM roster_departments WHERE organisation_id=:org"), {"org": org_id})).scalar() or 1
+    await db.execute(text("""
+        INSERT INTO roster_departments (id, organisation_id, name, sort_order) VALUES (:id, :org, :name, :sort)
+    """), {"id": did, "org": org_id, "name": name[:120], "sort": n})
+    return str(did)
+
+
+async def update_department(db: AsyncSession, org_id, dept_id, **fields) -> None:
+    if "name" in fields and fields["name"] is not None:
+        new_name = (fields["name"] or "").strip()
+        if new_name:
+            old = (await db.execute(text("SELECT name FROM roster_departments WHERE id=:id AND organisation_id=:org"), {"id": dept_id, "org": org_id})).scalar()
+            await db.execute(text("UPDATE roster_departments SET name=:name WHERE id=:id AND organisation_id=:org"), {"name": new_name[:120], "id": dept_id, "org": org_id})
+            # Cascade the rename onto areas that carry the old department text, so
+            # the dropdown and the areas stay in step.
+            if old and old != new_name:
+                await db.execute(text("UPDATE roster_areas SET department=:new WHERE organisation_id=:org AND department=:old"), {"new": new_name, "old": old, "org": org_id})
+    if "sort_order" in fields and fields["sort_order"] is not None:
+        await db.execute(text("UPDATE roster_departments SET sort_order=:s WHERE id=:id AND organisation_id=:org"), {"s": fields["sort_order"], "id": dept_id, "org": org_id})
+
+
+async def delete_department(db: AsyncSession, org_id, dept_id) -> None:
+    # Archive the catalogue entry only; areas keep their department text (it just
+    # becomes a value not currently in the catalogue).
+    await db.execute(text("UPDATE roster_departments SET is_active=FALSE WHERE id=:id AND organisation_id=:org"), {"id": dept_id, "org": org_id})
+
+
+async def reorder_departments(db: AsyncSession, org_id, dept_ids) -> None:
+    for i, did in enumerate(dept_ids):
+        await db.execute(text("UPDATE roster_departments SET sort_order=:i WHERE id=:id AND organisation_id=:org"), {"i": i, "id": did, "org": org_id})
+
+
+async def seed_starter_departments(db: AsyncSession, org_id) -> int:
+    """Seed the starter departments plus any department names already in use on
+    this club's areas. Reactivates an archived match; skips an active one."""
+    existing = {r["name"].lower(): r for r in (await db.execute(text(
+        "SELECT id, name, is_active FROM roster_departments WHERE organisation_id=:org"
+    ), {"org": org_id})).mappings().all()}
+    in_use = [r for r in (await db.execute(text(
+        "SELECT DISTINCT department FROM roster_areas WHERE organisation_id=:org AND is_active=TRUE AND department IS NOT NULL AND department <> ''"
+    ), {"org": org_id})).scalars().all()]
+    names = list(STARTER_DEPARTMENTS)
+    for d in in_use:
+        if d.lower() not in {n.lower() for n in names}:
+            names.append(d)
+    seeded = 0
+    start = (await db.execute(text("SELECT COALESCE(MAX(sort_order),0) FROM roster_departments WHERE organisation_id=:org"), {"org": org_id})).scalar() or 0
+    for name in names:
+        cur = existing.get(name.lower())
+        if cur is not None:
+            if not cur["is_active"]:
+                await db.execute(text("UPDATE roster_departments SET is_active=TRUE WHERE id=:id"), {"id": cur["id"]})
+                seeded += 1
+            continue
+        start += 1
+        await db.execute(text("""
+            INSERT INTO roster_departments (id, organisation_id, name, sort_order) VALUES (:id, :org, :name, :sort)
+        """), {"id": uuid.uuid4(), "org": org_id, "name": name, "sort": start})
+        seeded += 1
+    return seeded
+
+
 async def add_pattern(db: AsyncSession, org_id, area_id, *, day_of_week, start_time, end_time, headcount=1) -> str:
     pid = uuid.uuid4()
     await db.execute(text("""

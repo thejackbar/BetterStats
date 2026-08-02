@@ -4341,6 +4341,22 @@ async def lifespan(app: FastAPI):
         """))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_facility_booking_requests_org ON facility_booking_requests(organisation_id, status)"))
 
+    # Migration 210: BetterClubManager — a managed Departments catalogue for
+    # Operational Areas. Byte-identical to alembic/versions/210_roster_departments.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_departments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_roster_departments_org_name UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_departments_org ON roster_departments(organisation_id, is_active)"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

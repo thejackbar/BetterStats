@@ -17,7 +17,7 @@ import { C, MONO } from '../ui'
 //   addLabel                  (defaults 'Add')
 //   accentOf(item)            (optional dot colour per row)
 
-export default function EntityManager({ load, fields, onCreate, onUpdate, onDelete, onReorder, seed, primaryKey, subtitle, describe, addLabel = 'Add', accentOf, emptyText }) {
+export default function EntityManager({ load, fields, onCreate, onUpdate, onDelete, onReorder, onChanged, seed, primaryKey, subtitle, describe, addLabel = 'Add', accentOf, emptyText }) {
   const [items, setItems] = useState(null)
   const [err, setErr] = useState(null)
   const [adding, setAdding] = useState(false)
@@ -28,6 +28,7 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
   const [overId, setOverId] = useState(null)
 
   const pk = primaryKey || fields[0].key
+  const notify = () => { try { onChanged && onChanged() } catch { /* parent refresh is best-effort */ } }
   const refresh = () => load().then(rows => setItems(Array.isArray(rows) ? rows : [])).catch(e => setErr(String(e?.message || e)))
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -53,12 +54,12 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
     setBusy(true)
     try {
       if (editId) await onUpdate(editId, clean(form)); else await onCreate(clean(form))
-      await refresh(); cancel()
+      await refresh(); notify(); cancel()
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
   const remove = async (it) => {
     if (!window.confirm('Remove "' + (it[pk] || 'this item') + '"? This can be re-added later.')) return
-    setBusy(true); try { await onDelete(it.id); await refresh() } finally { setBusy(false) }
+    setBusy(true); try { await onDelete(it.id); await refresh(); notify() } finally { setBusy(false) }
   }
   const doSeed = async () => {
     setBusy(true); setErr(null)
@@ -67,6 +68,7 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
       const rows = await load()
       const arr = Array.isArray(rows) ? rows : []
       setItems(arr)
+      notify()
       if (arr.length === 0) setErr('Starter pack ran but nothing was added — these items may already exist (possibly archived). Add one manually below, or check with support.')
     } catch (e) {
       setErr('Could not add the starter pack: ' + String(e?.message || e))
@@ -81,7 +83,7 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
     if (fi < 0 || ti < 0) return
     const [m] = arr.splice(fi, 1); arr.splice(ti, 0, m)
     setItems(arr)
-    onReorder(arr.map(x => x.id)).catch(() => {})
+    onReorder(arr.map(x => x.id)).then(notify).catch(() => {})
   }
 
   const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '7px 10px', color: C.text, fontSize: 13, outline: 'none', width: '100%' }
