@@ -342,6 +342,25 @@ class Organisation(Base):
     # Opaque JSON blob the BetterSocials editor uses as the club's reusable
     # brand palette/fonts/crest/sponsors set. NULL until an admin saves one.
     social_brand_kit = Column(JSONB, nullable=True)
+    # ─── Password-protected public page (migration 205) ───────────────────────
+    # A third public-page state alongside is_active's Active/Inactive: the page
+    # exists and is reachable but gated behind a 4-digit PIN (see
+    # services/club_lock.py). Independent of is_active by design — the gate
+    # check (routers/clubs.py::_public_blocked and
+    # club_lock.is_locked_for_request) always evaluates password_protected
+    # FIRST, so it wins regardless of is_active's value.
+    # password_protect_reason distinguishes the copy shown on the public gate:
+    #   'draft'       — voluntary privacy (club admin or Super Admin), plain
+    #                    PIN entry only.
+    #   'trial_ended' — Super-Admin-only, deliberate sales-conversion action;
+    #                    the gate also offers an "email me for access" form
+    #                    (see club_unpause_requests below).
+    # access_pin_hash is a bcrypt hash — the raw PIN is never stored.
+    password_protected = Column(Boolean, nullable=False, server_default="false", default=False)
+    password_protect_reason = Column(Text, nullable=True)
+    access_pin_hash = Column(Text, nullable=True)
+    password_protected_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    password_protected_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only
@@ -3496,6 +3515,30 @@ class ClubOnboardingRequest(Base):
     # enquiry can be tied back to the anonymous browsing journey on the Usage page.
     visitor_id = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubUnpauseRequest(Base):
+    """A visitor's request to unlock a club's password-protected public page.
+
+    Only ever created from the public gate when the club's
+    ``password_protect_reason`` is 'trial_ended' — the sales-conversion trigger
+    for the "This trial has ended..." copy (see routers/clubs.py,
+    POST /clubs/{slug}/request-unpause). Reviewed by Super Admin at
+    /admin/super/unpause-requests, who can open a sales conversation with the
+    requester (reply_to on the notification email is the requester's own
+    address for exactly this). ``status`` tracks the follow-up
+    (pending -> actioned / dismissed).
+    """
+    __tablename__ = "club_unpause_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    email = Column(Text, nullable=False)
+    message = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending")  # pending | actioned | dismissed
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    actioned_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    actioned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
 
 class CommsContact(Base):

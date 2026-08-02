@@ -133,6 +133,48 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_preferences "
             "JSONB NOT NULL DEFAULT '{}'::jsonb"
         ))
+        # Club page password protection / "Draft" mode (migration 205) — see
+        # services/club_lock.py. Independent of is_active by design.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "password_protected BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "password_protect_reason TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "access_pin_hash TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "password_protected_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "password_protected_by UUID REFERENCES users(id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_unpause_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                email TEXT NOT NULL,
+                message TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                actioned_at TIMESTAMPTZ,
+                actioned_by UUID REFERENCES users(id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_unpause_requests_org "
+            "ON club_unpause_requests(organisation_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_unpause_requests_status_created "
+            "ON club_unpause_requests(status, created_at DESC)"
+        ))
         # BetterSelect: player → selection-pool team assignment (migration 053).
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "

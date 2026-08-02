@@ -7,6 +7,7 @@ import { usePageMeta } from '../hooks/usePageMeta'
 import { useNameFormat } from '../lib/nameFormat'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import { Card, PageHeader, PbSpinner, TabBar, ResultPill, Kpi } from '../lib/presskit'
 import { fmt2, fmtOvers, fmtCount, formatSeason } from '../lib/cricketFormat'
 
@@ -236,7 +237,7 @@ const PERF_TABS = [
 
 export default function TeamDetail() {
   const { clubSlug, gradeId } = useParams()
-  const { club, loading: clubLoading, inactive, notFound } = useClub(clubSlug)
+  const { club, loading: clubLoading, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   const orgId = club?.id
   const fmtName = useNameFormat(club)
 
@@ -277,6 +278,7 @@ export default function TeamDetail() {
       : `Team — ${club?.name || clubSlug}`,
   })
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading || loading) return <PbSpinner />

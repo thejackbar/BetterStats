@@ -6,6 +6,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import SeasonSelector from '../components/SeasonSelector'
 import { Card, PageHeader, PbSpinner } from '../lib/presskit'
 
@@ -85,7 +86,7 @@ function GradeSection({ gradeName, games }) {
 
 export default function GamesPage() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   usePageMeta({
     title: club?.name ? `${club.name} Games — BetterCricket` : null,
@@ -158,6 +159,7 @@ export default function GamesPage() {
   const currentSeason = seasons?.find(s => s.id === selectedSeason)
   const seasonLabel = currentSeason?.name || 'ALL SEASONS'
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading club data…" />

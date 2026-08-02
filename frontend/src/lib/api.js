@@ -95,6 +95,16 @@ function _appendContext(params, context) {
 export const api = {
   // Clubs (slug-based)
   getClubBySlug: (slug) => request(`/clubs/${slug}`),
+  unlockClub: (slug, pin) => request(`/clubs/${slug}/unlock`, {
+    method: 'POST', body: JSON.stringify({ pin }),
+  }),
+  requestClubUnpause: (slug, email, message) => request(`/clubs/${slug}/request-unpause`, {
+    method: 'POST', body: JSON.stringify({ email, message }),
+  }),
+  superListUnpauseRequests: (status) => request(`/club-admin/super/unpause-requests${status ? `?status=${status}` : ''}`),
+  superActionUnpauseRequest: (id, status) => request(`/club-admin/super/unpause-requests/${id}`, {
+    method: 'PATCH', body: JSON.stringify({ status }),
+  }),
 
   // Organisations (UUID-based, used internally once slug is resolved)
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),

@@ -5,12 +5,13 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 import { formatSeason } from '../lib/cricketFormat'
 
 export default function Teams() {
   const { clubSlug } = useParams()
-  const { club, loading: clubLoading, inactive, notFound } = useClub(clubSlug)
+  const { club, loading: clubLoading, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   const orgId = club?.id
 
   const [seasons, setSeasons] = useState([])
@@ -43,6 +44,7 @@ export default function Teams() {
   }, [orgId, selectedSeason])
 
   if (clubLoading) return <PbSpinner />
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 

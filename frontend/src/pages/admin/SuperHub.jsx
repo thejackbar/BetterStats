@@ -38,6 +38,7 @@ export default function SuperHub() {
   const [selfServeEnabled, setSelfServeEnabled] = useState(false)
   const [moduleReqCount, setModuleReqCount] = useState(0)
   const [commsReqCount, setCommsReqCount] = useState(0)
+  const [unpauseReqCount, setUnpauseReqCount] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -46,6 +47,9 @@ export default function SuperHub() {
       .catch(() => {})
     api.superCountCommsRequests()
       .then(d => { if (alive) setCommsReqCount(d?.total || 0) })
+      .catch(() => {})
+    api.superListUnpauseRequests('pending')
+      .then(d => { if (alive) setUnpauseReqCount(Array.isArray(d) ? d.length : 0) })
       .catch(() => {})
     api.superGetGeneralSettings()
       .then(s => { if (alive) setSelfServeEnabled(!!s?.self_serve_registration_enabled) })
@@ -65,6 +69,7 @@ export default function SuperHub() {
   const badgeFor = (item) => {
     if (item.badge === 'moduleRequests') return moduleReqCount
     if (item.badge === 'commsRequests') return commsReqCount
+    if (item.badge === 'unpauseRequests') return unpauseReqCount
     return 0
   }
 

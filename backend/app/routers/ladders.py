@@ -19,14 +19,14 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club, get_optional_user, user_can_view_org_private
 from app.routers.teams import ensure_team_grades, _grade_name_map
-from app.services import grassroots_scores_client
+from app.services import club_lock, grassroots_scores_client
 from app.services.club_match import club_match_keys
 
 router = APIRouter(prefix="/ladders", tags=["ladders"])
@@ -148,13 +148,15 @@ async def team_ladders(
 
 
 @router.get("/public/{slug}")
-async def public_team_ladders(slug: str, db: AsyncSession = Depends(get_db)):
+async def public_team_ladders(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Per-team ladders for a public club page (resolved by slug)."""
     org = (await db.execute(
         select(Organisation).where(Organisation.slug == slug.lower())
     )).scalar_one_or_none()
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
+    if club_lock.is_locked_for_request(org, request):
+        raise HTTPException(status_code=423, detail=club_lock.lock_detail(org))
     if not org.is_active:
         raise HTTPException(status_code=403, detail=INACTIVE_DETAIL)
     # Read-only on public GETs — linking happens on the admin side.
@@ -166,6 +168,7 @@ async def public_team_ladders(slug: str, db: AsyncSession = Depends(get_db)):
 @router.get("/grade/{grade_id}")
 async def grade_ladder(
     grade_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -183,6 +186,8 @@ async def grade_ladder(
     org = await db.get(Organisation, season.organisation_id) if season else None
     if not org or not org.is_active:
         raise HTTPException(status_code=404, detail="Grade not found")
+    if club_lock.is_locked_for_request(org, request):
+        raise HTTPException(status_code=423, detail=club_lock.lock_detail(org))
     # Hidden grades are only browsable by the club's own admins / Better staff.
     if grade.is_public is False and not await user_can_view_org_private(db, viewer, str(org.id)):
         raise HTTPException(status_code=404, detail="Grade not found")

@@ -5,6 +5,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { useClubData } from '../hooks/useClubData'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import LadderBoard from '../components/LadderBoard'
 import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner } from '../lib/presskit'
@@ -29,7 +30,7 @@ function gradeNav(slug, seasonId, gradeId, gradeName) {
 
 export default function Ladders() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
 
   const { seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade } = useClubData(orgId)
@@ -57,6 +58,7 @@ export default function Ladders() {
     api.laddersGrade(selectedGrade).then(setGrade).catch(() => setGrade(null))
   }, [selectedGrade])
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 

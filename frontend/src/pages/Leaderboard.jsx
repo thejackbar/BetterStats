@@ -6,6 +6,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import SeasonSelector from '../components/SeasonSelector'
 import {
   Label, Card, PageHeader, PbSpinner,
@@ -354,7 +355,7 @@ function FieldingTable({ rows, sortBy, fmt = n => n }) {
 
 export default function Leaderboard() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
   usePageMeta({
@@ -453,6 +454,7 @@ export default function Leaderboard() {
     }).finally(() => setSirsLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, mainTab])
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading club data…" />
