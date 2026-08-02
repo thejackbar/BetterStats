@@ -37,15 +37,24 @@ export default function Directory({ st, patch, narrow }) {
   const [people, setPeople] = useState(null)   // null = loading
   const [err, setErr] = useState(null)
   const [roleCatalogue, setRoleCatalogue] = useState([])   // general (non-committee) club roles
-  const [detail, setDetail] = useState({})     // { [memberId]: { quals, hours } }
+  const [qualTypes, setQualTypes] = useState([])
+  const [positions, setPositions] = useState([])
+  const [families, setFamilies] = useState([])
+  const [detail, setDetail] = useState({})     // { [memberId]: { quals, hours, overlays } }
   const [busy, setBusy] = useState(false)
   const [modal, setModal] = useState(null)     // null | { editId, form }
   const [imp, setImp] = useState(null)         // null | { text, preview, result }
+  const [qualForm, setQualForm] = useState({ type_id: '', obtained_at: '' })
+  const [newFamily, setNewFamily] = useState('')
 
   const reload = () => api.dirPeople().then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
+  const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
   useEffect(() => {
     reload()
     api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee))).catch(() => {})
+    api.qualListTypes().then(r => setQualTypes(r?.types || r || [])).catch(() => {})
+    api.dirCommitteePositions().then(r => setPositions(r?.positions || [])).catch(() => {})
+    reloadFamilies()
   }, [])
 
   const q = (st.dirQuery || '').toLowerCase()
@@ -71,10 +80,11 @@ export default function Directory({ st, patch, narrow }) {
     Promise.all([
       api.qualListMemberQualifications(sel.member_id).catch(() => []),
       api.volunteerListHours(sel.member_id).catch(() => []),
-    ]).then(([qRes, hRes]) => {
+      api.dirMemberOverlays(sel.member_id).catch(() => ({ committee: [], families: [] })),
+    ]).then(([qRes, hRes, oRes]) => {
       if (!alive) return
       const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
-        name: x.type_name || x.name || x.qualification_name || 'Qualification',
+        id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
         expiry: x.expires_at || x.expiry || null,
       }))
       const byAct = {}
@@ -83,7 +93,8 @@ export default function Directory({ st, patch, narrow }) {
         byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
       })
       const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
-      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours } }))
+      const overlays = { committee: oRes?.committee || [], families: oRes?.families || [] }
+      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours, overlays } }))
     })
     return () => { alive = false }
   }, [sel?.member_id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -91,6 +102,9 @@ export default function Directory({ st, patch, narrow }) {
   const det = sel && sel.member_id ? detail[sel.member_id] : null
   const quals = (det?.quals || []).map(qq => ({ ...qq, st: qualStatus(qq.expiry) }))
   const hours = det?.hours || []
+  const overlays = det?.overlays || { committee: [], families: [] }
+  // force the lazy detail effect to re-fetch this member after a mutation
+  const refreshMember = async (mid) => { setDetail(d => { const n = { ...d }; delete n[mid]; return n }); await reload() }
 
   // ── mutations ──────────────────────────────────────────────────────────────
   const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', notes: '' } })
@@ -132,6 +146,30 @@ export default function Directory({ st, patch, narrow }) {
     setBusy(true); try { const r = await api.dirImportCommit(imp.text); await reload(); setImp(m => ({ ...m, result: r })) } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
   const onImportFile = (file) => { if (!file) return; const rd = new FileReader(); rd.onload = () => setImp(m => ({ ...m, text: String(rd.result || ''), preview: null, result: null })); rd.readAsText(file) }
+  const assignQual = async () => {
+    if (!qualForm.type_id || !sel?.member_id) return
+    setBusy(true)
+    try { await api.qualAddQualification({ member_id: sel.member_id, qualification_type_id: qualForm.type_id, obtained_at: qualForm.obtained_at || null }); setQualForm({ type_id: '', obtained_at: '' }); await refreshMember(sel.member_id) }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const removeQual = async (qid) => { if (!qid) return; setBusy(true); try { await api.qualDeleteQualification(qid); await refreshMember(sel.member_id) } finally { setBusy(false) } }
+  const assignCommittee = async (positionId) => {
+    if (!positionId || !sel?.member_id) return
+    setBusy(true); try { await api.dirAssignCommittee(sel.member_id, positionId); await refreshMember(sel.member_id) } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const removeCommittee = async (termId) => { setBusy(true); try { await api.dirRemoveCommittee(sel.member_id, termId); await refreshMember(sel.member_id) } finally { setBusy(false) } }
+  const addToFamily = async (familyId) => {
+    if (!familyId || !sel?.member_id) return
+    setBusy(true); try { await api.dirAddToFamily(sel.member_id, familyId, { is_guardian: sel.category === 'parent' }); await refreshMember(sel.member_id) } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const removeFromFamily = async (familyId) => { setBusy(true); try { await api.dirRemoveFromFamily(sel.member_id, familyId); await refreshMember(sel.member_id) } finally { setBusy(false) } }
+  const createAndAddFamily = async () => {
+    const name = newFamily.trim()
+    if (!name || !sel?.member_id) return
+    setBusy(true)
+    try { const r = await api.dirCreateFamily(name); await api.dirAddToFamily(sel.member_id, r.family_id, { is_guardian: sel.category === 'parent' }); setNewFamily(''); await reloadFamilies(); await refreshMember(sel.member_id) }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
 
   const pill = (active, tone = 'accent') => {
     const on = { accent: ['rgba(99,102,241,0.45)', 'rgba(99,102,241,0.12)', C.accent], amber: ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', C.warn] }[tone]
@@ -244,18 +282,29 @@ export default function Directory({ st, patch, narrow }) {
                 <div style={cap}>QUALIFICATIONS</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {quals.map((qq, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '8px 11px' }}>
+                    <div key={qq.id || i} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '8px 11px' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, color: C.text }}>{qq.name}</div>
                         <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 2 }}>{fmtExpiry(qq.expiry)}</div>
                       </div>
                       <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 7px', borderRadius: 4, border: `1px solid ${qq.st.fg}66`, color: qq.st.fg, flexShrink: 0 }}>{qq.st.label}</span>
+                      {qq.id && <span onClick={() => removeQual(qq.id)} title="Remove" style={{ cursor: 'pointer', color: C.faint, fontSize: 14, flexShrink: 0 }}>×</span>}
                     </div>
                   ))}
                   {sel.member_id && !det && <div style={{ fontSize: 13, color: C.faint }}>Loading…</div>}
-                  {det && quals.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>None recorded. Assigning qualifications lands next.</div>}
+                  {det && quals.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>None recorded.</div>}
                   {!sel.member_id && <div style={{ fontSize: 13, color: C.faint }}>Assign a role first to start tracking qualifications.</div>}
                 </div>
+                {sel.member_id && (
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select value={qualForm.type_id} onChange={e => setQualForm(f => ({ ...f, type_id: e.target.value }))} style={{ ...inp, width: 'auto', flex: 1, minWidth: 130 }}>
+                      <option value="">+ Add qualification…</option>
+                      {qualTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <input type="date" title="Obtained on" value={qualForm.obtained_at} onChange={e => setQualForm(f => ({ ...f, obtained_at: e.target.value }))} style={{ ...inp, width: 'auto' }} />
+                    <button onClick={assignQual} disabled={busy || !qualForm.type_id} style={{ ...btnS, opacity: (busy || !qualForm.type_id) ? 0.6 : 1 }}>Add</button>
+                  </div>
+                )}
               </section>
 
               <section>
@@ -277,10 +326,44 @@ export default function Directory({ st, patch, narrow }) {
               </section>
 
               <section>
-                <div style={cap}>COMMITTEE &amp; FAMILY</div>
-                <div style={{ fontSize: 13, color: C.faint, lineHeight: 1.5 }}>
-                  {sel.segs.includes('Committee') ? 'Holds a committee position. ' : ''}Committee-position and family assignment land in the next update.
-                </div>
+                <div style={cap}>COMMITTEE</div>
+                {!sel.member_id ? (
+                  <div style={{ fontSize: 13, color: C.faint }}>Assign a role first, then committee positions can be recorded.</div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {overlays.committee.map(c => (
+                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                          {c.name}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        </span>
+                      ))}
+                      {overlays.committee.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No committee position.</span>}
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 240, opacity: busy ? 0.6 : 1 }}>
+                        <option value="">{positions.length ? '+ Assign a position…' : 'No positions set up'}</option>
+                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ ...cap, marginTop: 16 }}>FAMILY</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {overlays.families.map(f => (
+                        <span key={f.family_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                          {f.name}{f.is_guardian ? ' · guardian' : ''}<span onClick={() => removeFromFamily(f.family_id)} title="Remove from family" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        </span>
+                      ))}
+                      {overlays.families.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No family linked.</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select value="" onChange={e => addToFamily(e.target.value)} disabled={busy} style={{ ...inp, width: 'auto', maxWidth: 180, opacity: busy ? 0.6 : 1 }}>
+                        <option value="">+ Add to family…</option>
+                        {families.filter(f => !overlays.families.some(x => x.family_id === f.id)).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                      <input value={newFamily} onChange={e => setNewFamily(e.target.value)} placeholder="New family name" style={{ ...inp, width: 'auto', flex: 1, minWidth: 120 }} />
+                      <button onClick={createAndAddFamily} disabled={busy || !newFamily.trim()} style={{ ...btnS, opacity: (busy || !newFamily.trim()) ? 0.6 : 1 }}>Create</button>
+                    </div>
+                  </>
+                )}
               </section>
             </div>
 

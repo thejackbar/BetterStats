@@ -130,6 +130,107 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
     return people
 
 
+async def member_overlays(db: AsyncSession, org_id, member_id) -> dict:
+    """A member's current committee positions and family links, for the detail
+    pane. (Roles/quals/hours are fetched separately.)"""
+    committee = (await db.execute(text("""
+        SELECT ct.id AS term_id, cp.id AS position_id, cp.name
+        FROM committee_terms ct JOIN committee_positions cp ON cp.id = ct.position_id
+        WHERE ct.organisation_id = :org AND ct.member_id = :mid AND ct.ended_at IS NULL
+        ORDER BY cp.sort_order, lower(cp.name)
+    """), {"org": org_id, "mid": member_id})).mappings().all()
+    families = (await db.execute(text("""
+        SELECT f.id AS family_id, f.name, fm.relationship, fm.is_guardian
+        FROM family_members fm JOIN families f ON f.id = fm.family_id
+        WHERE f.organisation_id = :org AND fm.fee_member_id = :mid
+        ORDER BY lower(f.name)
+    """), {"org": org_id, "mid": member_id})).mappings().all()
+    return {
+        "committee": [{"term_id": str(c["term_id"]), "position_id": str(c["position_id"]), "name": c["name"]} for c in committee],
+        "families": [{"family_id": str(x["family_id"]), "name": x["name"], "relationship": x["relationship"], "is_guardian": x["is_guardian"]} for x in families],
+    }
+
+
+async def list_positions(db: AsyncSession, org_id) -> list[dict]:
+    rows = (await db.execute(text(
+        "SELECT id, name FROM committee_positions WHERE organisation_id = :org AND is_active = TRUE ORDER BY sort_order, lower(name)"
+    ), {"org": org_id})).mappings().all()
+    return [{"id": str(r["id"]), "name": r["name"]} for r in rows]
+
+
+async def list_families(db: AsyncSession, org_id) -> list[dict]:
+    rows = (await db.execute(text(
+        "SELECT id, name FROM families WHERE organisation_id = :org ORDER BY lower(name)"
+    ), {"org": org_id})).mappings().all()
+    return [{"id": str(r["id"]), "name": r["name"]} for r in rows]
+
+
+async def assign_committee(db: AsyncSession, org_id, member_id, position_id) -> None:
+    name = (await db.execute(text(
+        "SELECT full_name FROM fee_members WHERE id = :mid AND organisation_id = :org"
+    ), {"mid": member_id, "org": org_id})).scalar()
+    if not name:
+        raise ValueError("Member not found")
+    pos = (await db.execute(text(
+        "SELECT 1 FROM committee_positions WHERE id = :pid AND organisation_id = :org"
+    ), {"pid": position_id, "org": org_id})).scalar()
+    if not pos:
+        raise ValueError("Position not found")
+    dup = (await db.execute(text(
+        "SELECT 1 FROM committee_terms WHERE organisation_id = :org AND position_id = :pid AND member_id = :mid AND ended_at IS NULL"
+    ), {"org": org_id, "pid": position_id, "mid": member_id})).scalar()
+    if dup:
+        return
+    await db.execute(text("""
+        INSERT INTO committee_terms (id, organisation_id, position_id, member_id, holder_name, started_at)
+        VALUES (gen_random_uuid(), :org, :pid, :mid, :name, CURRENT_DATE)
+    """), {"org": org_id, "pid": position_id, "mid": member_id, "name": name[:200]})
+
+
+async def remove_committee(db: AsyncSession, org_id, term_id) -> None:
+    await db.execute(text(
+        "UPDATE committee_terms SET ended_at = CURRENT_DATE WHERE id = :tid AND organisation_id = :org AND ended_at IS NULL"
+    ), {"tid": term_id, "org": org_id})
+
+
+async def create_family(db: AsyncSession, org_id, name) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Name is required")
+    await db.execute(text(
+        "INSERT INTO families (id, organisation_id, name) VALUES (gen_random_uuid(), :org, :name) ON CONFLICT (organisation_id, name) DO NOTHING"
+    ), {"org": org_id, "name": name[:200]})
+    row = (await db.execute(text(
+        "SELECT id FROM families WHERE organisation_id = :org AND name = :name"
+    ), {"org": org_id, "name": name[:200]})).scalar()
+    return str(row)
+
+
+async def add_to_family(db: AsyncSession, org_id, member_id, family_id, relationship=None, is_guardian=False) -> None:
+    fam = (await db.execute(text(
+        "SELECT 1 FROM families WHERE id = :fid AND organisation_id = :org"
+    ), {"fid": family_id, "org": org_id})).scalar()
+    if not fam:
+        raise ValueError("Family not found")
+    dup = (await db.execute(text(
+        "SELECT 1 FROM family_members WHERE family_id = :fid AND fee_member_id = :mid"
+    ), {"fid": family_id, "mid": member_id})).scalar()
+    if dup:
+        return
+    await db.execute(text("""
+        INSERT INTO family_members (id, family_id, fee_member_id, is_guardian, relationship)
+        VALUES (gen_random_uuid(), :fid, :mid, :guard, :rel)
+    """), {"fid": family_id, "mid": member_id, "guard": bool(is_guardian), "rel": (relationship or None)})
+
+
+async def remove_from_family(db: AsyncSession, org_id, member_id, family_id) -> None:
+    await db.execute(text("""
+        DELETE FROM family_members
+        WHERE family_id = :fid AND fee_member_id = :mid
+          AND EXISTS (SELECT 1 FROM families f WHERE f.id = :fid AND f.organisation_id = :org)
+    """), {"fid": family_id, "mid": member_id, "org": org_id})
+
+
 async def add_role(db: AsyncSession, org_id, member_id, role_id) -> None:
     role = (await db.execute(text(
         "SELECT 1 FROM club_roles WHERE id = :rid AND organisation_id = :org"

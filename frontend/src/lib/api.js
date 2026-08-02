@@ -403,6 +403,14 @@ export const api = {
   dirRemoveRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles/${roleId}`, { method: 'DELETE' }),
   dirImportPreview: (csvText) => request('/club-admin/directory/import/preview', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
   dirImportCommit: (csvText) => request('/club-admin/directory/import/commit', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
+  dirMemberOverlays: (memberId) => request(`/club-admin/directory/people/${memberId}/overlays`),
+  dirCommitteePositions: () => request('/club-admin/directory/committee-positions'),
+  dirFamilies: () => request('/club-admin/directory/families'),
+  dirAssignCommittee: (memberId, positionId) => request(`/club-admin/directory/people/${memberId}/committee`, { method: 'POST', body: JSON.stringify({ position_id: positionId }) }),
+  dirRemoveCommittee: (memberId, termId) => request(`/club-admin/directory/people/${memberId}/committee/${termId}`, { method: 'DELETE' }),
+  dirCreateFamily: (name) => request('/club-admin/directory/families', { method: 'POST', body: JSON.stringify({ name }) }),
+  dirAddToFamily: (memberId, familyId, data = {}) => request(`/club-admin/directory/people/${memberId}/families`, { method: 'POST', body: JSON.stringify({ family_id: familyId, ...data }) }),
+  dirRemoveFromFamily: (memberId, familyId) => request(`/club-admin/directory/people/${memberId}/families/${familyId}`, { method: 'DELETE' }),
 
   // BetterClubManager Roster (core capability, not a paid module)
   rosterAreas: () => request('/club-admin/roster/areas'),

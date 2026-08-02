@@ -113,6 +113,79 @@ async def remove_role(member_id: str, role_id: str, _: User = _write, club: Orga
     return {"ok": True}
 
 
+@router.get("/people/{member_id}/overlays")
+async def member_overlays(member_id: str, _: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return await svc.member_overlays(db, club.id, _uuid(member_id))
+
+
+@router.get("/committee-positions")
+async def committee_positions(_: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"positions": await svc.list_positions(db, club.id)}
+
+
+@router.get("/families")
+async def families(_: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"families": await svc.list_families(db, club.id)}
+
+
+class CommitteeBody(BaseModel):
+    position_id: str
+
+
+@router.post("/people/{member_id}/committee")
+async def assign_committee(member_id: str, data: CommitteeBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        await svc.assign_committee(db, club.id, _uuid(member_id), _uuid(data.position_id))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/people/{member_id}/committee/{term_id}")
+async def remove_committee(member_id: str, term_id: str, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.remove_committee(db, club.id, _uuid(term_id))
+    await db.commit()
+    return {"ok": True}
+
+
+class FamilyCreate(BaseModel):
+    name: str
+
+
+@router.post("/families")
+async def create_family(data: FamilyCreate, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        fid = await svc.create_family(db, club.id, data.name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"family_id": fid}
+
+
+class FamilyLinkBody(BaseModel):
+    family_id: str
+    relationship: Optional[str] = None
+    is_guardian: Optional[bool] = False
+
+
+@router.post("/people/{member_id}/families")
+async def add_to_family(member_id: str, data: FamilyLinkBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        await svc.add_to_family(db, club.id, _uuid(member_id), _uuid(data.family_id), relationship=data.relationship, is_guardian=data.is_guardian)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/people/{member_id}/families/{family_id}")
+async def remove_from_family(member_id: str, family_id: str, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.remove_from_family(db, club.id, _uuid(member_id), _uuid(family_id))
+    await db.commit()
+    return {"ok": True}
+
+
 # ── shared non-player CSV import (also used by BetterFees Members) ────────────
 class ImportBody(BaseModel):
     csv: str
