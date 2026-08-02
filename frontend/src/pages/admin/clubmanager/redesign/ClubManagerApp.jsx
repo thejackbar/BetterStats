@@ -71,7 +71,7 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       facTab: 'availability', bookings: null, requests: null, returned: {},
       cteTab: 'meetings', cteMeeting: 'm5',
       event: 'e3',
-      setupTab: 'areas',
+      setupTab: 'roles',
       // configurable rostering settings (would become real club settings)
       enforceQualifications: true, weeklyShiftCap: 0,
     }
