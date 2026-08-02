@@ -24,6 +24,7 @@ requires MANAGE_CLUB_ROOM.
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -39,6 +40,7 @@ from app.models.db import (
     ClubRoomMedia, ClubRoomSettings, ClubRoomSlide, Organisation, SavedReport, Sponsor, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services import club_lock
 
 router = APIRouter(prefix="/club-admin/club-room", tags=["club-room"])
 
@@ -198,6 +200,70 @@ async def patch_settings(
         settings.shuffle = data.shuffle
     await db.commit()
     return _settings_dict(settings)
+
+
+# ─── Public link (a club runs the TV off /room/{token}, no admin session) ──
+
+def _public_link_dict(settings: ClubRoomSettings) -> dict:
+    return {
+        "enabled": settings.public_link_enabled,
+        "require_pin": settings.require_pin,
+        "has_pin": bool(settings.pin_hash),
+        "link_token": settings.link_token,
+    }
+
+
+class PublicLinkPatch(BaseModel):
+    enabled: Optional[bool] = None
+    require_pin: Optional[bool] = None
+    pin: Optional[str] = None  # only applied when non-empty — blank leaves the existing PIN alone
+
+
+@router.get("/public-link")
+async def get_public_link(
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await _get_or_create_settings(db, club)
+    return _public_link_dict(settings)
+
+
+@router.post("/public-link")
+async def set_public_link(
+    data: PublicLinkPatch,
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await _get_or_create_settings(db, club)
+    if data.enabled is not None:
+        settings.public_link_enabled = data.enabled
+        if data.enabled and not settings.link_token:
+            settings.link_token = secrets.token_urlsafe(24)
+    if data.require_pin is not None:
+        settings.require_pin = data.require_pin
+    if data.pin:
+        pin = data.pin.strip()
+        if not pin.isdigit() or len(pin) != 4:
+            raise HTTPException(422, "PIN must be 4 digits")
+        settings.pin_hash = club_lock.hash_pin(pin)
+    await db.commit()
+    return _public_link_dict(settings)
+
+
+@router.post("/public-link/regenerate")
+async def regenerate_public_link(
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """A new token invalidates the old link outright — for a lost/leaked
+    link, not routine rotation."""
+    settings = await _get_or_create_settings(db, club)
+    settings.link_token = secrets.token_urlsafe(24)
+    await db.commit()
+    return _public_link_dict(settings)
 
 
 class SlideCreate(BaseModel):
@@ -716,12 +782,10 @@ def _report_columns(first_row: dict, sort_by: str | None) -> list[str]:
     return (priority + rest)[:6]
 
 
-@router.get("/play")
-async def play(
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
+async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
+    """The whole resolved show for one club — shared by the authenticated
+    `/play` endpoint and the public `/room/{token}` link, so there's exactly
+    one place that expands the saved playlist into ready-to-render slides."""
     settings = await _get_or_create_settings(db, club)
     rows = await db.execute(
         select(ClubRoomSlide)
@@ -768,3 +832,12 @@ async def play(
         "theme_config": club.theme_config,
         "slides": slides,
     }
+
+
+@router.get("/play")
+async def play(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    return await build_play_payload(db, club)

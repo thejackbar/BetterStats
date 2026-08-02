@@ -2078,6 +2078,17 @@ export const api = {
     request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
   clubRoomListReports: () => request('/club-admin/club-room/reports'),
   clubRoomPlay: () => request('/club-admin/club-room/play'),
+  clubRoomGetPublicLink: () => request('/club-admin/club-room/public-link'),
+  clubRoomSetPublicLink: (data) =>
+    request('/club-admin/club-room/public-link', { method: 'POST', body: JSON.stringify(data) }),
+  clubRoomRegeneratePublicLink: () =>
+    request('/club-admin/club-room/public-link/regenerate', { method: 'POST' }),
+
+  // Club Room Mode — public link (unauthenticated)
+  publicClubRoomLanding: (token) => request(`/public/club-room/${token}`),
+  publicClubRoomVerify: (token, pin) =>
+    request(`/public/club-room/${token}/verify`, { method: 'POST', body: JSON.stringify({ pin }) }),
+  publicClubRoomPlay: (token) => request(`/public/club-room/${token}/play`),
 
   // ─── Front-end Website (public) ───────────────────────────────────────────
   webGetSite: (slug) => request(`/clubs/${slug}/website`),

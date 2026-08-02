@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import QRCode from 'qrcode'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
@@ -312,6 +313,8 @@ export default function AdminClubRoom() {
             </div>
           </div>
         )}
+
+        <PublicLinkPanel toast={toast} />
 
         {/* Playlist */}
         <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-2">Playlist</h2>
@@ -658,4 +661,196 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
   }
 
   return null
+}
+
+// Lets a club run the TV off /room/{token} + a PIN, with no admin session on
+// that browser — for a Chromebook or smart TV pinned permanently in the club
+// room. Mirrors BetterSelect's SelfServiceLinkPanel (link + QR + regenerate),
+// rebuilt in this page's own plain-Tailwind style rather than importing that
+// component's BetterSelect-specific UI kit.
+function PublicLinkPanel({ toast }) {
+  const [open, setOpen] = useState(false)
+  const [cfg, setCfg] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [qr, setQr] = useState(null)
+  const [pinInput, setPinInput] = useState('')
+
+  const fullUrl = cfg?.link_token ? `${window.location.origin}/room/${cfg.link_token}` : ''
+
+  useEffect(() => {
+    api.clubRoomGetPublicLink().then(setCfg).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!open || !fullUrl) { setQr(null); return }
+    let alive = true
+    QRCode.toDataURL(fullUrl, { margin: 1, width: 220, errorCorrectionLevel: 'M' })
+      .then(u => { if (alive) setQr(u) })
+      .catch(() => { if (alive) setQr(null) })
+    return () => { alive = false }
+  }, [open, fullUrl])
+
+  async function update(patch) {
+    setBusy(true)
+    try {
+      setCfg(await api.clubRoomSetPublicLink(patch))
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function savePin() {
+    if (pinInput.length !== 4) return
+    await update({ pin: pinInput })
+    setPinInput('')
+  }
+
+  async function regenerate() {
+    if (!confirm("Generate a new link? The old link and QR code will stop working immediately.")) return
+    setBusy(true)
+    try {
+      setCfg(await api.clubRoomRegeneratePublicLink())
+      toast.success('New link generated')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copyText(text, label) {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`${label} copied`)
+    } catch {
+      toast.error('Copy failed. Select and copy manually.')
+    }
+  }
+
+  if (!cfg) return null
+  const enabled = !!cfg.enabled
+  const needsPin = enabled && cfg.require_pin && !cfg.has_pin
+
+  return (
+    <div className="pb-card mb-6 overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+        <div>
+          <div className="text-pb-text text-sm font-medium flex items-center gap-2">
+            Public link
+            <span
+              className="font-mono text-[10px] px-2 py-0.5 rounded-full"
+              style={enabled
+                ? { background: 'color-mix(in srgb, var(--pb-accent) 16%, transparent)', color: 'var(--pb-accent)' }
+                : { background: 'var(--pb-surface2)', color: 'var(--pb-faintest)' }}
+            >
+              {enabled ? 'ON' : 'OFF'}
+            </span>
+          </div>
+          <div className="text-pb-faintest text-[11px] mt-0.5">
+            Run the show on a club room TV with no one logged in, gated by a PIN.
+          </div>
+        </div>
+        <span className="text-pb-faint">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-4">
+          <div className="flex items-center gap-6 flex-wrap">
+            <label className="flex items-center gap-2 text-[11px] font-mono text-pb-faint">
+              STATUS
+              <select
+                value={enabled ? 'on' : 'off'}
+                onChange={e => update({ enabled: e.target.value === 'on' })}
+                disabled={busy}
+                className="px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text"
+              >
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </label>
+            {enabled && (
+              <label className="flex items-center gap-2 text-[11px] font-mono text-pb-faint">
+                PIN
+                <select
+                  value={cfg.require_pin ? 'pin' : 'nopin'}
+                  onChange={e => update({ require_pin: e.target.value === 'pin' })}
+                  disabled={busy}
+                  className="px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text"
+                >
+                  <option value="pin">Required</option>
+                  <option value="nopin">Not required</option>
+                </select>
+              </label>
+            )}
+          </div>
+
+          {!enabled ? (
+            <p className="text-pb-faint text-sm">
+              Turn this on to generate a link for the club room's TV or Chromebook. Once unlocked it stays signed
+              in on that browser for about a month, so it survives the TV being switched off and on again.
+            </p>
+          ) : (
+            <>
+              {cfg.require_pin && (
+                <div>
+                  <label className={labelCls}>{cfg.has_pin ? 'Change PIN' : 'Set a 4-digit PIN'}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={pinInput}
+                      onChange={e => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      inputMode="numeric"
+                      placeholder="••••"
+                      className="w-24 px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text text-center tracking-[0.4em] font-mono"
+                    />
+                    <button
+                      onClick={savePin}
+                      disabled={pinInput.length !== 4 || busy}
+                      className="px-3 py-1.5 text-xs rounded bg-pb-accent text-white disabled:opacity-50"
+                    >
+                      {cfg.has_pin ? 'Update PIN' : 'Save PIN'}
+                    </button>
+                  </div>
+                  {needsPin && (
+                    <p className="text-[11px] mt-1.5" style={{ color: 'var(--pb-amber)' }}>
+                      No PIN set yet, so the link won't unlock for anyone until you set one.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className={labelCls}>Shareable link</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    readOnly
+                    value={fullUrl}
+                    onFocus={e => e.target.select()}
+                    className="flex-1 min-w-[220px] bg-pb-bg border pb-hairline rounded px-3 py-2 text-sm font-mono text-pb-faint"
+                  />
+                  <button onClick={() => copyText(fullUrl, 'Link')} className="px-3 py-1.5 text-xs rounded border pb-hairline text-pb-faint hover:text-pb-text">
+                    Copy link
+                  </button>
+                  <button onClick={regenerate} disabled={busy} className="px-3 py-1.5 text-xs rounded border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-50">
+                    Regenerate
+                  </button>
+                </div>
+                <p className="text-pb-faintest text-[11px] mt-1.5">
+                  Bookmark it on the TV's browser, or scan the QR code below from a phone or tablet.
+                </p>
+              </div>
+
+              {qr && (
+                <div>
+                  <img src={qr} alt="Club Room link QR code" className="w-36 h-36 rounded-lg bg-white p-2" />
+                  <div className="font-mono text-[10px] text-pb-faintest mt-1.5">Scan to open</div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
