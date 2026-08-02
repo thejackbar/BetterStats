@@ -696,7 +696,24 @@ async def _expand_statlab_report(db, club, entry: ClubRoomSlide) -> list[dict]:
     return [{
         "type": "statlab_report", "id": f"report-{entry.id}",
         "title": entry.title or report.title, "rows": rows,
+        "columns": _report_columns(rows[0], qj.get("sortBy")),
     }]
+
+
+def _report_columns(first_row: dict, sort_by: str | None) -> list[str]:
+    """Which of a report's (often 15-30) fields to actually show on a slide,
+    capped to 6 so a TV table stays readable. A blind "first 6 keys" cut the
+    field the report was SORTED BY out entirely whenever it happened to sit
+    later in the row (e.g. a "Most 5-wicket hauls" report showing matches/
+    seasons/batting-innings/runs/not-outs — every batting field except the
+    one five-wicket-haul count the report exists to highlight). The name
+    column, then the sort field, are pinned first; whatever else fits fills
+    the remaining slots in the row's own order."""
+    keys = [k for k in first_row.keys() if k != "id" and not k.endswith("_id")]
+    name_key = next((k for k in ("player_name", "name", "display_name") if k in keys), None)
+    priority = list(dict.fromkeys(k for k in (name_key, sort_by) if k and k in keys))
+    rest = [k for k in keys if k not in priority]
+    return (priority + rest)[:6]
 
 
 @router.get("/play")

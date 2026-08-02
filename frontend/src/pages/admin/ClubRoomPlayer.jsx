@@ -570,9 +570,12 @@ function niceLabel(key) {
 
 function ReportSlide({ slide }) {
   const rows = slide.rows || []
-  const columns = rows.length
-    ? Object.keys(rows[0]).filter(k => k !== 'id' && !k.endsWith('_id')).slice(0, 6)
-    : []
+  // The backend picks columns (name + whatever the report is sorted by,
+  // always included, plus whatever else fits) — fall back to a plain first-6
+  // slice only if an older cached response has no `columns` of its own.
+  const columns = slide.columns?.length
+    ? slide.columns
+    : (rows.length ? Object.keys(rows[0]).filter(k => k !== 'id' && !k.endsWith('_id')).slice(0, 6) : [])
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
       <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-2 shrink-0">Custom Report</div>
