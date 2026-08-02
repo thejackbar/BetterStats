@@ -121,6 +121,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               </div>
             </div>
           ) : (
+            <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
               {[...new Set(data.areas.map(a => a.department || 'Areas'))].map(dept => (
                 <div key={dept}>
@@ -149,6 +150,11 @@ export default function AreasRoles({ st, patch, narrow }) {
                 </div>
               ))}
             </div>
+            <div style={{ marginTop: 20, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
+              <button disabled={busy} onClick={async () => { if (!window.confirm('Remove all operational areas, their patterns and every roster week for this club? (Testing reset — only this club; players/members/committee are untouched.)')) return; setBusy(true); await api.rosterClearConfig().catch(() => {}); await load(); setBusy(false) }}
+                style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Clear all areas (reset)</button>
+            </div>
+            </>
           )}
         </div>
       )}

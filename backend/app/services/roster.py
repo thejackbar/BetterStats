@@ -296,6 +296,15 @@ async def publish(db: AsyncSession, org_id, week_id) -> dict:
     return {"status": "published", "open": open_count}
 
 
+async def clear_config(db: AsyncSession, org_id) -> None:
+    """Testing reset: remove all roster config for this club — areas, patterns
+    and every week/shift. Scoped strictly to the acting-as club; touches nothing
+    else (players, members, committee, etc. are untouched)."""
+    await db.execute(text("DELETE FROM roster_weeks WHERE organisation_id=:org"), {"org": org_id})  # cascades shifts
+    await db.execute(text("DELETE FROM roster_shift_patterns WHERE organisation_id=:org"), {"org": org_id})
+    await db.execute(text("DELETE FROM roster_areas WHERE organisation_id=:org"), {"org": org_id})
+
+
 async def reset_week(db: AsyncSession, org_id, week_id) -> None:
     """Clear all shifts for the week and regenerate them from the current
     patterns (drops every assignment). Scoped to this club's own week."""

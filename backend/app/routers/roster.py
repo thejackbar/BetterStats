@@ -157,3 +157,11 @@ async def reset(week_id: str, _: User = _cap, club: Organisation = Depends(get_c
     await svc.reset_week(db, club.id, week_id)
     await db.commit()
     return {"shifts": await svc._shift_rows(db, week_id)}
+
+
+@router.post("/clear-config")
+async def clear_config(_: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Testing reset — wipe this club's roster areas/patterns/weeks."""
+    await svc.clear_config(db, club.id)
+    await db.commit()
+    return {"ok": True}

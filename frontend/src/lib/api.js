@@ -407,6 +407,12 @@ export const api = {
   rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),
   rosterPublish: (weekId) => request(`/club-admin/roster/week/${weekId}/publish`, { method: 'POST' }),
   rosterReset: (weekId) => request(`/club-admin/roster/week/${weekId}/reset`, { method: 'POST' }),
+  rosterClearConfig: () => request('/club-admin/roster/clear-config', { method: 'POST' }),
+  facilityRequests: () => request('/club-admin/facility-requests'),
+  facilityRequestCreate: (data) => request('/club-admin/facility-requests', { method: 'POST', body: JSON.stringify(data) }),
+  facilityRequestApprove: (id, force) => request(`/club-admin/facility-requests/${id}/approve${force ? '?force=true' : ''}`, { method: 'POST' }),
+  facilityRequestDecline: (id) => request(`/club-admin/facility-requests/${id}/decline`, { method: 'POST' }),
+  facilityRequestsClear: () => request('/club-admin/facility-requests/clear', { method: 'POST' }),
 
   // Qualification Management (core capability, not a paid module)
   qualListTypes: (includeInactive) =>
