@@ -50,6 +50,38 @@ SLIDE_TYPES = {
     "leaderboard", "records", "statlab_report",
 }
 STAT_TABLE_LIMIT = 12  # rows shown on a leaderboard/records/report slide
+
+# records.get_records() computes EVERY record category in one call (batting,
+# bowling, partnerships, team, all-rounders — ~15-20 queries) because the
+# public Records page needs all of them at once. A Club Room records slide
+# only ever needs ONE category, so calling it fresh on every /play request
+# was the single biggest cost in a slow-loading playlist. A short in-process
+# cache (keyed on the exact filters passed, shared across every records slide
+# and every club currently open) means only the FIRST hit in the window pays
+# the full cost — the TV's own 5-min poll interval means a longer TTL here
+# would just mean a stale record; this is short enough to stay fresh, long
+# enough to absorb repeat calls (TV + an admin previewing at the same time).
+_RECORDS_CACHE_TTL = 90
+_records_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+async def _get_records_cached(db, org_id: str, season_id: str | None) -> dict:
+    import time as _time
+    key = (org_id, season_id)
+    hit = _records_cache.get(key)
+    now = _time.time()
+    if hit and now - hit[0] < _RECORDS_CACHE_TTL:
+        return hit[1]
+    from app.routers.records import get_records
+    # get_records is a FastAPI path function whose unfilled params default to
+    # Query(...) sentinel objects, not real values — bypassing DI (as here)
+    # means every one of them must be passed explicitly.
+    data = await get_records(
+        org_id=org_id, season_id=season_id, grade_id=None, grade_name=None,
+        finals_only=False, captain_only=False, gender=None, db=db,
+    )
+    _records_cache[key] = (now, data)
+    return data
 # Per-entry cap on how many individual slides one playlist row can expand
 # into, so a misconfigured "show everything" entry can't produce a
 # runaway-length loop.
@@ -413,27 +445,60 @@ async def _expand_sponsors(db, club, entry: ClubRoomSlide) -> list[dict]:
     return [_sponsor_dict(s) for s in displayable[:EXPAND_CAP]]
 
 
-async def _fixture_crests(db, club, fixture_id: str) -> tuple[str | None, str | None]:
-    """Our crest + the opponent's, via the same live Grassroots team-list
-    lookup the public Lineups/Fixtures pages already use (`services/lineups.py`
-    — Cricket Australia's own CDN for the opposition, `owningOrganisation.
-    logoUrl`). Best-effort: a manual fixture, an unsynced match, or an upstream
-    hiccup all just mean no crest, never a broken slide."""
+async def _fixture_crests(db, club, fixtures: list[dict]) -> dict[str, tuple[str | None, str | None]]:
+    """Our crest + the opponent's for a batch of fixtures, via the same live
+    Grassroots team-list lookup the public Lineups/Fixtures pages already use
+    (`services/lineups.py` — Cricket Australia's own CDN for the opposition,
+    `owningOrganisation.logoUrl`).
+
+    Fetches every match's detail CONCURRENTLY (one HTTP burst, bounded by the
+    client's own semaphore + 5-min cache) rather than one fixture at a time —
+    looping single-match lookups sequentially was the single biggest cost in a
+    slow /play response for a club with several fixtures configured. The DB
+    calls that follow (participant resolution) stay sequential on purpose —
+    AsyncSession isn't safe for concurrent use from multiple coroutines.
+    Best-effort throughout: a manual fixture, an unsynced match, or an
+    upstream hiccup all just mean no crest for that one fixture, never a
+    broken slide."""
     from app.models.db import Fixture
+    from app.services import grassroots_scores_client as gr
     from app.services import lineups as lineups_svc
     from app.services.votes import match_ref_id
+
+    out: dict[str, tuple[str | None, str | None]] = {}
     try:
-        fixture_row = await db.get(Fixture, uuid.UUID(fixture_id))
-        if not fixture_row:
-            return None, None
-        ml = await lineups_svc.match_lineups(db, club, str(match_ref_id(fixture_row)))
-        if not ml:
-            return None, None
-        our_logo = next((t.get("logo_url") for t in ml["teams"] if t.get("is_ours")), None)
-        opp_logo = next((t.get("logo_url") for t in ml["teams"] if not t.get("is_ours")), None)
-        return our_logo, opp_logo
+        id_by_fixture: dict[str, str] = {}
+        for f in fixtures:
+            try:
+                fixture_row = await db.get(Fixture, uuid.UUID(f["id"]))
+            except (ValueError, AttributeError):
+                fixture_row = None
+            if fixture_row:
+                id_by_fixture[f["id"]] = str(match_ref_id(fixture_row))
+
+        match_ids = list(dict.fromkeys(id_by_fixture.values()))  # de-duped, order preserved
+        if not match_ids:
+            return out
+        details = await gr.get_matches_detail(match_ids)
+
+        crests_by_match: dict[str, tuple[str | None, str | None]] = {}
+        for mid in match_ids:
+            detail = details.get(mid)
+            if not detail:
+                continue
+            ml = await lineups_svc.match_lineups(db, club, mid, detail=detail)
+            if not ml:
+                continue
+            our_logo = next((t.get("logo_url") for t in ml["teams"] if t.get("is_ours")), None)
+            opp_logo = next((t.get("logo_url") for t in ml["teams"] if not t.get("is_ours")), None)
+            crests_by_match[mid] = (our_logo, opp_logo)
+
+        for fid, mid in id_by_fixture.items():
+            if mid in crests_by_match:
+                out[fid] = crests_by_match[mid]
     except Exception:
-        return None, None
+        pass  # live upstream lookup is best-effort — never break the fixture slide over it
+    return out
 
 
 async def _expand_fixtures(db, club, entry: ClubRoomSlide) -> list[dict]:
@@ -442,14 +507,17 @@ async def _expand_fixtures(db, club, entry: ClubRoomSlide) -> list[dict]:
     from app.routers.selection import selection_overview
     data = await selection_overview(db=db, club=club)
     count = min((entry.config or {}).get("count", 3) or 3, EXPAND_CAP)
+    fixtures = (data.get("fixtures") or [])[:count]
+    crests = await _fixture_crests(db, club, fixtures)
+
     out = []
-    for f in (data.get("fixtures") or [])[:count]:
+    for f in fixtures:
         lineup = [
             {"display_name": p["display_name"], "batting_order": p["batting_order"],
              "is_captain": p["is_captain"], "is_wicket_keeper": p["is_wicket_keeper"]}
             for p in (f.get("lineup") or [])
         ]
-        our_logo, opp_logo = await _fixture_crests(db, club, f["id"])
+        our_logo, opp_logo = crests.get(f["id"], (None, None))
         out.append({
             "type": "fixture", "id": f["id"],
             "title": f.get("label") or (f"vs {f['opponent_name']}" if f.get("opponent_name") else "Upcoming fixture"),
@@ -571,19 +639,12 @@ def _dig(d: dict, path: str):
 
 
 async def _expand_records(db, club, entry: ClubRoomSlide) -> list[dict]:
-    from app.routers.records import get_records
     cfg = entry.config or {}
     category = cfg.get("category") if cfg.get("category") in _RECORD_CATEGORIES else "batting.top_career_runs"
     season_id = cfg.get("season_id") or None
     limit = min(int(cfg.get("limit") or 8), 15)
 
-    # get_records is a FastAPI path function whose unfilled params default to
-    # Query(...) sentinel objects, not real values — bypassing DI (as here)
-    # means every one of them must be passed explicitly.
-    data = await get_records(
-        org_id=str(club.id), season_id=season_id, grade_id=None, grade_name=None,
-        finals_only=False, captain_only=False, gender=None, db=db,
-    )
+    data = await _get_records_cached(db, str(club.id), season_id)
     rows = (_dig(data, category) or [])[:limit]
     if not rows:
         return []
@@ -687,5 +748,6 @@ async def play(
         "club_name": club.name,
         "club_short": club.short_name or (club.name or "")[:2].upper(),
         "logo_url": (f"/api/images/organisations/{club.id}/logo" if club.logo_data or club.logo_url else None),
+        "theme_config": club.theme_config,
         "slides": slides,
     }
