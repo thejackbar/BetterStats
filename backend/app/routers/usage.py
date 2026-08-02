@@ -1935,8 +1935,17 @@ async def live(
         FROM ev
     """))).mappings().first()
 
+    # v_now (is anyone here at all) still counts heartbeats, so a visitor
+    # parked on one page with no fresh navigation still reads as active. But
+    # p_now is surfaced to the frontend as "views" alongside three other
+    # windows whose own "views" are real page_view counts only (see `ev`
+    # above) — counting heartbeats here too silently inflated it (a single
+    # idle tab can rack up 2-3 heartbeat pings inside one 45s window with no
+    # new page load behind any of them), making "Active now" report fresh
+    # view activity the Live feed below has no matching row for.
     now_active = (await db.execute(text(f"""
-        SELECT COUNT(DISTINCT {_VKEY}) AS v_now, COUNT(*) AS p_now
+        SELECT COUNT(DISTINCT {_VKEY}) AS v_now,
+               COUNT(*) FILTER (WHERE ue.event_type = 'page_view') AS p_now
         FROM usage_events ue
         WHERE {online_base} AND ue.created_at >= NOW() - INTERVAL '{_NOW_WINDOW}'
     """))).mappings().first()
