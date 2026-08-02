@@ -59,6 +59,45 @@ function initialsOf(name) {
   return (name || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
 }
 
+function easeInOutQuad(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+}
+
+// A list that outgrows its box shouldn't just get clipped — this scrolls
+// itself from top to bottom over the slide's own display time (a pause at
+// each end, eased in between), so a long leaderboard/records/report table is
+// fully seen before the slide moves on. No visible scrollbar, since nobody's
+// holding a mouse in the club room. A no-op — no scrolling at all — when the
+// content already fits.
+function AutoScrollList({ children, durationMs, className = '', style }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.scrollTop = 0
+    const overflow = el.scrollHeight - el.clientHeight
+    if (overflow <= 2) return
+    const hold = 1400 // ms paused at the top and again at the bottom
+    const window_ = Math.max(1500, (durationMs || 15000) - hold * 2)
+    let raf
+    const start = performance.now()
+    const tick = (now) => {
+      const elapsed = now - start
+      if (elapsed < hold) { raf = requestAnimationFrame(tick); return }
+      const p = Math.min(1, (elapsed - hold) / window_)
+      el.scrollTop = overflow * easeInOutQuad(p)
+      if (p < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [durationMs, children])
+  return (
+    <div ref={ref} className={`club-room-scroll overflow-y-auto ${className}`} style={style}>
+      {children}
+    </div>
+  )
+}
+
 export default function ClubRoomPlayer() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
@@ -191,6 +230,8 @@ export default function ClubRoomPlayer() {
       <style>{`
         @keyframes clubRoomFadeIn { from { opacity: 0; transform: scale(1.015); } to { opacity: 1; transform: scale(1); } }
         .club-room-fade { animation: clubRoomFadeIn 700ms ease-out; }
+        .club-room-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+        .club-room-scroll::-webkit-scrollbar { display: none; }
       `}</style>
     </Stage>
   )
@@ -276,18 +317,20 @@ function SponsorGridSlide({ slide }) {
   const sponsors = slide.sponsors || []
   const cols = sponsors.length <= 4 ? 2 : sponsors.length <= 9 ? 3 : 4
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center px-16">
-      <div className="font-mono text-[13px] tracking-wide4 text-pb-faint uppercase mb-8">{slide.title}</div>
-      <div className="grid gap-8 w-full max-w-6xl" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-        {sponsors.map(s => (
-          <div key={s.id} className="rounded-2xl p-6 flex items-center justify-center h-40"
-            style={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)' }}>
-            {s.logo_url
-              ? <img src={s.logo_url} alt={s.title} className="max-w-full max-h-full object-contain" />
-              : <span className="text-lg font-bold text-pb-text text-center">{s.title}</span>}
-          </div>
-        ))}
-      </div>
+    <div className="w-full h-full flex flex-col items-center px-16 py-12">
+      <div className="font-mono text-[13px] tracking-wide4 text-pb-faint uppercase mb-8 shrink-0">{slide.title}</div>
+      <AutoScrollList durationMs={(slide.duration_seconds || 15) * 1000} className="flex-1 min-h-0 w-full flex justify-center">
+        <div className="grid gap-8 w-full max-w-6xl" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          {sponsors.map(s => (
+            <div key={s.id} className="rounded-2xl p-6 flex items-center justify-center h-40"
+              style={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)' }}>
+              {s.logo_url
+                ? <img src={s.logo_url} alt={s.title} className="max-w-full max-h-full object-contain" />
+                : <span className="text-lg font-bold text-pb-text text-center">{s.title}</span>}
+            </div>
+          ))}
+        </div>
+      </AutoScrollList>
     </div>
   )
 }
@@ -313,11 +356,11 @@ function FixtureSlide({ slide, clubLogoUrl }) {
   // just means TeamBadge's own initials treatment.
   const ourLogo = slide.our_logo_url || clubLogoUrl
   return (
-    <div className="w-full h-full flex flex-col justify-center px-16">
-      <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-6">
+    <div className="w-full h-full flex flex-col px-16 py-12">
+      <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-6 shrink-0">
         {slide.team_name || 'Upcoming fixture'}{slide.grade_name ? ` · ${slide.grade_name}` : ''}
       </div>
-      <div className="flex items-center gap-6 mb-7">
+      <div className="flex items-center gap-6 mb-7 shrink-0">
         <TeamBadge name={slide.team_name || 'Us'} logoUrl={ourLogo} size={104} />
         <span className="font-display text-2xl font-bold text-pb-faintest px-1">vs</span>
         <TeamBadge name={slide.opponent_name || 'TBC'} logoUrl={slide.opponent_logo_url} size={104} />
@@ -331,18 +374,20 @@ function FixtureSlide({ slide, clubLogoUrl }) {
         </div>
       </div>
       {slide.lineup?.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-12 gap-y-3 max-w-4xl">
-          {[...slide.lineup].sort((a, b) => (a.batting_order ?? 99) - (b.batting_order ?? 99)).map((p, i) => (
-            <div key={i} className="flex items-center gap-3 text-xl">
-              <span className="text-pb-faintest font-mono text-sm w-5">{p.batting_order ?? '–'}</span>
-              <span className="text-pb-text">{p.display_name}</span>
-              {p.is_captain && <span className="text-amber-400 text-xs font-mono">(C)</span>}
-              {p.is_wicket_keeper && <span className="text-pb-faint text-xs font-mono">(WK)</span>}
-            </div>
-          ))}
-        </div>
+        <AutoScrollList durationMs={(slide.duration_seconds || 15) * 1000} className="flex-1 min-h-0">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-12 gap-y-3 max-w-4xl">
+            {[...slide.lineup].sort((a, b) => (a.batting_order ?? 99) - (b.batting_order ?? 99)).map((p, i) => (
+              <div key={i} className="flex items-center gap-3 text-xl">
+                <span className="text-pb-faintest font-mono text-sm w-5">{p.batting_order ?? '–'}</span>
+                <span className="text-pb-text">{p.display_name}</span>
+                {p.is_captain && <span className="text-amber-400 text-xs font-mono">(C)</span>}
+                {p.is_wicket_keeper && <span className="text-pb-faint text-xs font-mono">(WK)</span>}
+              </div>
+            ))}
+          </div>
+        </AutoScrollList>
       ) : (
-        <div className="text-pb-faintest text-base">Team not named yet.</div>
+        <div className="flex-1 flex items-center text-pb-faintest text-base">Team not named yet.</div>
       )}
     </div>
   )
@@ -366,17 +411,17 @@ function primaryValue(row, sortBy) {
 function LeaderboardSlide({ slide, clubLogoUrl }) {
   const rows = slide.rows || []
   const top3 = rows.slice(0, 3)
-  const rest = rows.slice(3, 10)
+  const rest = rows.slice(3)
   return (
-    <div className="w-full h-full flex flex-col justify-center px-14">
-      <div className="mb-6 flex items-center gap-3">
+    <div className="w-full h-full flex flex-col px-14 py-12">
+      <div className="mb-6 flex items-center gap-3 shrink-0">
         {clubLogoUrl && <img src={clubLogoUrl} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 p-1" />}
         <div>
           <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
           <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
         </div>
       </div>
-      <div className="flex gap-5 mb-6">
+      <div className="flex gap-5 mb-6 shrink-0">
         {top3.map((r, i) => {
           const p = PLACE[i] || PLACE[2]
           const val = primaryValue(r, slide.sort_by)
@@ -399,7 +444,11 @@ function LeaderboardSlide({ slide, clubLogoUrl }) {
         })}
       </div>
       {rest.length > 0 && (
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--pb-hairline)' }}>
+        <AutoScrollList
+          durationMs={(slide.duration_seconds || 15) * 1000}
+          className="flex-1 min-h-0 rounded-xl"
+          style={{ border: '1px solid var(--pb-hairline)' }}
+        >
           {rest.map((r, i) => (
             <div key={r.player_id || i} className="flex items-center justify-between px-5 py-2"
               style={{ borderTop: i > 0 ? '1px solid var(--pb-hairline)' : 'none' }}>
@@ -411,7 +460,7 @@ function LeaderboardSlide({ slide, clubLogoUrl }) {
               <span className="text-lg font-bold tabular-nums text-pb-dim">{fmtVal(primaryValue(r, slide.sort_by))}</span>
             </div>
           ))}
-        </div>
+        </AutoScrollList>
       )}
     </div>
   )
@@ -440,8 +489,8 @@ function RecordsSlide({ slide, clubLogoUrl }) {
   const [leader, ...rest] = rows
   const leaderStat = leader ? recordHeadline(leader) : null
   return (
-    <div className="w-full h-full flex flex-col justify-center px-14">
-      <div className="mb-7 flex items-center gap-3">
+    <div className="w-full h-full flex flex-col px-14 py-12">
+      <div className="mb-7 flex items-center gap-3 shrink-0">
         {clubLogoUrl && <img src={clubLogoUrl} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 p-1" />}
         <div>
           <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
@@ -449,7 +498,7 @@ function RecordsSlide({ slide, clubLogoUrl }) {
         </div>
       </div>
       {leader && (
-        <div className="rounded-2xl p-7 mb-5 flex items-center gap-7"
+        <div className="rounded-2xl p-7 mb-5 flex items-center gap-7 shrink-0"
           style={{ background: 'linear-gradient(160deg, color-mix(in srgb, var(--pb-accent) 12%, var(--pb-surface)) 0%, var(--pb-surface) 72%)', border: '1px solid color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>
           <PlayerAvatar playerId={leader.player_id} name={leader.name} clubLogoUrl={clubLogoUrl} size={80} accent="var(--pb-accent)" />
           <div className="min-w-0 flex-1">
@@ -462,7 +511,11 @@ function RecordsSlide({ slide, clubLogoUrl }) {
         </div>
       )}
       {rest.length > 0 && (
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--pb-hairline)' }}>
+        <AutoScrollList
+          durationMs={(slide.duration_seconds || 15) * 1000}
+          className="flex-1 min-h-0 rounded-xl"
+          style={{ border: '1px solid var(--pb-hairline)' }}
+        >
           {rest.map((r, i) => {
             const s = recordHeadline(r)
             return (
@@ -478,7 +531,7 @@ function RecordsSlide({ slide, clubLogoUrl }) {
               </div>
             )
           })}
-        </div>
+        </AutoScrollList>
       )}
     </div>
   )
@@ -496,22 +549,26 @@ function ReportSlide({ slide }) {
     ? Object.keys(rows[0]).filter(k => k !== 'id' && !k.endsWith('_id')).slice(0, 6)
     : []
   return (
-    <div className="w-full h-full flex flex-col justify-center px-14">
-      <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-2">Custom Report</div>
-      <div className="text-[36px] font-extrabold tracking-tight mb-6">{slide.title}</div>
+    <div className="w-full h-full flex flex-col px-14 py-12">
+      <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-2 shrink-0">Custom Report</div>
+      <div className="text-[36px] font-extrabold tracking-tight mb-6 shrink-0">{slide.title}</div>
       {columns.length > 0 ? (
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--pb-hairline)' }}>
-          <div className="grid px-5 py-2.5 font-mono text-[11px] tracking-wide2 uppercase text-pb-faint"
+        <AutoScrollList
+          durationMs={(slide.duration_seconds || 15) * 1000}
+          className="flex-1 min-h-0 rounded-xl"
+          style={{ border: '1px solid var(--pb-hairline)' }}
+        >
+          <div className="grid px-5 py-2.5 font-mono text-[11px] tracking-wide2 uppercase text-pb-faint sticky top-0"
             style={{ gridTemplateColumns: `repeat(${columns.length}, 1fr)`, background: 'var(--pb-surface2)' }}>
             {columns.map(c => <span key={c}>{niceLabel(c)}</span>)}
           </div>
-          {rows.slice(0, 10).map((r, i) => (
+          {rows.map((r, i) => (
             <div key={i} className="grid px-5 py-2.5 text-lg"
-              style={{ gridTemplateColumns: `repeat(${columns.length}, 1fr)`, borderTop: '1px solid var(--pb-hairline)' }}>
+              style={{ gridTemplateColumns: `repeat(${columns.length}, 1fr)`, borderTop: '1px solid var(--pb-hairline)', background: 'var(--pb-surface)' }}>
               {columns.map(c => <span key={c} className="truncate text-pb-text">{fmtVal(r[c])}</span>)}
             </div>
           ))}
-        </div>
+        </AutoScrollList>
       ) : (
         <div className="text-pb-faintest text-base">No rows to show.</div>
       )}
