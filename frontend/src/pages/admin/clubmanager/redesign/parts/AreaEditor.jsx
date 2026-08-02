@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO } from '../ui'
-import EntityManager, { reorderBySortOrder } from './EntityManager'
 
 // Full editor for roster Operational Areas: Starter Pack, create/edit/delete,
 // drag-reorder, and a nested shift-pattern editor per area (add/remove the
 // repeating weekly shifts the roster generates from). Each area's Department is
-// picked from a managed catalogue (with an inline "new" option), and that
-// catalogue is CRUD'd + seeded in the "Manage departments" panel at the bottom.
+// picked from a managed catalogue (with an inline "＋ New" option); the
+// Departments catalogue itself is CRUD'd + seeded on its own "Departments"
+// secondary tab (see AreasRoles).
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const SWATCHES = ['#f5b542', '#f97316', '#3b82f6', '#06b6d4', '#16c784', '#a855f7', '#6366F1', '#ef5b5b']
@@ -173,34 +173,6 @@ export default function AreaEditor() {
         })}
         {areas.length === 0 && !adding && <div style={{ fontSize: 13, color: C.faint }}>No operational areas yet.</div>}
       </div>
-
-      <DeptPanel reload={reloadDepartments} />
-    </div>
-  )
-}
-
-// Collapsible "Manage departments" panel — CRUD + Starter Pack + drag-reorder
-// for the catalogue that feeds each area's Department dropdown above.
-function DeptPanel({ reload }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ marginTop: 24, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, padding: 0 }}>
-        <span style={{ fontSize: 11, color: C.faint, width: 10 }}>{open ? '▾' : '▸'}</span>Manage departments
-        <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, fontWeight: 400 }}>FOOD &amp; BEVERAGE · CRICKET OPERATIONS…</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 14 }}>
-          <EntityManager
-            describe="Departments group your operational areas. Pick one when adding an area above."
-            load={() => api.rosterDepartments().then(r => r?.departments || r || [])}
-            fields={[{ key: 'name', label: 'Department name', type: 'text', required: true, span: 2 }]}
-            onCreate={v => api.rosterCreateDepartment(v)} onUpdate={(id, v) => api.rosterUpdateDepartment(id, v)} onDelete={id => api.rosterDeleteDepartment(id)}
-            onReorder={reorderBySortOrder(api.rosterUpdateDepartment)} onChanged={reload}
-            seed={{ label: 'Add Departments Starter Pack', fn: () => api.rosterSeedDepartments() }}
-            primaryKey="name" addLabel="Add department" emptyText="No departments yet." />
-        </div>
-      )}
     </div>
   )
 }
