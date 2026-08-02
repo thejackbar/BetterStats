@@ -1,7 +1,7 @@
 export default {
   version: 'v9.0.0',
   date: '2026-08-02',
-  sortKey: '2026-08-02T00:00:00Z',
+  sortKey: '2026-08-02T01:00:00Z',
   title: 'Password-protected "Draft" pages + trial-ended unpause requests',
   items: [
     'A club\'s public page can now be password protected instead of just Active or Inactive — visitors need a 4-digit PIN to view it, so a club can share its page internally (committee, teammates) without it being publicly visible.',
