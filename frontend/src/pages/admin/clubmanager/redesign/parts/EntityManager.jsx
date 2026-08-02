@@ -60,7 +60,18 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
     if (!window.confirm('Remove "' + (it[pk] || 'this item') + '"? This can be re-added later.')) return
     setBusy(true); try { await onDelete(it.id); await refresh() } finally { setBusy(false) }
   }
-  const doSeed = async () => { setBusy(true); try { await seed.fn(); await refresh() } finally { setBusy(false) } }
+  const doSeed = async () => {
+    setBusy(true); setErr(null)
+    try {
+      await seed.fn()
+      const rows = await load()
+      const arr = Array.isArray(rows) ? rows : []
+      setItems(arr)
+      if (arr.length === 0) setErr('Starter pack ran but nothing was added — these items may already exist (possibly archived). Add one manually below, or check with support.')
+    } catch (e) {
+      setErr('Could not add the starter pack: ' + String(e?.message || e))
+    } finally { setBusy(false) }
+  }
 
   const move = (fromId, toId) => {
     setDragId(null); setOverId(null)
@@ -106,6 +117,13 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
   return (
     <div>
       {describe && <p style={{ fontSize: 13, color: C.dim, margin: '0 0 14px', lineHeight: 1.55, maxWidth: '46rem' }}>{describe}</p>}
+
+      {err && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: '9px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.35)' }}>
+          <span style={{ fontSize: 13, color: '#fca5a5', lineHeight: 1.5, flex: 1 }}>{err}</span>
+          <button onClick={() => setErr(null)} style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         {onCreate && !adding && editId == null && <button onClick={startAdd} style={btnS}>+ {addLabel}</button>}

@@ -101,12 +101,18 @@ async def archive_type(session: AsyncSession, t: QualificationType) -> None:
 
 
 async def seed_starter_types(session: AsyncSession, org_id) -> int:
-    existing_names = {n.lower() for n in (await session.execute(
-        select(QualificationType.name).where(QualificationType.organisation_id == org_id)
+    # Keyed by lower(name) so an archived starter type is REACTIVATED rather than
+    # skipped (matching create_type) — a skip would leave the active list empty
+    # and the seed button look like it did nothing.
+    existing = {t.name.lower(): t for t in (await session.execute(
+        select(QualificationType).where(QualificationType.organisation_id == org_id)
     )).scalars().all()}
     seeded = 0
     for position, (name, desc, validity) in enumerate(STARTER_TYPES):
-        if name.lower() in existing_names:
+        cur = existing.get(name.lower())
+        if cur is not None:
+            if not cur.is_active:
+                cur.is_active = True; seeded += 1
             continue
         session.add(QualificationType(organisation_id=org_id, name=name, description=desc,
                                       validity_months=validity, sort_order=position))

@@ -166,12 +166,19 @@ async def _update_type(session: AsyncSession, t, **fields):
 
 
 async def _seed_types(session: AsyncSession, model, org_id, rows) -> int:
-    existing = {n.lower() for n in (await session.execute(
-        select(model.name).where(model.organisation_id == org_id)
+    # Map existing rows by lower(name) so a starter entry that already exists but
+    # was archived is REACTIVATED (mirrors create_*), not silently skipped — a
+    # skip would leave the active list empty and the seed look like a no-op.
+    existing = {r.name.lower(): r for r in (await session.execute(
+        select(model).where(model.organisation_id == org_id)
     )).scalars().all()}
     seeded = 0
     for i, (name, desc) in enumerate(rows):
-        if name.lower() in existing:
+        cur = existing.get(name.lower())
+        if cur is not None:
+            if not cur.is_active:
+                cur.is_active = True
+                seeded += 1
             continue
         session.add(model(organisation_id=org_id, name=name, description=desc, sort_order=i))
         seeded += 1
@@ -255,13 +262,19 @@ async def seed_starter_roles(session: AsyncSession, org_id, *, committee: bool =
     """Seed a starter set of roles. committee=True seeds the elected/appointed
     COMMITTEE roles (which the Committee Positions tab holds terms against);
     committee=False seeds everyday volunteer roles + the role-type starter set."""
-    existing_titles = {t.lower() for t in (await session.execute(
-        select(ClubRole.title).where(ClubRole.organisation_id == org_id)
+    # Existing rows keyed by lower(title) so an archived starter role is
+    # REACTIVATED rather than skipped (matching create_role) — a skip would leave
+    # the active list empty and the seed button look like it did nothing.
+    existing = {r.title.lower(): r for r in (await session.execute(
+        select(ClubRole).where(ClubRole.organisation_id == org_id)
     )).scalars().all()}
     seeded = 0
     if committee:
         for i, (title, desc) in enumerate(STARTER_COMMITTEE_ROLES):
-            if title.lower() in existing_titles:
+            cur = existing.get(title.lower())
+            if cur is not None:
+                if not cur.is_active:
+                    cur.is_active = True; seeded += 1
                 continue
             rtype = await _get_or_create_type(session, ClubRoleType, org_id, "Committee Member")
             session.add(ClubRole(organisation_id=org_id, title=title, description=desc,
@@ -270,7 +283,10 @@ async def seed_starter_roles(session: AsyncSession, org_id, *, committee: bool =
     else:
         await seed_starter_role_types(session, org_id)
         for i, (title, type_name) in enumerate(STARTER_ROLES):
-            if title.lower() in existing_titles:
+            cur = existing.get(title.lower())
+            if cur is not None:
+                if not cur.is_active:
+                    cur.is_active = True; seeded += 1
                 continue
             rtype = await _get_or_create_type(session, ClubRoleType, org_id, type_name)
             session.add(ClubRole(organisation_id=org_id, title=title,
@@ -348,12 +364,15 @@ async def archive_activity(session: AsyncSession, a: ClubActivity) -> None:
 async def seed_starter_activities(session: AsyncSession, org_id) -> int:
     """Seeds the starter activity types AND a set of common activities."""
     await seed_starter_activity_types(session, org_id)
-    existing_titles = {t.lower() for t in (await session.execute(
-        select(ClubActivity.title).where(ClubActivity.organisation_id == org_id)
+    existing = {a.title.lower(): a for a in (await session.execute(
+        select(ClubActivity).where(ClubActivity.organisation_id == org_id)
     )).scalars().all()}
     seeded = 0
     for i, (title, type_name) in enumerate(STARTER_ACTIVITIES):
-        if title.lower() in existing_titles:
+        cur = existing.get(title.lower())
+        if cur is not None:
+            if not cur.is_active:
+                cur.is_active = True; seeded += 1
             continue
         atype = await _get_or_create_type(session, ClubActivityType, org_id, type_name)
         session.add(ClubActivity(organisation_id=org_id, title=title,
