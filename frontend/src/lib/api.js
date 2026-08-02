@@ -401,6 +401,8 @@ export const api = {
   dirEnsureMemberForPlayer: (playerId) => request(`/club-admin/directory/players/${playerId}/ensure-member`, { method: 'POST' }),
   dirAddRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles`, { method: 'POST', body: JSON.stringify({ role_id: roleId }) }),
   dirRemoveRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles/${roleId}`, { method: 'DELETE' }),
+  dirImportPreview: (csvText) => request('/club-admin/directory/import/preview', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
+  dirImportCommit: (csvText) => request('/club-admin/directory/import/commit', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
 
   // BetterClubManager Roster (core capability, not a paid module)
   rosterAreas: () => request('/club-admin/roster/areas'),

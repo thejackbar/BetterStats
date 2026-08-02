@@ -18,13 +18,17 @@ from app.models.db import User, Organisation, get_db
 from app.routers.auth import get_current_club
 from app.auth.capabilities import (
     require_cap, require_any_cap,
-    MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS,
+    MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS, MANAGE_FEES,
 )
 from app.services import directory as svc
+from app.services import members as members_svc
+from app.services import member_import as import_svc
 
 router = APIRouter(prefix="/club-admin/directory", tags=["club-admin-directory"])
 _read = Depends(require_any_cap(MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS))
 _write = Depends(require_cap(MANAGE_MEMBERS))
+# Importing people is a shared action — a BetterFees admin can bring in members too.
+_import = Depends(require_any_cap(MANAGE_MEMBERS, MANAGE_FEES))
 
 
 def _uuid(v):
@@ -45,14 +49,14 @@ class RoleBody(BaseModel):
 
 @router.get("/people")
 async def list_people(_: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"people": await svc.list_people(db, club.id), "categories": svc.MEMBER_CATEGORIES}
+    return {"people": await svc.list_people(db, club.id), "categories": members_svc.MEMBER_CATEGORIES}
 
 
 @router.post("/people")
 async def create_member(data: MemberUpsert, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
-        mid = await svc.create_member(db, club.id, full_name=data.full_name, email=data.email,
-                                      mobile=data.mobile, member_category=data.member_category, notes=data.notes)
+        mid = await members_svc.create_person(db, club.id, full_name=data.full_name, email=data.email,
+                                               mobile=data.mobile, member_category=data.member_category, notes=data.notes)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
@@ -61,21 +65,21 @@ async def create_member(data: MemberUpsert, _: User = _write, club: Organisation
 
 @router.patch("/people/{member_id}")
 async def update_member(member_id: str, data: MemberUpsert, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    await svc.update_member(db, club.id, _uuid(member_id), **data.model_dump(exclude_unset=True))
+    await members_svc.update_person(db, club.id, _uuid(member_id), **data.model_dump(exclude_unset=True))
     await db.commit()
     return {"ok": True}
 
 
 @router.post("/people/{member_id}/archive")
 async def archive_member(member_id: str, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    await svc.set_archived(db, club.id, _uuid(member_id), True)
+    await members_svc.set_archived(db, club.id, _uuid(member_id), True)
     await db.commit()
     return {"ok": True}
 
 
 @router.post("/people/{member_id}/restore")
 async def restore_member(member_id: str, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    await svc.set_archived(db, club.id, _uuid(member_id), False)
+    await members_svc.set_archived(db, club.id, _uuid(member_id), False)
     await db.commit()
     return {"ok": True}
 
@@ -85,7 +89,7 @@ async def ensure_member(player_id: str, _: User = _write, club: Organisation = D
     """Create (or find) the fee_members row for a Stats-owned player so it can be
     assigned ClubManager roles/quals. Idempotent."""
     try:
-        mid = await svc.ensure_member_for_player(db, club.id, _uuid(player_id))
+        mid = await members_svc.ensure_for_player(db, club.id, _uuid(player_id))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     await db.commit()
@@ -107,3 +111,20 @@ async def remove_role(member_id: str, role_id: str, _: User = _write, club: Orga
     await svc.remove_role(db, club.id, _uuid(member_id), _uuid(role_id))
     await db.commit()
     return {"ok": True}
+
+
+# ── shared non-player CSV import (also used by BetterFees Members) ────────────
+class ImportBody(BaseModel):
+    csv: str
+
+
+@router.post("/import/preview")
+async def import_preview(data: ImportBody, _: User = _import, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return await import_svc.preview(db, club.id, data.csv)
+
+
+@router.post("/import/commit")
+async def import_commit(data: ImportBody, _: User = _import, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    result = await import_svc.commit(db, club.id, data.csv)
+    await db.commit()
+    return result

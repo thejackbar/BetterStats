@@ -40,6 +40,7 @@ export default function Directory({ st, patch, narrow }) {
   const [detail, setDetail] = useState({})     // { [memberId]: { quals, hours } }
   const [busy, setBusy] = useState(false)
   const [modal, setModal] = useState(null)     // null | { editId, form }
+  const [imp, setImp] = useState(null)         // null | { text, preview, result }
 
   const reload = () => api.dirPeople().then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
   useEffect(() => {
@@ -124,6 +125,13 @@ export default function Directory({ st, patch, narrow }) {
     if (!p.member_id) return
     setBusy(true); try { await api.dirRemoveRole(p.member_id, roleId); await reload() } finally { setBusy(false) }
   }
+  const runPreview = async () => {
+    setBusy(true); try { const r = await api.dirImportPreview(imp.text); setImp(m => ({ ...m, preview: r, result: null })) } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const runImport = async () => {
+    setBusy(true); try { const r = await api.dirImportCommit(imp.text); await reload(); setImp(m => ({ ...m, result: r })) } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const onImportFile = (file) => { if (!file) return; const rd = new FileReader(); rd.onload = () => setImp(m => ({ ...m, text: String(rd.result || ''), preview: null, result: null })); rd.readAsText(file) }
 
   const pill = (active, tone = 'accent') => {
     const on = { accent: ['rgba(99,102,241,0.45)', 'rgba(99,102,241,0.12)', C.accent], amber: ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', C.warn] }[tone]
@@ -155,6 +163,7 @@ export default function Directory({ st, patch, narrow }) {
           {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : (s === 'Third party' ? 'Third parties' : s + 's')}</button>)}
           <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
+          <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
           <button onClick={openAdd} style={btnP}>+ Add person</button>
         </div>
       </ScreenHeader>
@@ -299,6 +308,52 @@ export default function Directory({ st, patch, narrow }) {
               <button onClick={() => setModal(null)} style={btnS}>Cancel</button>
               <button onClick={saveMember} disabled={busy || !(modal.form.full_name || '').trim()} style={{ ...btnP, opacity: (busy || !(modal.form.full_name || '').trim()) ? 0.6 : 1 }}>{modal.editId ? 'Save' : 'Add person'}</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {imp && (
+        <div onClick={() => setImp(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 'min(560px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Import people from CSV</div>
+            <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
+              Non-players and third parties. Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span> (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates. Players are imported in Stats.
+            </div>
+            {imp.result ? (
+              <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 14, fontSize: 13, color: C.text }}>
+                Imported. {imp.result.created} added, {imp.result.updated} updated, {imp.result.roles_added} role assignments.
+                <div style={{ marginTop: 12 }}><button onClick={() => setImp(null)} style={btnP}>Done</button></div>
+              </div>
+            ) : (
+              <>
+                <input type="file" accept=".csv,text/csv" onChange={e => onImportFile(e.target.files?.[0])} style={{ fontSize: 12.5, color: C.dim, marginBottom: 8 }} />
+                <textarea value={imp.text} onChange={e => setImp(m => ({ ...m, text: e.target.value, preview: null }))} placeholder={'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
+                  style={{ ...inp, minHeight: 120, fontFamily: MONO, fontSize: 11.5, resize: 'vertical' }} />
+                {imp.preview && (
+                  <div style={{ marginTop: 12, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12 }}>
+                    <div style={{ fontSize: 13, color: C.text, marginBottom: 8 }}>{imp.preview.total} row{imp.preview.total === 1 ? '' : 's'}: <b>{imp.preview.new}</b> new, <b>{imp.preview.existing}</b> existing.</div>
+                    <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {imp.preview.rows.map((r, i) => (
+                        <div key={i} style={{ fontSize: 12, color: C.dim, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                          <span style={{ fontFamily: MONO, fontSize: 9, color: r.existing ? C.warn : C.ok, width: 46, flexShrink: 0 }}>{r.existing ? 'UPDATE' : 'NEW'}</span>
+                          <span style={{ color: C.text }}>{r.name}</span>
+                          {r.category && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{r.category}</span>}
+                          {r.roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.accent }}>{r.roles.join(', ')}</span>}
+                          {r.unknown_roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
+                        </div>
+                      ))}
+                    </div>
+                    {imp.preview.rows.some(r => r.unknown_roles.length > 0) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>Role titles marked ? aren’t set up yet and will be skipped — add them in Areas &amp; Roles first.</div>}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setImp(null)} style={btnS}>Cancel</button>
+                  {!imp.preview
+                    ? <button onClick={runPreview} disabled={busy || !imp.text.trim()} style={{ ...btnP, opacity: (busy || !imp.text.trim()) ? 0.6 : 1 }}>Preview</button>
+                    : <button onClick={runImport} disabled={busy || imp.preview.total === 0} style={{ ...btnP, opacity: (busy || imp.preview.total === 0) ? 0.6 : 1 }}>Import {imp.preview.total} {imp.preview.total === 1 ? 'person' : 'people'}</button>}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -18,16 +18,10 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Non-player kinds a Directory person can be tagged with (drives the filters). A
-# linked player is a "Player" implicitly and is never given a category here.
-MEMBER_CATEGORIES = ["volunteer", "parent", "committee", "life_member", "third_party", "official", "other"]
-
-
-def _norm_category(v):
-    if v is None:
-        return None
-    v = str(v).strip().lower()
-    return v if v in MEMBER_CATEGORIES else None
+# Person-spine CRUD lives in services/members.py (shared with BetterFees). This
+# module keeps only the Directory-specific reads/writes (the people list with
+# segments, and role assignment).
+from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
 
 
 async def list_people(db: AsyncSession, org_id) -> list[dict]:
@@ -134,69 +128,6 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
 
     people.sort(key=lambda x: (x["name"] or "").lower())
     return people
-
-
-async def create_member(db: AsyncSession, org_id, *, full_name, email=None, mobile=None,
-                        member_category=None, notes=None) -> str:
-    full_name = (full_name or "").strip()
-    if not full_name:
-        raise ValueError("Name is required")
-    mid = uuid.uuid4()
-    await db.execute(text("""
-        INSERT INTO fee_members (id, organisation_id, player_id, full_name, email, mobile, member_category, notes)
-        VALUES (:id, :org, NULL, :name, :email, :mobile, :cat, :notes)
-    """), {"id": mid, "org": org_id, "name": full_name[:200], "email": (email or None),
-           "mobile": (mobile or None), "cat": _norm_category(member_category), "notes": (notes or None)})
-    return str(mid)
-
-
-async def update_member(db: AsyncSession, org_id, member_id, **fields) -> None:
-    cols = {"full_name": "full_name", "email": "email", "mobile": "mobile", "notes": "notes"}
-    sets, params = [], {"id": member_id, "org": org_id}
-    for k, col in cols.items():
-        if k in fields:
-            sets.append(f"{col} = :{k}")
-            v = fields[k]
-            params[k] = (v.strip()[:200] if k == "full_name" and v else (v or None))
-    if "member_category" in fields:
-        sets.append("member_category = :cat")
-        params["cat"] = _norm_category(fields["member_category"])
-    if not sets:
-        return
-    await db.execute(text(
-        f"UPDATE fee_members SET {', '.join(sets)}, updated_at = NOW() WHERE id = :id AND organisation_id = :org"
-    ), params)
-
-
-async def set_archived(db: AsyncSession, org_id, member_id, archived: bool) -> None:
-    await db.execute(text(
-        "UPDATE fee_members SET archived_at = " + ("NOW()" if archived else "NULL") +
-        " WHERE id = :id AND organisation_id = :org"
-    ), {"id": member_id, "org": org_id})
-
-
-async def ensure_member_for_player(db: AsyncSession, org_id, player_id) -> str:
-    """Return the fee_members id for a player, creating the member row on first
-    need (so a Stats-owned player can be assigned ClubManager roles without
-    ClubManager ever creating a player). Idempotent."""
-    row = (await db.execute(text(
-        "SELECT id FROM fee_members WHERE organisation_id = :org AND player_id = :pid"
-    ), {"org": org_id, "pid": player_id})).scalar()
-    if row:
-        # Un-archive if it was archived, so assigning brings them back into view.
-        await db.execute(text("UPDATE fee_members SET archived_at = NULL WHERE id = :id"), {"id": row})
-        return str(row)
-    name = (await db.execute(text(
-        "SELECT COALESCE(display_name_override, name) FROM players WHERE id = :pid AND organisation_id = :org"
-    ), {"pid": player_id, "org": org_id})).scalar()
-    if not name:
-        raise ValueError("Player not found")
-    mid = uuid.uuid4()
-    await db.execute(text("""
-        INSERT INTO fee_members (id, organisation_id, player_id, full_name)
-        VALUES (:id, :org, :pid, :name)
-    """), {"id": mid, "org": org_id, "pid": player_id, "name": name[:200]})
-    return str(mid)
 
 
 async def add_role(db: AsyncSession, org_id, member_id, role_id) -> None:

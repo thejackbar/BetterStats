@@ -37,6 +37,7 @@ from app.auth.capabilities import (
     MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY,
 )
 from app.services import fees as fee_service
+from app.services import members as members_svc
 from app.services import fees_square as fee_square_service
 from app.services import fees_xero as fee_xero_service
 from app.services import membership_types as membership_types_service
@@ -589,19 +590,19 @@ async def create_member(
             raise HTTPException(status_code=422, detail="Membership type not found")
         membership_type_id = mt.id
 
-    member = FeeMember(
-        id=uuid.uuid4(), organisation_id=club.id, player_id=None, full_name=full_name,
+    # The person row is created via the shared spine service (same create the
+    # ClubManager Directory uses); BetterFees layers the fee season on top.
+    member_id = uuid.UUID(await members_svc.create_person(
+        db, club.id, full_name=full_name,
         email=(data.email or "").strip() or None, mobile=(data.mobile or "").strip() or None,
-        current_tier=schedule.name if schedule else None, membership_type_id=membership_type_id,
-    )
-    db.add(member)
-    await db.flush()
+        membership_type_id=membership_type_id, current_tier=(schedule.name if schedule else None),
+    ))
     db.add(FeeMemberSeason(
-        id=uuid.uuid4(), member_id=member.id, season_id=season.id, organisation_id=club.id,
+        id=uuid.uuid4(), member_id=member_id, season_id=season.id, organisation_id=club.id,
         fee_schedule_id=schedule.id if schedule else None,
     ))
     await db.commit()
-    return {"member_id": str(member.id)}
+    return {"member_id": str(member_id)}
 
 
 async def _resolve_schedule(db, club, season, fee_schedule_id) -> Optional[FeeSchedule]:
