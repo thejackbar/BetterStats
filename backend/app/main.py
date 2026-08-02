@@ -4356,8 +4356,8 @@ async def lifespan(app: FastAPI):
         """))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_facility_booking_requests_org ON facility_booking_requests(organisation_id, status)"))
 
-    # Migration 210: BetterClubManager — a managed Departments catalogue for
-    # Operational Areas. Byte-identical to alembic/versions/210_roster_departments.py.
+    # Migration 211: BetterClubManager — a managed Departments catalogue for
+    # Operational Areas. Byte-identical to alembic/versions/211_roster_departments.py.
     async with engine.begin() as conn:
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS roster_departments (

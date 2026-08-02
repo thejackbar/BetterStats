@@ -9,12 +9,12 @@ dropdown and lets a rename cascade to matching areas.
 New table:
     roster_departments — org-scoped {name, sort_order, is_active}
 
-Mirrored idempotently in app/main.py lifespan (migration 210 block).
+Mirrored idempotently in app/main.py lifespan (migration 211 block).
 """
 from alembic import op
 
-revision = "210"
-down_revision = "209"
+revision = "211"
+down_revision = "210"
 branch_labels = None
 depends_on = None
 
