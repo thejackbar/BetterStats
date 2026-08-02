@@ -398,6 +398,7 @@ export const api = {
   rosterUpdateArea: (id, data) => request(`/club-admin/roster/areas/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   rosterDeleteArea: (id) => request(`/club-admin/roster/areas/${id}`, { method: 'DELETE' }),
   rosterSeedStarter: () => request('/club-admin/roster/areas/seed-starter', { method: 'POST' }),
+  rosterReorderAreas: (areaIds) => request('/club-admin/roster/areas/reorder', { method: 'POST', body: JSON.stringify({ area_ids: areaIds }) }),
   rosterAddPattern: (areaId, data) => request(`/club-admin/roster/areas/${areaId}/patterns`, { method: 'POST', body: JSON.stringify(data) }),
   rosterDeletePattern: (id) => request(`/club-admin/roster/patterns/${id}`, { method: 'DELETE' }),
   rosterGetSettings: () => request('/club-admin/roster/settings'),

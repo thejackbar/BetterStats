@@ -69,7 +69,8 @@ async def create_area(db: AsyncSession, org_id, *, name, department=None, color=
 
 async def update_area(db: AsyncSession, org_id, area_id, **fields) -> None:
     cols = {"name": "name", "department": "department", "color": "color",
-            "required_role_id": "required_role_id", "required_qualification_type_id": "required_qualification_type_id"}
+            "required_role_id": "required_role_id", "required_qualification_type_id": "required_qualification_type_id",
+            "sort_order": "sort_order"}
     sets, params = [], {"id": area_id, "org": org_id}
     for k, col in cols.items():
         if k in fields:
@@ -82,6 +83,11 @@ async def update_area(db: AsyncSession, org_id, area_id, **fields) -> None:
 
 async def delete_area(db: AsyncSession, org_id, area_id) -> None:
     await db.execute(text("UPDATE roster_areas SET is_active=FALSE WHERE id=:id AND organisation_id=:org"), {"id": area_id, "org": org_id})
+
+
+async def reorder_areas(db: AsyncSession, org_id, area_ids) -> None:
+    for i, aid in enumerate(area_ids):
+        await db.execute(text("UPDATE roster_areas SET sort_order=:i WHERE id=:id AND organisation_id=:org"), {"i": i, "id": aid, "org": org_id})
 
 
 async def add_pattern(db: AsyncSession, org_id, area_id, *, day_of_week, start_time, end_time, headcount=1) -> str:

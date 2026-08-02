@@ -31,6 +31,7 @@ class AreaUpsert(BaseModel):
     color: Optional[str] = None
     required_role_id: Optional[str] = None
     required_qualification_type_id: Optional[str] = None
+    sort_order: Optional[int] = None
 
 
 class PatternCreate(BaseModel):
@@ -74,6 +75,17 @@ async def update_area(area_id: str, data: AreaUpsert, _: User = _cap, club: Orga
 @router.delete("/areas/{area_id}")
 async def delete_area(area_id: str, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     await svc.delete_area(db, club.id, area_id)
+    await db.commit()
+    return {"ok": True}
+
+
+class ReorderBody(BaseModel):
+    area_ids: list[str]
+
+
+@router.post("/areas/reorder")
+async def reorder_areas(data: ReorderBody, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.reorder_areas(db, club.id, data.area_ids)
     await db.commit()
     return {"ok": True}
 
