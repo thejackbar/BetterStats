@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
+import TeamBadge from '../../components/TeamBadge'
 
 // Club Room Mode — the full-screen TV-loop stage. Meant to be opened once on
 // a TV/Chromebook browser and left running: it polls its own data every few
@@ -185,7 +186,7 @@ export default function ClubRoomPlayer() {
         </div>
       </div>
       <div key={fadeKey} className="w-full h-full club-room-fade">
-        <SlideView slide={slide} />
+        <SlideView slide={slide} clubLogoUrl={data.logo_url} />
       </div>
       <style>{`
         @keyframes clubRoomFadeIn { from { opacity: 0; transform: scale(1.015); } to { opacity: 1; transform: scale(1); } }
@@ -214,15 +215,40 @@ function ExitLink({ label = 'Back to setup' }) {
   )
 }
 
-function SlideView({ slide }) {
+function SlideView({ slide, clubLogoUrl }) {
   if (slide.type === 'sponsor') return <SponsorSlide slide={slide} />
   if (slide.type === 'sponsor_grid') return <SponsorGridSlide slide={slide} />
-  if (slide.type === 'fixture') return <FixtureSlide slide={slide} />
+  if (slide.type === 'fixture') return <FixtureSlide slide={slide} clubLogoUrl={clubLogoUrl} />
   if (slide.type === 'social_post' || slide.type === 'custom_image') return <ImageSlide slide={slide} />
-  if (slide.type === 'leaderboard') return <LeaderboardSlide slide={slide} />
-  if (slide.type === 'records') return <RecordsSlide slide={slide} />
+  if (slide.type === 'leaderboard') return <LeaderboardSlide slide={slide} clubLogoUrl={clubLogoUrl} />
+  if (slide.type === 'records') return <RecordsSlide slide={slide} clubLogoUrl={clubLogoUrl} />
   if (slide.type === 'statlab_report') return <ReportSlide slide={slide} />
   return null
+}
+
+// A player's own photo, falling back to the club's crest, then initials —
+// "utilise the player pictures... default to the club's logo if there's no
+// image". Mirrors TeamBadge's onError-cascade, just with one more tier.
+function PlayerAvatar({ playerId, name, clubLogoUrl, size = 44, accent = 'var(--pb-accent)' }) {
+  const [stage, setStage] = useState(playerId ? 'photo' : (clubLogoUrl ? 'club' : 'initials'))
+  const border = `2px solid color-mix(in srgb, ${accent} 45%, transparent)`
+  if (stage === 'initials') {
+    return (
+      <span className="rounded-full flex items-center justify-center shrink-0 font-mono font-bold"
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.32), background: 'var(--pb-surface2)', border, color: accent }}>
+        {initialsOf(name)}
+      </span>
+    )
+  }
+  const src = stage === 'photo' ? `/api/images/players/${playerId}/photo` : clubLogoUrl
+  return (
+    <img
+      src={src} alt=""
+      onError={() => setStage(s => (s === 'photo' && clubLogoUrl) ? 'club' : 'initials')}
+      className={`rounded-full shrink-0 ${stage === 'club' ? 'object-contain p-1.5 bg-pb-surface2' : 'object-cover'}`}
+      style={{ width: size, height: size, border }}
+    />
+  )
 }
 
 // ─── Sponsors ───────────────────────────────────────────────────────────────
@@ -279,18 +305,30 @@ function ImageSlide({ slide }) {
 
 // ─── Fixtures / Lineups ─────────────────────────────────────────────────────
 
-function FixtureSlide({ slide }) {
+function FixtureSlide({ slide, clubLogoUrl }) {
   const when = [slide.played_on, slide.start_time].filter(Boolean).join(' · ')
+  // Our own crest wins when Grassroots has one for us too — it's the club's
+  // own controlled upload, always current — else the club's uploaded logo
+  // stands in; the opponent has no such fallback, so a missing crest there
+  // just means TeamBadge's own initials treatment.
+  const ourLogo = slide.our_logo_url || clubLogoUrl
   return (
     <div className="w-full h-full flex flex-col justify-center px-16">
-      <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-3">
+      <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase mb-6">
         {slide.team_name || 'Upcoming fixture'}{slide.grade_name ? ` · ${slide.grade_name}` : ''}
       </div>
-      <div className="text-[56px] font-extrabold leading-tight mb-2 tracking-tight">
-        {slide.home_away === 'away' ? `${slide.opponent_name || 'TBC'}` : `vs ${slide.opponent_name || 'TBC'}`}
-      </div>
-      <div className="text-pb-dim text-xl mb-10">
-        {when}{slide.venue ? ` · ${slide.venue}` : ''}
+      <div className="flex items-center gap-6 mb-7">
+        <TeamBadge name={slide.team_name || 'Us'} logoUrl={ourLogo} size={104} />
+        <span className="font-display text-2xl font-bold text-pb-faintest px-1">vs</span>
+        <TeamBadge name={slide.opponent_name || 'TBC'} logoUrl={slide.opponent_logo_url} size={104} />
+        <div className="ml-3">
+          <div className="text-[46px] font-extrabold leading-tight tracking-tight">
+            {slide.opponent_name || 'TBC'}
+          </div>
+          <div className="text-pb-dim text-lg mt-1">
+            {when}{slide.venue ? ` · ${slide.venue}` : ''}
+          </div>
+        </div>
       </div>
       {slide.lineup?.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-12 gap-y-3 max-w-4xl">
@@ -325,15 +363,18 @@ function primaryValue(row, sortBy) {
   return null
 }
 
-function LeaderboardSlide({ slide }) {
+function LeaderboardSlide({ slide, clubLogoUrl }) {
   const rows = slide.rows || []
   const top3 = rows.slice(0, 3)
   const rest = rows.slice(3, 10)
   return (
     <div className="w-full h-full flex flex-col justify-center px-14">
-      <div className="mb-6">
-        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
-        <div className="text-[40px] font-extrabold tracking-tight">{slide.title}</div>
+      <div className="mb-6 flex items-center gap-3">
+        {clubLogoUrl && <img src={clubLogoUrl} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 p-1" />}
+        <div>
+          <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
+          <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
+        </div>
       </div>
       <div className="flex gap-5 mb-6">
         {top3.map((r, i) => {
@@ -347,10 +388,7 @@ function LeaderboardSlide({ slide }) {
               }}>
               <div className="font-mono text-[13px] font-bold tracking-wide3" style={{ color: p.accent }}>{p.label}</div>
               <div className="flex items-end gap-4 mt-4">
-                <span className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 font-mono text-lg font-bold shrink-0"
-                  style={{ background: 'var(--pb-surface2)', border: `2px solid color-mix(in srgb, ${p.accent} 45%, transparent)`, color: p.accent }}>
-                  {initialsOf(r.name)}
-                </span>
+                <PlayerAvatar playerId={r.player_id} name={r.name} clubLogoUrl={clubLogoUrl} size={56} accent={p.accent} />
                 <div className="min-w-0">
                   <div className="text-2xl font-bold tracking-tight truncate">{r.name}</div>
                 </div>
@@ -363,10 +401,11 @@ function LeaderboardSlide({ slide }) {
       {rest.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--pb-hairline)' }}>
           {rest.map((r, i) => (
-            <div key={r.player_id || i} className="flex items-center justify-between px-5 py-2.5"
+            <div key={r.player_id || i} className="flex items-center justify-between px-5 py-2"
               style={{ borderTop: i > 0 ? '1px solid var(--pb-hairline)' : 'none' }}>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3.5">
                 <span className="font-mono text-sm text-pb-faint w-6">{i + 4}</span>
+                <PlayerAvatar playerId={r.player_id} name={r.name} clubLogoUrl={clubLogoUrl} size={32} accent="var(--pb-dim)" />
                 <span className="text-lg text-pb-text">{r.name}</span>
               </div>
               <span className="text-lg font-bold tabular-nums text-pb-dim">{fmtVal(primaryValue(r, slide.sort_by))}</span>
@@ -396,23 +435,23 @@ function recordSubline(row, headlineKey) {
   return bits.join(' · ')
 }
 
-function RecordsSlide({ slide }) {
+function RecordsSlide({ slide, clubLogoUrl }) {
   const rows = slide.rows || []
   const [leader, ...rest] = rows
   const leaderStat = leader ? recordHeadline(leader) : null
   return (
     <div className="w-full h-full flex flex-col justify-center px-14">
-      <div className="mb-7">
-        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
-        <div className="text-[40px] font-extrabold tracking-tight">{slide.title}</div>
+      <div className="mb-7 flex items-center gap-3">
+        {clubLogoUrl && <img src={clubLogoUrl} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 p-1" />}
+        <div>
+          <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
+          <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
+        </div>
       </div>
       {leader && (
         <div className="rounded-2xl p-7 mb-5 flex items-center gap-7"
           style={{ background: 'linear-gradient(160deg, color-mix(in srgb, var(--pb-accent) 12%, var(--pb-surface)) 0%, var(--pb-surface) 72%)', border: '1px solid color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>
-          <span className="w-20 h-20 rounded-full flex items-center justify-center shrink-0 font-mono text-2xl font-bold"
-            style={{ background: 'var(--pb-surface2)', border: '2px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: 'var(--pb-accent)' }}>
-            {initialsOf(leader.name)}
-          </span>
+          <PlayerAvatar playerId={leader.player_id} name={leader.name} clubLogoUrl={clubLogoUrl} size={80} accent="var(--pb-accent)" />
           <div className="min-w-0 flex-1">
             <div className="text-3xl font-bold tracking-tight">{leader.name}</div>
             <div className="text-pb-faint text-sm mt-1">{recordSubline(leader, leaderStat?.key)}</div>
@@ -427,10 +466,11 @@ function RecordsSlide({ slide }) {
           {rest.map((r, i) => {
             const s = recordHeadline(r)
             return (
-              <div key={i} className="flex items-center justify-between px-5 py-2.5"
+              <div key={i} className="flex items-center justify-between px-5 py-2"
                 style={{ borderTop: i > 0 ? '1px solid var(--pb-hairline)' : 'none' }}>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3.5">
                   <span className="font-mono text-sm text-pb-faint w-6">{i + 2}</span>
+                  <PlayerAvatar playerId={r.player_id} name={r.name} clubLogoUrl={clubLogoUrl} size={32} accent="var(--pb-dim)" />
                   <span className="text-lg text-pb-text">{r.name}</span>
                   <span className="text-pb-faintest text-xs">{recordSubline(r, s.key)}</span>
                 </div>

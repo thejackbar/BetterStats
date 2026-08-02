@@ -24,7 +24,6 @@ requires MANAGE_CLUB_ROOM.
 """
 from __future__ import annotations
 
-import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -414,6 +413,29 @@ async def _expand_sponsors(db, club, entry: ClubRoomSlide) -> list[dict]:
     return [_sponsor_dict(s) for s in displayable[:EXPAND_CAP]]
 
 
+async def _fixture_crests(db, club, fixture_id: str) -> tuple[str | None, str | None]:
+    """Our crest + the opponent's, via the same live Grassroots team-list
+    lookup the public Lineups/Fixtures pages already use (`services/lineups.py`
+    — Cricket Australia's own CDN for the opposition, `owningOrganisation.
+    logoUrl`). Best-effort: a manual fixture, an unsynced match, or an upstream
+    hiccup all just mean no crest, never a broken slide."""
+    from app.models.db import Fixture
+    from app.services import lineups as lineups_svc
+    from app.services.votes import match_ref_id
+    try:
+        fixture_row = await db.get(Fixture, uuid.UUID(fixture_id))
+        if not fixture_row:
+            return None, None
+        ml = await lineups_svc.match_lineups(db, club, str(match_ref_id(fixture_row)))
+        if not ml:
+            return None, None
+        our_logo = next((t.get("logo_url") for t in ml["teams"] if t.get("is_ours")), None)
+        opp_logo = next((t.get("logo_url") for t in ml["teams"] if not t.get("is_ours")), None)
+        return our_logo, opp_logo
+    except Exception:
+        return None, None
+
+
 async def _expand_fixtures(db, club, entry: ClubRoomSlide) -> list[dict]:
     if not org_has_module(club, "select"):
         return []
@@ -427,6 +449,7 @@ async def _expand_fixtures(db, club, entry: ClubRoomSlide) -> list[dict]:
              "is_captain": p["is_captain"], "is_wicket_keeper": p["is_wicket_keeper"]}
             for p in (f.get("lineup") or [])
         ]
+        our_logo, opp_logo = await _fixture_crests(db, club, f["id"])
         out.append({
             "type": "fixture", "id": f["id"],
             "title": f.get("label") or (f"vs {f['opponent_name']}" if f.get("opponent_name") else "Upcoming fixture"),
@@ -434,7 +457,7 @@ async def _expand_fixtures(db, club, entry: ClubRoomSlide) -> list[dict]:
             "grade_name": f.get("grade_name"), "played_on": f.get("played_on"),
             "start_time": f.get("start_time"), "venue": f.get("venue"),
             "home_away": f.get("home_away"), "round": f.get("round"),
-            "lineup": lineup,
+            "lineup": lineup, "our_logo_url": our_logo, "opponent_logo_url": opp_logo,
         })
     return out
 
