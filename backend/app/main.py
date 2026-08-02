@@ -16,7 +16,8 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
-    club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests
+    club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, \
+    public_club_room
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -221,6 +222,20 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark'"))
         await conn.execute(text(
             "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS shuffle BOOLEAN NOT NULL DEFAULT false"))
+        # Club Room Mode — public PIN-gated link (migration 210).
+        await conn.execute(text(
+            "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS link_token TEXT"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_club_room_settings_link_token "
+            "ON club_room_settings(link_token) WHERE link_token IS NOT NULL"))
+        await conn.execute(text(
+            "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS public_link_enabled "
+            "BOOLEAN NOT NULL DEFAULT false"))
+        await conn.execute(text(
+            "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS require_pin "
+            "BOOLEAN NOT NULL DEFAULT true"))
+        await conn.execute(text(
+            "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS pin_hash TEXT"))
         # BetterSelect: player → selection-pool team assignment (migration 053).
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "
@@ -4629,6 +4644,10 @@ app.include_router(public_availability.router)                                  
 # necessity — resolves the club from its vote-link token and checks entitlement +
 # the enabled flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_votes.router)                                                   # BetterSelect (public votes)
+# Club Room Mode's public link (magic link + PIN). Unauthenticated by design —
+# resolves the club from its own link token and checks public_link_enabled
+# itself, so it is NOT wrapped in require_module (Club Room is Core anyway).
+app.include_router(public_club_room.router)                                               # Club Room Mode (public)
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)

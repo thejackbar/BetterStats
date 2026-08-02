@@ -538,6 +538,13 @@ class ClubRoomSettings(Base):
     rotation_seconds = Column(Integer, nullable=False, default=15)
     theme = Column(Text, nullable=False, default="dark")
     shuffle = Column(Boolean, nullable=False, default=False)
+    # Public link (migration 210) — a club can run the TV off /room/{token}
+    # with no admin session on that browser. Same link+PIN+cookie posture as
+    # BetterSelect's self-service availability/vote links.
+    link_token = Column(Text, nullable=True)
+    public_link_enabled = Column(Boolean, nullable=False, default=False)
+    require_pin = Column(Boolean, nullable=False, default=True)
+    pin_hash = Column(Text, nullable=True)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
