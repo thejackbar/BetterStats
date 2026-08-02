@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { api } from '../../../../lib/api'
 import { C, MONO, ACCENT } from './ui'
 import { buildSlots } from './model'
 import clubLogo from '../../../../assets/modules/betterclubmanager.svg'
@@ -78,6 +79,16 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
 
   const patch = useCallback((p) => setSt(s => ({ ...s, ...(typeof p === 'function' ? p(s) : p) })), [])
 
+  // Real club branding for the shell header — same source the other module
+  // layouts read (the acting-as club's own settings). The screens below still
+  // run on demo data until their data layer is wired.
+  const [club, setClub] = useState(null)
+  useEffect(() => {
+    let alive = true
+    api.adminGetSettings().then(s => { if (alive && s) setClub(s) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+
   useEffect(() => {
     const onResize = () => setSt(s => ({ ...s, w: window.innerWidth, panelOpen: window.innerWidth >= 1280 ? true : (s.panelOpen && s.w >= 1280 ? false : s.panelOpen) }))
     window.addEventListener('resize', onResize)
@@ -115,9 +126,11 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       }>
         <div style={{ padding: 16, borderBottom: `1px solid ${C.hair}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ width: 32, height: 32, borderRadius: 4, background: 'rgba(99,102,241,0.15)', color: C.accent, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 15 }}>K</span>
+            {club?.logo_url
+              ? <img src={club.logo_url} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'contain', background: C.surface2, flexShrink: 0 }} />
+              : <span style={{ width: 32, height: 32, borderRadius: 4, background: 'rgba(99,102,241,0.15)', color: C.accent, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 15 }}>{(club?.name || 'C')[0]}</span>}
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>Kalamunda CC</div>
+              <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={club?.name || ''}>{club?.name || 'Your club'}</div>
               <div style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, letterSpacing: '0.08em' }}>2026/27 SEASON</div>
             </div>
           </div>
