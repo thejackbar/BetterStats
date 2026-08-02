@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs } from '../ui'
+import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
 
 // Areas & Roles — the configuration the other screens read from. Roles,
 // Activities and Qualification types are backed by real club config. Operational
@@ -11,19 +12,9 @@ export default function AreasRoles({ st, patch, narrow }) {
   const [data, setData] = useState(null)
 
   const [busy, setBusy] = useState(false)
-  const load = () => Promise.all([
-    api.raRoles().catch(() => ({ roles: [] })),
-    api.raActivities().catch(() => ({ activities: [] })),
-    api.qualListTypes().catch(() => ([])),
-    api.rosterAreas().catch(() => ({ areas: [] })),
-  ]).then(([rolesRes, actRes, qualRes, areaRes]) => {
-    setData({
-      roles: rolesRes?.roles || rolesRes || [],
-      activities: actRes?.activities || actRes || [],
-      quals: qualRes?.types || qualRes || [],
-      areas: areaRes?.areas || areaRes || [],
-    })
-  })
+  // Roles / Activities / Qualifications self-load inside their EntityManager;
+  // this only fetches the operational areas for that tab.
+  const load = () => api.rosterAreas().then(r => setData({ areas: r?.areas || r || [] })).catch(() => setData({ areas: [] }))
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
@@ -41,72 +32,47 @@ export default function AreasRoles({ st, patch, narrow }) {
         <SegTabs value={tab} onChange={k => patch({ setupTab: k })} tabs={[{ key: 'roles', label: 'Roles' }, { key: 'activities', label: 'Activities' }, { key: 'quals', label: 'Qualifications' }, { key: 'areas', label: 'Operational areas' }]} />
       </ScreenHeader>
 
-      {!data && <div style={{ padding: 24, fontSize: 13, color: C.faint }}>Loading configuration…</div>}
+      {tab === 'areas' && !data && <div style={{ padding: 24, fontSize: 13, color: C.faint }}>Loading configuration…</div>}
 
-      {data && tab === 'roles' && (
-        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, maxWidth: '72rem' }}>
-            <div>
-              <div style={cap}>GENERAL ROLES</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {data.roles.filter(r => !r.is_committee).map(r => (
-                  <div key={r.id} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{r.title}</span>
-                      {r.role_type_name && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.dim }}>{r.role_type_name}</span>}
-                    </div>
-                    {r.description && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 4 }}>{r.description}</div>}
-                  </div>
-                ))}
-                {data.roles.filter(r => !r.is_committee).length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No general roles set up yet.</div>}
-              </div>
-            </div>
-            <div>
-              <div style={cap}>COMMITTEE ROLES</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {data.roles.filter(r => r.is_committee).map(r => (
-                  <div key={r.id} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '10px 13px' }}>
-                    <span style={{ fontSize: 13, color: C.text }}>{r.title}</span>
-                    {r.role_type_name && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{r.role_type_name}</span>}
-                  </div>
-                ))}
-                {data.roles.filter(r => r.is_committee).length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No committee roles set up yet.</div>}
-              </div>
-            </div>
-          </div>
+      {tab === 'roles' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '52rem' }}>
+          <EntityManager
+            describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Committee roles are managed on the Committee screen."
+            load={() => api.raRoles().then(r => (r?.roles || r || []).filter(x => !x.is_committee))}
+            fields={[{ key: 'title', label: 'Role name', type: 'text', required: true, span: 2 }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
+            onCreate={v => api.raCreateRole(v)} onUpdate={(id, v) => api.raUpdateRole(id, v)} onDelete={id => api.raArchiveRole(id)}
+            onReorder={reorderBySortOrder(api.raUpdateRole)}
+            seed={{ label: 'Add Roles Starter Pack', fn: () => api.raSeedRoles(false) }}
+            primaryKey="title" subtitle={it => [it.role_type_name, it.description].filter(Boolean).join(' · ')}
+            addLabel="Add role" emptyText="No general roles yet." />
         </div>
       )}
 
-      {data && tab === 'activities' && (
-        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '44rem' }}>
-          <p style={{ fontSize: 13, color: C.dim, margin: '0 0 16px', lineHeight: 1.55 }}>What logged volunteer hours are spent on. A completed roster shift books its hours against one of these.</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {data.activities.map(a => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
-                <span style={{ fontSize: 13, color: C.text }}>{a.title}</span>
-                {a.activity_type_name && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{a.activity_type_name}</span>}
-              </div>
-            ))}
-            {data.activities.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No activities set up yet.</div>}
-          </div>
+      {tab === 'activities' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '46rem' }}>
+          <EntityManager
+            describe="What logged volunteer hours are spent on. A completed roster shift books its hours against one of these."
+            load={() => api.raActivities().then(r => r?.activities || r || [])}
+            fields={[{ key: 'title', label: 'Activity name', type: 'text', required: true, span: 2 }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
+            onCreate={v => api.raCreateActivity(v)} onUpdate={(id, v) => api.raUpdateActivity(id, v)} onDelete={id => api.raArchiveActivity(id)}
+            onReorder={reorderBySortOrder(api.raUpdateActivity)}
+            seed={{ label: 'Add Activities Starter Pack', fn: () => api.raSeedActivities() }}
+            primaryKey="title" subtitle={it => it.activity_type_name || ''}
+            addLabel="Add activity" emptyText="No activities yet." />
         </div>
       )}
 
-      {data && tab === 'quals' && (
+      {tab === 'quals' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '48rem' }}>
-          <p style={{ fontSize: 13, color: C.dim, margin: '0 0 16px', lineHeight: 1.55 }}>Qualification types the club tracks. A gating qualification will block rostering for the areas that require it, once the roster is live.</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {data.quals.map(q => (
-              <div key={q.id} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{q.name}</span>
-                  {q.validity_months ? <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>valid {q.validity_months} months</span> : <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>no expiry</span>}
-                </div>
-                {q.description && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 4 }}>{q.description}</div>}
-              </div>
-            ))}
-            {data.quals.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No qualification types set up yet.</div>}
-          </div>
+          <EntityManager
+            describe="Qualification types the club tracks. A gating qualification blocks rostering for the operational areas that require it."
+            load={() => api.qualListTypes().then(r => r?.types || r || [])}
+            fields={[{ key: 'name', label: 'Qualification', type: 'text', required: true, span: 2 }, { key: 'validity_months', label: 'Valid for (months)', type: 'number' }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
+            onCreate={v => api.qualCreateType(v)} onUpdate={(id, v) => api.qualUpdateType(id, v)} onDelete={id => api.qualArchiveType(id)}
+            onReorder={reorderBySortOrder(api.qualUpdateType)}
+            seed={{ label: 'Add Qualifications Starter Pack', fn: () => api.qualSeedStarterTypes() }}
+            primaryKey="name" subtitle={it => it.validity_months ? 'valid ' + it.validity_months + ' months' : 'no expiry'}
+            addLabel="Add qualification" emptyText="No qualification types yet." />
         </div>
       )}
 
@@ -117,7 +83,7 @@ export default function AreasRoles({ st, patch, narrow }) {
             <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 22, fontSize: 13.5, color: C.dim, lineHeight: 1.6 }}>
               No operational areas yet. Add a starter set (Bar, Umpires, Groundsman…) — matched to your existing roles and qualifications where the names line up — and edit from there.
               <div style={{ marginTop: 14 }}>
-                <button disabled={busy} onClick={async () => { setBusy(true); await api.rosterSeedStarter().catch(() => {}); await load(); setBusy(false) }} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Setting up…' : 'Add starter areas'}</button>
+                <button disabled={busy} onClick={async () => { setBusy(true); await api.rosterSeedStarter().catch(() => {}); await load(); setBusy(false) }} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Setting up…' : 'Add Operational Areas Starter Pack'}</button>
               </div>
             </div>
           ) : (
