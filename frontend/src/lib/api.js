@@ -2051,6 +2051,7 @@ export const api = {
   },
   clubRoomDeleteMedia: (id) =>
     request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
+  clubRoomListReports: () => request('/club-admin/club-room/reports'),
   clubRoomPlay: () => request('/club-admin/club-room/play'),
 
   // ─── Front-end Website (public) ───────────────────────────────────────────

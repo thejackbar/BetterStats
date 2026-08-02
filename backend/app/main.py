@@ -216,6 +216,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_club_room_media_org "
             "ON club_room_media(organisation_id, source, created_at DESC)"))
+        # Club Room Mode — light/dark stage theme + shuffle (migration 207).
+        await conn.execute(text(
+            "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark'"))
+        await conn.execute(text(
+            "ALTER TABLE club_room_settings ADD COLUMN IF NOT EXISTS shuffle BOOLEAN NOT NULL DEFAULT false"))
         # BetterSelect: player → selection-pool team assignment (migration 053).
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "

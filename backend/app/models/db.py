@@ -536,6 +536,8 @@ class ClubRoomSettings(Base):
     )
     enabled = Column(Boolean, nullable=False, default=False)
     rotation_seconds = Column(Integer, nullable=False, default=15)
+    theme = Column(Text, nullable=False, default="dark")
+    shuffle = Column(Boolean, nullable=False, default=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 

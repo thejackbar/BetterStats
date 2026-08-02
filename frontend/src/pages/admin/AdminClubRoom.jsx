@@ -5,11 +5,51 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useToast } from '../../contexts/ToastContext'
 
 const SLIDE_TYPE_INFO = {
-  sponsors: { label: 'Sponsors', desc: 'One slide per sponsor with a logo, in your Sponsors order.', module: null },
+  sponsors: { label: 'Sponsors', desc: 'One sponsor, every sponsor in rotation, or every sponsor on one screen.', module: null },
   fixtures: { label: 'Fixtures & Lineups', desc: 'Your next upcoming fixtures, with the saved lineup when one exists.', module: 'select' },
+  leaderboard: { label: 'Leaderboard', desc: 'Top run-scorers, wicket-takers or fielders, podium-style.', module: null },
+  records: { label: 'Club Records', desc: 'A record category, like Most Runs or Best Bowling Figures.', module: null },
+  statlab_report: { label: 'Custom StatLab Report', desc: 'Any report saved and approved in StatLab.', module: null },
   social_posts: { label: 'Recent Social Posts', desc: 'Posts saved from the Post Designer with "Save to Club Room".', module: 'socials' },
   custom_images: { label: 'Custom Images', desc: 'Any images you upload below, like action shots or club notices.', module: null },
 }
+
+const BATTING_SORTS = [
+  { key: 'total_runs', label: 'Most Runs' }, { key: 'average', label: 'Average' },
+  { key: 'high_score', label: 'High Score' }, { key: 'fifties', label: 'Fifties' },
+  { key: 'hundreds', label: 'Centuries' }, { key: 'total_sixes', label: 'Sixes' },
+  { key: 'total_fours', label: 'Fours' }, { key: 'ducks', label: 'Ducks' },
+]
+const BOWLING_SORTS = [
+  { key: 'total_wickets', label: 'Wickets' }, { key: 'economy', label: 'Economy' },
+  { key: 'average', label: 'Average' }, { key: 'best_figures_wickets', label: 'Best Figures' },
+  { key: 'five_fors', label: 'Five-fors' }, { key: 'total_maidens', label: 'Maidens' },
+]
+const FIELDING_SORTS = [
+  { key: 'total_catches_non_wk', label: 'Catches' }, { key: 'total_catches_wk', label: 'WK Catches' },
+  { key: 'total_run_outs', label: 'Run Outs' }, { key: 'total_stumpings', label: 'Stumpings' },
+]
+const SORTS_BY_GROUP = { batting: BATTING_SORTS, bowling: BOWLING_SORTS, fielding: FIELDING_SORTS }
+
+const RECORD_CATEGORIES = [
+  { key: 'batting.top_career_runs', label: 'Most Runs (Career)' },
+  { key: 'batting.top_high_scores', label: 'Highest Individual Scores' },
+  { key: 'batting.top_batting_avg', label: 'Best Batting Average' },
+  { key: 'batting.most_fifties', label: 'Most Fifties' },
+  { key: 'batting.most_hundreds', label: 'Most Centuries' },
+  { key: 'batting.most_ducks', label: 'Most Ducks' },
+  { key: 'batting.most_runs_season', label: 'Most Runs (Single Season)' },
+  { key: 'bowling.top_career_wickets', label: 'Most Wickets (Career)' },
+  { key: 'bowling.best_innings_figures', label: 'Best Bowling Figures' },
+  { key: 'bowling.top_bowling_avg', label: 'Best Bowling Average' },
+  { key: 'bowling.top_economy', label: 'Best Economy Rate' },
+  { key: 'bowling.most_five_fors', label: 'Most Five-Wicket Hauls' },
+  { key: 'bowling.most_wickets_season', label: 'Most Wickets (Single Season)' },
+  { key: 'allrounders.top_allrounders', label: 'Best All-Rounders' },
+]
+
+const fieldCls = 'w-full px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent'
+const labelCls = 'block text-[10px] font-mono tracking-wide2 text-pb-faint uppercase mb-1'
 
 export default function AdminClubRoom() {
   const toast = useToast()
@@ -19,22 +59,31 @@ export default function AdminClubRoom() {
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
   const [rotationInput, setRotationInput] = useState('15')
-  const [editing, setEditing] = useState({}) // { [id]: { title, duration_seconds, config } }
-  const [adding, setAdding] = useState(null) // slide_type being added
+  const [editing, setEditing] = useState({}) // { [id]: draft config object }
+  const [adding, setAdding] = useState(null)
   const [customMedia, setCustomMedia] = useState([])
   const [socialMedia, setSocialMedia] = useState([])
   const [mediaLoading, setMediaLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [sponsors, setSponsors] = useState([])
+  const [seasons, setSeasons] = useState([])
+  const [reports, setReports] = useState([])
   const dragItem = useRef(null)
   const fileInputRef = useRef(null)
 
   useEffect(() => { load() }, [])
+  useEffect(() => { loadMedia() }, [])
+  useEffect(() => {
+    api.adminListSponsors().then(setSponsors).catch(() => {})
+    api.adminListSeasons().then(setSeasons).catch(() => {})
+    api.clubRoomListReports().then(setReports).catch(() => {})
+  }, [])
 
   async function load() {
     setLoading(true)
     try {
       const data = await api.clubRoomGetSettings()
-      setSettings({ enabled: data.enabled, rotation_seconds: data.rotation_seconds })
+      setSettings({ enabled: data.enabled, rotation_seconds: data.rotation_seconds, theme: data.theme, shuffle: data.shuffle })
       setRotationInput(String(data.rotation_seconds))
       setSlides(data.slides)
     } catch (e) {
@@ -60,8 +109,6 @@ export default function AdminClubRoom() {
     }
   }
 
-  useEffect(() => { loadMedia() }, [])
-
   async function patchSettings(patch) {
     setSavingSettings(true)
     try {
@@ -74,11 +121,21 @@ export default function AdminClubRoom() {
     }
   }
 
+  function defaultConfigFor(slideType) {
+    if (slideType === 'sponsors') return { mode: 'sequence' }
+    if (slideType === 'fixtures') return { count: 3 }
+    if (slideType === 'leaderboard') return { stat_group: 'batting', sort_by: 'total_runs', season_id: '', limit: 10 }
+    if (slideType === 'records') return { category: 'batting.top_career_runs', season_id: '', limit: 8 }
+    if (slideType === 'statlab_report') return { report_id: '' }
+    return {}
+  }
+
   async function addSlide(slideType) {
     setAdding(slideType)
     try {
-      const slide = await api.clubRoomCreateSlide({ slide_type: slideType })
+      const slide = await api.clubRoomCreateSlide({ slide_type: slideType, config: defaultConfigFor(slideType) })
       setSlides(prev => [...prev, slide])
+      startEdit(slide)
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -89,12 +146,16 @@ export default function AdminClubRoom() {
   function startEdit(slide) {
     setEditing(prev => ({
       ...prev,
-      [slide.id]: { title: slide.title || '', duration_seconds: slide.duration_seconds || '', config: { ...slide.config } },
+      [slide.id]: { title: slide.title || '', duration_seconds: slide.duration_seconds || '', config: { ...defaultConfigFor(slide.slide_type), ...slide.config } },
     }))
   }
 
   function cancelEdit(id) {
     setEditing(prev => { const n = { ...prev }; delete n[id]; return n })
+  }
+
+  function setDraftConfig(id, patch) {
+    setEditing(prev => ({ ...prev, [id]: { ...prev[id], config: { ...prev[id].config, ...patch } } }))
   }
 
   async function saveEdit(id) {
@@ -198,18 +259,29 @@ export default function AdminClubRoom() {
           </a>
         </div>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Build a rotating slideshow of sponsors, fixtures, lineups, social posts and your own images,
+          Build a rotating slideshow of sponsors, fixtures, lineups, stats and your own images,
           then leave it running full-screen on a TV in the club room. Open "Launch on this screen" on the
           TV's browser and it takes care of itself from there.
         </p>
 
         {!loading && settings && (
-          <div className="pb-card px-4 py-4 mb-6 flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <div className="text-pb-text text-sm font-medium">Turn Club Room Mode on</div>
-              <div className="text-pb-faintest text-[11px] mt-0.5">The launch page shows an "off" message until this is on.</div>
+          <div className="pb-card px-4 py-4 mb-6 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <div className="text-pb-text text-sm font-medium">Turn Club Room Mode on</div>
+                <div className="text-pb-faintest text-[11px] mt-0.5">The launch page shows an "off" message until this is on.</div>
+              </div>
+              <button
+                onClick={() => patchSettings({ enabled: !settings.enabled })}
+                disabled={savingSettings}
+                className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+                  settings.enabled ? 'bg-pb-accent text-white' : 'border pb-hairline text-pb-faint hover:text-pb-text'
+                }`}
+              >
+                {settings.enabled ? 'ON' : 'OFF'}
+              </button>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6 flex-wrap pt-3 pb-hairline-t">
               <label className="flex items-center gap-2 text-[11px] font-mono text-pb-faint">
                 DEFAULT SECONDS PER SLIDE
                 <input
@@ -222,21 +294,30 @@ export default function AdminClubRoom() {
                   className="w-16 px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text text-center"
                 />
               </label>
-              <button
-                onClick={() => patchSettings({ enabled: !settings.enabled })}
-                disabled={savingSettings}
-                className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
-                  settings.enabled ? 'bg-pb-accent text-white' : 'border pb-hairline text-pb-faint hover:text-pb-text'
-                }`}
-              >
-                {settings.enabled ? 'ON' : 'OFF'}
-              </button>
+              <label className="flex items-center gap-2 text-[11px] font-mono text-pb-faint">
+                STAGE THEME
+                <select
+                  value={settings.theme}
+                  onChange={e => patchSettings({ theme: e.target.value })}
+                  className="px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text"
+                >
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-[11px] font-mono text-pb-faint cursor-pointer">
+                <input type="checkbox" checked={settings.shuffle} onChange={e => patchSettings({ shuffle: e.target.checked })} />
+                SHUFFLE SLIDES
+              </label>
             </div>
           </div>
         )}
 
         {/* Playlist */}
         <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-2">Playlist</h2>
+        {settings?.shuffle && (
+          <p className="text-pb-faintest text-[11px] mb-2">Shuffle is on, so the order below is ignored on the TV. Slides play in a random order each loop.</p>
+        )}
         {!loading && (
           <div className="pb-card overflow-hidden mb-3">
             {slides.length === 0 && (
@@ -250,7 +331,7 @@ export default function AdminClubRoom() {
               return (
                 <div
                   key={slide.id}
-                  draggable
+                  draggable={!settings?.shuffle}
                   onDragStart={() => onDragStart(i)}
                   onDragEnter={() => onDragEnter(i)}
                   onDragEnd={onDragEnd}
@@ -258,41 +339,41 @@ export default function AdminClubRoom() {
                   className={`${i > 0 ? 'pb-hairline-t' : ''} px-4 py-3 ${slide.enabled ? '' : 'opacity-50'}`}
                 >
                   <div className="flex items-start gap-3">
-                    <span className="text-pb-faintest mt-1 select-none text-xs cursor-grab">⠿</span>
+                    {!settings?.shuffle && <span className="text-pb-faintest mt-1 select-none text-xs cursor-grab">⠿</span>}
                     <div className="flex-1 min-w-0">
                       {isEditing ? (
-                        <div className="space-y-1.5">
-                          <input
-                            value={editing[slide.id].title}
-                            onChange={e => setEditing(prev => ({ ...prev, [slide.id]: { ...prev[slide.id], title: e.target.value } }))}
-                            placeholder={info.label}
-                            className="w-full px-2 py-1 text-sm bg-pb-bg border pb-hairline rounded text-pb-text placeholder-pb-faintest focus:outline-none focus:border-pb-accent"
-                          />
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <label className="flex items-center gap-1.5 text-[11px] font-mono text-pb-faint">
-                              SECONDS (default {settings?.rotation_seconds})
-                              <input
-                                type="number" min={3} max={300}
-                                value={editing[slide.id].duration_seconds}
-                                onChange={e => setEditing(prev => ({ ...prev, [slide.id]: { ...prev[slide.id], duration_seconds: e.target.value } }))}
-                                className="w-16 px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text text-center"
-                              />
-                            </label>
-                            {(slide.slide_type === 'fixtures' || slide.slide_type === 'social_posts' || slide.slide_type === 'custom_images') && (
-                              <label className="flex items-center gap-1.5 text-[11px] font-mono text-pb-faint">
-                                {slide.slide_type === 'fixtures' ? 'HOW MANY FIXTURES' : 'HOW MANY IMAGES'}
-                                <input
-                                  type="number" min={1} max={30}
-                                  value={editing[slide.id].config.count ?? ''}
-                                  onChange={e => setEditing(prev => ({
-                                    ...prev,
-                                    [slide.id]: { ...prev[slide.id], config: { ...prev[slide.id].config, count: e.target.value ? Number(e.target.value) : undefined } },
-                                  }))}
-                                  className="w-14 px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text text-center"
-                                />
-                              </label>
-                            )}
+                        <div className="space-y-3">
+                          <div>
+                            <label className={labelCls}>Slide title (optional)</label>
+                            <input
+                              value={editing[slide.id].title}
+                              onChange={e => setEditing(prev => ({ ...prev, [slide.id]: { ...prev[slide.id], title: e.target.value } }))}
+                              placeholder={info.label}
+                              className={fieldCls}
+                            />
                           </div>
+
+                          <SlideConfigFields
+                            slide={slide}
+                            draft={editing[slide.id]}
+                            setConfig={patch => setDraftConfig(slide.id, patch)}
+                            sponsors={sponsors}
+                            seasons={seasons}
+                            reports={reports}
+                            customMedia={customMedia}
+                            socialMedia={socialMedia}
+                          />
+
+                          <label className="flex items-center gap-1.5 text-[11px] font-mono text-pb-faint">
+                            SECONDS (default {settings?.rotation_seconds})
+                            <input
+                              type="number" min={3} max={300}
+                              value={editing[slide.id].duration_seconds}
+                              onChange={e => setEditing(prev => ({ ...prev, [slide.id]: { ...prev[slide.id], duration_seconds: e.target.value } }))}
+                              className="w-16 px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text text-center"
+                            />
+                          </label>
+
                           <div className="flex gap-2 pt-1">
                             <button onClick={() => saveEdit(slide.id)} className="px-3 py-1 text-xs rounded bg-pb-accent text-white">Save</button>
                             <button onClick={() => cancelEdit(slide.id)} className="px-3 py-1 text-xs rounded border pb-hairline text-pb-faint hover:text-pb-text">Cancel</button>
@@ -302,8 +383,7 @@ export default function AdminClubRoom() {
                         <>
                           <div className="text-pb-text text-sm font-medium">{slide.title || info.label}</div>
                           <div className="text-pb-faintest text-[11px] mt-0.5">
-                            {info.label} · {slide.duration_seconds || settings?.rotation_seconds}s per slide
-                            {slide.config?.count ? ` · up to ${slide.config.count}` : ''}
+                            {slideSummary(slide, info)} · {slide.duration_seconds || settings?.rotation_seconds}s per slide
                           </div>
                         </>
                       )}
@@ -326,6 +406,9 @@ export default function AdminClubRoom() {
 
         <div className="pb-card px-4 py-4 mb-8">
           <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-3">Add to playlist</h2>
+          <p className="text-pb-faintest text-[11px] mb-3">
+            Sponsors can be added more than once. Pick "One sponsor" each time to control which sponsor gets more airtime.
+          </p>
           <div className="grid sm:grid-cols-2 gap-2">
             {availableTypes.map(([key, info]) => (
               <button
@@ -403,4 +486,176 @@ export default function AdminClubRoom() {
       </div>
     </BetterStatsLayout>
   )
+}
+
+function slideSummary(slide, info) {
+  const cfg = slide.config || {}
+  if (slide.slide_type === 'sponsors') {
+    if (cfg.mode === 'single') return `${info.label} · one sponsor`
+    if (cfg.mode === 'grid') return `${info.label} · all on one screen`
+    return `${info.label} · rotating`
+  }
+  if (slide.slide_type === 'leaderboard') return `${info.label} · ${cfg.stat_group || 'batting'}`
+  if (slide.slide_type === 'records') return `${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`
+  if (slide.slide_type === 'statlab_report') return info.label
+  if (cfg.media_ids?.length) return `${info.label} · ${cfg.media_ids.length} picked`
+  if (cfg.count) return `${info.label} · up to ${cfg.count}`
+  return info.label
+}
+
+function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, customMedia, socialMedia }) {
+  const cfg = draft.config
+
+  if (slide.slide_type === 'sponsors') {
+    return (
+      <div className="space-y-2">
+        <div>
+          <label className={labelCls}>How should sponsors appear?</label>
+          <select value={cfg.mode || 'sequence'} onChange={e => setConfig({ mode: e.target.value })} className={fieldCls}>
+            <option value="sequence">All sponsors, one at a time</option>
+            <option value="single">One sponsor (choose below)</option>
+            <option value="grid">All sponsors, on one screen</option>
+          </select>
+        </div>
+        {cfg.mode === 'single' && (
+          <div>
+            <label className={labelCls}>Sponsor</label>
+            <select value={cfg.sponsor_id || ''} onChange={e => setConfig({ sponsor_id: e.target.value })} className={fieldCls}>
+              <option value="">Choose a sponsor</option>
+              {sponsors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (slide.slide_type === 'fixtures') {
+    return (
+      <label className="flex items-center gap-1.5 text-[11px] font-mono text-pb-faint">
+        HOW MANY FIXTURES
+        <input type="number" min={1} max={10} value={cfg.count ?? 3}
+          onChange={e => setConfig({ count: e.target.value ? Number(e.target.value) : undefined })}
+          className="w-14 px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text text-center" />
+      </label>
+    )
+  }
+
+  if (slide.slide_type === 'leaderboard') {
+    const statGroup = cfg.stat_group || 'batting'
+    const sortOptions = SORTS_BY_GROUP[statGroup] || BATTING_SORTS
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={labelCls}>Stat</label>
+          <select value={statGroup} onChange={e => setConfig({ stat_group: e.target.value, sort_by: (SORTS_BY_GROUP[e.target.value] || [])[0]?.key })} className={fieldCls}>
+            <option value="batting">Batting</option>
+            <option value="bowling">Bowling</option>
+            <option value="fielding">Fielding</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Sorted by</label>
+          <select value={cfg.sort_by || sortOptions[0].key} onChange={e => setConfig({ sort_by: e.target.value })} className={fieldCls}>
+            {sortOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Season</label>
+          <select value={cfg.season_id || ''} onChange={e => setConfig({ season_id: e.target.value })} className={fieldCls}>
+            <option value="">All-time</option>
+            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Top N</label>
+          <input type="number" min={3} max={20} value={cfg.limit ?? 10}
+            onChange={e => setConfig({ limit: e.target.value ? Number(e.target.value) : undefined })} className={fieldCls} />
+        </div>
+      </div>
+    )
+  }
+
+  if (slide.slide_type === 'records') {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <label className={labelCls}>Record</label>
+          <select value={cfg.category || RECORD_CATEGORIES[0].key} onChange={e => setConfig({ category: e.target.value })} className={fieldCls}>
+            {RECORD_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Season</label>
+          <select value={cfg.season_id || ''} onChange={e => setConfig({ season_id: e.target.value })} className={fieldCls}>
+            <option value="">All-time</option>
+            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Top N</label>
+          <input type="number" min={3} max={15} value={cfg.limit ?? 8}
+            onChange={e => setConfig({ limit: e.target.value ? Number(e.target.value) : undefined })} className={fieldCls} />
+        </div>
+      </div>
+    )
+  }
+
+  if (slide.slide_type === 'statlab_report') {
+    return (
+      <div>
+        <label className={labelCls}>Saved report</label>
+        <select value={cfg.report_id || ''} onChange={e => setConfig({ report_id: e.target.value })} className={fieldCls}>
+          <option value="">Choose a report</option>
+          {reports.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+        </select>
+        {reports.length === 0 && (
+          <p className="text-pb-faintest text-[11px] mt-1">No approved saved reports yet. Build and save one in StatLab first.</p>
+        )}
+      </div>
+    )
+  }
+
+  if (slide.slide_type === 'social_posts' || slide.slide_type === 'custom_images') {
+    const library = slide.slide_type === 'social_posts' ? socialMedia : customMedia
+    const picking = !!cfg.media_ids
+    return (
+      <div className="space-y-2">
+        <label className="flex items-center gap-1.5 text-[11px] font-mono text-pb-faint cursor-pointer">
+          <input type="checkbox" checked={picking} onChange={e => setConfig({ media_ids: e.target.checked ? [] : undefined, count: e.target.checked ? undefined : 6 })} />
+          PICK SPECIFIC {slide.slide_type === 'social_posts' ? 'POSTS' : 'IMAGES'} (INSTEAD OF "MOST RECENT")
+        </label>
+        {picking ? (
+          <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 max-h-56 overflow-y-auto p-1">
+            {library.map(m => {
+              const picked = (cfg.media_ids || []).includes(m.id)
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setConfig({
+                    media_ids: picked ? (cfg.media_ids || []).filter(x => x !== m.id) : [...(cfg.media_ids || []), m.id],
+                  })}
+                  className={`relative aspect-square rounded overflow-hidden border-2 ${picked ? 'border-pb-accent' : 'border-transparent'}`}
+                >
+                  <img src={m.url} alt="" className="w-full h-full object-cover" />
+                  {picked && <span className="absolute inset-0 bg-black/30 grid place-items-center text-white text-lg">✓</span>}
+                </button>
+              )
+            })}
+            {library.length === 0 && <p className="col-span-full text-pb-faintest text-[11px]">Nothing available to pick yet.</p>}
+          </div>
+        ) : (
+          <label className="flex items-center gap-1.5 text-[11px] font-mono text-pb-faint">
+            HOW MANY, MOST RECENT FIRST
+            <input type="number" min={1} max={30} value={cfg.count ?? (slide.slide_type === 'custom_images' ? 30 : 6)}
+              onChange={e => setConfig({ count: e.target.value ? Number(e.target.value) : undefined })}
+              className="w-14 px-2 py-1 bg-pb-bg border pb-hairline rounded text-pb-text text-center" />
+          </label>
+        )}
+      </div>
+    )
+  }
+
+  return null
 }
