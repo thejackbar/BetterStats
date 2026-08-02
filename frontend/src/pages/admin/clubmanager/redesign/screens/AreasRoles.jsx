@@ -52,7 +52,7 @@ export default function AreasRoles({ st, patch, narrow }) {
         <div className="pb-scroll" style={scroll('52rem')}>
           <SubBar value={sub} onChange={setSub} tabs={[{ key: 'main', label: 'Roles' }, { key: 'types', label: 'Role types' }]} />
           {sub === 'main' ? (
-            <EntityManager
+            <EntityManager key="roles"
               describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Each role can sit under an optional type (Coach, Ground Staff…); the Starter Pack sets up those types for you. Committee roles are managed on the Committee screen."
               load={() => api.raRoles().then(r => (r?.roles || r || []).filter(x => !x.is_committee))}
               fields={[
@@ -68,7 +68,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               primaryKey="title" subtitle={it => [it.role_type_name, it.description].filter(Boolean).join(' · ')}
               addLabel="Add role" emptyText="No general roles yet." />
           ) : (
-            <EntityManager
+            <EntityManager key="role-types"
               describe="Role types group your roles (Coach, Ground Staff, Food & Beverage…). Pick one when adding a role. The Roles Starter Pack seeds these for you."
               load={() => api.raRoleTypes().then(r => r?.types || r || [])}
               fields={[{ key: 'name', label: 'Type name', type: 'text', required: true, span: 2 }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
@@ -85,7 +85,7 @@ export default function AreasRoles({ st, patch, narrow }) {
         <div className="pb-scroll" style={scroll('48rem')}>
           <SubBar value={sub} onChange={setSub} tabs={[{ key: 'main', label: 'Activities' }, { key: 'types', label: 'Activity types' }]} />
           {sub === 'main' ? (
-            <EntityManager
+            <EntityManager key="activities"
               describe="What logged volunteer hours are spent on. A completed roster shift books its hours against one of these. Each activity can sit under an optional type; the Starter Pack sets up those types for you."
               load={() => api.raActivities().then(r => r?.activities || r || [])}
               fields={[
@@ -101,7 +101,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               primaryKey="title" subtitle={it => it.activity_type_name || ''}
               addLabel="Add activity" emptyText="No activities yet." />
           ) : (
-            <EntityManager
+            <EntityManager key="activity-types"
               describe="Activity types group your activities (Committee & Administration, Ground & Equipment…). Pick one when adding an activity. The Activities Starter Pack seeds these for you."
               load={() => api.raActivityTypes().then(r => r?.types || r || [])}
               fields={[{ key: 'name', label: 'Type name', type: 'text', required: true, span: 2 }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
@@ -140,7 +140,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               </div>
             </>
           ) : (
-            <EntityManager
+            <EntityManager key="departments"
               describe="Departments group your operational areas (Food & Beverage, Cricket Operations…). Pick one when adding an area. The Operational Areas Starter Pack seeds these for you."
               load={() => api.rosterDepartments().then(r => r?.departments || r || [])}
               fields={[{ key: 'name', label: 'Department name', type: 'text', required: true, span: 2 }]}
