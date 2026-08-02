@@ -145,9 +145,26 @@ async def member_overlays(db: AsyncSession, org_id, member_id) -> dict:
         WHERE f.organisation_id = :org AND fm.fee_member_id = :mid
         ORDER BY lower(f.name)
     """), {"org": org_id, "mid": member_id})).mappings().all()
+    # This week's roster shifts assigned to the member (roster weeks anchor on
+    # Monday, matching date_trunc('week', …)).
+    shifts_this_week = (await db.execute(text("""
+        SELECT COUNT(*) FROM roster_shifts rs JOIN roster_weeks rw ON rw.id = rs.roster_week_id
+        WHERE rs.organisation_id = :org AND rs.assignee_member_id = :mid
+          AND rw.week_start = date_trunc('week', CURRENT_DATE)::date
+    """), {"org": org_id, "mid": member_id})).scalar() or 0
+    # Open club-diary tasks the member owns directly or through a role they hold.
+    diary_open = (await db.execute(text("""
+        SELECT COUNT(*) FROM club_diary_task_occurrences o
+        WHERE o.organisation_id = :org AND o.completed_at IS NULL
+          AND o.status NOT IN ('completed', 'done', 'cancelled')
+          AND (o.assigned_to_member_id = :mid
+               OR o.assigned_to_role_id IN (SELECT role_id FROM volunteer_roles WHERE organisation_id = :org AND member_id = :mid))
+    """), {"org": org_id, "mid": member_id})).scalar() or 0
     return {
         "committee": [{"term_id": str(c["term_id"]), "position_id": str(c["position_id"]), "name": c["name"]} for c in committee],
         "families": [{"family_id": str(x["family_id"]), "name": x["name"], "relationship": x["relationship"], "is_guardian": x["is_guardian"]} for x in families],
+        "shifts_this_week": int(shifts_this_week),
+        "diary_open": int(diary_open),
     }
 
 

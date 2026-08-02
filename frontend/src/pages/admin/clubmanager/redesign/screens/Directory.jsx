@@ -46,6 +46,8 @@ export default function Directory({ st, patch, narrow }) {
   const [imp, setImp] = useState(null)         // null | { text, preview, result }
   const [qualForm, setQualForm] = useState({ type_id: '', obtained_at: '' })
   const [newFamily, setNewFamily] = useState('')
+  const [activities, setActivities] = useState([])
+  const [logForm, setLogForm] = useState({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) })
 
   const reload = () => api.dirPeople().then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
   const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
@@ -54,6 +56,7 @@ export default function Directory({ st, patch, narrow }) {
     api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee))).catch(() => {})
     api.qualListTypes().then(r => setQualTypes(r?.types || r || [])).catch(() => {})
     api.dirCommitteePositions().then(r => setPositions(r?.positions || [])).catch(() => {})
+    api.raActivities().then(r => setActivities(r?.activities || r || [])).catch(() => {})
     reloadFamilies()
   }, [])
 
@@ -87,14 +90,15 @@ export default function Directory({ st, patch, narrow }) {
         id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
         expiry: x.expires_at || x.expiry || null,
       }))
+      const raw = (Array.isArray(hRes) ? hRes : (hRes?.hours || []))
       const byAct = {}
-      ;(Array.isArray(hRes) ? hRes : (hRes?.hours || [])).forEach(h => {
+      raw.forEach(h => {
         const a = h.activity || h.activity_name || h.activity_type || 'Other'
         byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
       })
       const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
-      const overlays = { committee: oRes?.committee || [], families: oRes?.families || [] }
-      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours, overlays } }))
+      const overlays = { committee: oRes?.committee || [], families: oRes?.families || [], shifts_this_week: oRes?.shifts_this_week || 0, diary_open: oRes?.diary_open || 0 }
+      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours, hoursRaw: raw, overlays } }))
     })
     return () => { alive = false }
   }, [sel?.member_id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -102,7 +106,8 @@ export default function Directory({ st, patch, narrow }) {
   const det = sel && sel.member_id ? detail[sel.member_id] : null
   const quals = (det?.quals || []).map(qq => ({ ...qq, st: qualStatus(qq.expiry) }))
   const hours = det?.hours || []
-  const overlays = det?.overlays || { committee: [], families: [] }
+  const overlays = det?.overlays || { committee: [], families: [], shifts_this_week: 0, diary_open: 0 }
+  const hoursRaw = det?.hoursRaw || []
   // force the lazy detail effect to re-fetch this member after a mutation
   const refreshMember = async (mid) => { setDetail(d => { const n = { ...d }; delete n[mid]; return n }); await reload() }
 
@@ -170,6 +175,13 @@ export default function Directory({ st, patch, narrow }) {
     try { const r = await api.dirCreateFamily(name); await api.dirAddToFamily(sel.member_id, r.family_id, { is_guardian: sel.category === 'parent' }); setNewFamily(''); await reloadFamilies(); await refreshMember(sel.member_id) }
     catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
+  const logHours = async () => {
+    if (!sel?.member_id || !Number(logForm.hours)) return
+    setBusy(true)
+    try { await api.volunteerLogHours({ member_id: sel.member_id, hours: Number(logForm.hours), activity_id: logForm.activity_id || null, logged_date: logForm.logged_date }); setLogForm({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) }); await refreshMember(sel.member_id) }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const removeHours = async (id) => { setBusy(true); try { await api.volunteerDeleteHours(id); await refreshMember(sel.member_id) } finally { setBusy(false) } }
 
   const pill = (active, tone = 'accent') => {
     const on = { accent: ['rgba(99,102,241,0.45)', 'rgba(99,102,241,0.12)', C.accent], amber: ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', C.warn] }[tone]
@@ -246,8 +258,8 @@ export default function Directory({ st, patch, narrow }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 22 }}>
               {[
                 { value: (sel.total_hours || 0) + 'h', label: 'HOURS THIS SEASON' },
-                { value: '—', label: 'SHIFTS THIS WEEK' },
-                { value: '—', label: 'DIARY TASKS' },
+                { value: sel.member_id ? String(overlays.shifts_this_week) : '—', label: 'SHIFTS THIS WEEK' },
+                { value: sel.member_id ? String(overlays.diary_open) : '—', label: 'DIARY TASKS' },
                 { value: String(sel.flagged || 0), label: 'QUALS TO RENEW' },
               ].map((s, i) => (
                 <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
@@ -323,6 +335,31 @@ export default function Directory({ st, patch, narrow }) {
                   ))}
                   {(!det || hours.length === 0) && <div style={{ fontSize: 13, color: C.faint }}>No hours logged yet.</div>}
                 </div>
+                {sel.member_id ? (
+                  <>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="number" min="0" step="0.5" value={logForm.hours} placeholder="Hrs" onChange={e => setLogForm(f => ({ ...f, hours: e.target.value }))} style={{ ...inp, width: 64 }} />
+                      <select value={logForm.activity_id} onChange={e => setLogForm(f => ({ ...f, activity_id: e.target.value }))} style={{ ...inp, width: 'auto', flex: 1, minWidth: 120 }}>
+                        <option value="">Activity (optional)…</option>
+                        {activities.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                      </select>
+                      <input type="date" value={logForm.logged_date} onChange={e => setLogForm(f => ({ ...f, logged_date: e.target.value }))} style={{ ...inp, width: 'auto' }} />
+                      <button onClick={logHours} disabled={busy || !Number(logForm.hours)} style={{ ...btnS, opacity: (busy || !Number(logForm.hours)) ? 0.6 : 1 }}>Log</button>
+                    </div>
+                    {hoursRaw.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8 }}>
+                        {hoursRaw.slice(0, 6).map(h => (
+                          <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: MONO, fontSize: 10, color: C.faint }}>
+                            <span style={{ width: 74, flexShrink: 0 }}>{h.logged_date || ''}</span>
+                            <span style={{ color: C.dim, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.activity || 'Other'}</span>
+                            <span style={{ color: C.text }}>{Number(h.hours)}h</span>
+                            <span onClick={() => removeHours(h.id)} title="Remove" style={{ cursor: 'pointer', fontSize: 12 }}>×</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assign a role first to log hours.</div>}
               </section>
 
               <section>
