@@ -13,7 +13,6 @@ import Facilities from './screens/Facilities'
 import Events from './screens/Events'
 import AreasRoles from './screens/AreasRoles'
 import PersonDrawer from './parts/PersonDrawer'
-import TaskDrawer from './parts/TaskDrawer'
 
 // The redesigned BetterClubManager surface: one self-contained shell with its
 // own 232px sidebar and eight internally-navigated screens, faithfully porting
@@ -165,8 +164,7 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
         <Screen st={st} patch={patch} opts={opts} narrow={narrow} />
       </div>
 
-      {/* Global drawers */}
-      {st.task && <TaskDrawer taskId={st.task} patch={patch} onClose={() => patch({ task: null })} />}
+      {/* Roster person drawer (Roster is still on demo data until its backend lands) */}
       {st.person && <PersonDrawer personId={st.person} slots={st.slots} opts={opts} onClose={() => patch({ person: null })} />}
     </div>
   )
