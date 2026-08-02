@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs } from '../ui'
+import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
 
 // Events — the club's real events (club_events) with their registrations.
 // The redesign's ticket-type breakdown / volunteer-requirement aren't in the
@@ -34,6 +35,7 @@ function payChip(status) {
 export default function Events({ st, patch, narrow }) {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
+  const [view, setView] = useState('events')
 
   useEffect(() => {
     let alive = true
@@ -60,8 +62,28 @@ export default function Events({ st, patch, narrow }) {
         <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Events</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>TICKETING, RSVPS AND WHO IS COMING</Caption>
       </div>
+      <SegTabs value={view} onChange={setView} tabs={[{ key: 'events', label: 'Events' }, { key: 'types', label: 'Event types' }]} />
     </ScreenHeader>
   )
+
+  if (view === 'types') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <Header />
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '46rem' }}>
+          <EntityManager
+            describe="The kinds of event your club runs (Fundraiser, Social, Presentation night…). New events pick from these."
+            load={() => api.eventListTypes().then(r => r?.types || r || [])}
+            fields={[{ key: 'name', label: 'Event type', type: 'text', required: true, span: 2 }, { key: 'is_committee_only', label: 'Committee-only', type: 'checkbox' }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
+            onCreate={v => api.eventCreateType(v)} onUpdate={(id, v) => api.eventUpdateType(id, v)} onDelete={id => api.eventArchiveType(id)}
+            onReorder={reorderBySortOrder(api.eventUpdateType)}
+            seed={{ label: 'Add Event Types Starter Pack', fn: () => api.eventSeedTypes(false) }}
+            primaryKey="name" subtitle={it => [it.is_committee_only ? 'Committee-only' : null, it.description].filter(Boolean).join(' · ')}
+            addLabel="Add event type" emptyText="No event types yet." />
+        </div>
+      </div>
+    )
+  }
 
   if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load events.' : 'Loading events…'}</div></div>
 

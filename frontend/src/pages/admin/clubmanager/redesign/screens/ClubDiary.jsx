@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout, Toast, Drawer } from '../ui'
+import EntityManager from '../parts/EntityManager'
 
 // Club Diary on real data — the board (one current occurrence per active task
 // definition) rendered as a day-proportional season timeline. Blocked / overdue
@@ -262,25 +263,22 @@ export default function ClubDiary({ st, patch, narrow }) {
         <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 340px', gap: 0, alignItems: 'start', minHeight: 0 }}>
           <div className="pb-scroll" style={{ padding: '18px 20px', overflowY: 'auto' }}>
             <div style={{ ...cap, marginBottom: 4 }}>TEMPLATE LIBRARY</div>
-            <p style={{ fontSize: 13, color: C.dim, margin: '0 0 14px', maxWidth: '46rem', lineHeight: 1.55 }}>The club's standing obligations — what has to happen every season, who owns it by role, and what it depends on. Edit here and every future season inherits it.</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {defs.map(d => (
-                <div key={d.id} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{d.title}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 6px', borderRadius: 4, background: C.surface2, color: C.dim, flexShrink: 0 }}>{mapFreq(d.frequency)}</span>
-                    </div>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 3 }}>{roleName[d.responsibility_role_id] || 'No role set'}{d.default_month ? ' · month ' + d.default_month : ''}</div>
-                  </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim }}>{d.budget_estimate ? money(d.budget_estimate) : '—'}</div>
-                    <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 2 }}>{(d.depends_on || []).length ? (d.depends_on.length + ' dep' + (d.depends_on.length === 1 ? '' : 's')) : 'no deps'}</div>
-                  </div>
-                </div>
-              ))}
-              {defs.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No task definitions yet. Seed the starter set from the club diary admin, or add your own.</div>}
-            </div>
+            <EntityManager
+              describe="The club's standing obligations — what has to happen every season and who owns it by role. Edit here and every future season you generate inherits it."
+              load={() => api.diaryListDefinitions().then(r => r?.definitions || r || [])}
+              fields={[
+                { key: 'title', label: 'Task', type: 'text', required: true, span: 2 },
+                { key: 'frequency', label: 'Cadence', type: 'select', required: true, options: [{ value: 'annual', label: 'Annual' }, { value: 'once', label: 'One-time' }, { value: 'quarterly', label: 'Quarterly' }, { value: 'monthly', label: 'Monthly' }, { value: 'weekly', label: 'Weekly' }, { value: 'conditional', label: 'Conditional' }] },
+                { key: 'responsibility_role_id', label: 'Owner role', type: 'select', options: Object.entries(roleName).map(([id, title]) => ({ value: id, label: title })) },
+                { key: 'default_month', label: 'Month (1-12)', type: 'number' },
+                { key: 'budget_estimate', label: 'Budget ($)', type: 'number' },
+                { key: 'description', label: 'Notes', type: 'text', span: 2 },
+              ]}
+              onCreate={v => api.diaryCreateDefinition(v)} onUpdate={(id, v) => api.diaryUpdateDefinition(id, v)} onDelete={id => api.diaryArchiveDefinition(id)}
+              seed={{ label: 'Add Club Diary Starter Pack', fn: () => api.diarySeedStarterDefinitions() }}
+              primaryKey="title"
+              subtitle={it => [mapFreq(it.frequency), roleName[it.responsibility_role_id], it.budget_estimate ? money(it.budget_estimate) : null].filter(Boolean).join(' · ')}
+              addLabel="Add task" emptyText="No task definitions yet." />
           </div>
           <div className="pb-scroll" style={{ borderLeft: `1px solid ${C.hair}`, background: C.surface, padding: '18px 16px', overflowY: 'auto', alignSelf: 'stretch' }}>
             <div style={cap}>GENERATE A SEASON</div>

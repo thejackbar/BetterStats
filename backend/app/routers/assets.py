@@ -76,6 +76,20 @@ async def create_facility(data: FacilityCreate, _: User = _require, club: Organi
     return assets_service._facility_dict(f)
 
 
+@router.post("/facilities/seed-starter")
+async def seed_facilities(_: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    n = await assets_service.seed_starter_facilities(db, club.id)
+    await db.commit()
+    return {"seeded": n}
+
+
+@router.post("/items/seed-starter")
+async def seed_items(_: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    n = await assets_service.seed_starter_assets(db, club.id)
+    await db.commit()
+    return {"seeded": n}
+
+
 class FacilityPatch(BaseModel):
     name: Optional[str] = None
     facility_type: Optional[str] = None

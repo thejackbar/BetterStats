@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, Toast } from '../ui'
+import EntityManager from '../parts/EntityManager'
 
 // Facilities on real data — the availability grid (this week's real bookings,
 // with client-side conflict detection) and the asset register. The redesign's
@@ -214,32 +215,26 @@ export default function Facilities({ st, patch, narrow }) {
       )}
 
       {tab === 'assets' && (
-        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '60rem' }}>
-          {assets.length === 0 ? (
-            <div style={{ fontSize: 13.5, color: C.dim }}>No assets recorded yet. Add club gear in the Assets &amp; Facilities admin.</div>
-          ) : (
-            [...new Set(assets.map(a => a.category || 'Uncategorised'))].map(catg => (
-              <div key={catg} style={{ marginBottom: 20 }}>
-                <div style={cap}>{catg}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {assets.filter(a => (a.category || 'Uncategorised') === catg).map(a => {
-                    const s = (a.status || '').toLowerCase()
-                    const out = s ? !s.includes('avail') : false
-                    const chipFg = out ? C.warn : C.ok
-                    return (
-                      <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '10px 13px' }}>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{a.name}</div>
-                          <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 2 }}>{[a.condition, a.service_due_date ? 'service due ' + a.service_due_date : null].filter(Boolean).join(' · ') || 'No condition recorded'}</div>
-                        </div>
-                        {a.status && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 6px', borderRadius: 4, flexShrink: 0, border: `1px solid ${chipFg}66`, color: chipFg }}>{a.status.toUpperCase().replace(/_/g, ' ')}</span>}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ))
-          )}
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '56rem' }}>
+          <div style={cap}>FACILITIES</div>
+          <EntityManager
+            describe="Your grounds, nets and rooms — bookings and the availability grid read from these."
+            load={() => api.assetsListFacilities().then(r => (r?.facilities || r || []).filter(f => f.is_active !== false))}
+            fields={[{ key: 'name', label: 'Facility name', type: 'text', required: true, span: 2 }, { key: 'facility_type', label: 'Kind', type: 'text' }, { key: 'key_location', label: 'Key location', type: 'text' }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
+            onCreate={v => api.assetsCreateFacility(v)} onUpdate={(id, v) => api.assetsUpdateFacility(id, v)} onDelete={id => api.assetsDeleteFacility(id)}
+            seed={{ label: 'Add Facilities Starter Pack', fn: () => api.assetsSeedFacilities() }}
+            primaryKey="name" subtitle={it => [it.facility_type, it.key_location, it.description].filter(Boolean).join(' · ')}
+            addLabel="Add facility" emptyText="No facilities yet." />
+
+          <div style={{ ...cap, marginTop: 26 }}>ASSETS</div>
+          <EntityManager
+            describe="Club gear — kit bags, machines, markers and the like."
+            load={() => api.assetsListItems({}).then(r => (r?.items || r || []).filter(a => a.is_active !== false))}
+            fields={[{ key: 'name', label: 'Asset', type: 'text', required: true, span: 2 }, { key: 'category', label: 'Category', type: 'text' }, { key: 'condition', label: 'Condition', type: 'text' }, { key: 'status', label: 'Status', type: 'text' }, { key: 'notes', label: 'Notes', type: 'text', span: 2 }]}
+            onCreate={v => api.assetsCreateItem(v)} onUpdate={(id, v) => api.assetsUpdateItem(id, v)} onDelete={id => api.assetsDeleteItem(id)}
+            seed={{ label: 'Add Assets Starter Pack', fn: () => api.assetsSeedItems() }}
+            primaryKey="name" subtitle={it => [it.category, it.condition, it.status].filter(Boolean).join(' · ')}
+            addLabel="Add asset" emptyText="No assets yet." />
         </div>
       )}
     </div>

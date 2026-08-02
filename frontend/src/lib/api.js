@@ -497,6 +497,8 @@ export const api = {
   // Assets & Facilities (core capability, not a paid module)
   assetsListFacilities: (includeInactive) =>
     request(`/club-admin/assets/facilities${includeInactive ? '?include_inactive=true' : ''}`),
+  assetsSeedFacilities: () => request('/club-admin/assets/facilities/seed-starter', { method: 'POST' }),
+  assetsSeedItems: () => request('/club-admin/assets/items/seed-starter', { method: 'POST' }),
   assetsCreateFacility: (data) =>
     request('/club-admin/assets/facilities', { method: 'POST', body: JSON.stringify(data) }),
   assetsUpdateFacility: (id, data) =>
