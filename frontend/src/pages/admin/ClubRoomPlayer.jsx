@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import TeamBadge from '../../components/TeamBadge'
+import { resolveTheme, safeAccent2, gradientCss } from '../../lib/theme'
 
 // Club Room Mode — the full-screen TV-loop stage. Meant to be opened once on
 // a TV/Chromebook browser and left running: it polls its own data every few
@@ -40,6 +41,30 @@ const LIGHT_TOKENS = {
   background: '#f3f4f7',
 }
 
+// Merges the club's own brand colours (organisations.theme_config — the same
+// source the public club pages theme themselves from, via resolveTheme/
+// buildThemeCss in lib/theme.js) on top of the stage's dark/light surface
+// tokens. Previously the stage never set --pb-accent at all, so every card
+// gradient/border fell back to whatever --pb-accent happened to be inherited
+// from the surrounding admin app — BetterStats' own default green, not the
+// club's actual colour.
+function buildStageTokens(data) {
+  const mode = data?.theme === 'light' ? 'light' : 'dark'
+  const base = mode === 'light' ? LIGHT_TOKENS : DARK_TOKENS
+  const theme = resolveTheme(data?.theme_config)
+  const accent2Safe = safeAccent2(theme.accent2, theme.accent, mode)
+  return {
+    ...base,
+    '--pb-accent': theme.accent,
+    '--pb-accent-2': theme.accent2,
+    '--pb-accent-2-safe': accent2Safe,
+    '--pb-gradient': gradientCss(theme.accent, accent2Safe),
+    '--pb-positive': theme.positive,
+    '--pb-negative': theme.negative,
+    '--pb-amber': theme.chart_milestone,
+  }
+}
+
 const PLACE = [
   { label: '1ST', accent: '#f4c542' },
   { label: '2ND', accent: 'var(--pb-dim)' },
@@ -64,12 +89,15 @@ function easeInOutQuad(t) {
 }
 
 // A list that outgrows its box shouldn't just get clipped — this scrolls
-// itself from top to bottom over the slide's own display time (a pause at
-// each end, eased in between), so a long leaderboard/records/report table is
-// fully seen before the slide moves on. No visible scrollbar, since nobody's
-// holding a mouse in the club room. A no-op — no scrolling at all — when the
-// content already fits.
-function AutoScrollList({ children, durationMs, className = '', style }) {
+// itself from top to bottom at a steady, readable pace (a pause at each end,
+// eased in between) instead of being squeezed into whatever's left of the
+// slide's display time — a long list on a short slide just won't finish a
+// full pass, which reads far better than a rushed blur. No visible
+// scrollbar, since nobody's holding a mouse in the club room. A no-op — no
+// scrolling at all — when the content already fits.
+const SCROLL_PX_PER_SECOND = 42 // a comfortable, readable pace — not rushed
+
+function AutoScrollList({ children, className = '', style }) {
   const ref = useRef(null)
   useEffect(() => {
     const el = ref.current
@@ -77,20 +105,24 @@ function AutoScrollList({ children, durationMs, className = '', style }) {
     el.scrollTop = 0
     const overflow = el.scrollHeight - el.clientHeight
     if (overflow <= 2) return
-    const hold = 1400 // ms paused at the top and again at the bottom
-    const window_ = Math.max(1500, (durationMs || 15000) - hold * 2)
+    const hold = 1800 // ms paused at the top and again at the bottom
+    // A steady, readable pace — NOT squeezed to fit inside the slide's own
+    // display time. A long list on a short slide just won't finish a full
+    // pass before the slide moves on; that reads far better than rushing to
+    // cram everything into whatever time happens to be left.
+    const scrollMs = Math.max(2500, (overflow / SCROLL_PX_PER_SECOND) * 1000)
     let raf
     const start = performance.now()
     const tick = (now) => {
       const elapsed = now - start
       if (elapsed < hold) { raf = requestAnimationFrame(tick); return }
-      const p = Math.min(1, (elapsed - hold) / window_)
+      const p = Math.min(1, (elapsed - hold) / scrollMs)
       el.scrollTop = overflow * easeInOutQuad(p)
       if (p < 1) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [durationMs, children])
+  }, [children])
   return (
     <div ref={ref} className={`club-room-scroll overflow-y-auto ${className}`} style={style}>
       {children}
@@ -167,7 +199,7 @@ export default function ClubRoomPlayer() {
     return () => window.removeEventListener('keydown', onKey)
   }, [advance, navigate])
 
-  const tokens = data?.theme === 'light' ? LIGHT_TOKENS : DARK_TOKENS
+  const tokens = buildStageTokens(data)
 
   if (error && !data) {
     return (
@@ -319,7 +351,7 @@ function SponsorGridSlide({ slide }) {
   return (
     <div className="w-full h-full flex flex-col items-center px-16 py-12">
       <div className="font-mono text-[13px] tracking-wide4 text-pb-faint uppercase mb-8 shrink-0">{slide.title}</div>
-      <AutoScrollList durationMs={(slide.duration_seconds || 15) * 1000} className="flex-1 min-h-0 w-full flex justify-center">
+      <AutoScrollList className="flex-1 min-h-0 w-full flex justify-center">
         <div className="grid gap-8 w-full max-w-6xl" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {sponsors.map(s => (
             <div key={s.id} className="rounded-2xl p-6 flex items-center justify-center h-40"
@@ -374,14 +406,15 @@ function FixtureSlide({ slide, clubLogoUrl }) {
         </div>
       </div>
       {slide.lineup?.length > 0 ? (
-        <AutoScrollList durationMs={(slide.duration_seconds || 15) * 1000} className="flex-1 min-h-0">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-12 gap-y-3 max-w-4xl">
+        <AutoScrollList className="flex-1 min-h-0">
+          <div className="h-full flex flex-col justify-between">
             {[...slide.lineup].sort((a, b) => (a.batting_order ?? 99) - (b.batting_order ?? 99)).map((p, i) => (
-              <div key={i} className="flex items-center gap-3 text-xl">
-                <span className="text-pb-faintest font-mono text-sm w-5">{p.batting_order ?? '–'}</span>
-                <span className="text-pb-text">{p.display_name}</span>
-                {p.is_captain && <span className="text-amber-400 text-xs font-mono">(C)</span>}
-                {p.is_wicket_keeper && <span className="text-pb-faint text-xs font-mono">(WK)</span>}
+              <div key={i} className="flex items-center gap-5"
+                style={{ borderTop: i > 0 ? '1px solid var(--pb-hairline)' : 'none' }}>
+                <span className="text-pb-faintest font-mono text-xl w-9 shrink-0">{p.batting_order ?? '–'}</span>
+                <span className="text-3xl text-pb-text font-medium flex-1 truncate">{p.display_name}</span>
+                {p.is_captain && <span className="text-amber-400 text-sm font-mono tracking-wide2 shrink-0">CAPTAIN</span>}
+                {p.is_wicket_keeper && <span className="text-pb-faint text-sm font-mono tracking-wide2 shrink-0">KEEPER</span>}
               </div>
             ))}
           </div>
@@ -414,12 +447,9 @@ function LeaderboardSlide({ slide, clubLogoUrl }) {
   const rest = rows.slice(3)
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
-      <div className="mb-6 flex items-center gap-3 shrink-0">
-        {clubLogoUrl && <img src={clubLogoUrl} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 p-1" />}
-        <div>
-          <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
-          <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
-        </div>
+      <div className="mb-6 shrink-0">
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
+        <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
       </div>
       <div className="flex gap-5 mb-6 shrink-0">
         {top3.map((r, i) => {
@@ -445,7 +475,6 @@ function LeaderboardSlide({ slide, clubLogoUrl }) {
       </div>
       {rest.length > 0 && (
         <AutoScrollList
-          durationMs={(slide.duration_seconds || 15) * 1000}
           className="flex-1 min-h-0 rounded-xl"
           style={{ border: '1px solid var(--pb-hairline)' }}
         >
@@ -490,12 +519,9 @@ function RecordsSlide({ slide, clubLogoUrl }) {
   const leaderStat = leader ? recordHeadline(leader) : null
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
-      <div className="mb-7 flex items-center gap-3 shrink-0">
-        {clubLogoUrl && <img src={clubLogoUrl} alt="" className="w-9 h-9 rounded object-contain bg-pb-surface2 p-1" />}
-        <div>
-          <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
-          <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
-        </div>
+      <div className="mb-7 shrink-0">
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
+        <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
       </div>
       {leader && (
         <div className="rounded-2xl p-7 mb-5 flex items-center gap-7 shrink-0"
@@ -512,7 +538,6 @@ function RecordsSlide({ slide, clubLogoUrl }) {
       )}
       {rest.length > 0 && (
         <AutoScrollList
-          durationMs={(slide.duration_seconds || 15) * 1000}
           className="flex-1 min-h-0 rounded-xl"
           style={{ border: '1px solid var(--pb-hairline)' }}
         >
@@ -554,7 +579,6 @@ function ReportSlide({ slide }) {
       <div className="text-[36px] font-extrabold tracking-tight mb-6 shrink-0">{slide.title}</div>
       {columns.length > 0 ? (
         <AutoScrollList
-          durationMs={(slide.duration_seconds || 15) * 1000}
           className="flex-1 min-h-0 rounded-xl"
           style={{ border: '1px solid var(--pb-hairline)' }}
         >
