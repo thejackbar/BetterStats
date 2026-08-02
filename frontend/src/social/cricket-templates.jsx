@@ -1458,7 +1458,7 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
             : <div key={i} style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
         })}
       </div>
-      <CreditMark ink={palette.ink} h={44} />
+      <CreditMark ink={ink} h={44} />
     </div>
   )
 }
