@@ -605,6 +605,36 @@ async def create_member(
     return {"member_id": str(member_id)}
 
 
+class MemberImportPreview(BaseModel):
+    csv: str
+
+
+class MemberImportCommit(BaseModel):
+    csv: str
+    season_id: str
+
+
+@router.post("/members/import/preview")
+async def members_import_preview(data: MemberImportPreview, _: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Preview a non-player member CSV — the SAME shared importer the ClubManager
+    Directory uses. Players are imported in Stats."""
+    from app.services import member_import as member_import_svc
+    return await member_import_svc.preview(db, club.id, data.csv)
+
+
+@router.post("/members/import/commit")
+async def members_import_commit(data: MemberImportCommit, _: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Import non-player members via the shared importer, then open a fee season
+    row (as "needs tier") for each so they appear in this season's members list."""
+    from app.services import member_import as member_import_svc
+    season = await _season_or_404(db, club, data.season_id)
+    result = await member_import_svc.commit(db, club.id, data.csv)
+    result["added_to_season"] = await member_import_svc.open_member_seasons(
+        db, club.id, season.id, result.pop("member_ids", []))
+    await db.commit()
+    return result
+
+
 async def _resolve_schedule(db, club, season, fee_schedule_id) -> Optional[FeeSchedule]:
     if not fee_schedule_id:
         return None

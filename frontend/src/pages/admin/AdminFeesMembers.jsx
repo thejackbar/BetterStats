@@ -103,6 +103,67 @@ function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }
   )
 }
 
+function ImportMembersModal({ seasonId, onClose, onDone }) {
+  const toast = useToast()
+  const [text, setText] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+
+  function onFile(file) { if (!file) return; const rd = new FileReader(); rd.onload = () => { setText(String(rd.result || '')); setPreview(null) }; rd.readAsText(file) }
+  async function runPreview() { setBusy(true); try { setPreview(await api.feeMembersImportPreview(text)) } catch (e) { toast.error(e.message) } finally { setBusy(false) } }
+  async function runImport() {
+    setBusy(true)
+    try {
+      const r = await api.feeMembersImportCommit(text, seasonId)
+      toast.success(`Imported — ${r.created} added, ${r.updated} updated, ${r.added_to_season} into this season`)
+      onDone()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
+      <div className="bg-pb-surface pb-card w-full max-w-lg max-h-[86vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
+          <h2 className="font-display font-bold text-pb-text">Import members</h2>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-pb-faint text-[12px] leading-relaxed">
+            Non-playing members (parents, life members, sponsors…). Columns: <span className="font-mono text-[11px]">name, email, mobile, category, roles</span> (only <span className="font-mono text-[11px]">name</span> required). Matched to existing people by name, so a re-run tops up rather than duplicates. Each imported person is opened into this season as “needs tier”. Players are imported in Stats.
+          </p>
+          <input type="file" accept=".csv,text/csv" onChange={e => onFile(e.target.files?.[0])} className="text-pb-dim text-[12px]" />
+          <textarea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} rows={5}
+            placeholder={'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
+            className={`${inp} font-mono text-[11.5px]`} />
+          {preview && (
+            <div className="bg-pb-surface2/50 border pb-hairline rounded p-3">
+              <div className="text-pb-text text-sm mb-2">{preview.total} row{preview.total === 1 ? '' : 's'}: <b>{preview.new}</b> new, <b>{preview.existing}</b> existing.</div>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {preview.rows.map((r, i) => (
+                  <div key={i} className="text-[12px] text-pb-dim flex gap-2 items-baseline">
+                    <span className={`font-mono text-[9px] w-12 shrink-0 ${r.existing ? 'text-pb-amber' : 'text-green-300'}`}>{r.existing ? 'UPDATE' : 'NEW'}</span>
+                    <span className="text-pb-text">{r.name}</span>
+                    {r.category && <span className="font-mono text-[9.5px] text-pb-faint">{r.category}</span>}
+                    {r.roles.length > 0 && <span className="font-mono text-[9.5px]" style={{ color: 'var(--pb-accent)' }}>{r.roles.join(', ')}</span>}
+                    {r.unknown_roles.length > 0 && <span className="font-mono text-[9.5px] text-pb-amber" title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+          {!preview
+            ? <button onClick={runPreview} disabled={busy || !text.trim()} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>{busy ? 'READING…' : 'PREVIEW'}</button>
+            : <button onClick={runImport} disabled={busy || preview.total === 0} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>{busy ? 'IMPORTING…' : `IMPORT ${preview.total}`}</button>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BulkTierModal({ seasonId, memberIds, tiers, onClose, onSaved }) {
   const toast = useToast()
   const [tierId, setTierId] = useState('')
@@ -202,6 +263,7 @@ export default function AdminFeesMembers() {
   const [needsTierOnly, setNeedsTierOnly] = useState(false)
   const [owesOnly, setOwesOnly] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
   const [selected, setSelected] = useState(() => new Set())
   const [showBulkTier, setShowBulkTier] = useState(false)
@@ -269,6 +331,10 @@ export default function AdminFeesMembers() {
                 ROLL OVER
               </button>
             )}
+            <button onClick={() => setShowImport(true)} disabled={!seasonId}
+              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap">
+              IMPORT
+            </button>
             <button onClick={() => setShowAdd(true)} disabled={!seasonId}
               className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
               + MEMBER
@@ -445,6 +511,11 @@ export default function AdminFeesMembers() {
         <AddMemberModal seasonId={seasonId} tiers={tiers} membershipTypes={membershipTypes}
           onClose={() => setShowAdd(false)}
           onCreated={() => { setShowAdd(false); load() }} />
+      )}
+      {showImport && (
+        <ImportMembersModal seasonId={seasonId}
+          onClose={() => setShowImport(false)}
+          onDone={() => { setShowImport(false); load() }} />
       )}
       {showBulkTier && (
         <BulkTierModal seasonId={seasonId} memberIds={Array.from(selected)} tiers={tiers}

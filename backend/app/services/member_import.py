@@ -87,6 +87,7 @@ async def commit(db: AsyncSession, org_id, csv_text: str) -> dict:
     existing = await members_svc.find_by_name(db, org_id)
     rolemap = await _role_map(db, org_id)
     created = updated = roles_added = 0
+    member_ids = []
     for r in rows:
         name = r["name"]
         key = name.strip().lower()
@@ -110,6 +111,7 @@ async def commit(db: AsyncSession, org_id, csv_text: str) -> dict:
                 db, org_id, full_name=name, email=r.get("email"), mobile=r.get("mobile"), member_category=cat)
             existing[key] = mid
             created += 1
+        member_ids.append(mid)
         for rt in _split_roles(r.get("roles")):
             rid = rolemap.get(rt.lower())
             if rid:
@@ -119,4 +121,19 @@ async def commit(db: AsyncSession, org_id, csv_text: str) -> dict:
                     ON CONFLICT (member_id, role_id) DO NOTHING
                 """), {"org": org_id, "mid": mid, "rid": rid})
                 roles_added += 1
-    return {"created": created, "updated": updated, "roles_added": roles_added}
+    return {"created": created, "updated": updated, "roles_added": roles_added, "member_ids": member_ids}
+
+
+async def open_member_seasons(db: AsyncSession, org_id, season_id, member_ids) -> int:
+    """Open a fee season row (no tier = "needs tier") for each member that isn't
+    already in the season. Lets a BetterFees import surface people in the
+    season-scoped members list; the person spine itself is created by commit()."""
+    opened = 0
+    for mid in member_ids:
+        res = await db.execute(text("""
+            INSERT INTO fee_member_seasons (id, member_id, season_id, organisation_id)
+            SELECT gen_random_uuid(), :mid, :sid, :org
+            WHERE NOT EXISTS (SELECT 1 FROM fee_member_seasons WHERE member_id = :mid AND season_id = :sid)
+        """), {"mid": mid, "sid": season_id, "org": org_id})
+        opened += res.rowcount or 0
+    return opened
