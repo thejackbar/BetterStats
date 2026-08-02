@@ -9,6 +9,9 @@ import { C, MONO } from '../ui'
 // Props:
 //   load()                    → Promise<item[]>   (each item has .id + field keys)
 //   fields: [{ key, label, type:'text'|'number'|'checkbox'|'select', options?, placeholder?, required?, span? }]
+//     a 'select' field may set allowNew + onCreateNew(name)->id (+ newLabel/
+//     newPlaceholder) to offer an inline "＋ New…" option that coins a value
+//     (e.g. a new type) on submit and uses its id, without leaving the form.
 //   onCreate(values) / onUpdate(id, values) / onDelete(id) / onReorder(orderedIds)  (async; omit to hide that action)
 //   seed: { label, fn }       (Starter Pack button; shown when the list is empty)
 //   primaryKey                (the field shown as the row title; defaults fields[0].key)
@@ -26,16 +29,19 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
   const [busy, setBusy] = useState(false)
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
+  const [newMode, setNewMode] = useState({})  // per-select-field: "＋ New…" chosen
+  const [newText, setNewText] = useState({})  // per-select-field: the typed new name
 
   const pk = primaryKey || fields[0].key
   const notify = () => { try { onChanged && onChanged() } catch { /* parent refresh is best-effort */ } }
   const refresh = () => load().then(rows => setItems(Array.isArray(rows) ? rows : [])).catch(e => setErr(String(e?.message || e)))
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const resetNew = () => { setNewMode({}); setNewText({}) }
   const blank = () => Object.fromEntries(fields.map(f => [f.key, f.type === 'checkbox' ? false : '']))
-  const startAdd = () => { setForm(blank()); setAdding(true); setEditId(null) }
-  const startEdit = (it) => { setForm(Object.fromEntries(fields.map(f => [f.key, it[f.key] ?? (f.type === 'checkbox' ? false : '')]))); setEditId(it.id); setAdding(false) }
-  const cancel = () => { setAdding(false); setEditId(null) }
+  const startAdd = () => { setForm(blank()); resetNew(); setAdding(true); setEditId(null) }
+  const startEdit = (it) => { setForm(Object.fromEntries(fields.map(f => [f.key, it[f.key] ?? (f.type === 'checkbox' ? false : '')]))); resetNew(); setEditId(it.id); setAdding(false) }
+  const cancel = () => { setAdding(false); setEditId(null); resetNew() }
 
   const clean = (v) => {
     const o = {}
@@ -48,12 +54,21 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
     })
     return o
   }
-  const canSubmit = fields.filter(f => f.required).every(f => form[f.key] !== '' && form[f.key] != null)
+  const canSubmit = fields.filter(f => f.required).every(f =>
+    (form[f.key] !== '' && form[f.key] != null) || (newMode[f.key] && (newText[f.key] || '').trim()))
   const submit = async () => {
     if (!canSubmit) return
     setBusy(true)
     try {
-      if (editId) await onUpdate(editId, clean(form)); else await onCreate(clean(form))
+      const values = clean(form)
+      // Coin any inline "＋ New…" values first, then use the created id.
+      for (const f of fields) {
+        if (f.type === 'select' && f.allowNew && newMode[f.key] && f.onCreateNew) {
+          const name = (newText[f.key] || '').trim()
+          if (name) { const made = await f.onCreateNew(name); values[f.key] = made?.id ?? made }
+        }
+      }
+      if (editId) await onUpdate(editId, values); else await onCreate(values)
       await refresh(); notify(); cancel()
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
@@ -98,7 +113,16 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
           {f.type === 'checkbox'
             ? <><input type="checkbox" checked={!!form[f.key]} onChange={e => setF(f.key, e.target.checked)} /> <span style={{ color: C.dim, fontSize: 12.5, fontFamily: 'inherit' }}>{f.label}</span></>
             : f.type === 'select'
-              ? <>{f.label}{f.required ? ' *' : ''}<select value={form[f.key] ?? ''} onChange={e => setF(f.key, e.target.value)} style={{ ...inp, marginTop: 3 }}><option value="">{f.placeholder || '—'}</option>{(f.options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></>
+              ? <>{f.label}{f.required ? ' *' : ''}
+                  <select value={newMode[f.key] ? '__new__' : (form[f.key] ?? '')}
+                    onChange={e => { const v = e.target.value; if (v === '__new__') { setNewMode(m => ({ ...m, [f.key]: true })) } else { setNewMode(m => ({ ...m, [f.key]: false })); setF(f.key, v) } }}
+                    style={{ ...inp, marginTop: 3 }}>
+                    <option value="">{f.placeholder || '—'}</option>
+                    {(f.options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {f.allowNew && <option value="__new__">＋ {f.newLabel || 'New…'}</option>}
+                  </select>
+                  {f.allowNew && newMode[f.key] && <input value={newText[f.key] || ''} placeholder={f.newPlaceholder || 'New name'} onChange={e => setNewText(t => ({ ...t, [f.key]: e.target.value }))} style={{ ...inp, marginTop: 6 }} />}
+                </>
               : <>{f.label}{f.required ? ' *' : ''}<input type={f.type === 'number' ? 'number' : 'text'} value={form[f.key] ?? ''} placeholder={f.placeholder || ''} onChange={e => setF(f.key, e.target.value)} style={{ ...inp, marginTop: 3 }} /></>}
         </label>
       ))}

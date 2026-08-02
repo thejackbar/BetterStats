@@ -58,15 +58,17 @@ export default function AreasRoles({ st, patch, narrow }) {
       {tab === 'roles' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '52rem' }}>
           <EntityManager
-            describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Committee roles are managed on the Committee screen."
+            describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Each role can sit under an optional type (Coach, Ground Staff…); the Starter Pack sets up those types for you. Committee roles are managed on the Committee screen."
             load={() => api.raRoles().then(r => (r?.roles || r || []).filter(x => !x.is_committee))}
             fields={[
               { key: 'title', label: 'Role name', type: 'text', required: true, span: 2 },
-              { key: 'role_type_id', label: 'Type', type: 'select', options: roleTypeOpts, placeholder: 'No type' },
+              { key: 'role_type_id', label: 'Type', type: 'select', options: roleTypeOpts, placeholder: 'No type',
+                allowNew: true, newLabel: 'New role type…', newPlaceholder: 'New role type name',
+                onCreateNew: async (name) => { const t = await api.raCreateRoleType({ name }); await reloadRoleTypes(); return t } },
               { key: 'description', label: 'Description', type: 'text' },
             ]}
             onCreate={v => api.raCreateRole(v)} onUpdate={(id, v) => api.raUpdateRole(id, v)} onDelete={id => api.raArchiveRole(id)}
-            onReorder={reorderBySortOrder(api.raUpdateRole)}
+            onReorder={reorderBySortOrder(api.raUpdateRole)} onChanged={reloadRoleTypes}
             seed={{ label: 'Add Roles Starter Pack', fn: () => api.raSeedRoles(false) }}
             primaryKey="title" subtitle={it => [it.role_type_name, it.description].filter(Boolean).join(' · ')}
             addLabel="Add role" emptyText="No general roles yet." />
@@ -88,15 +90,17 @@ export default function AreasRoles({ st, patch, narrow }) {
       {tab === 'activities' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '48rem' }}>
           <EntityManager
-            describe="What logged volunteer hours are spent on. A completed roster shift books its hours against one of these."
+            describe="What logged volunteer hours are spent on. A completed roster shift books its hours against one of these. Each activity can sit under an optional type; the Starter Pack sets up those types for you."
             load={() => api.raActivities().then(r => r?.activities || r || [])}
             fields={[
               { key: 'title', label: 'Activity name', type: 'text', required: true, span: 2 },
-              { key: 'activity_type_id', label: 'Type', type: 'select', options: actTypeOpts, placeholder: 'No type' },
+              { key: 'activity_type_id', label: 'Type', type: 'select', options: actTypeOpts, placeholder: 'No type',
+                allowNew: true, newLabel: 'New activity type…', newPlaceholder: 'New activity type name',
+                onCreateNew: async (name) => { const t = await api.raCreateActivityType({ name }); await reloadActTypes(); return t } },
               { key: 'description', label: 'Description', type: 'text' },
             ]}
             onCreate={v => api.raCreateActivity(v)} onUpdate={(id, v) => api.raUpdateActivity(id, v)} onDelete={id => api.raArchiveActivity(id)}
-            onReorder={reorderBySortOrder(api.raUpdateActivity)}
+            onReorder={reorderBySortOrder(api.raUpdateActivity)} onChanged={reloadActTypes}
             seed={{ label: 'Add Activities Starter Pack', fn: () => api.raSeedActivities() }}
             primaryKey="title" subtitle={it => it.activity_type_name || ''}
             addLabel="Add activity" emptyText="No activities yet." />

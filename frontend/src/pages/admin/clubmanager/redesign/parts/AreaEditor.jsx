@@ -63,7 +63,7 @@ export default function AreaEditor() {
     } finally { setBusy(false) }
   }
   const remove = async (a) => { if (!window.confirm('Remove the "' + a.name + '" area and its shift patterns?')) return; setBusy(true); try { await api.rosterDeleteArea(a.id); await refresh() } finally { setBusy(false) } }
-  const seed = async () => { setBusy(true); try { await api.rosterSeedStarter(); await refresh() } finally { setBusy(false) } }
+  const seed = async () => { setBusy(true); try { await api.rosterSeedStarter(); await refresh(); await reloadDepartments() } finally { setBusy(false) } }
 
   const addPattern = async (areaId) => {
     const s = Number(pat.start_time), e = Number(pat.end_time), hc = Math.max(1, Number(pat.headcount) || 1)
