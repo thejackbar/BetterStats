@@ -31,7 +31,7 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
     member), assigned roles, hours and a quals-to-renew count."""
     members = (await db.execute(text("""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
-               fm.is_life_member, p.photo_url
+               fm.is_life_member, p.photo_url, p.email AS player_email, p.phone AS player_phone
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id
         WHERE fm.organisation_id = :org AND fm.archived_at IS NULL
@@ -101,7 +101,10 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
         q = quals_by.get(mid, {})
         people.append({
             "key": mid, "member_id": mid, "player_id": str(m["player_id"]) if m["player_id"] else None,
-            "name": m["full_name"], "email": m["email"] or "", "phone": m["mobile"] or "",
+            # Fall back to the linked player's Stats contact when the member row
+            # has none, so a player's email/phone show through in ClubManager.
+            "name": m["full_name"], "email": m["email"] or m["player_email"] or "",
+            "phone": m["mobile"] or m["player_phone"] or "",
             "photo": m["photo_url"], "category": cat,
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
@@ -111,7 +114,7 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
 
     # Players with no member row still appear (read-through from Stats/Core).
     extra = (await db.execute(text("""
-        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url
+        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone
         FROM players p
         WHERE p.organisation_id = :org
           AND NOT EXISTS (SELECT 1 FROM fee_members fm WHERE fm.player_id = p.id AND fm.organisation_id = :org)
@@ -122,7 +125,7 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
             continue
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
-            "name": p["name"], "email": "", "phone": "", "photo": p["photo_url"], "category": None,
+            "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": ["Player"],
         })
 
