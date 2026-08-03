@@ -5,6 +5,26 @@ from typing import List
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://cricket:cricket@db/betterstats"
     sync_database_url: str = "postgresql://cricket:cricket@db/betterstats"
+
+    # ─── DB connection pool (the app's whole DB-concurrency ceiling) ───────────
+    # SQLAlchemy's own defaults are pool_size=5 + max_overflow=10 = 15 total
+    # connections for the ENTIRE process. That's far too low here: every API
+    # request drops a usage breadcrumb on its own session, a public page view
+    # spawns 2-3 more short-lived own-session tasks (geo enrich + CRM signal
+    # check), the Usage page polls a heavy multi-query /usage/live, and the
+    # scheduler jobs each open sessions too. Under real traffic the pool
+    # saturates and even the tiny get_current_user lookup times out waiting for
+    # a connection (the QueuePool "size 5 overflow 10 reached" 500s). betterstats
+    # runs as a single uvicorn process against a dedicated Postgres (default
+    # max_connections=100), so this pool is the only consumer — 20+30=50 leaves
+    # comfortable headroom. All env-overridable (DB_POOL_SIZE, etc.).
+    db_pool_size: int = 20
+    db_max_overflow: int = 30
+    # Fail a wedged checkout fast rather than hanging 30s and stacking requests.
+    db_pool_timeout: int = 10
+    # Recycle a connection after 30 min so a silently-dropped TCP conn (proxy /
+    # DB restart) is replaced instead of erroring on next use.
+    db_pool_recycle: int = 1800
     secret_key: str = "changeme-secret-key-32-chars-min"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 days

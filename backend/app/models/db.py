@@ -15,7 +15,18 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(settings.database_url, echo=False)
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    # See settings.db_pool_* for why the SQLAlchemy defaults (5+10) are too
+    # small here. pool_pre_ping recovers a connection the DB/proxy dropped out
+    # from under us (returns a live conn instead of a dead-socket error).
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=True,
+)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
