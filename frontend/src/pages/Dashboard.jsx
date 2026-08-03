@@ -8,6 +8,7 @@ import { CAP } from '../lib/capabilities'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
@@ -97,7 +98,7 @@ function MilestonesSection({ milestones, loading }) {
 
 export default function Dashboard() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
 
@@ -169,6 +170,7 @@ export default function Dashboard() {
       .finally(() => setFixturesLoading(false))
   }, [orgId])
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (loading) return <PbSpinner message="Loading club data…" />

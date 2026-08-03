@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,21 +77,26 @@ def _cache_bust() -> int:
     return int(time.time())
 
 
-async def _public_org(slug: str, db: AsyncSession) -> Organisation:
+async def _public_org(slug: str, db: AsyncSession, request: Request | None = None) -> Organisation:
     from sqlalchemy.orm import selectinload
     from app.auth.modules import org_core_live
+    from app.services import club_lock
     org = (await db.execute(
         select(Organisation).where(Organisation.slug == slug.lower())
         .options(selectinload(Organisation.module_subscriptions))
     )).scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if request is not None and club_lock.is_locked_for_request(org, request):
+        raise HTTPException(status_code=423, detail=club_lock.lock_detail(org))
     # Hidden when manually inactive OR BetterStats (Core) isn't live.
-    if not org or not org.is_active or not org_core_live(org):
+    if not org.is_active or not org_core_live(org):
         raise HTTPException(status_code=404, detail="Club not found")
     return org
 
 
-async def _website_org(slug: str, db: AsyncSession) -> Organisation:
-    org = await _public_org(slug, db)
+async def _website_org(slug: str, db: AsyncSession, request: Request | None = None) -> Organisation:
+    org = await _public_org(slug, db, request)
     if not org.website_enabled:
         raise HTTPException(status_code=404, detail="This club hasn't published a website yet.")
     return org
@@ -429,9 +434,9 @@ def _image(img: ClubGalleryImage) -> dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 @public_router.get("/{slug}/website")
-async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
+async def get_website(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Homepage payload: branding, nav, latest news + section availability."""
-    org = await _website_org(slug, db)
+    org = await _website_org(slug, db, request)
 
     pages = (await db.execute(
         select(ClubPage)
@@ -480,11 +485,12 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
 @public_router.get("/{slug}/website/news")
 async def list_website_news(
     slug: str,
+    request: Request,
     limit: int = Query(24, ge=1, le=60),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    org = await _website_org(slug, db)
+    org = await _website_org(slug, db, request)
     base = select(ClubNews).where(
         ClubNews.organisation_id == org.id, ClubNews.is_published == True  # noqa: E712
     )
@@ -502,8 +508,8 @@ async def list_website_news(
 
 
 @public_router.get("/{slug}/website/news/{news_slug}")
-async def get_website_article(slug: str, news_slug: str, db: AsyncSession = Depends(get_db)):
-    org = await _website_org(slug, db)
+async def get_website_article(slug: str, news_slug: str, request: Request, db: AsyncSession = Depends(get_db)):
+    org = await _website_org(slug, db, request)
     article = (await db.execute(
         select(ClubNews).where(
             ClubNews.organisation_id == org.id,
@@ -524,8 +530,8 @@ async def get_website_article(slug: str, news_slug: str, db: AsyncSession = Depe
 
 
 @public_router.get("/{slug}/website/pages/{page_slug}")
-async def get_website_page(slug: str, page_slug: str, db: AsyncSession = Depends(get_db)):
-    org = await _website_org(slug, db)
+async def get_website_page(slug: str, page_slug: str, request: Request, db: AsyncSession = Depends(get_db)):
+    org = await _website_org(slug, db, request)
     page = (await db.execute(
         select(ClubPage).where(
             ClubPage.organisation_id == org.id,
@@ -540,8 +546,8 @@ async def get_website_page(slug: str, page_slug: str, db: AsyncSession = Depends
 
 
 @public_router.get("/{slug}/website/honours")
-async def get_website_honours(slug: str, db: AsyncSession = Depends(get_db)):
-    org = await _website_org(slug, db)
+async def get_website_honours(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
+    org = await _website_org(slug, db, request)
     boards = (await db.execute(
         select(ClubHonourBoard)
         .where(ClubHonourBoard.organisation_id == org.id)
@@ -577,8 +583,8 @@ async def get_website_honours(slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @public_router.get("/{slug}/website/committee")
-async def get_website_committee(slug: str, db: AsyncSession = Depends(get_db)):
-    org = await _website_org(slug, db)
+async def get_website_committee(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
+    org = await _website_org(slug, db, request)
     members = (await db.execute(
         select(ClubCommitteeMember)
         .where(ClubCommitteeMember.organisation_id == org.id)
@@ -595,8 +601,8 @@ async def get_website_committee(slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @public_router.get("/{slug}/website/gallery")
-async def get_website_gallery(slug: str, db: AsyncSession = Depends(get_db)):
-    org = await _website_org(slug, db)
+async def get_website_gallery(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
+    org = await _website_org(slug, db, request)
     albums = (await db.execute(
         select(ClubGalleryAlbum)
         .where(ClubGalleryAlbum.organisation_id == org.id)
@@ -618,8 +624,8 @@ async def get_website_gallery(slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @public_router.get("/{slug}/website/gallery/{album_id}")
-async def get_website_album(slug: str, album_id: str, db: AsyncSession = Depends(get_db)):
-    org = await _website_org(slug, db)
+async def get_website_album(slug: str, album_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    org = await _website_org(slug, db, request)
     album = (await db.execute(
         select(ClubGalleryAlbum).where(
             ClubGalleryAlbum.id == _uuid(album_id),

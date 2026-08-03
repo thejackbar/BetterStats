@@ -49,6 +49,7 @@ const ICON_PATHS = {
   sheet: <><rect x="4" y="3.5" width="16" height="17" rx="2" /><path d="M8 8.5h8M8 12h8M8 15.5h5" /></>,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4" /></>,
   moon: <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></>,
+  tv: <><rect x="2.5" y="5" width="19" height="13" rx="2" /><path d="M8 21h8M12 18v3" /></>,
 }
 
 export function Icon({ name, size = 18, strokeWidth = 1.6, className = '', style }) {

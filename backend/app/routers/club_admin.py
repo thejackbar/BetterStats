@@ -15,7 +15,7 @@ from pathlib import Path
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
-    PlayerSyncRequest, Sponsor, ClubOnboardingRequest, OrgModuleSubscription,
+    PlayerSyncRequest, Sponsor, ClubOnboardingRequest, ClubUnpauseRequest, OrgModuleSubscription,
     ModuleActionRequest, CommsLimitRequest, MarketingClub, SyncRun, OnboardingWizardState, get_db
 )
 from sqlalchemy import text as _text
@@ -29,12 +29,13 @@ from app.auth.capabilities import (
 )
 from app.auth.modules import (
     ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
-    STATUS_TRIAL, org_default_trial_days,
+    STATUS_TRIAL, STATUS_ACTIVE, org_default_trial_days,
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
+from app.services import club_lock
 from app.services import stripe_client
 from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
@@ -732,6 +733,13 @@ class SettingsPatch(BaseModel):
     # survives browsers and the Setup Wizard can auto-detect it. See
     # _sanitize_socials_style for the accepted shape.
     socials_style: Optional[dict] = None
+    # Password-protected "Draft" page (self-serve — see club_lock.py). A club
+    # admin may only turn this ON while the club's own subscription is trial
+    # or active (checked below); turning it off is always allowed. Reason is
+    # always 'draft' for this self-serve path — 'trial_ended' is Super-Admin-only
+    # (see ClubUpdate/patch_club).
+    password_protected: Optional[bool] = None
+    access_pin: Optional[str] = None
 
 
 # Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
@@ -824,6 +832,10 @@ async def get_settings(
         "public_show_gender": bool(club.public_show_gender),
         "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
         "socials_style": club.socials_style,
+        "subscription_status": club.subscription_status,
+        "password_protected": bool(club.password_protected),
+        "password_protect_reason": club.password_protect_reason,
+        "has_pin": bool(club.access_pin_hash),
     }
 
 
@@ -873,6 +885,30 @@ async def patch_settings(
         club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
     if data.socials_style is not None:
         club.socials_style = _sanitize_socials_style(data.socials_style)
+
+    if data.access_pin is not None:
+        pin = data.access_pin.strip()
+        if not re.fullmatch(r"\d{4}", pin):
+            raise HTTPException(status_code=422, detail="PIN must be exactly 4 digits")
+        club.access_pin_hash = club_lock.hash_pin(pin)
+
+    if data.password_protected is not None:
+        if data.password_protected:
+            if club.subscription_status not in (STATUS_TRIAL, STATUS_ACTIVE):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Password protection is only available while your club is on a trial or an active subscription.",
+                )
+            if not club.access_pin_hash:
+                raise HTTPException(status_code=422, detail="Set a 4-digit PIN first")
+            if not club.password_protected:
+                club.password_protected_at = _datetime.now(_timezone.utc)
+                club.password_protected_by = current_user.id
+            club.password_protected = True
+            club.password_protect_reason = "draft"
+        else:
+            club.password_protected = False
+            club.password_protect_reason = None
 
     # Record which fields the admin touched. Don't dump full new values into
     # the audit row — colour codes / names will already be visible in the
@@ -1638,6 +1674,13 @@ def _club_payload(
         "short_name": org.short_name,
         "is_active": org.is_active,
         "archived_at": org.archived_at.isoformat() if org.archived_at else None,
+        # Password-protected "Draft" page (see club_lock.py) — independent of
+        # is_active by design. has_pin only tells the UI whether a PIN already
+        # exists, never the PIN itself.
+        "password_protected": bool(org.password_protected),
+        "password_protect_reason": org.password_protect_reason,
+        "has_pin": bool(org.access_pin_hash),
+        "password_protected_at": org.password_protected_at.isoformat() if org.password_protected_at else None,
         "contact_email": org.contact_email,
         # Organisation.state is only ever populated by the self-serve registration
         # flow (migration 158) — every club onboarded the older way (the "New Club"
@@ -2278,13 +2321,25 @@ class ClubUpdate(BaseModel):
     comms_sandbox_cap: Optional[int] = None
     comms_production_cap: Optional[int] = None
     comms_monthly_cap: Optional[int] = None
+    # Password-protected "Draft" page (see club_lock.py). Unlike the club-admin
+    # self-serve toggle in SettingsPatch above, Super Admin may enable this for
+    # any club at any time (no subscription-status gate) and is the only one
+    # who can set reason='trial_ended' — the sales-conversion lock for a lapsed
+    # trial. access_pin sets/replaces the PIN; omit to leave an existing PIN
+    # untouched.
+    password_protected: Optional[bool] = None
+    password_protect_reason: Optional[str] = None
+    access_pin: Optional[str] = None
+
+
+PASSWORD_PROTECT_REASONS = ("draft", "trial_ended")
 
 
 @router.patch("/super/clubs/{club_id}")
 async def patch_club(
     club_id: str,
     data: ClubUpdate,
-    _: User = Depends(require_super_admin),
+    current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     org = await db.get(
@@ -2350,6 +2405,33 @@ async def patch_club(
         if unknown:
             raise HTTPException(status_code=422, detail=f"Unknown modules: {', '.join(unknown)}")
         mod_subs.reconcile_held_modules(org, sorted(set(overrides)))
+
+    # PIN is hashed, never set via the generic setattr loop below.
+    if "access_pin" in fields:
+        pin = (fields.pop("access_pin") or "").strip()
+        if not re.fullmatch(r"\d{4}", pin):
+            raise HTTPException(status_code=422, detail="PIN must be exactly 4 digits")
+        org.access_pin_hash = club_lock.hash_pin(pin)
+
+    if "password_protect_reason" in fields:
+        reason = fields["password_protect_reason"]
+        if reason is not None and reason not in PASSWORD_PROTECT_REASONS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"password_protect_reason must be one of: {', '.join(PASSWORD_PROTECT_REASONS)}",
+            )
+
+    if fields.get("password_protected") is True:
+        if not org.access_pin_hash:
+            raise HTTPException(status_code=422, detail="Set a 4-digit PIN first")
+        if not org.password_protected:
+            org.password_protected_at = _datetime.now(_timezone.utc)
+            org.password_protected_by = current_user.id
+        # Default to 'draft' when Super Admin turns it on without picking a reason.
+        if "password_protect_reason" not in fields:
+            fields["password_protect_reason"] = org.password_protect_reason or "draft"
+    elif fields.get("password_protected") is False:
+        fields.setdefault("password_protect_reason", None)
 
     for key, value in fields.items():
         setattr(org, key, value)
@@ -3585,6 +3667,73 @@ async def delete_onboarding_request(
     await db.delete(row)
     await db.commit()
     return {"ok": True}
+
+
+# ─── Unpause requests (password-protected trial-ended pages) ─────────────────
+# The queue behind a lapsed-trial club's public "email me for access" form —
+# see routers/clubs.py POST /clubs/{slug}/request-unpause. This is the sales-
+# conversion lead list: Super Admin actions a request and opens a conversation
+# with the requester directly (their email is right there on the row).
+
+_UNPAUSE_STATUSES = {"pending", "actioned", "dismissed"}
+
+
+@router.get("/super/unpause-requests")
+async def list_unpause_requests(
+    status: str | None = None,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(ClubUnpauseRequest, Organisation).join(
+        Organisation, Organisation.id == ClubUnpauseRequest.organisation_id
+    )
+    if status and status in _UNPAUSE_STATUSES:
+        q = q.where(ClubUnpauseRequest.status == status)
+    q = q.order_by(ClubUnpauseRequest.created_at.desc()).limit(500)
+    rows = (await db.execute(q)).all()
+    return [
+        {
+            "id": str(r.id),
+            "organisation_id": str(org.id),
+            "club_name": org.name,
+            "club_slug": org.slug,
+            "email": r.email,
+            "message": r.message,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "actioned_at": r.actioned_at.isoformat() if r.actioned_at else None,
+        }
+        for r, org in rows
+    ]
+
+
+class UnpauseRequestStatusIn(BaseModel):
+    status: str
+
+
+@router.patch("/super/unpause-requests/{request_id}")
+async def update_unpause_request(
+    request_id: uuid.UUID,
+    payload: UnpauseRequestStatusIn,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move a request through the follow-up states (pending, actioned, dismissed)."""
+    status_value = (payload.status or "").strip().lower()
+    if status_value not in _UNPAUSE_STATUSES:
+        raise HTTPException(status_code=422, detail="Unknown status.")
+    row = await db.get(ClubUnpauseRequest, request_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    row.status = status_value
+    if status_value != "pending":
+        row.actioned_at = _datetime.now(_timezone.utc)
+        row.actioned_by = current_user.id
+    else:
+        row.actioned_at = None
+        row.actioned_by = None
+    await db.commit()
+    return {"ok": True, "status": status_value}
 
 
 @router.post("/super/users", status_code=201)

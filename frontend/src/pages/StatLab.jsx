@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { api } from '../lib/api'
 import Dropdown from '../components/Dropdown'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import { Label, Card, Btn, PageHeader, PbSpinner } from '../lib/presskit'
 import { fmt2, fmtCount, fmtOvers, formatSeason } from '../lib/cricketFormat'
 
@@ -1060,7 +1061,7 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
 
 export default function StatLab() {
   const { clubSlug, reportSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   const { org, seasons, loading: clubLoading } = useClubData(orgId)
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -1338,6 +1339,7 @@ export default function StatLab() {
     }
   }, [refreshReports, openReport, navigate, clubSlug])
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading || !schema) return <PbSpinner message="Loading…" />

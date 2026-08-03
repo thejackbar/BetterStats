@@ -230,3 +230,38 @@ async def create_maintenance_log(session: AsyncSession, org_id, *, subject_type:
 
 async def delete_maintenance_log(session: AsyncSession, m: MaintenanceLog) -> None:
     await session.delete(m)
+
+
+# ── Starter Packs (BetterClubManager setup) ─────────────────────────────────
+STARTER_FACILITIES = [
+    {"name": "Main Ground", "facility_type": "ground", "description": "Turf oval"},
+    {"name": "Turf Wicket Block", "facility_type": "ground", "description": "Centre square"},
+    {"name": "Practice Nets", "facility_type": "nets", "description": "Synthetic bays"},
+    {"name": "Clubrooms", "facility_type": "clubroom", "description": "Bar + social space"},
+    {"name": "Function Room", "facility_type": "clubroom", "description": "Hireable room"},
+]
+STARTER_ASSETS = [
+    {"name": "Junior kit bag", "category": "kit"},
+    {"name": "Senior kit bag", "category": "kit"},
+    {"name": "Bowling machine", "category": "equipment"},
+    {"name": "Portable nets", "category": "equipment"},
+    {"name": "Line marker", "category": "grounds"},
+    {"name": "Scoring tablet", "category": "tech"},
+    {"name": "Covers (roll-on)", "category": "grounds"},
+]
+
+
+async def seed_starter_facilities(session: AsyncSession, org_id) -> int:
+    if await list_facilities(session, org_id):
+        return 0
+    for f in STARTER_FACILITIES:
+        await create_facility(session, org_id, **f)
+    return len(STARTER_FACILITIES)
+
+
+async def seed_starter_assets(session: AsyncSession, org_id) -> int:
+    if await list_assets(session, org_id):
+        return 0
+    for a in STARTER_ASSETS:
+        await create_asset(session, org_id, **a)
+    return len(STARTER_ASSETS)

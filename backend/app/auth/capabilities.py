@@ -48,10 +48,12 @@ MANAGE_MERCH = "manage_merch"                 # BetterMerch: stock register (app
 MANAGE_FANTASY = "manage_fantasy"             # BetterFantasyCricket: fantasy season setup, leagues, settlement
 MANAGE_CRM = "manage_crm"                     # BetterCRM: deals/pipeline, contacts, activities
 MANAGE_COMMITTEE = "manage_committee"         # Committee positions/terms, task register, documents, club calendar
+MANAGE_MEMBERS = "manage_members"             # ClubManager Directory: add/edit/import non-player people + third parties
 MANAGE_VOLUNTEERS = "manage_volunteers"       # Volunteer profiles + hours ledger
 MANAGE_QUALIFICATIONS = "manage_qualifications"  # Qualification types + member qualifications/expiry
 MANAGE_ASSETS = "manage_assets"               # Club assets, facilities, bookings, maintenance logs
 MANAGE_CLUB_DIARY = "manage_club_diary"       # Annual/recurring compliance & maintenance task calendar
+MANAGE_CLUB_ROOM = "manage_club_room"         # Club Room Mode: playlist + slides + custom images
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -80,10 +82,12 @@ ALL_CAPABILITIES = (
     MANAGE_FANTASY,
     MANAGE_CRM,
     MANAGE_COMMITTEE,
+    MANAGE_MEMBERS,
     MANAGE_VOLUNTEERS,
     MANAGE_QUALIFICATIONS,
     MANAGE_ASSETS,
     MANAGE_CLUB_DIARY,
+    MANAGE_CLUB_ROOM,
 )
 
 

@@ -4,6 +4,7 @@ import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import Dropdown from '../components/Dropdown'
@@ -233,7 +234,7 @@ function getRowHighlights(values, higher) {
 
 export default function PlayerComparison() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
 
@@ -318,6 +319,7 @@ export default function PlayerComparison() {
   const hasEnough      = selectedPlayers.length >= 2
   const excludeIds     = selectedPlayers.map(p => p.id)
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
 

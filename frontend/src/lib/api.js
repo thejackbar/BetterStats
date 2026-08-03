@@ -95,6 +95,16 @@ function _appendContext(params, context) {
 export const api = {
   // Clubs (slug-based)
   getClubBySlug: (slug) => request(`/clubs/${slug}`),
+  unlockClub: (slug, pin) => request(`/clubs/${slug}/unlock`, {
+    method: 'POST', body: JSON.stringify({ pin }),
+  }),
+  requestClubUnpause: (slug, email, message) => request(`/clubs/${slug}/request-unpause`, {
+    method: 'POST', body: JSON.stringify({ email, message }),
+  }),
+  superListUnpauseRequests: (status) => request(`/club-admin/super/unpause-requests${status ? `?status=${status}` : ''}`),
+  superActionUnpauseRequest: (id, status) => request(`/club-admin/super/unpause-requests/${id}`, {
+    method: 'PATCH', body: JSON.stringify({ status }),
+  }),
 
   // Organisations (UUID-based, used internally once slug is resolved)
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
@@ -382,6 +392,57 @@ export const api = {
   volunteerDeleteHours: (id) =>
     request(`/club-admin/volunteers/hours/${id}`, { method: 'DELETE' }),
 
+  // BetterClubManager Directory (core capability, not a paid module)
+  dirPeople: () => request('/club-admin/directory/people'),
+  dirCreateMember: (data) => request('/club-admin/directory/people', { method: 'POST', body: JSON.stringify(data) }),
+  dirUpdateMember: (id, data) => request(`/club-admin/directory/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  dirArchiveMember: (id) => request(`/club-admin/directory/people/${id}/archive`, { method: 'POST' }),
+  dirRestoreMember: (id) => request(`/club-admin/directory/people/${id}/restore`, { method: 'POST' }),
+  dirEnsureMemberForPlayer: (playerId) => request(`/club-admin/directory/players/${playerId}/ensure-member`, { method: 'POST' }),
+  dirAddRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles`, { method: 'POST', body: JSON.stringify({ role_id: roleId }) }),
+  dirRemoveRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles/${roleId}`, { method: 'DELETE' }),
+  dirImportPreview: (csvText) => request('/club-admin/directory/import/preview', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
+  dirImportCommit: (csvText) => request('/club-admin/directory/import/commit', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
+  feeMembersImportPreview: (csvText) => request('/club-admin/fees/members/import/preview', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),
+  feeMembersImportCommit: (csvText, seasonId) => request('/club-admin/fees/members/import/commit', { method: 'POST', body: JSON.stringify({ csv: csvText, season_id: seasonId }) }),
+  dirMemberOverlays: (memberId) => request(`/club-admin/directory/people/${memberId}/overlays`),
+  dirCommitteePositions: () => request('/club-admin/directory/committee-positions'),
+  dirFamilies: () => request('/club-admin/directory/families'),
+  dirAssignCommittee: (memberId, positionId) => request(`/club-admin/directory/people/${memberId}/committee`, { method: 'POST', body: JSON.stringify({ position_id: positionId }) }),
+  dirRemoveCommittee: (memberId, termId) => request(`/club-admin/directory/people/${memberId}/committee/${termId}`, { method: 'DELETE' }),
+  dirCreateFamily: (name) => request('/club-admin/directory/families', { method: 'POST', body: JSON.stringify({ name }) }),
+  dirAddToFamily: (memberId, familyId, data = {}) => request(`/club-admin/directory/people/${memberId}/families`, { method: 'POST', body: JSON.stringify({ family_id: familyId, ...data }) }),
+  dirRemoveFromFamily: (memberId, familyId) => request(`/club-admin/directory/people/${memberId}/families/${familyId}`, { method: 'DELETE' }),
+
+  // BetterClubManager Roster (core capability, not a paid module)
+  rosterAreas: () => request('/club-admin/roster/areas'),
+  rosterCreateArea: (data) => request('/club-admin/roster/areas', { method: 'POST', body: JSON.stringify(data) }),
+  rosterUpdateArea: (id, data) => request(`/club-admin/roster/areas/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rosterDeleteArea: (id) => request(`/club-admin/roster/areas/${id}`, { method: 'DELETE' }),
+  rosterSeedStarter: () => request('/club-admin/roster/areas/seed-starter', { method: 'POST' }),
+  rosterReorderAreas: (areaIds) => request('/club-admin/roster/areas/reorder', { method: 'POST', body: JSON.stringify({ area_ids: areaIds }) }),
+  rosterDepartments: () => request('/club-admin/roster/departments'),
+  rosterCreateDepartment: (data) => request('/club-admin/roster/departments', { method: 'POST', body: JSON.stringify(data) }),
+  rosterUpdateDepartment: (id, data) => request(`/club-admin/roster/departments/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rosterDeleteDepartment: (id) => request(`/club-admin/roster/departments/${id}`, { method: 'DELETE' }),
+  rosterReorderDepartments: (deptIds) => request('/club-admin/roster/departments/reorder', { method: 'POST', body: JSON.stringify({ department_ids: deptIds }) }),
+  rosterSeedDepartments: () => request('/club-admin/roster/departments/seed-starter', { method: 'POST' }),
+  rosterAddPattern: (areaId, data) => request(`/club-admin/roster/areas/${areaId}/patterns`, { method: 'POST', body: JSON.stringify(data) }),
+  rosterDeletePattern: (id) => request(`/club-admin/roster/patterns/${id}`, { method: 'DELETE' }),
+  rosterGetSettings: () => request('/club-admin/roster/settings'),
+  rosterSetSettings: (data) => request('/club-admin/roster/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  rosterWeek: (weekStart) => request(`/club-admin/roster/week${weekStart ? '?week_start=' + weekStart : ''}`),
+  rosterAssign: (weekId, shiftId, memberId) => request(`/club-admin/roster/week/${weekId}/assign`, { method: 'POST', body: JSON.stringify({ shift_id: shiftId, member_id: memberId }) }),
+  rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),
+  rosterPublish: (weekId) => request(`/club-admin/roster/week/${weekId}/publish`, { method: 'POST' }),
+  rosterReset: (weekId) => request(`/club-admin/roster/week/${weekId}/reset`, { method: 'POST' }),
+  rosterClearConfig: () => request('/club-admin/roster/clear-config', { method: 'POST' }),
+  facilityRequests: () => request('/club-admin/facility-requests'),
+  facilityRequestCreate: (data) => request('/club-admin/facility-requests', { method: 'POST', body: JSON.stringify(data) }),
+  facilityRequestApprove: (id, force) => request(`/club-admin/facility-requests/${id}/approve${force ? '?force=true' : ''}`, { method: 'POST' }),
+  facilityRequestDecline: (id) => request(`/club-admin/facility-requests/${id}/decline`, { method: 'POST' }),
+  facilityRequestsClear: () => request('/club-admin/facility-requests/clear', { method: 'POST' }),
+
   // Qualification Management (core capability, not a paid module)
   qualListTypes: (includeInactive) =>
     request(`/club-admin/qualifications/types${includeInactive ? '?include_inactive=true' : ''}`),
@@ -464,6 +525,8 @@ export const api = {
   // Assets & Facilities (core capability, not a paid module)
   assetsListFacilities: (includeInactive) =>
     request(`/club-admin/assets/facilities${includeInactive ? '?include_inactive=true' : ''}`),
+  assetsSeedFacilities: () => request('/club-admin/assets/facilities/seed-starter', { method: 'POST' }),
+  assetsSeedItems: () => request('/club-admin/assets/items/seed-starter', { method: 'POST' }),
   assetsCreateFacility: (data) =>
     request('/club-admin/assets/facilities', { method: 'POST', body: JSON.stringify(data) }),
   assetsUpdateFacility: (id, data) =>
@@ -1998,6 +2061,62 @@ export const api = {
     request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+
+  // ─── Club Room Mode ────────────────────────────────────────────────────────
+  clubRoomGetSettings: () => request('/club-admin/club-room/settings'),
+  clubRoomPatchSettings: (data) =>
+    request('/club-admin/club-room/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  clubRoomCreateSlide: (data) =>
+    request('/club-admin/club-room/slides', { method: 'POST', body: JSON.stringify(data) }),
+  clubRoomPatchSlide: (id, data) =>
+    request(`/club-admin/club-room/slides/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  clubRoomDeleteSlide: (id) =>
+    request(`/club-admin/club-room/slides/${id}`, { method: 'DELETE' }),
+  clubRoomReorderSlides: (items) =>
+    request('/club-admin/club-room/slides/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  clubRoomListMedia: (source) =>
+    request(`/club-admin/club-room/media${source ? `?source=${source}` : ''}`),
+  clubRoomUploadMedia: (file, caption) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (caption) form.append('caption', caption)
+    return fetch(`${BASE}/club-admin/club-room/media`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  clubRoomSaveSocialExport: (blob, caption) => {
+    const form = new FormData()
+    form.append('file', blob, 'post.png')
+    if (caption) form.append('caption', caption)
+    return fetch(`${BASE}/club-admin/club-room/media/social-export`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  clubRoomDeleteMedia: (id) =>
+    request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
+  clubRoomListReports: () => request('/club-admin/club-room/reports'),
+  clubRoomPlay: () => request('/club-admin/club-room/play'),
+  clubRoomGetPublicLink: () => request('/club-admin/club-room/public-link'),
+  clubRoomSetPublicLink: (data) =>
+    request('/club-admin/club-room/public-link', { method: 'POST', body: JSON.stringify(data) }),
+  clubRoomRegeneratePublicLink: () =>
+    request('/club-admin/club-room/public-link/regenerate', { method: 'POST' }),
+
+  // Club Room Mode — public link (unauthenticated)
+  publicClubRoomLanding: (token) => request(`/public/club-room/${token}`),
+  publicClubRoomVerify: (token, pin) =>
+    request(`/public/club-room/${token}/verify`, { method: 'POST', body: JSON.stringify({ pin }) }),
+  publicClubRoomPlay: (token) => request(`/public/club-room/${token}/play`),
 
   // ─── Front-end Website (public) ───────────────────────────────────────────
   webGetSite: (slug) => request(`/clubs/${slug}/website`),

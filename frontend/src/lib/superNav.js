@@ -41,6 +41,7 @@ export const SUPER_SECTIONS = [
       { to: '/admin/super/migration', label: 'KlubPro Migration', blurb: 'Import player profiles and sponsors from a legacy KlubPro club.' },
       { to: '/admin/super/merge-clubs', label: 'Merge Clubs', blurb: 'Combine two club records into one.' },
       { to: '/admin/super/onboarding', label: 'Onboarding Requests', blurb: 'Enquiries from the public contact form.' },
+      { to: '/admin/super/unpause-requests', label: 'Unpause Requests', blurb: "Leads from a lapsed-trial club's password-protected page.", badge: 'unpauseRequests' },
     ],
   },
   {
@@ -88,10 +89,11 @@ export function visibleSectionItems(section, { selfServeEnabled } = {}) {
 
 // Aggregate badge count for a section's sidebar button — sums the counts of
 // whichever badge-bearing items it contains.
-export function sectionBadgeCount(section, { moduleReqCount = 0, commsReqCount = 0 } = {}) {
+export function sectionBadgeCount(section, { moduleReqCount = 0, commsReqCount = 0, unpauseReqCount = 0 } = {}) {
   return section.items.reduce((n, i) => {
     if (i.badge === 'moduleRequests') return n + moduleReqCount
     if (i.badge === 'commsRequests') return n + commsReqCount
+    if (i.badge === 'unpauseRequests') return n + unpauseReqCount
     return n
   }, 0)
 }

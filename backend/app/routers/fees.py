@@ -37,6 +37,7 @@ from app.auth.capabilities import (
     MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY,
 )
 from app.services import fees as fee_service
+from app.services import members as members_svc
 from app.services import fees_square as fee_square_service
 from app.services import fees_xero as fee_xero_service
 from app.services import membership_types as membership_types_service
@@ -589,19 +590,49 @@ async def create_member(
             raise HTTPException(status_code=422, detail="Membership type not found")
         membership_type_id = mt.id
 
-    member = FeeMember(
-        id=uuid.uuid4(), organisation_id=club.id, player_id=None, full_name=full_name,
+    # The person row is created via the shared spine service (same create the
+    # ClubManager Directory uses); BetterFees layers the fee season on top.
+    member_id = uuid.UUID(await members_svc.create_person(
+        db, club.id, full_name=full_name,
         email=(data.email or "").strip() or None, mobile=(data.mobile or "").strip() or None,
-        current_tier=schedule.name if schedule else None, membership_type_id=membership_type_id,
-    )
-    db.add(member)
-    await db.flush()
+        membership_type_id=membership_type_id, current_tier=(schedule.name if schedule else None),
+    ))
     db.add(FeeMemberSeason(
-        id=uuid.uuid4(), member_id=member.id, season_id=season.id, organisation_id=club.id,
+        id=uuid.uuid4(), member_id=member_id, season_id=season.id, organisation_id=club.id,
         fee_schedule_id=schedule.id if schedule else None,
     ))
     await db.commit()
-    return {"member_id": str(member.id)}
+    return {"member_id": str(member_id)}
+
+
+class MemberImportPreview(BaseModel):
+    csv: str
+
+
+class MemberImportCommit(BaseModel):
+    csv: str
+    season_id: str
+
+
+@router.post("/members/import/preview")
+async def members_import_preview(data: MemberImportPreview, _: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Preview a non-player member CSV — the SAME shared importer the ClubManager
+    Directory uses. Players are imported in Stats."""
+    from app.services import member_import as member_import_svc
+    return await member_import_svc.preview(db, club.id, data.csv)
+
+
+@router.post("/members/import/commit")
+async def members_import_commit(data: MemberImportCommit, _: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Import non-player members via the shared importer, then open a fee season
+    row (as "needs tier") for each so they appear in this season's members list."""
+    from app.services import member_import as member_import_svc
+    season = await _season_or_404(db, club, data.season_id)
+    result = await member_import_svc.commit(db, club.id, data.csv)
+    result["added_to_season"] = await member_import_svc.open_member_seasons(
+        db, club.id, season.id, result.pop("member_ids", []))
+    await db.commit()
+    return result
 
 
 async def _resolve_schedule(db, club, season, fee_schedule_id) -> Optional[FeeSchedule]:

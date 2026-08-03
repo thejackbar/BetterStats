@@ -342,6 +342,25 @@ class Organisation(Base):
     # Opaque JSON blob the BetterSocials editor uses as the club's reusable
     # brand palette/fonts/crest/sponsors set. NULL until an admin saves one.
     social_brand_kit = Column(JSONB, nullable=True)
+    # ─── Password-protected public page (migration 205) ───────────────────────
+    # A third public-page state alongside is_active's Active/Inactive: the page
+    # exists and is reachable but gated behind a 4-digit PIN (see
+    # services/club_lock.py). Independent of is_active by design — the gate
+    # check (routers/clubs.py::_public_blocked and
+    # club_lock.is_locked_for_request) always evaluates password_protected
+    # FIRST, so it wins regardless of is_active's value.
+    # password_protect_reason distinguishes the copy shown on the public gate:
+    #   'draft'       — voluntary privacy (club admin or Super Admin), plain
+    #                    PIN entry only.
+    #   'trial_ended' — Super-Admin-only, deliberate sales-conversion action;
+    #                    the gate also offers an "email me for access" form
+    #                    (see club_unpause_requests below).
+    # access_pin_hash is a bcrypt hash — the raw PIN is never stored.
+    password_protected = Column(Boolean, nullable=False, server_default="false", default=False)
+    password_protect_reason = Column(Text, nullable=True)
+    access_pin_hash = Column(Text, nullable=True)
+    password_protected_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    password_protected_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     # ─── BetterSelect: self-service player availability (migration 068) ───────
     # Players set their own availability via one per-club magic link + a
     # last-4-of-phone PIN — no accounts, no app. The token is the link's only
@@ -496,6 +515,66 @@ class SocialMediaAsset(Base):
     image_data = Column(LargeBinary, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+# ─── Club Room Mode (migration 205) ───────────────────────────────────────────
+# A club-configured, auto-rotating slideshow (sponsors / fixtures & lineups /
+# recent social posts / custom images) meant to be left running full-screen on
+# a TV in the club room. One settings row per club, an ordered list of
+# playlist entries (each expands into one or more rendered slides on read —
+# e.g. a "sponsors" entry becomes one slide per sponsor), and a shared media
+# pool for both admin-uploaded images and social-post exports saved from the
+# BetterSocials composer.
+
+class ClubRoomSettings(Base):
+    __tablename__ = "club_room_settings"
+
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled = Column(Boolean, nullable=False, default=False)
+    rotation_seconds = Column(Integer, nullable=False, default=15)
+    theme = Column(Text, nullable=False, default="dark")
+    shuffle = Column(Boolean, nullable=False, default=False)
+    # Public link (migration 210) — a club can run the TV off /room/{token}
+    # with no admin session on that browser. Same link+PIN+cookie posture as
+    # BetterSelect's self-service availability/vote links.
+    link_token = Column(Text, nullable=True)
+    public_link_enabled = Column(Boolean, nullable=False, default=False)
+    require_pin = Column(Boolean, nullable=False, default=True)
+    pin_hash = Column(Text, nullable=True)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubRoomSlide(Base):
+    __tablename__ = "club_room_slides"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slide_type = Column(Text, nullable=False)  # 'sponsors' | 'fixtures' | 'social_posts' | 'custom_images'
+    title = Column(Text, nullable=True)
+    config = Column(JSONB, nullable=False, default=dict)
+    duration_seconds = Column(Integer, nullable=True)  # overrides the club's default rotation_seconds
+    position = Column(Integer, nullable=False, default=0)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubRoomMedia(Base):
+    __tablename__ = "club_room_media"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source = Column(Text, nullable=False, default="upload")  # 'upload' | 'social_export'
+    caption = Column(Text, nullable=True)
+    image_data = Column(LargeBinary, nullable=False)
+    image_mime = Column(Text, nullable=False)
     created_by = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -3496,6 +3575,30 @@ class ClubOnboardingRequest(Base):
     # enquiry can be tied back to the anonymous browsing journey on the Usage page.
     visitor_id = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubUnpauseRequest(Base):
+    """A visitor's request to unlock a club's password-protected public page.
+
+    Only ever created from the public gate when the club's
+    ``password_protect_reason`` is 'trial_ended' — the sales-conversion trigger
+    for the "This trial has ended..." copy (see routers/clubs.py,
+    POST /clubs/{slug}/request-unpause). Reviewed by Super Admin at
+    /admin/super/unpause-requests, who can open a sales conversation with the
+    requester (reply_to on the notification email is the requester's own
+    address for exactly this). ``status`` tracks the follow-up
+    (pending -> actioned / dismissed).
+    """
+    __tablename__ = "club_unpause_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    email = Column(Text, nullable=False)
+    message = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending")  # pending | actioned | dismissed
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    actioned_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    actioned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
 
 class CommsContact(Base):

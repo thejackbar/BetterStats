@@ -688,6 +688,8 @@ export default function AdminSocialPost() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
+  const [savingToClubRoom, setSavingToClubRoom] = useState(false)
+  const [clubRoomSaved, setClubRoomSaved] = useState(false)
 
   const [templateId, setTemplateId] = useState(() => {
     // A ?type= deep link (from the Start screen or the dashboard) wins over the
@@ -1379,6 +1381,29 @@ export default function AdminSocialPost() {
     }
   }
 
+  // Save the current render straight into Club Room Mode's media pool, so it
+  // can rotate as a "Recent social posts" slide on the club TV loop — no
+  // download, no re-upload round trip. Scoped to a single render (not the
+  // Blank-tab multi-slide carousel) to keep this additive and low-risk.
+  const handleSaveToClubRoom = async () => {
+    if (!renderRef.current) return
+    setSavingToClubRoom(true)
+    setExportError(null)
+    setClubRoomSaved(false)
+    try {
+      const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
+      const H = tmpl.h || 1080
+      const blob = await exportNodeToPng(renderRef.current, { width: W, height: H, download: false })
+      await api.clubRoomSaveSocialExport(blob, tmpl.label || templateId)
+      setClubRoomSaved(true)
+      setTimeout(() => setClubRoomSaved(false), 3000)
+    } catch (e) {
+      setExportError(e.message || 'Could not save to Club Room')
+    } finally {
+      setSavingToClubRoom(false)
+    }
+  }
+
   // ─── Derived values ─────────────────────────────────────────────────────────
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
@@ -1995,6 +2020,12 @@ export default function AdminSocialPost() {
         className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
       <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
+      {!(isBlankTab && pages.count > 1) && (
+        <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
+          className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-60">
+          {savingToClubRoom ? 'SAVING…' : clubRoomSaved ? '✓ SAVED' : 'SAVE TO CLUB ROOM'}
+        </button>
+      )}
       <button onClick={handleExport} disabled={exporting}
         className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : '↓ DOWNLOAD PNG')}</button>

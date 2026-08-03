@@ -55,7 +55,9 @@ async function buildEmbeddedFontCss() {
   return css
 }
 
-// Render an off-screen template node to a high-res PNG and trigger a download.
+// Render an off-screen template node to a high-res PNG and trigger a download
+// (unless `download` is false — e.g. the "Save to Club Room" action wants the
+// blob itself to upload, not a file on the visitor's machine).
 // `node` must already be mounted at full width×height (templates render full-bleed).
 export async function exportNodeToPng(node, {
   width,
@@ -63,6 +65,7 @@ export async function exportNodeToPng(node, {
   fileName = 'image.png',
   scale = 2,                   // 2× for crisp, high-DPI output
   backgroundColor = '#080808', // fallback for any uncovered area; templates are full-bleed dark
+  download = true,
 } = {}) {
   if (!node) throw new Error('Nothing to export')
   await document.fonts.ready
@@ -78,12 +81,15 @@ export async function exportNodeToPng(node, {
     font,
   })
   if (!blob) throw new Error('Could not generate image')
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  if (download) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  return blob
 }

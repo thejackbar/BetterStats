@@ -5,6 +5,7 @@ import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
+import ClubPinGate from './ClubPinGate'
 import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
@@ -27,7 +28,7 @@ function PlayerStat({ label, value, accent }) {
 
 export default function Players() {
   const { clubSlug } = useParams()
-  const { club, orgId, inactive, notFound } = useClub(clubSlug)
+  const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading: clubLoading } = useClubData(orgId)
@@ -70,6 +71,7 @@ export default function Players() {
     return players.filter(p => nameMatchesSearch(p.display_name || p.name, search))
   }, [players, search])
 
+  if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
   if (notFound) return <ClubInactive variant="notfound" slug={clubSlug} />
   if (clubLoading) return <PbSpinner message="Loading players…" />

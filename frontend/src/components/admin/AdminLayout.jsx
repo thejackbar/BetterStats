@@ -72,6 +72,9 @@ export default function AdminLayout({ children }) {
     api.superCountCommsRequests()
       .then(d => { if (alive) setCommsReqCount(d?.total || 0) })
       .catch(() => {})
+    api.superListUnpauseRequests('pending')
+      .then(d => { if (alive) setUnpauseReqCount(Array.isArray(d) ? d.length : 0) })
+      .catch(() => {})
     api.superGetGeneralSettings()
       .then(s => { if (alive) setSelfServeEnabled(!!s?.self_serve_registration_enabled) })
       .catch(() => {})
@@ -84,6 +87,8 @@ export default function AdminLayout({ children }) {
   const [moduleReqCount, setModuleReqCount] = useState(0)
   // Pending BetterComms tier requests + breaker-suspended clubs (badge).
   const [commsReqCount, setCommsReqCount] = useState(0)
+  // Pending unpause requests from password-protected trial-ended clubs (badge).
+  const [unpauseReqCount, setUnpauseReqCount] = useState(0)
   // Self-serve trial registration platform flag — off by default; hides the
   // internal-only menu item until a super admin turns it on (General Settings).
   const [selfServeEnabled, setSelfServeEnabled] = useState(false)
@@ -129,7 +134,7 @@ export default function AdminLayout({ children }) {
       ...section,
       items,
       hubTo: `/admin/super/hub/${section.key}`,
-      badge: sectionBadgeCount(section, { moduleReqCount, commsReqCount }),
+      badge: sectionBadgeCount(section, { moduleReqCount, commsReqCount, unpauseReqCount }),
     }
   }).filter(s => s.items.length > 0)
 

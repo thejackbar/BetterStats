@@ -26,7 +26,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -69,6 +69,7 @@ import Login from './pages/Login'
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
 const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
 const BetterClubManagerHome = lazy(() => import('./pages/admin/BetterClubManagerHome'))
+const ClubManagerApp = lazy(() => import('./pages/admin/clubmanager/redesign/ClubManagerApp'))
 const SetupWizard = lazy(() => import('./pages/admin/setup/SetupWizard'))
 const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
@@ -125,6 +126,8 @@ const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const SuperCrmTargets = lazy(() => import('./pages/admin/SuperCrmTargets'))
 const SuperCrmAutomation = lazy(() => import('./pages/admin/SuperCrmAutomation'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
+const AdminClubRoom = lazy(() => import('./pages/admin/AdminClubRoom'))
+const ClubRoomPlayer = lazy(() => import('./pages/admin/ClubRoomPlayer'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
 const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail'))
@@ -134,6 +137,7 @@ const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperClubMerge = lazy(() => import('./pages/admin/SuperClubMerge'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
+const SuperUnpauseRequests = lazy(() => import('./pages/admin/SuperUnpauseRequests'))
 const SuperBackups = lazy(() => import('./pages/admin/SuperBackups'))
 const SuperCoupons = lazy(() => import('./pages/admin/SuperCoupons'))
 const SuperDiscountReport = lazy(() => import('./pages/admin/SuperDiscountReport'))
@@ -220,6 +224,7 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 const PublicVoting = lazy(() => import('./pages/PublicVoting'))
+const PublicClubRoom = lazy(() => import('./pages/PublicClubRoom'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
 const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
 // Public, login-free event registration (Events/Ticketing — event-id link)
@@ -281,6 +286,7 @@ export default function App() {
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
+          <Route path="/room/:token" element={<PublicClubRoom />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />
           {/* Public event registration (no login — event-id link) */}
@@ -294,8 +300,9 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/betterstats" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><BetterClubManagerHome /></ProtectedRoute>} />
+          <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="overview" /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="overview" /></ProtectedRoute>} />
+          <Route path="/admin/betterclub/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
@@ -305,16 +312,16 @@ export default function App() {
           <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
-          <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
-          <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
-          <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
-          <Route path="/admin/roles" element={<ProtectedRoute requireRole="super_admin"><AdminRoles /></ProtectedRoute>} />
-          <Route path="/admin/activities" element={<ProtectedRoute requireRole="super_admin"><AdminActivities /></ProtectedRoute>} />
-          <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><AdminQualifications /></ProtectedRoute>} />
-          <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><AdminEvents /></ProtectedRoute>} />
-          <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
+          <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="committee" /></ProtectedRoute>} />
+          <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/roles" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/activities" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="events" /></ProtectedRoute>} />
+          <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="facilities" /></ProtectedRoute>} />
           <Route path="/admin/member-portal" element={<ProtectedRoute requireRole="super_admin"><AdminMemberPortal /></ProtectedRoute>} />
-          <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><AdminClubDiary /></ProtectedRoute>} />
+          <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="diary" /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute requireCore><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute requireCore><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute requireCore><AdminPartnershipRecords /></ProtectedRoute>} />
@@ -358,6 +365,11 @@ export default function App() {
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
+          <Route path="/admin/club-room" element={<ProtectedRoute requireCore><AdminClubRoom /></ProtectedRoute>} />
+          {/* Standalone full-screen player, no surrounding sidebar — same pattern as
+              /admin/yearbook: a club leaves this open on a TV, so a refresh must land
+              straight back on the stage, not inside the app chrome. */}
+          <Route path="/admin/club-room/play" element={<ProtectedRoute requireCore><ClubRoomPlayer /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute requireCore><AdminYearbook /></ProtectedRoute>} />
@@ -369,6 +381,7 @@ export default function App() {
           <Route path="/admin/super/merge-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubMerge /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
+          <Route path="/admin/super/unpause-requests" element={<ProtectedRoute requireRole="super_admin"><SuperUnpauseRequests /></ProtectedRoute>} />
           <Route path="/admin/super/backups" element={<ProtectedRoute requireRole="super_admin"><SuperBackups /></ProtectedRoute>} />
           <Route path="/admin/super/coupons" element={<ProtectedRoute requireRole="super_admin"><SuperCoupons /></ProtectedRoute>} />
           <Route path="/admin/super/discount-report" element={<ProtectedRoute requireRole="super_admin"><SuperDiscountReport /></ProtectedRoute>} />

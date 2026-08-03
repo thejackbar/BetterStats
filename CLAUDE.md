@@ -1,5 +1,65 @@
 # BetterStats — Claude Session Notes
 
+## Password-protected "Draft" pages + trial-ended unpause requests (v9.0.0, Aug 2026)
+
+A third public-page state alongside `is_active`'s Active/Inactive: the page exists
+and is reachable but gated behind a 4-digit PIN, either the club's own voluntary
+choice or a Super-Admin sales-conversion lock on a lapsed trial.
+
+- **Migration 205**: `organisations.password_protected` (bool), `.password_protect_reason`
+  (`'draft'` | `'trial_ended'`, meaningful only when protected), `.access_pin_hash`
+  (bcrypt — the raw PIN is never stored), `.password_protected_at`/`.password_protected_by`
+  (audit). New table `club_unpause_requests` (org, email, message, status
+  pending/actioned/dismissed, actioned_at/by) — the queue behind the "email me for
+  access" form. Both mirrored idempotently in `main.py`'s lifespan per the usual
+  pattern. `password_protected` is deliberately independent of `is_active` — the
+  gate always checks `password_protected` FIRST, so it wins regardless of `is_active`.
+- **`app/services/club_lock.py`** — the shared PIN/cookie primitive, modeled
+  directly on `public_availability.py`'s `bs_avail` pattern: `hash_pin`/`verify_pin`
+  (bcrypt), `issue_lock_cookie`/`is_unlocked` (signed JWT cookie `bs_lock`, HttpOnly,
+  30 days), `is_locked_for_request(org, request)`, and `lock_detail(org)` (the
+  structured 423 payload — same `detail={"code": ..., "message": ...}` convention
+  `require_module`'s 402 upsell already uses).
+- **`routers/clubs.py`**: `GET /{slug}` raises **423** (not 403) with the lock
+  payload when password-protected and unlocked-by-cookie fails, checked ahead of
+  the existing `_public_blocked` 403. New `POST /{slug}/unlock` (PIN verify,
+  rate-limited + lockout via `rate_limit.assert_not_locked`, same shape as
+  BetterSelect's self-service PIN) and `POST /{slug}/request-unpause` (only valid
+  when `password_protect_reason == 'trial_ended'`; creates the queue row, emails
+  **`cricket@bettersports.com.au`** specifically — a deliberate choice, not the
+  general support address — with `reply_to` set to the requester's own email so
+  Super Admin can just hit reply). Same lock check added to `ladders.py` and
+  `website.py`'s public endpoints for defense-in-depth parity with how they
+  already duplicate the `is_active` check independently of `clubs.py`.
+- **Club-admin self-serve** (`routers/club_admin.py`'s `/settings` PATCH,
+  `MANAGE_SETTINGS` cap): a club can enable Draft mode itself only while
+  `subscription_status` is `trial` or `active` — turning it off is always allowed.
+  Always sets `password_protect_reason='draft'`; `'trial_ended'` is Super-Admin-only
+  via `ClubUpdate`/`patch_club` (no subscription-status gate there — "whenever they
+  want").
+- **Super Admin**: `SuperClubs.jsx`'s edit drawer gets a "Public access" panel
+  (independent of the existing Active/Inactive pill) — enable + reason picker
+  (Draft / Trial ended) + PIN field, behind a `window.confirm` before turning on.
+  New `/admin/super/unpause-requests` (`SuperUnpauseRequests.jsx`, mirrors
+  `SuperOnboarding.jsx`'s list/filter/status pattern) added to `lib/superNav.js`'s
+  Clubs & Data section with a pending-count badge (same wiring as
+  `moduleRequests`/`commsRequests`).
+- **Frontend gate**: `useClub.js` gained a `locked` state (detected via `err.status
+  === 423`, the payload already surfaces as `error.detail` per api.js's existing
+  object-shaped-detail handling) plus `unlock`/`requestAccess`. New
+  `ClubPinGate.jsx` (styled like `ClubInactive.jsx`'s hero treatment) renders the
+  PIN entry, and — only for `reason: 'trial_ended'` — the "This trial has ended…"
+  copy and email-request form. Wired into all 12 public page files that already do
+  the `if (inactive) return <ClubInactive/>` pattern (Dashboard, Players, Records,
+  Ladders, Leaderboard, StatLab, GamesPage, FixturesPage, LineupsPage, TeamDetail,
+  Teams, PlayerComparison), checked before `inactive`/`notFound`.
+- **Known scope boundary**: only `GET /clubs/{slug}` (+ `ladders`/`website`'s own
+  public endpoints) are PIN-gated server-side. The dozens of other org-scoped data
+  endpoints (players, records, games, etc.) aren't independently re-checked — the
+  frontend never learns the org id without unlocking first, so this is a soft
+  privacy/sales gate, not a hardened access-control boundary (matching the same
+  posture the existing self-serve-availability magic link already accepts).
+
 ## Admin navigation — module surfaces, and where the Core tools live (v8.82.0, Jul 2026)
 
 The admin app is organised as **module surfaces**: each Better product is a card
