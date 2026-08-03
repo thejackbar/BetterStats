@@ -77,30 +77,32 @@ export default function Directory({ st, patch, narrow }) {
   const selId = st.dirSel && (people || []).some(p => p.key === st.dirSel) ? st.dirSel : (list[0] ? list[0].key : null)
   const sel = (people || []).find(p => p.key === selId) || null
 
+  // Load (or reload) one member's quals + hours + overlays into the detail
+  // cache. Called both on select and after a mutation — a mutation can't rely
+  // on the select effect re-running (member_id is unchanged), so it re-fetches
+  // through here directly.
+  const loadDetail = (memberId) => Promise.all([
+    api.qualListMemberQualifications(memberId).catch(() => []),
+    api.volunteerListHours(memberId).catch(() => []),
+    api.dirMemberOverlays(memberId).catch(() => ({ committee: [], families: [] })),
+  ]).then(([qRes, hRes, oRes]) => {
+    const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
+      id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
+      expiry: x.expires_at || x.expiry || null,
+    }))
+    const raw = (Array.isArray(hRes) ? hRes : (hRes?.hours || []))
+    const byAct = {}
+    raw.forEach(h => {
+      const a = h.activity || h.activity_name || h.activity_type || 'Other'
+      byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
+    })
+    const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
+    const overlays = { committee: oRes?.committee || [], families: oRes?.families || [], shifts_this_week: oRes?.shifts_this_week || 0, diary_open: oRes?.diary_open || 0 }
+    setDetail(d => ({ ...d, [memberId]: { quals, hours, hoursRaw: raw, overlays } }))
+  })
   useEffect(() => {
     if (!sel || !sel.member_id || detail[sel.member_id]) return
-    let alive = true
-    Promise.all([
-      api.qualListMemberQualifications(sel.member_id).catch(() => []),
-      api.volunteerListHours(sel.member_id).catch(() => []),
-      api.dirMemberOverlays(sel.member_id).catch(() => ({ committee: [], families: [] })),
-    ]).then(([qRes, hRes, oRes]) => {
-      if (!alive) return
-      const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
-        id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
-        expiry: x.expires_at || x.expiry || null,
-      }))
-      const raw = (Array.isArray(hRes) ? hRes : (hRes?.hours || []))
-      const byAct = {}
-      raw.forEach(h => {
-        const a = h.activity || h.activity_name || h.activity_type || 'Other'
-        byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
-      })
-      const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
-      const overlays = { committee: oRes?.committee || [], families: oRes?.families || [], shifts_this_week: oRes?.shifts_this_week || 0, diary_open: oRes?.diary_open || 0 }
-      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours, hoursRaw: raw, overlays } }))
-    })
-    return () => { alive = false }
+    loadDetail(sel.member_id)
   }, [sel?.member_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const det = sel && sel.member_id ? detail[sel.member_id] : null
@@ -108,8 +110,9 @@ export default function Directory({ st, patch, narrow }) {
   const hours = det?.hours || []
   const overlays = det?.overlays || { committee: [], families: [], shifts_this_week: 0, diary_open: 0 }
   const hoursRaw = det?.hoursRaw || []
-  // force the lazy detail effect to re-fetch this member after a mutation
-  const refreshMember = async (mid) => { setDetail(d => { const n = { ...d }; delete n[mid]; return n }); await reload() }
+  // Re-fetch this member's detail directly (not via the select effect, which
+  // won't re-run for the same member_id) and refresh the people list.
+  const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
 
   // ── mutations ──────────────────────────────────────────────────────────────
   const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', notes: '' } })
