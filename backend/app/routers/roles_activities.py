@@ -40,6 +40,7 @@ class TypeUpsert(BaseModel):
     description: Optional[str] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
+    category: Optional[str] = None  # role types only: committee/volunteer/paid/third_party/other
 
 
 class RoleUpsert(BaseModel):
@@ -76,7 +77,7 @@ async def create_role_type(data: TypeUpsert, _: User = _roles, club: Organisatio
                            db: AsyncSession = Depends(get_db)):
     try:
         t = await svc.create_role_type(db, club.id, name=data.name, description=data.description,
-                                       sort_order=data.sort_order or 0)
+                                       sort_order=data.sort_order or 0, category=data.category)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()

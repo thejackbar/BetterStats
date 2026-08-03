@@ -53,7 +53,7 @@ export default function Directory({ st, patch, narrow }) {
   const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
   useEffect(() => {
     reload()
-    api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee))).catch(() => {})
+    api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee && x.role_type_category !== 'committee'))).catch(() => {})
     api.qualListTypes().then(r => setQualTypes(r?.types || r || [])).catch(() => {})
     api.dirCommitteePositions().then(r => setPositions(r?.positions || [])).catch(() => {})
     api.raActivities().then(r => setActivities(r?.activities || r || [])).catch(() => {})
@@ -373,16 +373,16 @@ export default function Directory({ st, patch, narrow }) {
                   <>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {overlays.committee.map(c => (
-                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
-                          {c.name}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'rgba(99,102,241,0.15)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'rgba(99,102,241,0.45)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                          {c.name}{c.is_office_bearer ? ' · office bearer' : ''}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
                         </span>
                       ))}
                       {overlays.committee.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No committee position.</span>}
                     </div>
                     <div style={{ marginTop: 8 }}>
-                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 240, opacity: busy ? 0.6 : 1 }}>
+                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 260, opacity: busy ? 0.6 : 1 }}>
                         <option value="">{positions.length ? '+ Assign a position…' : 'No positions set up'}</option>
-                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}{p.is_office_bearer ? ' (office bearer)' : ''}</option>)}
                       </select>
                     </div>
                     <div style={{ ...cap, marginTop: 16 }}>FAMILY</div>

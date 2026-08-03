@@ -11,6 +11,18 @@ import AreaEditor from '../parts/AreaEditor'
 // is first-class and discoverable, not buried. A parent Starter Pack seeds its
 // type catalogue too (see the services), so one click gives a grouped set.
 
+// Role-type categories — a committee type feeds committee positions; an official
+// type is a formal scorecard role (umpire/scorer); the rest are non-committee.
+const ROLE_CAT_OPTS = [
+  { value: 'committee', label: 'Committee' },
+  { value: 'official', label: 'Official (umpire, scorer)' },
+  { value: 'volunteer', label: 'Volunteer' },
+  { value: 'paid', label: 'Paid worker' },
+  { value: 'third_party', label: 'Third party' },
+  { value: 'other', label: 'Other' },
+]
+const catLabel = (v) => (ROLE_CAT_OPTS.find(o => o.value === v) || {}).label || ''
+
 // A compact secondary tab bar, sized to content (not full width).
 function SubBar({ value, onChange, tabs }) {
   return <div style={{ display: 'flex', marginBottom: 16 }}><SegTabs value={value} onChange={onChange} tabs={tabs} /></div>
@@ -53,8 +65,8 @@ export default function AreasRoles({ st, patch, narrow }) {
           <SubBar value={sub} onChange={setSub} tabs={[{ key: 'main', label: 'Roles' }, { key: 'types', label: 'Role types' }]} />
           {sub === 'main' ? (
             <EntityManager key="roles"
-              describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Each role can sit under an optional type (Coach, Ground Staff…); the Starter Pack sets up those types for you. Committee roles are managed on the Committee screen."
-              load={() => api.raRoles().then(r => (r?.roles || r || []).filter(x => !x.is_committee))}
+              describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Each role sits under a type (Official, Volunteer, Paid…). Committee-type roles are managed as positions on the Committee screen and don't appear here."
+              load={() => api.raRoles().then(r => (r?.roles || r || []).filter(x => !x.is_committee && x.role_type_category !== 'committee'))}
               fields={[
                 { key: 'title', label: 'Role name', type: 'text', required: true, span: 2 },
                 { key: 'role_type_id', label: 'Type', type: 'select', options: roleTypeOpts, placeholder: 'No type',
@@ -69,13 +81,17 @@ export default function AreasRoles({ st, patch, narrow }) {
               addLabel="Add role" emptyText="No general roles yet." />
           ) : (
             <EntityManager key="role-types"
-              describe="Role types group your roles (Coach, Ground Staff, Food & Beverage…). Pick one when adding a role. The Roles Starter Pack seeds these for you."
+              describe="Role types classify your roles. A Committee type feeds committee positions (not the Roles list); an Official type is a formal scorecard role (umpire/scorer); Volunteer / Paid / Third party / Other are everyday roles. Pick a type when adding a role."
               load={() => api.raRoleTypes().then(r => r?.types || r || [])}
-              fields={[{ key: 'name', label: 'Type name', type: 'text', required: true, span: 2 }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
+              fields={[
+                { key: 'name', label: 'Type name', type: 'text', required: true, span: 2 },
+                { key: 'category', label: 'Category', type: 'select', options: ROLE_CAT_OPTS, placeholder: 'Volunteer' },
+                { key: 'description', label: 'Description', type: 'text' },
+              ]}
               onCreate={v => api.raCreateRoleType(v)} onUpdate={(id, v) => api.raUpdateRoleType(id, v)} onDelete={id => api.raArchiveRoleType(id)}
               onReorder={reorderBySortOrder(api.raUpdateRoleType)} onChanged={reloadRoleTypes}
               seed={{ label: 'Add Role Types Starter Pack', fn: () => api.raSeedRoleTypes() }}
-              primaryKey="name" subtitle={it => it.description || ''}
+              primaryKey="name" subtitle={it => [catLabel(it.category), it.description].filter(Boolean).join(' · ')}
               addLabel="Add role type" emptyText="No role types yet." />
           )}
         </div>

@@ -55,6 +55,10 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
         SELECT DISTINCT member_id FROM committee_terms
         WHERE organisation_id = :org AND member_id IS NOT NULL AND ended_at IS NULL
     """), {"org": org_id})).scalars().all()}
+    office_bearers = {str(m) for m in (await db.execute(text("""
+        SELECT DISTINCT ct.member_id FROM committee_terms ct JOIN committee_positions cp ON cp.id = ct.position_id
+        WHERE ct.organisation_id = :org AND ct.member_id IS NOT NULL AND ct.ended_at IS NULL AND cp.is_office_bearer = TRUE
+    """), {"org": org_id})).scalars().all()}
 
     guardians = {str(m) for m in (await db.execute(text("""
         SELECT DISTINCT fmb.fee_member_id
@@ -88,6 +92,8 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
             segs.append("Player")
         if mid in vol_profiles or roles_by.get(mid):
             segs.append("Volunteer")
+        if mid in office_bearers:
+            segs.append("Office Bearer")
         if mid in committee or cat == "committee":
             segs.append("Committee")
         if cat == "parent" or mid in guardians:
@@ -137,10 +143,10 @@ async def member_overlays(db: AsyncSession, org_id, member_id) -> dict:
     """A member's current committee positions and family links, for the detail
     pane. (Roles/quals/hours are fetched separately.)"""
     committee = (await db.execute(text("""
-        SELECT ct.id AS term_id, cp.id AS position_id, cp.name
+        SELECT ct.id AS term_id, cp.id AS position_id, cp.name, cp.is_office_bearer
         FROM committee_terms ct JOIN committee_positions cp ON cp.id = ct.position_id
         WHERE ct.organisation_id = :org AND ct.member_id = :mid AND ct.ended_at IS NULL
-        ORDER BY cp.sort_order, lower(cp.name)
+        ORDER BY cp.is_office_bearer DESC, cp.sort_order, lower(cp.name)
     """), {"org": org_id, "mid": member_id})).mappings().all()
     families = (await db.execute(text("""
         SELECT f.id AS family_id, f.name, fm.relationship, fm.is_guardian
@@ -164,7 +170,7 @@ async def member_overlays(db: AsyncSession, org_id, member_id) -> dict:
                OR o.assigned_to_role_id IN (SELECT role_id FROM volunteer_roles WHERE organisation_id = :org AND member_id = :mid))
     """), {"org": org_id, "mid": member_id})).scalar() or 0
     return {
-        "committee": [{"term_id": str(c["term_id"]), "position_id": str(c["position_id"]), "name": c["name"]} for c in committee],
+        "committee": [{"term_id": str(c["term_id"]), "position_id": str(c["position_id"]), "name": c["name"], "is_office_bearer": c["is_office_bearer"]} for c in committee],
         "families": [{"family_id": str(x["family_id"]), "name": x["name"], "relationship": x["relationship"], "is_guardian": x["is_guardian"]} for x in families],
         "shifts_this_week": int(shifts_this_week),
         "diary_open": int(diary_open),
@@ -173,9 +179,9 @@ async def member_overlays(db: AsyncSession, org_id, member_id) -> dict:
 
 async def list_positions(db: AsyncSession, org_id) -> list[dict]:
     rows = (await db.execute(text(
-        "SELECT id, name FROM committee_positions WHERE organisation_id = :org AND is_active = TRUE ORDER BY sort_order, lower(name)"
+        "SELECT id, name, is_office_bearer FROM committee_positions WHERE organisation_id = :org AND is_active = TRUE ORDER BY is_office_bearer DESC, sort_order, lower(name)"
     ), {"org": org_id})).mappings().all()
-    return [{"id": str(r["id"]), "name": r["name"]} for r in rows]
+    return [{"id": str(r["id"]), "name": r["name"], "is_office_bearer": r["is_office_bearer"]} for r in rows]
 
 
 async def list_families(db: AsyncSession, org_id) -> list[dict]:
