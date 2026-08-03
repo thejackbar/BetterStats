@@ -24,17 +24,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
 
 
-async def list_people(db: AsyncSession, org_id) -> list[dict]:
+async def list_people(db: AsyncSession, org_id, include_archived: bool = False) -> list[dict]:
     """One row per person: every active fee_members row, unioned with the club's
     players that don't yet have a member row. Each person carries its computed
     segments (Player / Volunteer / Committee / Parent / Third party / Life
-    member), assigned roles, hours and a quals-to-renew count."""
-    members = (await db.execute(text("""
+    member), assigned roles, hours and a quals-to-renew count. With
+    include_archived, archived people are included too, each flagged `archived`."""
+    members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
-               fm.is_life_member, p.photo_url, p.email AS player_email, p.phone AS player_phone
+               fm.is_life_member, fm.archived_at, p.photo_url, p.email AS player_email, p.phone AS player_phone
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id
-        WHERE fm.organisation_id = :org AND fm.archived_at IS NULL
+        WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
     """), {"org": org_id})).mappings().all()
 
     roles_rows = (await db.execute(text("""
@@ -111,7 +112,7 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
             # has none, so a player's email/phone show through in ClubManager.
             "name": m["full_name"], "email": m["email"] or m["player_email"] or "",
             "phone": m["mobile"] or m["player_phone"] or "",
-            "photo": m["photo_url"], "category": cat,
+            "photo": m["photo_url"], "category": cat, "archived": m["archived_at"] is not None,
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
             "quals_total": q.get("total", 0), "flagged": q.get("expiring", 0),
@@ -131,7 +132,7 @@ async def list_people(db: AsyncSession, org_id) -> list[dict]:
             continue
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
-            "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None,
+            "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None, "archived": False,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": ["Player"],
         })
 

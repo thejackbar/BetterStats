@@ -48,8 +48,8 @@ class RoleBody(BaseModel):
 
 
 @router.get("/people")
-async def list_people(_: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"people": await svc.list_people(db, club.id), "categories": members_svc.MEMBER_CATEGORIES}
+async def list_people(include_archived: bool = False, _: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"people": await svc.list_people(db, club.id, include_archived=include_archived), "categories": members_svc.MEMBER_CATEGORIES}
 
 
 @router.post("/people")

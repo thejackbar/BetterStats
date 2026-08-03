@@ -49,10 +49,10 @@ export default function Directory({ st, patch, narrow }) {
   const [activities, setActivities] = useState([])
   const [logForm, setLogForm] = useState({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) })
 
-  const reload = () => api.dirPeople().then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
+  const reload = () => api.dirPeople(st.dirShowArchived).then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
   const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
+  useEffect(() => { reload() }, [st.dirShowArchived]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    reload()
     api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee && x.role_type_category !== 'committee'))).catch(() => {})
     api.qualListTypes().then(r => setQualTypes(r?.types || r || [])).catch(() => {})
     api.dirCommitteePositions().then(r => setPositions(r?.positions || [])).catch(() => {})
@@ -132,6 +132,10 @@ export default function Directory({ st, patch, narrow }) {
     if (!p.member_id) return
     if (!window.confirm('Archive ' + p.name + '? They can be restored later, and their history is kept.')) return
     setBusy(true); try { await api.dirArchiveMember(p.member_id); await reload(); patch({ dirSel: null }) } finally { setBusy(false) }
+  }
+  const restore = async (p) => {
+    if (!p.member_id) return
+    setBusy(true); try { await api.dirRestoreMember(p.member_id); await reload() } finally { setBusy(false) }
   }
   const assignRole = async (p, roleId) => {
     if (!roleId) return
@@ -215,6 +219,7 @@ export default function Directory({ st, patch, narrow }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : (s === 'Third party' ? 'Third parties' : s + 's')}</button>)}
           <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
+          <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
           <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
           <button onClick={openAdd} style={btnP}>+ Add person</button>
@@ -230,7 +235,7 @@ export default function Directory({ st, patch, narrow }) {
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 8, cursor: 'pointer', border: p.key === selId ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent', background: p.key === selId ? 'rgba(99,102,241,0.08)' : 'transparent' }}>
                 <Avatar p={p} size={30} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: p.archived ? C.faint : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}{p.archived ? <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em', color: C.warn, border: `1px solid ${C.warn}66`, borderRadius: 3, padding: '1px 4px', marginLeft: 6 }}>ARCHIVED</span> : null}</div>
                   <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{roleTitles(p).join(' · ') || (p.segs[0] || 'Member')}</div>
                 </div>
                 {p.flagged > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.warn, flexShrink: 0 }} />}
@@ -253,8 +258,10 @@ export default function Directory({ st, patch, narrow }) {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                {sel.member_id && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
-                {sel.member_id && <button onClick={() => archive(sel)} style={{ ...btnS, color: C.faint }}>Archive</button>}
+                {sel.member_id && !sel.archived && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
+                {sel.member_id && (sel.archived
+                  ? <button onClick={() => restore(sel)} disabled={busy} style={{ ...btnP, opacity: busy ? 0.6 : 1 }}>Restore</button>
+                  : <button onClick={() => archive(sel)} style={{ ...btnS, color: C.faint }}>Archive</button>)}
               </div>
             </div>
 
