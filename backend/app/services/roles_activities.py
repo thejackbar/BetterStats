@@ -23,7 +23,8 @@ from app.models.db import (
 
 # ─── Starter sets ────────────────────────────────────────────────────────────
 STARTER_ROLE_TYPES = [
-    ("Committee Member", "Elected/appointed committee positions."),
+    ("Office Bearer", "Executive committee — President, Vice President, Treasurer, Secretary; legal/fiduciary duties."),
+    ("Committee Member", "General elected/appointed committee positions."),
     ("Officials", "Formal match roles on the scorecard — umpires and scorers."),
     ("Ground Staff", "Ground, nets and facility upkeep."),
     ("Coach", "Coaching and player development."),
@@ -45,6 +46,11 @@ STARTER_ROLES = [
     ("Cleaner", "Other"),
     ("Photographer", "Other"),
 ]
+
+# The executive office bearers among the committee roles — they get the
+# "Office Bearer" role type (still committee-category); the rest get
+# "Committee Member". Matches committee.py's own office-bearer name set.
+_OFFICE_BEARER_TITLES = {"president", "vice president", "treasurer", "secretary"}
 
 # (title, description) — the elected/appointed COMMITTEE roles. These are the
 # same roles the Committee Administration "Positions" tab holds terms against
@@ -236,7 +242,7 @@ async def seed_starter_role_types(session, org_id) -> int:
     # is a committee type, "Other" is other. Clubs re-classify the rest (paid,
     # third_party…) themselves via Areas & Roles.
     await session.execute(text(
-        "UPDATE club_role_types SET category='committee' WHERE organisation_id=:org AND lower(name)='committee member'"
+        "UPDATE club_role_types SET category='committee' WHERE organisation_id=:org AND lower(name) IN ('committee member', 'office bearer')"
     ), {"org": org_id})
     await session.execute(text(
         "UPDATE club_role_types SET category='official' WHERE organisation_id=:org AND lower(name)='officials'"
@@ -315,7 +321,8 @@ async def seed_starter_roles(session: AsyncSession, org_id, *, committee: bool =
                 if not cur.is_active:
                     cur.is_active = True; seeded += 1
                 continue
-            rtype = await _get_or_create_type(session, ClubRoleType, org_id, "Committee Member")
+            type_name = "Office Bearer" if title.lower() in _OFFICE_BEARER_TITLES else "Committee Member"
+            rtype = await _get_or_create_type(session, ClubRoleType, org_id, type_name)
             session.add(ClubRole(organisation_id=org_id, title=title, description=desc,
                                  role_type_id=rtype.id if rtype else None, is_committee=True, sort_order=i))
             seeded += 1

@@ -153,7 +153,10 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         {onCreate && !adding && editId == null && <button onClick={startAdd} style={btnS}>+ {addLabel}</button>}
-        {seed && items.length === 0 && <button onClick={doSeed} disabled={busy} style={{ ...btnP, opacity: busy ? 0.6 : 1 }}>{busy ? 'Adding…' : seed.label}</button>}
+        {/* Always available: the starter pack tops up (idempotent) so a club can
+            pick up newly-added starter items. Primary when the list is empty,
+            secondary once it has items. */}
+        {seed && <button onClick={doSeed} disabled={busy} style={{ ...(items.length === 0 ? btnP : btnS), opacity: busy ? 0.6 : 1 }}>{busy ? 'Adding…' : seed.label}</button>}
         {onReorder && items.length > 1 && <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, alignSelf: 'center' }}>DRAG THE GRIP TO REORDER</span>}
       </div>
 
