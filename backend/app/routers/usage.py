@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import User, get_db
 from app.routers.auth import require_super_admin
 from app.services import platform_settings as ps
+from app.services.club_directory import _resolved_cid_sql
 from app.services.usage_tracker import record_event
 
 router = APIRouter(tags=["usage"])
@@ -1999,22 +2000,44 @@ async def live(
         GROUP BY 1, 2, 3 ORDER BY views DESC LIMIT 20
     """))).mappings().all()
 
+    # Which club an anonymous visitor is associated with — NOT which club's
+    # page they happen to be looking at (a stranger reading Applecross's
+    # public scorecard isn't "associated with Applecross"), but who sent
+    # them: an outreach email/share-link's own utm_id/utm_source matching a
+    # club's tracking code (marketing_clubs.utm_code), or a manually-set
+    # alias for a raw value that doesn't literally equal a club's code
+    # (marketing_utm_aliases — e.g. a rep's name used as utm_source). Reuses
+    # the exact alias/utm_code resolution the Club Directory's own prospect
+    # scoring runs (club_directory._resolved_cid_sql), with the path-derived
+    # branches disabled (path_code -> NULL) so landing on a club's own page
+    # with no tracked link behind it never attributes on its own.
+    _live_club_cid = _resolved_cid_sql("ue.utm_id", "ue.utm_source", "NULL")
+
     recent = (await db.execute(text(f"""
-        SELECT ue.created_at,
-               split_part(ue.path, '?', 1) AS page,
-               ue.country, ue.region, ue.city, ue.user_agent,
-               {src_ue} AS source,
-               lower(substring(ue.path from 'utm_source=([^&]+)')) AS utm_source,
-               substring(ue.path from 'utm_campaign=([^&]+)') AS utm_campaign,
+        WITH ev AS (
+            SELECT ue.*, ({_live_club_cid}) AS resolved_club_cid
+            FROM usage_events ue
+            WHERE {base}
+            ORDER BY ue.created_at DESC LIMIT 60
+        )
+        SELECT ev.created_at,
+               split_part(ev.path, '?', 1) AS page,
+               ev.country, ev.region, ev.city, ev.user_agent,
+               {_src_sql('ev')} AS source,
+               lower(substring(ev.path from 'utm_source=([^&]+)')) AS utm_source,
+               substring(ev.path from 'utm_campaign=([^&]+)') AS utm_campaign,
+               mc.id AS club_id, mc.name AS club_name,
+               mc.existing_org_id AS club_org_id, o.slug AS club_org_slug,
                EXISTS (
                    SELECT 1 FROM usage_events h
                    WHERE {online_base.replace('ue.', 'h.')}
                      AND h.created_at >= NOW() - INTERVAL '{_NOW_WINDOW}'
-                     AND {_VKEY.replace('ue.', 'h.')} = {_VKEY}
+                     AND {_VKEY.replace('ue.', 'h.')} = {_VKEY.replace('ue.', 'ev.')}
                ) AS is_online
-        FROM usage_events ue
-        WHERE {base}
-        ORDER BY ue.created_at DESC LIMIT 60
+        FROM ev
+        LEFT JOIN marketing_clubs mc ON mc.id::text = ev.resolved_club_cid
+        LEFT JOIN organisations o ON o.id = mc.existing_org_id
+        ORDER BY ev.created_at DESC
     """))).mappings().all()
 
     def _u(v):
@@ -2056,7 +2079,13 @@ async def live(
              "source": r["source"] or "direct",
              "utm_source": _u(r["utm_source"]), "utm_campaign": _u(r["utm_campaign"]),
              "device": _parse_device(r["user_agent"]),
-             "is_online": bool(r["is_online"])}
+             "is_online": bool(r["is_online"]),
+             "club": ({
+                 "id": str(r["club_id"]), "name": r["club_name"],
+                 "is_customer": r["club_org_id"] is not None,
+                 "org_id": str(r["club_org_id"]) if r["club_org_id"] else None,
+                 "org_slug": r["club_org_slug"],
+             } if r["club_id"] else None)}
             for r in recent
         ],
     }

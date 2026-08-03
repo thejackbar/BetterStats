@@ -77,6 +77,33 @@ function clubDirectoryUrl(code) {
   return `/admin/super/marketing?q=${encodeURIComponent(code)}`
 }
 
+// Deep-link for a resolved `club` object (see the live feed's `club` field) —
+// an onboarded club (org_id set) goes straight to its Club Directory row,
+// a still-prospect club falls back to a name search, same pattern as
+// clubDirectoryUrl above.
+function marketingClubUrl(club) {
+  return club.org_id
+    ? `/admin/super/marketing?org_id=${encodeURIComponent(club.org_id)}`
+    : `/admin/super/marketing?q=${encodeURIComponent(club.name)}`
+}
+
+// Which club a live-feed visitor is associated with — resolved server-side
+// from a tracked link/email (UTM/alias matching a club's own code), NEVER
+// from the page they happen to be on. Absent (null) means we have no such
+// signal for this hit, which is the common case (organic/direct traffic).
+function ClubAssocBadge({ club }) {
+  if (!club) return null
+  return (
+    <a href={marketingClubUrl(club)} target="_blank" rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 shrink-0 font-mono text-[9px] px-1.5 py-0.5 rounded border pb-hairline hover:text-pb-accent hover:border-pb-accent max-w-[110px]"
+      title={`${club.is_customer ? 'Customer' : 'Prospect'} club, from a tracked link/email — not necessarily the page they're on. Open in Club Directory.`}
+      onClick={e => e.stopPropagation()}>
+      <span>{club.is_customer ? '⭐' : '🎯'}</span>
+      <span className="truncate">{club.name}</span>
+    </a>
+  )
+}
+
 // Renders as a link to the matching club's Club Directory entry (new tab)
 // when `code` looks like a club utm_code/name, otherwise plain text/span —
 // same className either way so callers don't need to branch layout.
@@ -791,6 +818,10 @@ function LiveSection() {
                 <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide">Live page views</h3>
                 <Dot on={live} />
                 <span className="font-mono text-[9px] text-pb-faintest">anonymous public traffic</span>
+                <span className="font-mono text-[9px] text-pb-faintest hidden lg:inline"
+                  title="A club badge (🎯 prospect / ⭐ customer) means this specific hit carried a tracked link or email's UTM back to that club — never inferred from which page they're viewing.">
+                  · 🎯/⭐ = tracked to a club
+                </span>
               </div>
               <div className="pb-card overflow-hidden">
                 {recent.length === 0 && (
@@ -816,6 +847,7 @@ function LiveSection() {
                             {e.utm_source && <span className="text-pb-accent"> · {e.utm_source}{e.utm_campaign ? `/${e.utm_campaign}` : ''}</span>}
                           </a>
                         </div>
+                        <ClubAssocBadge club={e.club} />
                         <ClubCodeLink code={e.source} className="inline-flex items-center gap-1 shrink-0" title={`Source: ${m.label}`}>
                           <span className="w-2 h-2 rounded-full" style={{ background: m.dot }} />
                           <span className="font-mono text-[9px] text-pb-faint hidden sm:inline">{m.label}</span>
