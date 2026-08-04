@@ -647,6 +647,14 @@ async def sync_organisation(org_id: uuid.UUID,
                           30 + 60 * (idx / max(1, len(todo))), idx, len(todo))
                 if idx % 5 == 0:
                     await update_sync_run(run_id, stats)
+                # Interim rollup so a first big sync fills the public
+                # leaderboards progressively instead of only at the end.
+                if idx and idx % 100 == 0:
+                    try:
+                        await _rollup_season_stats(session, org.id)
+                        await session.commit()
+                    except Exception:  # noqa: BLE001 — final rollup still runs
+                        await session.rollback()
                 game_row = await session.get(Game, game_row_id)
                 details = await session.get(AflGameDetails, game_row_id)
                 try:
