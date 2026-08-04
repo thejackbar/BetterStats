@@ -121,6 +121,29 @@ Website module. Admin: login + Data Sync (Sync Now / Full Rebuild / history)
 - Other modules (Socials, Fees/Admin, IQ) reuse their cricket code where
   sport-agnostic; each gets an AFL review before enabling.
 
+## betterat.football domain topology (umbrella + per-code subdomains)
+
+betterat.football is an umbrella for MULTIPLE football-code silos, unlike
+betterat.cricket's single-product hostname. The handoff between codes happens
+at the nginx-proxy-manager layer via HOSTNAMES — there is deliberately no
+umbrella proxy container (it would be a shared failure point across silos and
+a second proxy layer to debug behind NPM):
+
+- `betterat.football` (+ www) → `bs-football-landing` — a stock nginx:alpine
+  container bind-mounting a static HTML folder
+  (`/srv/docker/football-landing/html`). Holds the "choose your code" page and
+  each code's static marketing page; its CTAs link across into the silos. Not
+  part of any silo, so a silo redeploy never touches it.
+- `afl.betterat.football` → `bs-afl-frontend` — the AFL silo, an exact mirror
+  of the betterat.cricket → betterstats-frontend entry. Future codes get their
+  own subdomain + entry (`soccer.` → that code's frontend), one per silo.
+- Consequence: bs-afl-backend's `PUBLIC_BASE_URL`/`CORS_ORIGINS` are
+  `https://afl.betterat.football`. Sessions are isolated between codes for
+  free — the `bs_session` cookie is host-only (no Domain attribute is set).
+- Rejected: path-prefix routing (`betterat.football/afl/...`) — the silo
+  frontends are built root-relative, so prefixing needs Vite base + router
+  basename surgery per build, and club slugs would collide across codes.
+
 ## Deploy notes (for Elton)
 
 - `bs-afl-backend`: same image as `betterstats-backend`, command
