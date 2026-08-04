@@ -25,7 +25,7 @@ from app.models.db import (
 STARTER_ROLE_TYPES = [
     ("Office Bearer", "Executive committee — President, Vice President, Treasurer, Secretary; legal/fiduciary duties."),
     ("Committee Member", "General elected/appointed committee positions."),
-    ("Officials", "Formal match roles on the scorecard — umpires and scorers."),
+    ("Official", "Formal match roles on the scorecard — umpires and scorers."),
     ("Ground Staff", "Ground, nets and facility upkeep."),
     ("Coach", "Coaching and player development."),
     ("Food & Beverage", "Canteen, bar and catering."),
@@ -39,8 +39,8 @@ STARTER_ROLES = [
     ("Groundskeeper", "Ground Staff"),
     ("Canteen Manager", "Food & Beverage"),
     ("Bar Steward", "Food & Beverage"),
-    ("Umpire", "Officials"),
-    ("Scorer", "Officials"),
+    ("Umpire", "Official"),
+    ("Scorer", "Official"),
     ("Team Manager", "Other"),
     ("First Aid Officer", "Other"),
     ("Cleaner", "Other"),
@@ -245,7 +245,7 @@ async def seed_starter_role_types(session, org_id) -> int:
         "UPDATE club_role_types SET category='committee' WHERE organisation_id=:org AND lower(name) IN ('committee member', 'office bearer')"
     ), {"org": org_id})
     await session.execute(text(
-        "UPDATE club_role_types SET category='official' WHERE organisation_id=:org AND lower(name)='officials'"
+        "UPDATE club_role_types SET category='official' WHERE organisation_id=:org AND lower(name)='official'"
     ), {"org": org_id})
     await session.execute(text(
         "UPDATE club_role_types SET category='other' WHERE organisation_id=:org AND lower(name)='other'"
