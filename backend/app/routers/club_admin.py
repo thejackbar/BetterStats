@@ -1046,9 +1046,10 @@ async def upload_font(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a club's own font file for one typography role (display heading
-    or body text) — e.g. a licensed Clash Display .woff2 to match the club's
-    own website. See app/services/fonts.py for the accepted formats."""
+    """Upload a club's own font file for one typography role (display heading,
+    body text, or mono numbers/stats) — e.g. a licensed Clash Display .woff2
+    to match the club's own website. See app/services/fonts.py for the
+    accepted formats."""
     if role not in font_service.FONT_ROLES:
         raise HTTPException(404, "Unknown font role")
     ext = Path(file.filename or "").suffix.lower()
@@ -1064,12 +1065,8 @@ async def upload_font(
     clean_family = _clean_font_family(family, fallback_name)
     version = uuid.uuid4().hex[:8]
 
-    if role == "display":
-        club.font_display_data = data
-        club.font_display_mime = font_service.mime_for_ext(ext)
-    else:
-        club.font_body_data = data
-        club.font_body_mime = font_service.mime_for_ext(ext)
+    setattr(club, f"font_{role}_data", data)
+    setattr(club, f"font_{role}_mime", font_service.mime_for_ext(ext))
 
     cfg = dict(club.font_config or {})
     cfg[role] = {"source": "upload", "family": clean_family, "v": version}
@@ -1087,12 +1084,8 @@ async def delete_font(
 ):
     if role not in font_service.FONT_ROLES:
         raise HTTPException(404, "Unknown font role")
-    if role == "display":
-        club.font_display_data = None
-        club.font_display_mime = None
-    else:
-        club.font_body_data = None
-        club.font_body_mime = None
+    setattr(club, f"font_{role}_data", None)
+    setattr(club, f"font_{role}_mime", None)
     cfg = dict(club.font_config or {})
     cfg.pop(role, None)
     club.font_config = cfg or None
