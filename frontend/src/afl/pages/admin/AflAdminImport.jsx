@@ -125,9 +125,17 @@ function valueLabel(value, idName, kind) {
 
 // Searchable combobox shared by the Players/Seasons/Grades steps — renders
 // only a handful of options at a time so it stays snappy on a big roster.
-function SearchSelect({ value, idName, candidates, options, onChange, kind }) {
+// A hand-kept historical sheet often predates anything the club has synced,
+// so — for seasons only — there's a way to mint one on the spot rather than
+// forcing every pre-sync decade into "unassigned".
+function SearchSelect({ value, idName, candidates, options, onChange, kind, onCreateSeason }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newYear, setNewYear] = useState('')
+  const [creatingBusy, setCreatingBusy] = useState(false)
+  const [createErr, setCreateErr] = useState(null)
   const ref = useRef(null)
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase()
@@ -135,7 +143,19 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind }) {
     return base.slice(0, 25)
   }, [q, options])
   const pick = v => { onChange(v); setOpen(false); setQ('') }
+  const closeAll = () => { setOpen(false); setCreating(false); setCreateErr(null) }
   const unresolved = !value
+
+  async function submitNewSeason() {
+    const n = newName.trim()
+    if (!n) { setCreateErr('Name is required'); return }
+    setCreatingBusy(true); setCreateErr(null)
+    try {
+      const s = await onCreateSeason({ name: n, year: newYear ? parseInt(newYear, 10) : null })
+      setNewName(''); setNewYear('')
+      pick(s.id)
+    } catch (e) { setCreateErr(e.message) } finally { setCreatingBusy(false) }
+  }
 
   const item = 'block w-full text-left px-2 py-1 text-[12px] text-pb-dim hover:bg-pb-surface2 hover:text-pb-text rounded'
   return (
@@ -145,37 +165,66 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind }) {
         <span className="truncate">{valueLabel(value, idName, kind)}</span>
         <span className="text-pb-faint ml-2">▾</span>
       </button>
-      <Dropdown anchorRef={ref} open={open} onClose={() => setOpen(false)} align="start" width={300} maxHeight={300}
+      <Dropdown anchorRef={ref} open={open} onClose={closeAll} align="start" width={300} maxHeight={300}
         className="bg-pb-surface border pb-hairline rounded shadow-xl p-1">
-        {kind === 'player' && (
-          <button className={item} onClick={() => pick('__new__')}>+ Add as new player</button>
+        {kind === 'season' && creating ? (
+          <div className="p-2">
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              <input autoFocus placeholder="e.g. Summer 1972/73" value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
+                className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+              <input placeholder="Year" value={newYear}
+                onChange={e => setNewYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
+                className="w-16 shrink-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={submitNewSeason} disabled={creatingBusy}
+                className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1 text-black bg-[var(--pb-accent)] disabled:opacity-50">
+                {creatingBusy ? 'ADDING…' : 'ADD SEASON'}
+              </button>
+              <button type="button" onClick={() => { setCreating(false); setCreateErr(null) }}
+                className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Cancel</button>
+            </div>
+            {createErr && <p className="text-[10px] text-pb-red/70 mt-1.5">{createErr}</p>}
+          </div>
+        ) : (
+          <>
+            {kind === 'player' && (
+              <button className={item} onClick={() => pick('__new__')}>+ Add as new player</button>
+            )}
+            {kind === 'season' && (
+              <>
+                <button className={item} onClick={() => pick('__unassigned__')}>↪ Unassigned (no matching season)</button>
+                <button className={item} onClick={() => setCreating(true)}>+ Create new season</button>
+              </>
+            )}
+            {kind === 'grade' && (
+              <button className={item} onClick={() => pick('__own__')}>Use this label as-is</button>
+            )}
+            {kind !== 'grade' && (
+              <button className={item} onClick={() => pick('__skip__')}>Skip this {kind === 'player' ? 'name' : 'row'}</button>
+            )}
+            {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
+            {(candidates || []).map(c => (
+              <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate">{c.name}</span>
+                  {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
+                </span>
+                {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
+              </button>
+            ))}
+            <div className="px-1 pt-2 pb-1 sticky top-0">
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)}
+                placeholder={`Search all ${kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'}…`}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+            </div>
+            {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
+            {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
+          </>
         )}
-        {kind === 'season' && (
-          <button className={item} onClick={() => pick('__unassigned__')}>↪ Unassigned (no matching season)</button>
-        )}
-        {kind === 'grade' && (
-          <button className={item} onClick={() => pick('__own__')}>Use this label as-is</button>
-        )}
-        {kind !== 'grade' && (
-          <button className={item} onClick={() => pick('__skip__')}>Skip this {kind === 'player' ? 'name' : 'row'}</button>
-        )}
-        {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
-        {(candidates || []).map(c => (
-          <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
-            <span className="flex items-center justify-between gap-2">
-              <span className="truncate">{c.name}</span>
-              {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
-            </span>
-            {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
-          </button>
-        ))}
-        <div className="px-1 pt-2 pb-1 sticky top-0">
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)}
-            placeholder={`Search all ${kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'}…`}
-            className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
-        </div>
-        {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
-        {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
       </Dropdown>
     </div>
   )
@@ -185,7 +234,7 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind }) {
 const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
 const PAGE_SIZE = 50
 
-function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, nextLabel, onNext, onBack, loading }) {
+function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, nextLabel, onNext, onBack, loading, onCreateSeason }) {
   const [onlyReview, setOnlyReview] = useState(true)
   const [page, setPage] = useState(0)
 
@@ -255,7 +304,7 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                     <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
                     <td className="py-2 pr-2">
                       <SearchSelect value={valueFor(r)} idName={idName} candidates={candidates} options={allOptions}
-                        onChange={v => onChange(r, v)} kind={kind} />
+                        onChange={v => onChange(r, v)} kind={kind} onCreateSeason={onCreateSeason} />
                     </td>
                   </tr>
                 )
@@ -733,6 +782,16 @@ export default function AflAdminImport() {
   const setSOverride = (label, val) => setSeasonOverrides(o => { const n = { ...o }; if (!val) delete n[label]; else n[label] = val; return n })
   const setGOverride = (label, val) => setGradeOverrides(o => { const n = { ...o }; if (!val) delete n[label]; else n[label] = val; return n })
 
+  // A hand-kept historical sheet often predates anything the club has
+  // synced — there's no existing season to match "1972" to, so the Seasons
+  // step needs a way to mint one on the spot rather than folding every
+  // pre-sync decade into "unassigned".
+  async function createSeason(data) {
+    const s = await aflApi.importsCreateSeason(data)
+    setAllSeasons(prev => [...prev, { id: s.id, name: s.year && !String(s.name).includes(String(s.year)) ? `${s.name} (${s.year})` : s.name }])
+    return s
+  }
+
   const required = ['player_name']
   const mapReady = required.every(f => mappedColumn(f))
   const unresolved = resolved?.totals?.players_unresolved || 0
@@ -892,6 +951,7 @@ export default function AflAdminImport() {
           loading={resolving}
           valueFor={r => seasonOverrides[r.raw_label] ?? (r.season_id || (r.is_prior ? '__unassigned__' : ''))}
           onChange={(r, v) => setSOverride(r.raw_label, v)}
+          onCreateSeason={createSeason}
           nextLabel={hasGradeCol ? 'NEXT: GRADES →' : 'NEXT: CONFIRM →'}
           onNext={() => setStep(hasGradeCol ? 'grades' : 'confirm')}
           onBack={() => setStep('players')}

@@ -35,7 +35,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
@@ -329,6 +329,42 @@ async def list_org_seasons(
     /resolve, but a manual full browse needs the whole list up front."""
     rows = await _org_seasons(db, club.id)
     return [{"id": sid, "name": name, "year": year} for sid, name, year in rows]
+
+
+class SeasonCreate(BaseModel):
+    name: str
+    year: Optional[int] = None
+
+
+@router.post("/seasons")
+async def create_season(
+    data: SeasonCreate,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """A season with no PlayHQ equivalent (a pre-sync era) — mirrors cricket's
+    /club-admin/seasons (routers/manual_entries.py::create_manual_season).
+    grassroots_id stays NULL, which is itself the "not from a sync" marker:
+    every synced season carries the raw PlayHQ id there."""
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(422, "Season name is required")
+    existing = await db.execute(select(Season).where(
+        Season.organisation_id == club.id, func.lower(Season.name) == name.lower(),
+    ))
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, f"A season named '{name}' already exists — pick it from the list instead.")
+
+    season = Season(id=uuid.uuid4(), organisation_id=club.id, grassroots_id=None, name=name, year=data.year)
+    db.add(season)
+    await db.flush()
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id, action="create_season",
+        target_type="season", target_id=str(season.id), details={"name": name, "year": data.year},
+    )
+    await db.commit()
+    return {"id": str(season.id), "name": season.name, "year": season.year}
 
 
 @router.get("/template.csv")
