@@ -258,6 +258,10 @@ class Organisation(Base):
     font_display_mime = Column(Text, nullable=True)
     font_body_data = Column(LargeBinary, nullable=True)
     font_body_mime = Column(Text, nullable=True)
+    # Third role: numbers/stats — maps onto the app's `font-mono` styling used
+    # throughout stat figures and tabular data (migration 216).
+    font_mono_data = Column(LargeBinary, nullable=True)
+    font_mono_mime = Column(Text, nullable=True)
     contact_email = Column(Text, nullable=True)
     player_name_format = Column(Text, default="last_first", nullable=True)
     # BetterSelect: a player is "dormant" (hidden from default selection) if they

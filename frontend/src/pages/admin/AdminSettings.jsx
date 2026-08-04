@@ -4,7 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import {
   BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss,
-  deriveDarkPalette, gradientCss, resolveClubFonts, DISPLAY_FONT_PRESETS, BODY_FONT_PRESETS,
+  deriveDarkPalette, gradientCss, resolveClubFonts, DISPLAY_FONT_PRESETS, BODY_FONT_PRESETS, MONO_FONT_PRESETS,
 } from '../../lib/theme'
 import { validateImageFile } from '../../lib/validation'
 import { BASE_URL } from '../../data/marketing'
@@ -40,6 +40,7 @@ function ColorField({ label, hint, value, fallback, onChange, onReset }) {
 }
 
 const FONT_ALLOWED_EXTS = '.woff2,.woff,.ttf,.otf'
+const FONT_ROLE_LABEL = { display: 'Heading', body: 'Body', mono: 'Numbers' }
 
 function FontRoleField({ role, label, hint, presets, config, sampleText, busy, onSelectPreset, onSelectDefault, onUpload, onRemove }) {
   const fileRef = useRef(null)
@@ -173,7 +174,7 @@ export default function AdminSettings() {
   const [pinInput, setPinInput] = useState('')
   const [fontConfig, setFontConfig] = useState({})
   const [fontMeta, setFontMeta] = useState({})
-  const [fontBusy, setFontBusy] = useState({ display: false, body: false })
+  const [fontBusy, setFontBusy] = useState({ display: false, body: false, mono: false })
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -185,6 +186,7 @@ export default function AdminSettings() {
       setFontMeta({
         font_display_url: s.font_display_url, font_display_format: s.font_display_format,
         font_body_url: s.font_body_url, font_body_format: s.font_body_format,
+        font_mono_url: s.font_mono_url, font_mono_format: s.font_mono_format,
       })
       setForm({
         name: s.name || '',
@@ -301,8 +303,9 @@ export default function AdminSettings() {
       setFontMeta({
         font_display_url: res.font_display_url, font_display_format: res.font_display_format,
         font_body_url: res.font_body_url, font_body_format: res.font_body_format,
+        font_mono_url: res.font_mono_url, font_mono_format: res.font_mono_format,
       })
-      flash(`${role === 'display' ? 'Heading' : 'Body'} font updated`)
+      flash(`${FONT_ROLE_LABEL[role] || role} font updated`)
     } catch (err) {
       flashError(err.message)
     } finally {
@@ -317,7 +320,7 @@ export default function AdminSettings() {
       const res = await api.adminDeleteFont(role)
       setFontConfig(res.font_config || {})
       setFontMeta(m => ({ ...m, [`font_${role}_url`]: null, [`font_${role}_format`]: null }))
-      flash(`${role === 'display' ? 'Heading' : 'Body'} font removed`)
+      flash(`${FONT_ROLE_LABEL[role] || role} font removed`)
     } catch (err) {
       flashError(err.message)
     } finally {
@@ -598,6 +601,13 @@ export default function AdminSettings() {
                 onSelectDefault={() => selectFontDefault('body')}
                 onUpload={(file, family) => uploadFont('body', file, family)}
                 onRemove={() => removeFont('body')} />
+              <FontRoleField role="mono" label="Numbers & stats" hint="Scores, averages and tabular figures across the site. Font files: woff2, woff, ttf or otf, max 6 MB."
+                presets={MONO_FONT_PRESETS} config={fontConfig.mono} busy={fontBusy.mono}
+                sampleText="1,234 runs · 56 wickets · 89.4 avg"
+                onSelectPreset={p => selectFontPreset('mono', p)}
+                onSelectDefault={() => selectFontDefault('mono')}
+                onUpload={(file, family) => uploadFont('mono', file, family)}
+                onRemove={() => removeFont('mono')} />
             </div>
           </div>
 

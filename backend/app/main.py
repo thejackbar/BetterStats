@@ -4409,6 +4409,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_body_data BYTEA"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_body_mime TEXT"))
 
+    # Migration 216: third typography role (numbers/stats, "mono"). Byte-identical
+    # to alembic/versions/216_club_font_mono.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_mono_data BYTEA"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_mono_mime TEXT"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
