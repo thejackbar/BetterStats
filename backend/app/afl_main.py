@@ -278,9 +278,25 @@ async def lifespan(app: FastAPI):
                 behinds INTEGER NOT NULL DEFAULT 0,
                 bog_count INTEGER NOT NULL DEFAULT 0,
                 captain_games INTEGER NOT NULL DEFAULT 0,
+                club_bf_votes INTEGER NOT NULL DEFAULT 0,
+                comp_bf_votes INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
+        # club_bf_votes/comp_bf_votes added after the table already existed on
+        # deployed AFL databases — CREATE TABLE IF NOT EXISTS above doesn't
+        # retrofit columns onto an existing table, so mirror them explicitly
+        # (same idempotent-ALTER pattern cricket's main.py uses everywhere).
+        # Deliberately NOT added to afl_player_season_stats: that table is
+        # wholly derived from synced game lines (_rollup_season_stats deletes
+        # + reinserts it every sync, see services/afl/sync.py) and PlayHQ has
+        # no concept of club-internal B&F voting — a value stored there would
+        # be silently wiped on the next sync. afl_imported_stats is untouched
+        # by sync, so it's the only safe home for a historical vote tally.
+        await conn.execute(text(
+            "ALTER TABLE afl_imported_stats ADD COLUMN IF NOT EXISTS club_bf_votes INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text(
+            "ALTER TABLE afl_imported_stats ADD COLUMN IF NOT EXISTS comp_bf_votes INTEGER NOT NULL DEFAULT 0"))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_org_player "
             "ON afl_imported_stats(organisation_id, player_id)"))

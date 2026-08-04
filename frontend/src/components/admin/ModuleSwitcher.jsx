@@ -28,10 +28,10 @@ const tilePaths = tile => (tile.isGroup ? [tile.to, ...tile.members.map(m => m.t
 const pathIsActive = (pathname, paths) =>
   paths.some(p => pathname === p || pathname.startsWith(p + '/'))
 
-function Pill({ to, brand, label, active, title, onNavigate, forceLabel }) {
+function Pill({ to, brand, label, active, title, onNavigate, forceLabel, compact }) {
   const base = {
     display: 'inline-flex', alignItems: 'center', gap: 6,
-    padding: '5px 10px', borderRadius: 999, fontSize: 12.5, lineHeight: 1,
+    padding: compact ? '4px 8px' : '5px 10px', borderRadius: 999, fontSize: compact ? 11.5 : 12.5, lineHeight: 1,
     whiteSpace: 'nowrap', textDecoration: 'none', background: 'transparent',
     border: '1px solid transparent',
     transition: 'background .12s, color .12s, border-color .12s',
@@ -54,13 +54,15 @@ function Pill({ to, brand, label, active, title, onNavigate, forceLabel }) {
         e.currentTarget.style.background = 'transparent'
         e.currentTarget.style.borderColor = 'transparent'
       }}>
-      <img src={brand.logo} alt="" className="shrink-0" style={{ width: 16, height: 16, borderRadius: 5 }} />
+      <img src={brand.logo} alt="" className="shrink-0" style={{ width: compact ? 14 : 16, height: compact ? 14 : 16, borderRadius: compact ? 4 : 5 }} />
       <span className={(active || forceLabel) ? '' : 'hidden lg:inline'}>{label}</span>
     </Link>
   )
 }
 
-export default function ModuleSwitcher({ className = '', wrap = false, onNavigate }) {
+// `compact` — the smaller pill used in a module sidebar's footer, where the
+// switcher lives now rather than in each screen header.
+export default function ModuleSwitcher({ className = '', wrap = false, compact = false, onNavigate }) {
   const { hasModule } = useAuth()
   const { pathname } = useLocation()
 
@@ -73,14 +75,14 @@ export default function ModuleSwitcher({ className = '', wrap = false, onNavigat
   return (
     <div className={`items-center gap-1 ${wrap ? 'flex-wrap' : 'overflow-x-auto pb-no-scrollbar'} ${className}`}>
       <Pill to={CORE.to} brand={moduleBrand(CORE.key)} label={suffixOf(CORE.name)}
-        active={pathname === '/admin'} title={CORE.title} onNavigate={onNavigate} forceLabel={wrap} />
-      {tiles.length > 0 && (
+        active={pathname === '/admin'} title={CORE.title} onNavigate={onNavigate} forceLabel={wrap} compact={compact} />
+      {tiles.length > 0 && !compact && (
         <span aria-hidden className="shrink-0" style={{ width: 1, height: 18, margin: '0 3px', background: 'var(--pb-hairline2)' }} />
       )}
       {tiles.map(tile => (
         <Pill key={tile.key} to={tile.to} brand={moduleBrand(tile.key)}
           label={suffixOf(tile.name)} active={pathIsActive(pathname, tilePaths(tile))}
-          title={tile.name} onNavigate={onNavigate} forceLabel={wrap} />
+          title={tile.name} onNavigate={onNavigate} forceLabel={wrap} compact={compact} />
       ))}
     </div>
   )

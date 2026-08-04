@@ -20,7 +20,7 @@ function fmtWhen(iso) {
 }
 function eventStatus(e) {
   if (e.registration_open === false) return { label: 'DRAFT', fg: '#8a90a2' }
-  if (e.is_ticketed) return { label: 'ON SALE', fg: '#6366F1' }
+  if (e.is_ticketed) return { label: 'ON SALE', fg: 'var(--pb-accent)' }
   return { label: 'OPEN', fg: '#16c784' }
 }
 function payChip(status) {
@@ -108,7 +108,7 @@ export default function Events({ st, patch, narrow }) {
               const n = regs[e.id]?.registered_count ?? 0
               return (
                 <div key={e.id} onClick={() => patch({ event: e.id })}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '11px 12px', borderRadius: 8, cursor: 'pointer', border: sel && e.id === sel.id ? '1px solid rgba(99,102,241,0.4)' : `1px solid ${C.hair}`, background: sel && e.id === sel.id ? 'rgba(99,102,241,0.08)' : C.surface }}>
+                  style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '11px 12px', borderRadius: 8, cursor: 'pointer', border: sel && e.id === sel.id ? '1px solid color-mix(in srgb, var(--pb-accent) 40%, transparent)' : `1px solid ${C.hair}`, background: sel && e.id === sel.id ? 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' : C.surface }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{e.title}</span>
                     <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.08em', padding: '2px 6px', borderRadius: 4, border: `1px solid ${s.fg}66`, color: s.fg, flexShrink: 0 }}>{s.label}</span>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
+import { Button, FilterPill, SearchInput, StatCard, StatReadout } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 
 function sortSeasons(seasons) {
@@ -18,16 +19,6 @@ function StatusPill({ status }) {
   if (status === 'needs_tier')
     return <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">NEEDS TIER</span>
   return null
-}
-
-function Kpi({ label, value, accent, warn }) {
-  return (
-    <div className="pb-card px-4 py-3">
-      <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{label}</div>
-      <div className={`font-display font-bold text-xl ${warn ? 'text-pb-amber' : accent ? '' : 'text-pb-text'}`}
-        style={accent && !warn ? { color: 'var(--pb-accent)' } : {}}>{value}</div>
-    </div>
-  )
 }
 
 function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }) {
@@ -313,61 +304,65 @@ export default function AdminFeesMembers() {
   const s = data?.summary || {}
   const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
-  return (
-    <BetterFeesLayout>
-      <div className="max-w-5xl">
-        <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
-          <div>
-            <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Members</h1>
-            <p className="text-pb-faint text-sm">Membership &amp; match-day fees owed. Days played sync automatically.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
-              {seasons.map(se => <option key={se.id} value={se.id}>{se.name}</option>)}
-            </select>
-            {previousSeason && (
-              <button onClick={() => setShowRollover(true)} disabled={!seasonId}
-                className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap">
-                ROLL OVER
-              </button>
-            )}
-            <button onClick={() => setShowImport(true)} disabled={!seasonId}
-              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap">
-              IMPORT
-            </button>
-            <button onClick={() => setShowAdd(true)} disabled={!seasonId}
-              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-              + MEMBER
-            </button>
-          </div>
-        </div>
+  // Header slots: the title, its live count, the filters and the primary action
+  // all belong to the shell's sticky header now, which is why the old page-level
+  // heading block and the "Showing N of M" footer line are both gone.
+  const header = {
+    title: 'Accounts',
+    caption: `One balance per person · ${filtered.length} of ${data?.members?.length ?? 0} shown`,
+    filters: (
+      <div className="flex items-center gap-2 flex-wrap">
+        <SearchInput value={q} onChange={setQ} placeholder="Search name or tier…" />
+        <FilterPill active={!needsTierOnly && !owesOnly} onClick={() => { setNeedsTierOnly(false); setOwesOnly(false) }}>
+          Everyone
+        </FilterPill>
+        <FilterPill warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
+          Owes money
+        </FilterPill>
+        <FilterPill active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
+          Needs tier
+        </FilterPill>
+      </div>
+    ),
+    stats: (
+      <>
+        <StatReadout value={money(s.total_outstanding)} label="Outstanding"
+          ink={(s.total_outstanding ?? 0) > 0 ? '#f5b542' : undefined} />
+        <StatReadout value={s.total_members ?? 0} label="People" />
+      </>
+    ),
+    actions: (
+      <>
+        <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
+          {seasons.map(se => <option key={se.id} value={se.id}>{se.name}</option>)}
+        </select>
+        {previousSeason && <Button size="sm" onClick={() => setShowRollover(true)} disabled={!seasonId}>Roll over</Button>}
+        <Button size="sm" onClick={() => setShowImport(true)} disabled={!seasonId}>Import</Button>
+        <Button variant="primary" onClick={() => setShowAdd(true)} disabled={!seasonId}>Add member</Button>
+      </>
+    ),
+  }
 
+  return (
+    <BetterFeesLayout {...header}>
+      <div className="max-w-5xl">
         {data === null ? (
-          <PbSpinner message="Loading members…" />
+          <PbSpinner message="Loading accounts…" />
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-              <Kpi label="Members" value={s.total_members ?? 0} />
-              <Kpi label="Non-Financial" value={s.non_financial ?? 0} warn={(s.non_financial ?? 0) > 0} />
-              <Kpi label="Payable" value={money(s.total_payable)} />
-              <Kpi label="Paid" value={money(s.total_paid)} />
-              <Kpi label="Outstanding" value={money(s.total_outstanding)} accent />
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-5">
+              <StatCard label="People" value={s.total_members ?? 0} ink="var(--pb-text)" />
+              <StatCard label="Owe money" value={s.non_financial ?? 0}
+                ink={(s.non_financial ?? 0) > 0 ? '#f5b542' : 'var(--pb-text)'} />
+              <StatCard label="Billed" value={money(s.total_payable)} ink="var(--pb-text)" />
+              <StatCard label="Taken" value={money(s.total_paid)} ink="var(--pb-text)" />
+              <StatCard label="Outstanding" value={money(s.total_outstanding)} accent />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 mb-3">
-              <input className={`${inp} flex-1 min-w-[180px]`} placeholder="Search name or tier…" value={q} onChange={e => setQ(e.target.value)} />
-              <label className="flex items-center gap-2 font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer select-none">
-                <input type="checkbox" checked={needsTierOnly} onChange={e => setNeedsTierOnly(e.target.checked)} />
-                NEEDS TIER
-              </label>
-              <label className="flex items-center gap-2 font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer select-none">
-                <input type="checkbox" checked={owesOnly} onChange={e => setOwesOnly(e.target.checked)} />
-                OWES MONEY
-              </label>
-              <button onClick={recompute} disabled={recomputing}
-                className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-                {recomputing ? 'SYNCING…' : 'SYNC MATCH DAYS'}
-              </button>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <Button size="sm" onClick={recompute} disabled={recomputing}>
+                {recomputing ? 'Syncing…' : 'Sync match days'}
+              </Button>
             </div>
 
             {filtered.length === 0 ? (
@@ -380,15 +375,13 @@ export default function AdminFeesMembers() {
                     Roll forward everyone from <span className="text-pb-text">{previousSeason.name}</span> — each member keeps their tier
                     (so you only bulk-edit the exceptions, e.g. graduating students). Payments stay behind, "Left Club" members are skipped.
                   </p>
-                  <div className="flex gap-2">
-                    <button onClick={() => setShowRollover(true)}
-                      className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
-                      ROLL OVER FROM {previousSeason.name.toUpperCase()}
-                    </button>
-                    <button onClick={recompute} disabled={recomputing}
-                      className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-                      {recomputing ? 'SYNCING…' : 'JUST SYNC MATCH DAYS'}
-                    </button>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button variant="primary" onClick={() => setShowRollover(true)}>
+                      Roll over from {previousSeason.name}
+                    </Button>
+                    <Button onClick={recompute} disabled={recomputing}>
+                      {recomputing ? 'Syncing…' : 'Just sync match days'}
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -486,9 +479,6 @@ export default function AdminFeesMembers() {
                 </div>
               </>
             )}
-            <p className="font-mono text-[10px] text-pb-faintest mt-3">
-              Showing {filtered.length} of {data.members.length}.
-            </p>
           </>
         )}
       </div>
@@ -498,12 +488,8 @@ export default function AdminFeesMembers() {
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-pb-surface border pb-hairline rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
           style={{ borderColor: 'var(--pb-accent)' }}>
           <span className="font-mono text-[11px] text-pb-text">{selected.size} selected</span>
-          <button onClick={() => setShowBulkTier(true)}
-            className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
-            SET TIER
-          </button>
-          <button onClick={() => setSelected(new Set())}
-            className="font-mono text-[10px] text-pb-faint hover:text-pb-text">CLEAR</button>
+          <Button size="sm" variant="primary" onClick={() => setShowBulkTier(true)}>Set tier</Button>
+          <Button size="sm" variant="quiet" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
 

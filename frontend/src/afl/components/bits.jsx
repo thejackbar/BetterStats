@@ -13,12 +13,13 @@ export function SectionTitle({ children, right }) {
   )
 }
 
-export function Select({ value, onChange, options, placeholder }) {
+export function Select({ value, onChange, options, placeholder, disabled }) {
   return (
     <select
       value={value ?? ''}
       onChange={e => onChange(e.target.value || null)}
-      className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm text-pb-text"
+      disabled={disabled}
+      className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm text-pb-text disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {placeholder != null && <option value="">{placeholder}</option>}
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

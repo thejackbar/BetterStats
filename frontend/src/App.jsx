@@ -68,8 +68,12 @@ import Login from './pages/Login'
 // Admin — lazy loaded (behind auth, not needed on first paint)
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
 const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
-const BetterClubManagerHome = lazy(() => import('./pages/admin/BetterClubManagerHome'))
 const ClubManagerApp = lazy(() => import('./pages/admin/clubmanager/redesign/ClubManagerApp'))
+const ClubhouseToday = lazy(() => import('./pages/admin/clubhouse/ClubhouseToday'))
+const ClubhouseAudiences = lazy(() => import('./pages/admin/clubhouse/ClubhouseAudiences'))
+const ClubhouseIntegrations = lazy(() => import('./pages/admin/clubhouse/ClubhouseIntegrations'))
+const ClubhouseReports = lazy(() => import('./pages/admin/clubhouse/ClubhouseReports'))
+const ClubhouseSettings = lazy(() => import('./pages/admin/clubhouse/ClubhouseSettings'))
 const SetupWizard = lazy(() => import('./pages/admin/setup/SetupWizard'))
 const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
@@ -148,6 +152,7 @@ const SuperLoginAttempts = lazy(() => import('./pages/admin/SuperLoginAttempts')
 const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests'))
 const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
 const SuperMarketing = lazy(() => import('./pages/admin/SuperMarketing'))
+const SuperDirectoryAudiences = lazy(() => import('./pages/admin/SuperDirectoryAudiences'))
 const SuperAnnounce = lazy(() => import('./pages/admin/SuperAnnounce'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
@@ -182,14 +187,11 @@ const FantasyPlayers = lazy(() => import('./pages/admin/fantasy/FantasyPlayers')
 const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
 // BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
-const BetterAdminHome = lazy(() => import('./pages/admin/BetterAdminHome'))
 // BetterSocials umbrella (Website + Post Designer)
 const BetterSocialsHome = lazy(() => import('./pages/admin/BetterSocialsHome'))
 const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
 const CommsCompose = lazy(() => import('./pages/admin/bettercomms/CommsCompose'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
-const CommsSegments = lazy(() => import('./pages/admin/bettercomms/CommsSegments'))
-const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsTemplates = lazy(() => import('./pages/admin/bettercomms/CommsTemplates'))
 const CommsSettings = lazy(() => import('./pages/admin/bettercomms/CommsSettings'))
 
@@ -314,9 +316,22 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/betterstats" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
-          <Route path="/admin/betterclub" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="overview" /></ProtectedRoute>} />
-          <Route path="/admin/betterclub/:group" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="overview" /></ProtectedRoute>} />
-          <Route path="/admin/betterclub/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
+          {/* BetterClubhouse — the merged back office. Today is its front door;
+              every other tool kept the URL it already had (see
+              components/admin/BetterClubhouseLayout.jsx for the merged nav). */}
+          <Route path="/admin/clubhouse" element={<ProtectedRoute><ClubhouseToday /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/audiences" element={<ProtectedRoute requireModule="comms"><ClubhouseAudiences /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/integrations" element={<ProtectedRoute><ClubhouseIntegrations /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/reports" element={<ProtectedRoute><ClubhouseReports /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/settings" element={<ProtectedRoute><ClubhouseSettings /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
+          {/* Old entry points, kept so bookmarks and links still land somewhere. */}
+          <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
+          <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />
+          <Route path="/admin/betterclub/roster" element={<Navigate to="/admin/clubhouse/roster" replace />} />
+          <Route path="/admin/comms/segments" element={<Navigate to="/admin/clubhouse/audiences" replace />} />
+          <Route path="/admin/comms/lists" element={<Navigate to="/admin/clubhouse/audiences" replace />} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
@@ -406,6 +421,7 @@ export default function App() {
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
           <Route path="/admin/super/comms-limits" element={<ProtectedRoute requireRole="super_admin"><SuperCommsLimits /></ProtectedRoute>} />
           <Route path="/admin/super/marketing" element={<ProtectedRoute requireRole="super_admin"><SuperMarketing /></ProtectedRoute>} />
+          <Route path="/admin/super/directory-audiences" element={<ProtectedRoute requireRole="super_admin"><SuperDirectoryAudiences /></ProtectedRoute>} />
           <Route path="/admin/super/announce" element={<ProtectedRoute requireRole="super_admin"><SuperAnnounce /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />
 
@@ -443,12 +459,12 @@ export default function App() {
           {/* BetterSocials umbrella (Website + Post Designer) — Website is Core, so the hub is open to all */}
           <Route path="/admin/bettersocials" element={<ProtectedRoute requireCore><BetterSocialsHome /></ProtectedRoute>} />
 
-          {/* BetterAdmin umbrella + BetterComms (bulk email) */}
-          <Route path="/admin/betteradmin" element={<ProtectedRoute><BetterAdminHome /></ProtectedRoute>} />
+          {/* BetterComms (bulk email) — the Comms section of BetterClubhouse.
+              Segments and Lists redirect to Audiences, which replaced them;
+              Contacts stays reachable but is off the sidebar, since the person
+              spine is the Directory. */}
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
-          <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><CommsSegments /></ProtectedRoute>} />
-          <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
           <Route path="/admin/comms/templates" element={<ProtectedRoute requireModule="comms"><CommsTemplates /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
           <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCompose /></ProtectedRoute>} />

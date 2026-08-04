@@ -68,20 +68,25 @@ export const PALETTE_FIELDS = [
 ]
 
 /**
- * Public-site typography. FONT_STACKS are the app defaults (mirrors
- * tailwind.config.js's `display`/`body` fontFamily) — always the fallback
- * tail of a club's chosen font, and what's used when a club hasn't set one.
+ * Public-site typography — three roles: display (headings), body (paragraph
+ * text) and mono (numbers/stats — the app's font-mono styling used throughout
+ * stat figures and tabular data). FONT_STACKS are the app defaults (mirrors
+ * tailwind.config.js's `display`/`body`/`mono` fontFamily) — always the
+ * fallback tail of a club's chosen font, and what's used when a club hasn't
+ * set one.
  *
- * DISPLAY_FONT_PRESETS / BODY_FONT_PRESETS are the curated built-in choices —
- * every family here is already loaded site-wide via the big Google Fonts
- * <link> in index.html, so picking a preset needs no extra network request.
- * Keep the key set in sync by hand with backend/app/services/fonts.py
- * (DISPLAY_FONT_PRESET_KEYS / BODY_FONT_PRESET_KEYS) — no shared build step
+ * DISPLAY_FONT_PRESETS / BODY_FONT_PRESETS / MONO_FONT_PRESETS are the
+ * curated built-in choices — every family here is already loaded site-wide
+ * via the big Google Fonts <link> in index.html, so picking a preset needs no
+ * extra network request. Keep the key sets in sync by hand with
+ * backend/app/services/fonts.py (DISPLAY_FONT_PRESET_KEYS /
+ * BODY_FONT_PRESET_KEYS / MONO_FONT_PRESET_KEYS) — no shared build step
  * between the two.
  */
 export const FONT_STACKS = {
   display: "'Geist','Barlow Condensed','Oswald',sans-serif",
   body: "'Geist','Inter',system-ui,sans-serif",
+  mono: "'JetBrains Mono','Fira Code',monospace",
 }
 
 export const DISPLAY_FONT_PRESETS = [
@@ -109,18 +114,28 @@ export const BODY_FONT_PRESETS = [
   { key: 'cormorant', name: 'Cormorant Garamond', family: "'Cormorant Garamond', serif" },
 ]
 
-export const FONT_PRESETS_BY_ROLE = { display: DISPLAY_FONT_PRESETS, body: BODY_FONT_PRESETS }
+export const MONO_FONT_PRESETS = [
+  { key: 'jetbrains_mono', name: 'JetBrains Mono', family: "'JetBrains Mono', monospace" },
+  { key: 'ibm_plex_mono', name: 'IBM Plex Mono', family: "'IBM Plex Mono', monospace" },
+  { key: 'space_mono', name: 'Space Mono', family: "'Space Mono', monospace" },
+  { key: 'roboto_mono', name: 'Roboto Mono', family: "'Roboto Mono', monospace" },
+]
+
+export const FONT_PRESETS_BY_ROLE = { display: DISPLAY_FONT_PRESETS, body: BODY_FONT_PRESETS, mono: MONO_FONT_PRESETS }
+
+export const FONT_ROLES = ['display', 'body', 'mono']
 
 /**
  * Resolve a club's chosen fonts (from its font_config + resolved upload
  * URLs) into what buildThemeCss needs: a CSS font-family value per role, plus
  * an optional @font-face descriptor for an uploaded file. Returns
- * `{ display: {...}|null, body: {...}|null }` — null means "use the app default".
+ * `{ display: {...}|null, body: {...}|null, mono: {...}|null }` — null means
+ * "use the app default".
  */
 export function resolveClubFonts(club) {
   const cfg = (club && club.font_config) || {}
   const out = {}
-  for (const role of ['display', 'body']) {
+  for (const role of FONT_ROLES) {
     const entry = cfg[role]
     if (entry && entry.source === 'preset') {
       const preset = FONT_PRESETS_BY_ROLE[role].find(f => f.key === entry.preset)
@@ -243,7 +258,7 @@ export function resolveTheme(config) {
 /** Build the @font-face rule(s) for a club's uploaded font(s), if any. */
 function buildFontFaceCss(fonts) {
   if (!fonts) return ''
-  return ['display', 'body']
+  return FONT_ROLES
     .map(role => fonts[role]?.fontFace)
     .filter(Boolean)
     .map(f => `@font-face{font-family:'${f.family}';src:url('${f.url}') format('${f.format}');font-display:swap;}`)
@@ -262,6 +277,7 @@ export function buildThemeCss(config, fonts) {
   const shared = [
     `--pb-font-display:${fonts?.display?.cssFamily || FONT_STACKS.display}`,
     `--pb-font-body:${fonts?.body?.cssFamily || FONT_STACKS.body}`,
+    `--pb-font-mono:${fonts?.mono?.cssFamily || FONT_STACKS.mono}`,
     `--pb-accent:${t.accent}`,
     `--pb-accent-2:${t.accent2}`,
     `--pb-gradient:${gradientCss(t.accent, t.accent2)}`,

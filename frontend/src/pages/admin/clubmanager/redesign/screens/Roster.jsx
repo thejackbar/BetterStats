@@ -149,7 +149,7 @@ export default function Roster({ st, patch, narrow }) {
       onDrop: e => { e.preventDefault(); const pid = st.dragPerson; patch({ overCell: null, dragPerson: null }); if (pid) doAssign(shiftId, pid) },
     }
   }
-  const cellStyle = (isOver, extra) => ({ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, ...(isOver ? { background: 'rgba(99,102,241,0.14)', boxShadow: 'inset 0 0 0 1.5px #6366F1' } : {}), ...extra })
+  const cellStyle = (isOver, extra) => ({ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, ...(isOver ? { background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', boxShadow: 'inset 0 0 0 1.5px var(--pb-accent)' } : {}), ...extra })
 
   const ShiftChip = ({ shift, inOpen, count }) => {
     const a = areaById[shift.area_id] || {}
@@ -157,10 +157,10 @@ export default function Roster({ st, patch, narrow }) {
     return (
       <div draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => patch({ selected: shift.id })}
         style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
-          border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || '#6366F1'} 40%, transparent)`)}`,
-          background: inOpen ? 'rgba(245,181,66,0.10)' : `color-mix(in srgb, ${a.color || '#6366F1'} 13%, transparent)`, color: inOpen ? C.warn : (a.color || C.accent) }}>
+          border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`)}`,
+          background: inOpen ? 'rgba(245,181,66,0.10)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)`, color: inOpen ? C.warn : (a.color || C.accent) }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: a.color || '#6366F1' }} />
+          <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: a.color || 'var(--pb-accent)' }} />
           <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{count > 1 ? a.name + ' ×' + count : a.name}</span>
           {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
         </div>
@@ -192,7 +192,7 @@ export default function Roster({ st, patch, narrow }) {
       <Header>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
           {['people', 'areas'].map(v => (
-            <button key={v} onClick={() => patch({ view: v, selected: null })} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', textTransform: 'capitalize', background: view === v ? 'rgba(99,102,241,0.15)' : 'transparent', color: view === v ? C.accent : C.faint }}>{v}</button>
+            <button key={v} onClick={() => patch({ view: v, selected: null })} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', textTransform: 'capitalize', background: view === v ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', color: view === v ? C.accent : C.faint }}>{v}</button>
           ))}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginLeft: 'auto', flexWrap: 'wrap' }}>
@@ -201,7 +201,7 @@ export default function Roster({ st, patch, narrow }) {
             <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {shifts.length} FILLED</span>
           </div>
           <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
-          <button onClick={() => patch(s => ({ panelOpen: !s.panelOpen }))} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(st.panelOpen ? { border: '1px solid rgba(99,102,241,0.45)', color: C.accent, background: 'rgba(99,102,241,0.10)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{st.panelOpen ? 'Hide candidates' : 'Candidates'}</button>
+          <button onClick={() => patch(s => ({ panelOpen: !s.panelOpen }))} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(st.panelOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{st.panelOpen ? 'Hide candidates' : 'Candidates'}</button>
           <button disabled={busy} onClick={autoFill} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Auto-fill open shifts</button>
           <button onClick={resetWeek} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer' }}>Reset</button>
           <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
@@ -216,7 +216,7 @@ export default function Roster({ st, patch, narrow }) {
             <div style={{ display: 'grid', gridTemplateColumns: gridCols, position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
               <div style={{ padding: '10px 14px', borderRight: `1px solid ${C.hair}`, fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, display: 'flex', alignItems: 'center' }}>{view === 'areas' ? 'OPERATIONAL AREA' : 'VOLUNTEER'}</div>
               {DOW.map((d, i) => (
-                <div key={i} style={{ padding: '10px 12px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 2, background: i >= 5 ? 'rgba(99,102,241,0.05)' : undefined }}>
+                <div key={i} style={{ padding: '10px 12px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 2, background: i >= 5 ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : undefined }}>
                   <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faint }}>{d.toUpperCase()}</span>
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.dim }}>{DATES[i]}</span>
                 </div>
@@ -292,24 +292,24 @@ export default function Roster({ st, patch, narrow }) {
                     <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                       <div style={{ padding: '10px 14px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || '#6366F1' }} />
+                          <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)' }} />
                           <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{a.name}</span>
                           <span style={{ fontFamily: MONO, fontSize: 9.5, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
                         </div>
                         <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{[a.required_role_name, a.required_qualification_name].filter(Boolean).join(' · ') || 'No role/qual set'}</div>
                       </div>
                       {DOW.map((_, d) => (
-                        <div key={d} style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, background: d >= 5 ? 'rgba(99,102,241,0.03)' : undefined }}>
+                        <div key={d} style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }}>
                           {mine.filter(x => x.day_of_week === d).map(x => {
                             const warned = x.warnings && x.warnings.length
                             const over = st.overCell === 'slot-' + x.id
                             return (
                               <div key={x.id} onClick={() => patch({ selected: x.id })} {...slotDrop(x.id)}
                                 style={{ borderRadius: 7, padding: '6px 8px', cursor: 'pointer', userSelect: 'none',
-                                  border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || '#6366F1'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
-                                  background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || '#6366F1'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
+                                  border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
+                                  background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
                                   color: x.assignee_member_id ? (a.color || C.accent) : C.warn,
-                                  ...(over ? { boxShadow: '0 0 0 1.5px #6366F1' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid #6366F1', outlineOffset: 1 } : {}) }}>
+                                  ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid var(--pb-accent)', outlineOffset: 1 } : {}) }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                                   <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
                                   {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
@@ -337,7 +337,7 @@ export default function Roster({ st, patch, narrow }) {
                 <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>BEST FIT FOR THIS SHIFT</div>
                 <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12, marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: selArea.color || '#6366F1' }} />
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: selArea.color || 'var(--pb-accent)' }} />
                     <span style={{ fontWeight: 600, fontSize: 14 }}>{selArea.name}</span>
                   </div>
                   <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
@@ -360,14 +360,14 @@ export default function Roster({ st, patch, narrow }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {candList.map(({ c, res, load }) => (
                 <div key={c.member_id} draggable onClick={() => { if (sel) doAssign(sel.id, c.member_id) }} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragPerson: c.member_id }) }} onDragEnd={() => patch({ dragPerson: null, overCell: null })}
-                  style={{ background: C.surface2, border: `1px solid ${sel && !res.warns.length ? 'rgba(99,102,241,0.35)' : C.hair}`, borderRadius: 8, padding: '9px 10px', cursor: 'pointer' }}>
+                  style={{ background: C.surface2, border: `1px solid ${sel && !res.warns.length ? 'color-mix(in srgb, var(--pb-accent) 35%, transparent)' : C.hair}`, borderRadius: 8, padding: '9px 10px', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ width: 26, height: 26, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(c.name)}</span>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sel ? (res.warns.length ? res.warns[0] : 'Clear match · ' + load + ' shift' + (load === 1 ? '' : 's')) : (load + ' shift' + (load === 1 ? '' : 's') + ' this week')}</div>
                     </div>
-                    {sel && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'rgba(99,102,241,0.15)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>}
+                    {sel && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>}
                   </div>
                 </div>
               ))}

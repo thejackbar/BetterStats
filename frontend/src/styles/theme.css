@@ -11,9 +11,10 @@
   /* Typography — the app default; a club's own choice (preset or uploaded
      font) overrides these via <style id="club-theme"> (see useClubTheme /
      buildThemeCss in lib/theme.js). Always defined here so font-display/
-     font-body/font-sans stay valid CSS on pages with no club context. */
+     font-body/font-mono/font-sans stay valid CSS on pages with no club context. */
   --pb-font-display: 'Geist','Barlow Condensed','Oswald',sans-serif;
   --pb-font-body:    'Geist','Inter',system-ui,sans-serif;
+  --pb-font-mono:    'JetBrains Mono','Fira Code',monospace;
 
   /* Brand + semantic colours (shared across light and dark) */
   --pb-accent:          #16c784;
@@ -83,6 +84,70 @@
   --pb-faintest: #b6bac6;
 }
 
+/* Ink tokens — the accent/positive/red as *text*, which needs darkening on a
+   white background to stay legible. `--pb-accent-ink` is derived from whatever
+   --pb-accent resolves to on the element it's computed on, so a module surface
+   that re-points --pb-accent must also carry `.pb-ink` for the ink to follow it
+   (a custom property declared on <html> computes against <html>'s accent and is
+   then inherited as a fixed value). Fills keep using --pb-accent itself. */
+:root,
+[data-theme="dark"],
+[data-theme="dark"] .pb-ink {
+  --pb-accent-ink:   var(--pb-accent);
+  --pb-positive-ink: var(--pb-positive);
+  --pb-red-ink:      var(--pb-red);
+}
+.pb-ink { --pb-accent-ink: var(--pb-accent); }
+[data-theme="light"],
+[data-theme="light"] .pb-ink {
+  --pb-accent-ink:   color-mix(in srgb, var(--pb-accent) 74%, #000);
+  --pb-positive-ink: #0f8f5f;
+  --pb-red-ink:      #c73f3f;
+}
+
+/* Master–detail panes.
+   Wrapping is decided by flex-basis, not min-width, so the list's basis and
+   max-width live here rather than inline: an inline declaration beats a media
+   query, and the responsive override has to be able to win. Below 900px the
+   list releases to a full row and the pattern becomes list-then-record. The
+   side panel beside a table does the same at 1200px, where it stacks under the
+   table and should fill the row rather than leave a dead column. */
+.ch-listpane {
+  flex: 0 1 270px;
+  max-width: 340px;
+  min-width: 240px;
+  border-right: 1px solid var(--pb-hairline);
+}
+.ch-sidepane {
+  flex: 1 1 346px;
+  min-width: 300px;
+  max-width: 420px;
+  border-left: 1px solid var(--pb-hairline);
+}
+@media (max-width: 900px) {
+  .ch-listpane {
+    flex-basis: 100%;
+    max-width: none;
+    border-right: none;
+    border-bottom: 1px solid var(--pb-hairline);
+  }
+}
+@media (max-width: 1200px) {
+  .ch-sidepane {
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--pb-hairline);
+  }
+}
+
+/* Panels, drawers and toasts enter with this — ported from the ClubManager
+   redesign's bcmRiseIn, which it replaces. */
+@keyframes chRise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.ch-rise { animation: chRise 180ms ease both; }
+
 .pb-num { font-variant-numeric: tabular-nums; }
 
 .pb-scroll::-webkit-scrollbar              { width: 8px; height: 8px; }
@@ -135,7 +200,7 @@
 .pb-card {
   background: var(--pb-surface);
   border: 1px solid var(--pb-hairline);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 .pb-card-2 { background: var(--pb-surface2); }
 .pb-hairline-t { border-top: 1px solid var(--pb-hairline); }

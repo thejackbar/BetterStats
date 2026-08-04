@@ -172,7 +172,7 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
               onDragOver={e => { if (dragId && onReorder) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== it.id) setOverId(it.id) } }}
               onDrop={e => { e.preventDefault(); move(dragId, it.id) }}
               style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surface, borderRadius: 8, padding: '10px 13px',
-                border: `1px solid ${isOver ? C.accent : C.hair}`, boxShadow: isOver ? 'inset 0 2px 0 #6366F1' : undefined, opacity: dragging ? 0.5 : 1 }}>
+                border: `1px solid ${isOver ? C.accent : C.hair}`, boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : undefined, opacity: dragging ? 0.5 : 1 }}>
               {onReorder && (
                 <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(it.id) }} onDragEnd={() => { setDragId(null); setOverId(null) }}
                   title="Drag to reorder" style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>

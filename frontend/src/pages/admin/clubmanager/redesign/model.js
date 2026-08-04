@@ -230,7 +230,7 @@ export const ROLE_HOLDERS = [
 // status → { fg, label } for the diary timeline tones.
 export const DIARY_TONE = {
   done:        { fg: '#16c784', label: 'DONE' },
-  open:        { fg: '#6366F1', label: 'IN PROGRESS' },
+  open:        { fg: 'var(--pb-accent)', label: 'IN PROGRESS' },
   overdue:     { fg: '#ef5b5b', label: 'OVERDUE' },
   blocked:     { fg: '#ef5b5b', label: 'BLOCKED' },
   upcoming:    { fg: '#5b6072', label: 'NOT STARTED' },
@@ -337,7 +337,7 @@ export const FACILITIES = [
 ]
 
 export const SOURCES = {
-  match:       { label: 'MATCH',    fg: '#6366F1' },
+  match:       { label: 'MATCH',    fg: 'var(--pb-accent)' },
   training:    { label: 'TRAINING', fg: '#a855f7' },
   event:       { label: 'EVENT',    fg: '#f5b542' },
   hire:        { label: 'HIRE',     fg: '#06b6d4' },
@@ -476,13 +476,13 @@ export const MEETINGS = [
 ]
 
 export const CTE_STATUS = {
-  today:     { label: 'TODAY', fg: '#6366F1' },
+  today:     { label: 'TODAY', fg: 'var(--pb-accent)' },
   scheduled: { label: 'SCHEDULED', fg: '#8a90a2' },
   held:      { label: 'MINUTES APPROVED', fg: '#16c784' },
 }
 export const ACTION_STATE = {
   done:    { label: 'DONE', fg: '#16c784' },
-  open:    { label: 'OPEN', fg: '#6366F1' },
+  open:    { label: 'OPEN', fg: 'var(--pb-accent)' },
   overdue: { label: 'OVERDUE', fg: '#ef5b5b' },
 }
 
@@ -535,6 +535,6 @@ export const EVENTS = [
 
 export const EV_STATUS = {
   'open':    { label: 'OPEN', fg: '#16c784' },
-  'on sale': { label: 'ON SALE', fg: '#6366F1' },
+  'on sale': { label: 'ON SALE', fg: 'var(--pb-accent)' },
   'draft':   { label: 'DRAFT', fg: '#8a90a2' },
 }

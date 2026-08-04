@@ -46,9 +46,10 @@ from app.services.audit_log import log_activity
 
 router = APIRouter(prefix="/club-admin/imports", tags=["afl-imports"])
 
-MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
-STAT_FIELDS = ("games_played", "goals", "behinds", "bog_count", "captain_games")
+STAT_FIELDS = ("games_played", "goals", "behinds", "bog_count", "captain_games",
+               "club_bf_votes", "comp_bf_votes")
 KEY_FIELDS = ("player_name", "season_label", "grade_label")
 ALL_FIELDS = KEY_FIELDS + STAT_FIELDS
 
@@ -59,8 +60,18 @@ SYNONYMS = {
     "games_played": ["games", "matches", "gp", "games played", "played", "m"],
     "goals": ["goals", "g", "goal"],
     "behinds": ["behinds", "b", "behind"],
-    "bog_count": ["bog", "boG", "best on ground", "b.o.g", "votes", "b&f votes"],
+    "bog_count": ["bog", "boG", "best on ground", "b.o.g"],
     "captain_games": ["captain", "capt", "c", "captain games"],
+    # Two distinct historical tallies clubs commonly track alongside season
+    # stats: votes in the CLUB's own internal best & fairest count, vs votes
+    # in the wider association/league's best & fairest — never the same
+    # number. Kept separate from bog_count (an actual best-on-ground TALLY,
+    # not a vote count) rather than folded in as a synonym of it.
+    "club_bf_votes": ["club bf votes", "club b&f votes", "clubbfvotes", "club votes",
+                       "b&f votes", "bf votes", "votes", "best and fairest votes"],
+    "comp_bf_votes": ["comp bf votes", "compbfvotes", "competition bf votes",
+                       "comp b&f votes", "competition b&f votes", "comp votes",
+                       "association votes", "league votes", "league medal votes"],
 }
 
 
@@ -260,6 +271,8 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             "games": sum(it["games_played"] for it in items),
             "goals": sum(it["goals"] for it in items),
             "behinds": sum(it["behinds"] for it in items),
+            "club_bf_votes": sum(it["club_bf_votes"] for it in items),
+            "comp_bf_votes": sum(it["comp_bf_votes"] for it in items),
             "already_synced_overlap": overlapping,
         })
     for nm, items in new_items_by_name.items():
@@ -268,6 +281,8 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             "games": sum(it["games_played"] for it in items),
             "goals": sum(it["goals"] for it in items),
             "behinds": sum(it["behinds"] for it in items),
+            "club_bf_votes": sum(it["club_bf_votes"] for it in items),
+            "comp_bf_votes": sum(it["comp_bf_votes"] for it in items),
             "already_synced_overlap": False,
         })
     preview.sort(key=lambda p: p["games"], reverse=True)
@@ -303,12 +318,26 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     }
 
 
+@router.get("/seasons")
+async def list_org_seasons(
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's seasons for the Seasons step's full "search all seasons"
+    picker — the auto-matched candidates already come back on each row from
+    /resolve, but a manual full browse needs the whole list up front."""
+    rows = await _org_seasons(db, club.id)
+    return [{"id": sid, "name": name, "year": year} for sid, name, year in rows]
+
+
 @router.get("/template.csv")
 async def template():
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Player Name", "Season", "Grade", "Games", "Goals", "Behinds", "BOG", "Captain"])
-    writer.writerow(["Smith, John", "2019", "A Grade", "18", "12", "8", "2", "0"])
+    writer.writerow(["Player Name", "Season", "Grade", "Games", "Goals", "Behinds", "BOG", "Captain",
+                      "Club B&F Votes", "Comp B&F Votes"])
+    writer.writerow(["Smith, John", "2019", "A Grade", "18", "12", "8", "2", "0", "12", "3"])
     return StreamingResponse(
         iter([output.getvalue()]), media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=afl_historical_import_template.csv"},
@@ -407,14 +436,17 @@ async def commit(
             await db.execute(text("""
                 INSERT INTO afl_imported_stats
                     (organisation_id, import_batch_id, player_id, season_id, season_label,
-                     grade_label, games_played, goals, behinds, bog_count, captain_games)
-                VALUES (:org, :batch, :pid, :sid, :slabel, :glabel, :games, :goals, :behinds, :bog, :capt)
+                     grade_label, games_played, goals, behinds, bog_count, captain_games,
+                     club_bf_votes, comp_bf_votes)
+                VALUES (:org, :batch, :pid, :sid, :slabel, :glabel, :games, :goals, :behinds, :bog, :capt,
+                        :club_votes, :comp_votes)
             """), {
                 "org": str(club.id), "batch": str(batch.id), "pid": pid_str,
                 "sid": str(it["season_id"]) if it["season_id"] else None,
                 "slabel": it.get("season_label"), "glabel": it.get("grade_label"),
                 "games": it["games_played"], "goals": it["goals"], "behinds": it["behinds"],
                 "bog": it["bog_count"], "capt": it["captain_games"],
+                "club_votes": it["club_bf_votes"], "comp_votes": it["comp_bf_votes"],
             })
             inserted += 1
 
@@ -463,7 +495,8 @@ async def list_import_players(
 ):
     rows = await db.execute(text("""
         SELECT i.player_id, COALESCE(p.display_name_override, p.name) AS player_name,
-               i.season_label, i.grade_label, i.games_played, i.goals, i.behinds, i.bog_count
+               i.season_label, i.grade_label, i.games_played, i.goals, i.behinds, i.bog_count,
+               i.club_bf_votes, i.comp_bf_votes
         FROM afl_imported_stats i JOIN players p ON p.id = i.player_id
         WHERE i.import_batch_id = :batch AND i.organisation_id = :org
         ORDER BY player_name

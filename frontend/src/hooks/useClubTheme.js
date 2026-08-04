@@ -6,8 +6,8 @@ import { useTheme } from '../contexts/ThemeContext'
  * Applies a club's white-label theme:
  *  - injects a <style id="club-theme"> tag with the club's full colour
  *    palette (accent, indicators, chart series, light + dark surfaces) and
- *    its display/body font choice (--pb-font-display/-body, plus any
- *    @font-face rule for an uploaded font)
+ *    its display/body/mono font choices (--pb-font-display/-body/-mono, plus
+ *    any @font-face rule for an uploaded font)
  *  - feeds the club's admin-default theme mode into ThemeContext
  *
  * Cleans up on unmount so non-club pages fall back to BetterStats defaults.
@@ -30,7 +30,7 @@ export function useClubTheme(club) {
     return () => { document.getElementById('club-theme')?.remove() }
   }, [
     club?.theme_config, club?.accent_color, club?.font_config,
-    club?.font_display_url, club?.font_body_url,
+    club?.font_display_url, club?.font_body_url, club?.font_mono_url,
   ])
 
   useEffect(() => {

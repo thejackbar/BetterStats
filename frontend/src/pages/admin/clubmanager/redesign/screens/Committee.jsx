@@ -14,7 +14,7 @@ function fmtDate(iso) {
 const isToday = (iso) => iso && new Date(iso).toDateString() === new Date().toDateString()
 
 function meetingStatus(m) {
-  if (isToday(m.scheduled_at)) return { label: 'TODAY', fg: '#6366F1' }
+  if (isToday(m.scheduled_at)) return { label: 'TODAY', fg: 'var(--pb-accent)' }
   const s = (m.status || '').toLowerCase()
   if (s.includes('complet') || s.includes('held') || s.includes('approv') || s.includes('minutes')) return { label: (m.status || 'COMPLETED').toUpperCase().replace(/_/g, ' '), fg: '#16c784' }
   if (m.scheduled_at && new Date(m.scheduled_at) > new Date()) return { label: 'SCHEDULED', fg: '#8a90a2' }
@@ -24,7 +24,7 @@ function taskState(t) {
   const s = (t.status || '').toLowerCase()
   if (s.includes('done') || s.includes('complet')) return { label: 'DONE', fg: '#16c784' }
   if (t.due_date && new Date(t.due_date) < new Date()) return { label: 'OVERDUE', fg: '#ef5b5b' }
-  return { label: (t.status || 'OPEN').toUpperCase().replace(/_/g, ' '), fg: '#6366F1' }
+  return { label: (t.status || 'OPEN').toUpperCase().replace(/_/g, ' '), fg: 'var(--pb-accent)' }
 }
 function motionOutcome(o) {
   const s = (o || '').toLowerCase()
@@ -129,7 +129,7 @@ export default function Committee({ st, patch, narrow }) {
                 const s = meetingStatus(m)
                 return (
                   <div key={m.id} onClick={() => patch({ cteMeeting: m.id })}
-                    style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '11px 12px', borderRadius: 8, cursor: 'pointer', border: sel && m.id === sel.id ? '1px solid rgba(99,102,241,0.4)' : `1px solid ${C.hair}`, background: sel && m.id === sel.id ? 'rgba(99,102,241,0.08)' : C.surface }}>
+                    style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '11px 12px', borderRadius: 8, cursor: 'pointer', border: sel && m.id === sel.id ? '1px solid color-mix(in srgb, var(--pb-accent) 40%, transparent)' : `1px solid ${C.hair}`, background: sel && m.id === sel.id ? 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' : C.surface }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{m.title}</span>
                       <span style={chip(s.fg)}>{s.label}</span>
@@ -216,7 +216,7 @@ export default function Committee({ st, patch, narrow }) {
                   onDrop={e => { e.preventDefault(); movePosition(dragId, p.id) }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surface, borderRadius: 8, padding: '11px 13px',
                     border: `1px solid ${isOver ? C.accent : (t ? C.hair : 'rgba(245,181,66,0.35)')}`,
-                    boxShadow: isOver ? 'inset 0 2px 0 #6366F1' : undefined, opacity: dragging ? 0.5 : 1 }}>
+                    boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : undefined, opacity: dragging ? 0.5 : 1 }}>
                   <span draggable
                     onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(p.id) }}
                     onDragEnd={() => { setDragId(null); setOverId(null) }}

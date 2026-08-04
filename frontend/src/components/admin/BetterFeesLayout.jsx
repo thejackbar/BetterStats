@@ -1,22 +1,9 @@
-import { CAP } from '../../lib/capabilities'
-import ModuleLayout from './ModuleLayout'
+import BetterClubhouseLayout from './BetterClubhouseLayout'
 
-// BetterFees runs as its own module surface — members, payments, schedule and
-// reports grouped together, away from the main admin nav.
-const NAV = [
-  { to: '/admin/fees', label: 'Members', icon: 'teams', cap: CAP.MANAGE_FEES, exact: true },
-  { to: '/admin/fees/payments', label: 'Payments', icon: 'money', cap: CAP.MANAGE_FEES },
-  { to: '/admin/fees/schedule', label: 'Fee Schedule', icon: 'list', cap: CAP.MANAGE_FEES },
-  { to: '/admin/fees/membership-types', label: 'Membership Types', icon: 'settings', cap: CAP.MANAGE_FEES },
-  { to: '/admin/fees/reports', label: 'Reports', icon: 'ladders', cap: CAP.MANAGE_FEES },
-  { to: '/admin/fees/square', label: 'Square', icon: 'share', cap: CAP.MANAGE_FEES },
-  { to: '/admin/fees/xero', label: 'Xero', icon: 'share', cap: CAP.MANAGE_FEES },
-]
-
-export default function BetterFeesLayout({ children, title, actions }) {
-  return (
-    <ModuleLayout moduleName="Fees" nav={NAV} title={title} actions={actions}>
-      {children}
-    </ModuleLayout>
-  )
+// The Fees screens are the Money section of BetterClubhouse now — no separate
+// BetterFees sidebar, accent or lockup, and the tools kept their URLs. This
+// wrapper stays so the existing pages don't all have to change their import in
+// one go; new screens should render BetterClubhouseLayout directly.
+export default function BetterFeesLayout(props) {
+  return <BetterClubhouseLayout {...props} />
 }

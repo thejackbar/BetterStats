@@ -1,23 +1,12 @@
-import { CAP } from '../../lib/capabilities'
-import ModuleLayout from './ModuleLayout'
-import CommsContextBar from './CommsContextBar'
+import BetterClubhouseLayout from './BetterClubhouseLayout'
 
-// BetterComms — bulk email — runs as its own module surface (part of the
-// BetterAdmin umbrella), mirroring BetterFees.
-const NAV = [
-  { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, exact: true },
-  { to: '/admin/comms/contacts', label: 'Contacts', icon: 'teams', cap: CAP.MANAGE_COMMS },
-  { to: '/admin/comms/segments', label: 'Segments', icon: 'teams', cap: CAP.MANAGE_COMMS },
-  { to: '/admin/comms/lists', label: 'Lists', icon: 'list', cap: CAP.MANAGE_COMMS },
-  { to: '/admin/comms/templates', label: 'Templates', icon: 'list', cap: CAP.MANAGE_COMMS },
-  { to: '/admin/comms/settings', label: 'Settings', icon: 'settings', cap: CAP.MANAGE_COMMS },
-]
-
-export default function BetterCommsLayout({ children, title, actions }) {
-  return (
-    <ModuleLayout moduleName="Comms" nav={NAV} title={title} actions={actions}>
-      <CommsContextBar />
-      {children}
-    </ModuleLayout>
-  )
+// The Comms screens are the Comms section of BetterClubhouse now.
+//
+// CommsContextBar no longer renders here. It is Super Admin machinery — the
+// BetterCricket marketing-org switch and the act-as-club mechanism — and a club
+// build must never carry BetterCricket's own sales surface, not behind a
+// dropdown and not greyed out. It lives on the super-admin Clubs Directory
+// instead. See docs/design_handoff_betterclubhouse/PROJECT_RULES.md.
+export default function BetterCommsLayout(props) {
+  return <BetterClubhouseLayout {...props} />
 }
