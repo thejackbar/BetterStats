@@ -936,10 +936,10 @@ async def add_player_alias(
 
     await db.execute(
         text(
-            "INSERT INTO player_name_aliases (organisation_id, player_id, alias_name, alias_key, source) "
-            "VALUES (:org, :pid, :name, :key, 'manual')"
+            "INSERT INTO player_name_aliases (id, organisation_id, player_id, alias_name, alias_key, source) "
+            "VALUES (:id, :org, :pid, :name, :key, 'manual')"
         ),
-        {"org": club.id, "pid": player_id, "name": alias_name, "key": key},
+        {"id": str(uuid.uuid4()), "org": club.id, "pid": player_id, "name": alias_name, "key": key},
     )
     await db.commit()
     return {"status": "ok"}

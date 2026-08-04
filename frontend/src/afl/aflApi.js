@@ -148,6 +148,7 @@ export const aflApi = {
 
   // Admin — Merge Players
   mergeCandidates: () => request('/club-admin/merge-candidates'),
+  bulkIgnoreRedacted: () => request('/club-admin/merge-candidates/bulk-ignore-redacted', { method: 'POST' }),
   playerMergeInfo: (playerId) => request(`/club-admin/player-info/${playerId}`),
   ignorePair: (playerAId, playerBId) => request('/club-admin/ignore-pair', {
     method: 'POST', body: JSON.stringify({ player_a_id: playerAId, player_b_id: playerBId }),

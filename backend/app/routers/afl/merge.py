@@ -387,20 +387,16 @@ def _fuzzy_name_pairs(players: list, ignored: set) -> list:
     return scored[:MAX_FUZZY_PAIRS]
 
 
-@router.get("/merge-candidates")
-async def get_merge_candidates(
-    club: Organisation = Depends(get_current_club),
-    _: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    org_id = str(club.id)
-    result = await db.execute(select(Player).where(Player.organisation_id == club.id))
-    players = result.scalars().all()
-
-    ignored_res = await db.execute(text(
+async def _org_ignored_pairs(db: AsyncSession, org_id: str) -> set[tuple[str, str]]:
+    res = await db.execute(text(
         "SELECT player_a_id::text, player_b_id::text FROM afl_merge_pair_ignores WHERE org_id = :org_id"
     ), {"org_id": org_id})
-    ignored = {(r.player_a_id, r.player_b_id) for r in ignored_res.mappings().all()}
+    return {(r.player_a_id, r.player_b_id) for r in res.mappings().all()}
+
+
+async def _build_candidate_pairs(db: AsyncSession, org_id: str, ignored: set[tuple[str, str]]) -> list[dict]:
+    result = await db.execute(select(Player).where(Player.organisation_id == uuid.UUID(org_id)))
+    players = result.scalars().all()
 
     groups: dict[str, list] = {}
     for p in players:
@@ -430,6 +426,46 @@ async def get_merge_candidates(
         })
 
     return candidate_pairs
+
+
+@router.get("/merge-candidates")
+async def get_merge_candidates(
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    org_id = str(club.id)
+    ignored = await _org_ignored_pairs(db, org_id)
+    return await _build_candidate_pairs(db, org_id, ignored)
+
+
+@router.post("/merge-candidates/bulk-ignore-redacted")
+async def bulk_ignore_redacted(
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_MERGES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ignore every currently-listed candidate pair involving a CA-redacted
+    name ('********', a privacy-redacted junior — see the fill-in/redacted
+    notes elsewhere in this codebase) in one action. Two redacted players
+    can never be told apart to confirm a real duplicate, so reviewing them
+    one at a time buys nothing; each stays a normal player record, this only
+    stops the pair resurfacing as a merge suggestion. If a future sync ever
+    resolves one to a real name, a genuine duplicate would need a fresh
+    match anyway (a name-key change no longer groups it with the old pair),
+    so nothing is permanently lost by ignoring it now."""
+    org_id = str(club.id)
+    ignored = await _org_ignored_pairs(db, org_id)
+    pairs = await _build_candidate_pairs(db, org_id, ignored)
+    redacted_pairs = [p for p in pairs if p["redacted"]]
+    for p in redacted_pairs:
+        a, b = sorted([p["player_a"]["id"], p["player_b"]["id"]])
+        await db.execute(text("""
+            INSERT INTO afl_merge_pair_ignores (org_id, player_a_id, player_b_id)
+            VALUES (:org_id, :a, :b) ON CONFLICT (org_id, player_a_id, player_b_id) DO NOTHING
+        """), {"org_id": org_id, "a": a, "b": b})
+    await db.commit()
+    return {"status": "ignored", "count": len(redacted_pairs)}
 
 
 @router.get("/player-info/{player_id}")
