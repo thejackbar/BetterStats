@@ -187,6 +187,36 @@ async def list_grades_with_stats(
     """), {"org": org_id})
     raw_rows = [dict(r) for r in raw.mappings().all()]
 
+    # A grade minted purely from an Import Stats upload (routers/afl/imports.py
+    # promotes a resolved season+grade-label pair into a real Grade row) has
+    # no games/afl_player_game_lines rows at all — the query above alone
+    # would show it as 0 games/0 players/0 goals forever, even though real
+    # figures exist in afl_imported_stats. Added as separate rows (not
+    # merged into the query above) and combined into the same bucket below,
+    # same "sync wins per season" exclusion the leaderboard/records use, so
+    # a season covered by both sources is never double-counted here.
+    imported = await db.execute(text("""
+        SELECT
+            gr.name AS grade_name,
+            COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
+            MAX(gr.category) AS category,
+            bool_and(COALESCE(gr.is_public, true)) AS is_public,
+            COALESCE(SUM(i.games_played), 0) AS games,
+            COUNT(DISTINCT i.player_id) AS players,
+            COALESCE(SUM(i.goals), 0) AS goals
+        FROM afl_imported_stats i
+        JOIN grades gr ON gr.id = i.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org
+          AND NOT EXISTS (
+            SELECT 1 FROM afl_player_season_stats s2
+            WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+              AND s2.grade_id IS NULL AND s2.games > 0
+          )
+        GROUP BY gr.name
+    """), {"org": org_id})
+    raw_rows += [dict(r) for r in imported.mappings().all()]
+
     log_rows = await db.execute(text(
         "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
     ), {"org": org_id})

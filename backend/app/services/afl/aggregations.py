@@ -13,32 +13,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 async def career_totals(db: AsyncSession, org_id: uuid.UUID,
                         player_ids: Optional[list[uuid.UUID]] = None) -> list[dict]:
-    """Career totals per player from the whole-season rollup rows
-    (grade_id IS NULL so per-grade rows don't double count)."""
-    where_player = "AND pss.player_id = ANY(:pids)" if player_ids else ""
+    """Career totals per player, combining the synced whole-season rollup
+    (grade_id IS NULL so per-grade rows don't double count) with imported
+    (Import Stats upload) rows — sync wins per season, imported only fills a
+    genuine gap, same rule the leaderboard/dashboard/records use. A LEFT JOIN
+    to seasons (not INNER) so an imported row with no resolved season still
+    counts toward the totals — it just can't move first_year/last_year."""
+    where_player_s = "AND s.player_id = ANY(:pids)" if player_ids else ""
+    where_player_i = "AND i.player_id = ANY(:pids)" if player_ids else ""
     params: dict = {"org": str(org_id)}
     if player_ids:
         params["pids"] = [str(p) for p in player_ids]
     res = await db.execute(text(f"""
-        SELECT pss.player_id,
+        WITH combined AS (
+            SELECT s.player_id, s.season_id, s.games, s.goals, s.behinds, s.bog_count, s.captain_games
+            FROM afl_player_season_stats s
+            WHERE s.organisation_id = :org AND s.grade_id IS NULL {where_player_s}
+            UNION ALL
+            SELECT i.player_id, i.season_id, i.games_played AS games, i.goals, i.behinds, i.bog_count, i.captain_games
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org {where_player_i}
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT c.player_id,
                p.name,
                p.display_name_override,
                p.photo_url,
-               COUNT(DISTINCT pss.season_id)              AS seasons,
-               COALESCE(SUM(pss.games), 0)                AS games,
-               COALESCE(SUM(pss.goals), 0)                AS goals,
-               COALESCE(SUM(pss.behinds), 0)              AS behinds,
-               COALESCE(SUM(pss.bog_count), 0)            AS bogs,
-               COALESCE(SUM(pss.captain_games), 0)        AS captain_games,
+               COUNT(DISTINCT c.season_id)                AS seasons,
+               COALESCE(SUM(c.games), 0)                  AS games,
+               COALESCE(SUM(c.goals), 0)                  AS goals,
+               COALESCE(SUM(c.behinds), 0)                AS behinds,
+               COALESCE(SUM(c.bog_count), 0)               AS bogs,
+               COALESCE(SUM(c.captain_games), 0)          AS captain_games,
                MIN(s.year)                                AS first_year,
                MAX(s.year)                                AS last_year
-        FROM afl_player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE pss.organisation_id = :org
-          AND pss.grade_id IS NULL
-          {where_player}
-        GROUP BY pss.player_id, p.name, p.display_name_override, p.photo_url
+        FROM combined c
+        JOIN players p ON p.id = c.player_id
+        LEFT JOIN seasons s ON s.id = c.season_id
+        GROUP BY c.player_id, p.name, p.display_name_override, p.photo_url
         ORDER BY games DESC, goals DESC
     """), params)
     return [dict(r._mapping) for r in res]
@@ -46,6 +62,13 @@ async def career_totals(db: AsyncSession, org_id: uuid.UUID,
 
 async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
                            player_id: uuid.UUID) -> list[dict]:
+    """Synced-only for now — unlike career_totals above, this doesn't yet
+    combine in afl_imported_stats rows. A season covered purely by an Import
+    Stats upload won't appear in this per-season breakdown even though it
+    does count toward the player's career total. Flagged as a follow-up:
+    needs the same combine plus synthesising a whole-season (grade_id NULL)
+    row for an import-only season, since an imported row is only ever
+    per-grade shaped."""
     res = await db.execute(text("""
         SELECT pss.season_id, s.name AS season_name, s.year,
                pss.grade_id, gr.name AS grade_name,
@@ -123,7 +146,14 @@ async def matching_grade_ids(db: AsyncSession, org_id: uuid.UUID, grade_id: uuid
 
 async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
                                season_id: Optional[uuid.UUID] = None) -> dict:
-    """Headline W/L/D across the club (optionally one season)."""
+    """Headline W/L/D across the club (optionally one season).
+
+    Deliberately synced-only, unlike the goals/games/BOG combines elsewhere
+    in this module — a win/loss/draw is a property of one specific MATCH
+    (the games/afl_game_details tables), and a season-total Import Stats
+    upload has no per-match data to draw a result from at all. There's
+    nothing to combine here; the games/grades count will only ever reflect
+    what's actually been synced from PlayHQ."""
     season_clause = "AND s.id = :season" if season_id else ""
     params: dict = {"org": str(org_id)}
     if season_id:

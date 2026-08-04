@@ -67,26 +67,46 @@ async def get_summary(org_id: uuid.UUID,
     BOGs, recent + upcoming games."""
     summary = await aggregations.club_results_summary(db, org_id, season_id)
 
-    season_clause = "AND pss.season_id = :season" if season_id else ""
     params: dict = {"org": str(org_id)}
+    season_clause_s = ""
+    season_clause_i = ""
     if season_id:
         params["season"] = str(season_id)
+        season_clause_s = "AND s.season_id = :season"
+        season_clause_i = "AND i.season_id = :season"
 
     _TOP_COLS = {"goals": "goals", "games": "games", "bogs": "bog_count"}
 
+    # Combines synced (afl_player_season_stats) with imported (Import Stats
+    # upload) the same way the leaderboard/admin Players list do — without
+    # this, a club whose whole history came from an upload had real numbers
+    # nowhere on the public dashboard's "leading players" panels.
     async def _top(order: str):
         col = _TOP_COLS[order]
         res = await db.execute(text(f"""
-            SELECT pss.player_id, p.name, p.display_name_override, p.photo_url,
-                   COALESCE(SUM(pss.games),0) AS games,
-                   COALESCE(SUM(pss.goals),0) AS goals,
-                   COALESCE(SUM(pss.bog_count),0) AS bogs
-            FROM afl_player_season_stats pss
-            JOIN players p ON p.id = pss.player_id
-            WHERE pss.organisation_id = :org AND pss.grade_id IS NULL {season_clause}
-            GROUP BY pss.player_id, p.name, p.display_name_override, p.photo_url
-            HAVING COALESCE(SUM(pss.{col}),0) > 0
-            ORDER BY COALESCE(SUM(pss.{col}),0) DESC, games DESC
+            WITH combined AS (
+                SELECT s.player_id, s.games, s.goals, s.bog_count
+                FROM afl_player_season_stats s
+                WHERE s.organisation_id = :org AND s.grade_id IS NULL {season_clause_s}
+                UNION ALL
+                SELECT i.player_id, i.games_played AS games, i.goals, i.bog_count
+                FROM afl_imported_stats i
+                WHERE i.organisation_id = :org {season_clause_i}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM afl_player_season_stats s2
+                    WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                      AND s2.grade_id IS NULL AND s2.games > 0
+                  )
+            )
+            SELECT c.player_id, p.name, p.display_name_override, p.photo_url,
+                   COALESCE(SUM(c.games),0) AS games,
+                   COALESCE(SUM(c.goals),0) AS goals,
+                   COALESCE(SUM(c.bog_count),0) AS bogs
+            FROM combined c
+            JOIN players p ON p.id = c.player_id
+            GROUP BY c.player_id, p.name, p.display_name_override, p.photo_url
+            HAVING COALESCE(SUM(c.{col}),0) > 0
+            ORDER BY COALESCE(SUM(c.{col}),0) DESC, games DESC
             LIMIT 5
         """), params)
         return [dict(r._mapping) for r in res]
