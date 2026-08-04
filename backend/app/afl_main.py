@@ -47,6 +47,7 @@ from app.routers.afl import (
     users_admin as afl_users_admin,
     super_clubs as afl_super_clubs,
     imports as afl_imports,
+    seasons_admin as afl_seasons_admin,
 )
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,7 @@ async def lifespan(app: FastAPI):
                 captain_games INTEGER NOT NULL DEFAULT 0,
                 club_bf_votes INTEGER NOT NULL DEFAULT 0,
                 comp_bf_votes INTEGER NOT NULL DEFAULT 0,
+                grade_id UUID REFERENCES grades(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
@@ -311,9 +313,19 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE afl_imported_stats ADD COLUMN IF NOT EXISTS club_bf_votes INTEGER NOT NULL DEFAULT 0"))
         await conn.execute(text(
             "ALTER TABLE afl_imported_stats ADD COLUMN IF NOT EXISTS comp_bf_votes INTEGER NOT NULL DEFAULT 0"))
+        # grade_id — promotes a resolved (season, grade label) pair from free
+        # text into a real Grade row (routers/afl/imports.py::commit), so an
+        # imported grade shows up in the grade filter and Merge Grades like
+        # any synced one. grade_label stays alongside it as the always-present
+        # free-text fallback for a row whose season never resolved.
+        await conn.execute(text(
+            "ALTER TABLE afl_imported_stats ADD COLUMN IF NOT EXISTS grade_id UUID REFERENCES grades(id) ON DELETE SET NULL"))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_org_player "
             "ON afl_imported_stats(organisation_id, player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_grade "
+            "ON afl_imported_stats(grade_id)"))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_batch "
             "ON afl_imported_stats(import_batch_id)"))
@@ -360,6 +372,7 @@ app.include_router(afl_sponsors.router)
 app.include_router(afl_users_admin.router)
 app.include_router(afl_super_clubs.router)
 app.include_router(afl_imports.router)
+app.include_router(afl_seasons_admin.router)
 
 
 @app.get("/health")

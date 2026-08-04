@@ -1,7 +1,16 @@
-"""Public club records — the AFL record book, computed from synced data.
+"""Public club records — the AFL record book.
 
-Kept deliberately lean for pass 1: the record set AFL clubs actually talk
-about with only games/goals/BOG data available (see the plan doc).
+Two different shapes of record here, and only one of them can use imported
+(Import Stats upload) data:
+
+- Season/career records (most goals in a season, most games/goals/BOGs in a
+  career) are built from afl_player_season_stats combined with
+  afl_imported_stats — same "sync wins per season, imported fills the gap"
+  rule the leaderboard/dashboard use, since a season-total upload genuinely
+  has this data.
+- Single-game records (most goals in a game, biggest win, highest score) stay
+  synced-only — a season-total spreadsheet has no per-game breakdown to draw
+  a single-game record from, so there's nothing to combine.
 """
 import uuid
 from typing import Optional
@@ -23,12 +32,14 @@ async def get_records(org_id: uuid.UUID,
     params: dict = {"org": str(org_id)}
     grade_line = ""
     grade_pss = "AND pss.grade_id IS NULL"
+    grade_i = ""
     if grade_id:
         # Every grade_id (any season) merged into/with this one — so a
         # merged grade's games count under whichever name you filter by.
         params["grade"] = await matching_grade_ids(db, org_id, grade_id)
         grade_line = "AND gr.id = ANY(:grade)"
         grade_pss = "AND pss.grade_id = ANY(:grade)"
+        grade_i = "AND i.grade_id = ANY(:grade)"
 
     most_goals_game = await db.execute(text(f"""
         SELECT l.player_id, p.name, p.display_name_override, l.goals,
@@ -47,47 +58,100 @@ async def get_records(org_id: uuid.UUID,
     """), params)
 
     most_goals_season = await db.execute(text(f"""
-        SELECT pss.player_id, p.name, p.display_name_override, pss.goals,
+        WITH combined AS (
+            SELECT pss.player_id, pss.goals, pss.season_id
+            FROM afl_player_season_stats pss
+            WHERE pss.organisation_id = :org {grade_pss}
+            UNION ALL
+            SELECT i.player_id, i.goals, i.season_id
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org {grade_i}
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT c.player_id, p.name, p.display_name_override, c.goals,
                s.name AS season_name, s.year
-        FROM afl_player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE pss.organisation_id = :org AND pss.goals > 0 {grade_pss}
-        ORDER BY pss.goals DESC, s.year ASC
+        FROM combined c
+        JOIN players p ON p.id = c.player_id
+        JOIN seasons s ON s.id = c.season_id
+        WHERE c.goals > 0
+        ORDER BY c.goals DESC, s.year ASC
         LIMIT 10
     """), params)
 
     most_games_career = await db.execute(text(f"""
-        SELECT pss.player_id, p.name, p.display_name_override,
-               SUM(pss.games) AS games
-        FROM afl_player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        WHERE pss.organisation_id = :org {grade_pss}
-        GROUP BY pss.player_id, p.name, p.display_name_override
+        WITH combined AS (
+            SELECT pss.player_id, pss.season_id, pss.games
+            FROM afl_player_season_stats pss
+            WHERE pss.organisation_id = :org {grade_pss}
+            UNION ALL
+            SELECT i.player_id, i.season_id, i.games_played AS games
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org {grade_i}
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT c.player_id, p.name, p.display_name_override,
+               SUM(c.games) AS games
+        FROM combined c
+        JOIN players p ON p.id = c.player_id
+        GROUP BY c.player_id, p.name, p.display_name_override
         ORDER BY games DESC
         LIMIT 10
     """), params)
 
     most_goals_career = await db.execute(text(f"""
-        SELECT pss.player_id, p.name, p.display_name_override,
-               SUM(pss.goals) AS goals
-        FROM afl_player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        WHERE pss.organisation_id = :org {grade_pss}
-        GROUP BY pss.player_id, p.name, p.display_name_override
-        HAVING SUM(pss.goals) > 0
+        WITH combined AS (
+            SELECT pss.player_id, pss.season_id, pss.goals
+            FROM afl_player_season_stats pss
+            WHERE pss.organisation_id = :org {grade_pss}
+            UNION ALL
+            SELECT i.player_id, i.season_id, i.goals
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org {grade_i}
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT c.player_id, p.name, p.display_name_override,
+               SUM(c.goals) AS goals
+        FROM combined c
+        JOIN players p ON p.id = c.player_id
+        GROUP BY c.player_id, p.name, p.display_name_override
+        HAVING SUM(c.goals) > 0
         ORDER BY goals DESC
         LIMIT 10
     """), params)
 
     most_bogs_career = await db.execute(text(f"""
-        SELECT pss.player_id, p.name, p.display_name_override,
-               SUM(pss.bog_count) AS bogs
-        FROM afl_player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        WHERE pss.organisation_id = :org {grade_pss}
-        GROUP BY pss.player_id, p.name, p.display_name_override
-        HAVING SUM(pss.bog_count) > 0
+        WITH combined AS (
+            SELECT pss.player_id, pss.season_id, pss.bog_count
+            FROM afl_player_season_stats pss
+            WHERE pss.organisation_id = :org {grade_pss}
+            UNION ALL
+            SELECT i.player_id, i.season_id, i.bog_count
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org {grade_i}
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT c.player_id, p.name, p.display_name_override,
+               SUM(c.bog_count) AS bogs
+        FROM combined c
+        JOIN players p ON p.id = c.player_id
+        GROUP BY c.player_id, p.name, p.display_name_override
+        HAVING SUM(c.bog_count) > 0
         ORDER BY bogs DESC
         LIMIT 10
     """), params)

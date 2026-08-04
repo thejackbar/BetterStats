@@ -161,9 +161,15 @@ export const aflApi = {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
 
+  // Admin — Seasons (list / rename / delete)
+  adminListSeasons: () => request('/club-admin/seasons'),
+  adminRenameSeason: (id, body) => request(`/club-admin/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  adminDeleteSeason: (id) => request(`/club-admin/seasons/${id}`, { method: 'DELETE' }),
+
   // Admin — Import Stats (historical CSV import)
   importsTemplateUrl: () => `${BASE}/club-admin/imports/template.csv`,
   importsSeasons: () => request('/club-admin/imports/seasons'),
+  importsCreateSeason: (body) => request('/club-admin/imports/seasons', { method: 'POST', body: JSON.stringify(body) }),
   importsPreview: (file) => {
     const fd = new FormData()
     fd.append('file', file)
