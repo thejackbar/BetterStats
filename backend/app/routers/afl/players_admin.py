@@ -46,6 +46,26 @@ async def list_players(
     """), {"org": str(club.id)})
     summary = {str(r.player_id): dict(r._mapping) for r in summary_res}
 
+    # Historical CSV import (Import Stats) totals, added on top of the synced
+    # figures — but only for a (player, season) the sync doesn't already have
+    # games for, so a season covered by both never double-counts (sync wins).
+    imported_res = await db.execute(text("""
+        SELECT i.player_id,
+               COALESCE(SUM(i.games_played), 0) AS games,
+               COALESCE(SUM(i.goals), 0) AS goals,
+               COALESCE(SUM(i.behinds), 0) AS behinds,
+               COALESCE(SUM(i.bog_count), 0) AS bogs
+        FROM afl_imported_stats i
+        WHERE i.organisation_id = :org
+          AND NOT EXISTS (
+            SELECT 1 FROM afl_player_season_stats s
+            WHERE s.player_id = i.player_id AND s.season_id = i.season_id
+              AND s.grade_id IS NULL AND s.games > 0
+          )
+        GROUP BY i.player_id
+    """), {"org": str(club.id)})
+    imported = {str(r.player_id): dict(r._mapping) for r in imported_res}
+
     last_res = await db.execute(text("""
         SELECT l.player_id, MAX(g.played_at) AS last_played
         FROM afl_player_game_lines l
@@ -68,10 +88,11 @@ async def list_players(
             "email": p.email,
             "phone": p.phone,
             "status": p.status,
-            "games": summary.get(str(p.id), {}).get("games", 0),
-            "goals": summary.get(str(p.id), {}).get("goals", 0),
-            "behinds": summary.get(str(p.id), {}).get("behinds", 0),
-            "bogs": summary.get(str(p.id), {}).get("bogs", 0),
+            "games": summary.get(str(p.id), {}).get("games", 0) + imported.get(str(p.id), {}).get("games", 0),
+            "goals": summary.get(str(p.id), {}).get("goals", 0) + imported.get(str(p.id), {}).get("goals", 0),
+            "behinds": summary.get(str(p.id), {}).get("behinds", 0) + imported.get(str(p.id), {}).get("behinds", 0),
+            "bogs": summary.get(str(p.id), {}).get("bogs", 0) + imported.get(str(p.id), {}).get("bogs", 0),
+            "has_imported_stats": str(p.id) in imported,
             "last_played": last_played.get(str(p.id)),
         }
         for p in players

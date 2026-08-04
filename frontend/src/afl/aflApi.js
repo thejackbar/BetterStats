@@ -155,6 +155,23 @@ export const aflApi = {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
 
+  // Admin — Import Stats (historical CSV import)
+  importsTemplateUrl: () => `${BASE}/club-admin/imports/template.csv`,
+  importsPreview: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/imports/preview`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Preview failed')
+        return res.json()
+      })
+  },
+  importsResolve: (body) => request('/club-admin/imports/resolve', { method: 'POST', body: JSON.stringify(body) }),
+  importsCommit: (body) => request('/club-admin/imports/commit', { method: 'POST', body: JSON.stringify(body) }),
+  importsList: () => request('/club-admin/imports'),
+  importsBatchPlayers: (batchId) => request(`/club-admin/imports/${batchId}/players`),
+  importsUndo: (batchId) => request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
+
   // Admin — Better HQ: All Clubs
   superListClubs: (params) => request(`/club-admin/super/clubs${qs(params)}`),
   superCreateClub: (playhqOrgId, syncNow = true) => request('/club-admin/super/clubs', {

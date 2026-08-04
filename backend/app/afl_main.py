@@ -45,6 +45,7 @@ from app.routers.afl import (
     sponsors as afl_sponsors,
     users_admin as afl_users_admin,
     super_clubs as afl_super_clubs,
+    imports as afl_imports,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,6 +215,32 @@ async def lifespan(app: FastAPI):
                 UNIQUE (org_id, player_a_id, player_b_id)
             )
         """))
+        # Import Stats — historical CSV import (routers/afl/imports.py). Reuses
+        # the shared import_batches table (models.db.ImportBatch, already
+        # ORM-mapped and 100% sport-agnostic — no mirror needed for it here).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_imported_stats (
+                id SERIAL PRIMARY KEY,
+                organisation_id UUID NOT NULL,
+                import_batch_id UUID NOT NULL,
+                player_id UUID NOT NULL,
+                season_id UUID,
+                season_label TEXT,
+                grade_label TEXT,
+                games_played INTEGER NOT NULL DEFAULT 0,
+                goals INTEGER NOT NULL DEFAULT 0,
+                behinds INTEGER NOT NULL DEFAULT 0,
+                bog_count INTEGER NOT NULL DEFAULT 0,
+                captain_games INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_org_player "
+            "ON afl_imported_stats(organisation_id, player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_batch "
+            "ON afl_imported_stats(import_batch_id)"))
 
     # Mark any sync runs orphaned by a restart, same as the cricket boot does.
     from app.models.db import async_session_maker
@@ -256,6 +283,7 @@ app.include_router(afl_achievements.router)
 app.include_router(afl_sponsors.router)
 app.include_router(afl_users_admin.router)
 app.include_router(afl_super_clubs.router)
+app.include_router(afl_imports.router)
 
 
 @app.get("/health")

@@ -12,9 +12,11 @@ import ClubSwitcher from './components/ClubSwitcher'
 
 const NAV = [
   { heading: 'Club Data' },
-  { to: '/admin', label: 'Data Sync', end: true },
   { to: '/admin/players', label: 'Players' },
   { to: '/admin/players/import', label: 'Import Players' },
+  { heading: 'Data Import' },
+  { to: '/admin', label: 'Data Sync', end: true },
+  { to: '/admin/import', label: 'Import Stats' },
   { heading: 'Clean Your Data' },
   { to: '/admin/merge', label: 'Merge Players' },
   { to: '/admin/merge-grades', label: 'Merge Grades' },
