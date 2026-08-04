@@ -328,6 +328,17 @@ export default function App() {
           <Route path="/admin/clubhouse/directory" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          {/* The full editors behind the read-only Clubhouse screens. They lost
+              their routes when the redesign screens took /admin/committee,
+              /admin/events and friends, which left their CRUD unreachable.
+              Each viewer links here until the two are folded together. */}
+          <Route path="/admin/clubhouse/committee/manage" element={<ProtectedRoute requireRole="super_admin"><AdminCommittee /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/events/manage" element={<ProtectedRoute requireRole="super_admin"><AdminEvents /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/facilities/manage" element={<ProtectedRoute requireRole="super_admin"><AdminAssets /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/diary/manage" element={<ProtectedRoute requireRole="super_admin"><AdminClubDiary /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory/families" element={<ProtectedRoute requireRole="super_admin"><AdminFamilies /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory/qualifications" element={<ProtectedRoute requireRole="super_admin"><AdminQualifications /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory/volunteers" element={<ProtectedRoute requireRole="super_admin"><AdminVolunteers /></ProtectedRoute>} />
           {/* Old entry points, kept so bookmarks and links still land somewhere. */}
           <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />

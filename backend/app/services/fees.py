@@ -18,7 +18,7 @@ from decimal import Decimal
 from difflib import SequenceMatcher
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.models.db import (
     async_session_maker,
@@ -602,3 +602,73 @@ async def seed_default_schedule(session, organisation_id, season_id) -> int:
         ))
         created += 1
     return created
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Who owes money
+# ───────────────────────────────────────────────────────────────────────────
+
+async def outstanding_by_member(session: AsyncSession, season_id) -> dict:
+    """{member_id: outstanding} for one season, using the SAME `_financials`
+    the Accounts screen reads.
+
+    A balance is derived, never stored (see the BetterFees allocation note), so
+    anything that needs "who owes money" has to run this calculation rather than
+    reimplement it in SQL. Re-deriving it a second way is how the sidebar badge,
+    the Today row and an audience would start disagreeing with each other.
+    """
+    from app.models.db import FeeMatchDay, FeeMemberSeason, FeeMember, FeePayment, FeeSchedule
+
+    rows = (await session.execute(
+        select(FeeMemberSeason, FeeMember, FeeSchedule)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .outerjoin(FeeSchedule, FeeMemberSeason.fee_schedule_id == FeeSchedule.id)
+        .where(FeeMemberSeason.season_id == season_id)
+    )).all()
+
+    days = {ms_id: float(d) for ms_id, d in (await session.execute(
+        select(FeeMatchDay.member_season_id, func.coalesce(func.sum(FeeMatchDay.days_played), 0))
+        .join(FeeMemberSeason, FeeMatchDay.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season_id)
+        .group_by(FeeMatchDay.member_season_id)
+    )).all()}
+    waived = {ms_id: float(d) for ms_id, d in (await session.execute(
+        select(FeeMatchDay.member_season_id, func.coalesce(func.sum(FeeMatchDay.days_played), 0))
+        .join(FeeMemberSeason, FeeMatchDay.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season_id, FeeMatchDay.waived_at.isnot(None))
+        .group_by(FeeMatchDay.member_season_id)
+    )).all()}
+    paid: dict = {}
+    for ms_id, kind, amount in (await session.execute(
+        select(FeePayment.member_season_id, FeePayment.kind, func.coalesce(func.sum(FeePayment.amount), 0))
+        .join(FeeMemberSeason, FeePayment.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season_id)
+        .group_by(FeePayment.member_season_id, FeePayment.kind)
+    )).all():
+        paid.setdefault(ms_id, {"membership": 0.0, "match_day": 0.0})[kind] = float(amount)
+
+    out = {}
+    for ms, member, schedule in rows:
+        fin = _financials(schedule, days.get(ms.id, 0.0), paid.get(ms.id), waived.get(ms.id, 0.0))
+        out[member.id] = float(fin["total_outstanding"])
+    return out
+
+
+async def owing_player_ids(session: AsyncSession, org_id, season_id) -> set:
+    """The player ids behind every member of this season who still owes.
+    Members with no linked player drop out — an audience resolves against
+    contacts, which key on the player."""
+    from app.models.db import FeeMember
+
+    balances = await outstanding_by_member(session, season_id)
+    owing = {mid for mid, bal in balances.items() if bal > 0}
+    if not owing:
+        return set()
+    rows = (await session.execute(
+        select(FeeMember.player_id).where(
+            FeeMember.id.in_(owing),
+            FeeMember.organisation_id == org_id,
+            FeeMember.player_id.isnot(None),
+        )
+    )).scalars().all()
+    return {pid for pid in rows if pid}

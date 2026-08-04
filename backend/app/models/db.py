@@ -2721,6 +2721,19 @@ class CommitteeTask(Base):
     is_recurring = Column(Boolean, nullable=False, server_default="false", default=False)
     recurrence_note = Column(Text, nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Migration 217 — an action becomes plannable: what it should cost, what it
+    # did cost, how far along it is, what it is waiting on (see
+    # CommitteeTaskDependency), which objective it serves and which meeting or
+    # motion asked for it.
+    objective_id = Column(UUID(as_uuid=True), ForeignKey("club_objectives.id", ondelete="SET NULL"), nullable=True)
+    budget_estimate = Column(Numeric(12, 2), nullable=True)
+    actual_expenditure = Column(Numeric(12, 2), nullable=True)
+    percent_complete = Column(Integer, nullable=False, server_default="0", default=0)
+    start_date = Column(Date, nullable=True)
+    closed_by_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    outcome_notes = Column(Text, nullable=True)
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="SET NULL"), nullable=True)
+    motion_id = Column(UUID(as_uuid=True), ForeignKey("meeting_motions.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -2737,6 +2750,11 @@ class CommitteeDocument(Base):
     url = Column(Text, nullable=False)
     position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
+    # Migration 217 — what this document belongs to, so a quote the committee
+    # asked for hangs off that action rather than floating in a general list.
+    # 'task' | 'motion' | 'meeting' | 'objective'; both null = a club-wide doc.
+    entity_type = Column(Text, nullable=True)
+    entity_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -2941,6 +2959,72 @@ class MeetingMotion(Base):
     votes_abstain = Column(Integer, nullable=True)
     outcome = Column(Text, nullable=False, server_default="pending", default="pending")
     notes = Column(Text, nullable=True)
+    # Migration 217 — a carried motion the committee chooses to record as a
+    # standing decision. `resolution_ref` is the club's own numbering; ours
+    # would only be one more convention to argue about.
+    is_resolution = Column(Boolean, nullable=False, server_default="false", default=False)
+    resolution_ref = Column(Text, nullable=True)
+    resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MeetingMotionVote(Base):
+    """One committee member's vote on one motion (migration 217).
+
+    The tallies on MeetingMotion stay: a club that counts hands in the room has
+    only a count, and forcing named votes on them would be worse than useless.
+    A club that does record names gets both, and the tallies can be derived.
+    """
+    __tablename__ = "meeting_motion_votes"
+    __table_args__ = (UniqueConstraint("motion_id", "member_id", name="uq_motion_vote_per_member"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    motion_id = Column(UUID(as_uuid=True), ForeignKey("meeting_motions.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    vote = Column(Text, nullable=False)   # for | against | abstain
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClubObjective(Base):
+    """A line in the club's business or strategic plan (migration 217).
+    Committee actions point at one, which is what turns a task register into
+    progress against a plan."""
+    __tablename__ = "club_objectives"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    plan = Column(Text, nullable=True)
+    season_year = Column(Integer, nullable=True)
+    status = Column(Text, nullable=False, server_default="active", default="active")
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeTaskDependency(Base):
+    """An action that waits on another (migration 217). Same shape as
+    DiaryTaskDependency, so the same client-side critical-path derivation
+    works on both."""
+    __tablename__ = "committee_task_dependencies"
+
+    task_id = Column(UUID(as_uuid=True), ForeignKey("committee_tasks.id", ondelete="CASCADE"), primary_key=True)
+    depends_on_task_id = Column(UUID(as_uuid=True), ForeignKey("committee_tasks.id", ondelete="CASCADE"), primary_key=True)
+
+
+class CommitteeNote(Base):
+    """A note against an action, motion or meeting (migration 217).
+    `entity_type` is 'task' | 'motion' | 'meeting' | 'objective'."""
+    __tablename__ = "committee_notes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    entity_type = Column(Text, nullable=False)
+    entity_id = Column(UUID(as_uuid=True), nullable=False)
+    body = Column(Text, nullable=False)
+    author_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    author_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 

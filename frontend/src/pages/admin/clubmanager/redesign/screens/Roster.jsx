@@ -46,7 +46,11 @@ export default function Roster({ st, patch, narrow }) {
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  const load = () => api.rosterWeek().then(res => { setData(res); setShifts(res.week.shifts || []) }).catch(e => setErr(String(e?.message || e)))
+  // api.js stamps the HTTP status onto the error, which is the difference
+  // between "you lack a capability" (403) and "the server threw" (500).
+  const load = () => api.rosterWeek()
+    .then(res => { setData(res); setShifts(res.week.shifts || []) })
+    .catch(e => setErr((e?.status ? `HTTP ${e.status} · ` : '') + String(e?.message || e)))
   useEffect(() => { load() }, [])
 
   const view = st.view
@@ -63,7 +67,26 @@ export default function Roster({ st, patch, narrow }) {
     </ScreenHeader>
   )
 
-  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load the roster.' : 'Loading the roster…'}</div></div>
+  // A failure here used to read "Could not load the roster." and nothing else,
+  // which is the same message whether the club lacks a capability, the request
+  // timed out, or the server threw. Say which, so it can be acted on.
+  if (!data) return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <Header />
+      <div style={{ padding: 24, fontSize: 13, color: C.faint, maxWidth: '46rem' }}>
+        {!err ? 'Loading the roster…' : (
+          <div style={{ background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 9, padding: 18, lineHeight: 1.6 }}>
+            <div style={{ color: C.block, fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>Could not load the roster.</div>
+            <div style={{ color: C.dim }}>{err}</div>
+            <div style={{ marginTop: 12 }}>
+              <button onClick={() => { setErr(null); load() }}
+                style={{ padding: '7px 13px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#0a0d14', cursor: 'pointer' }}>Try again</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 
   const { areas, candidates, settings } = data
   const areaById = {}; areas.forEach(a => { areaById[a.id] = a })

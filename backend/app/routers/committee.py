@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -241,6 +242,7 @@ async def end_term(term_id: str, data: TermEnd, _: User = _require, club: Organi
 async def list_tasks(status: Optional[str] = None, category: Optional[str] = None, _: User = _require,
                      club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     rows = await committee_service.list_tasks(db, club.id, status=status, category=category)
+    await committee_service.load_task_dependencies(db, rows)
     return {"tasks": [committee_service._task_dict(t) for t in rows]}
 
 
@@ -253,14 +255,24 @@ class TaskCreate(BaseModel):
     due_date: Optional[date] = None
     is_recurring: bool = False
     recurrence_note: Optional[str] = None
+    # Migration 217 — the planning side of an action.
+    objective_id: Optional[str] = None
+    budget_estimate: Optional[float] = None
+    actual_expenditure: Optional[float] = None
+    percent_complete: Optional[int] = None
+    start_date: Optional[date] = None
+    outcome_notes: Optional[str] = None
+    meeting_id: Optional[str] = None
+    motion_id: Optional[str] = None
 
 
 @router.post("/tasks")
 async def create_task(data: TaskCreate, _: User = _require, club: Organisation = Depends(get_current_club),
                       db: AsyncSession = Depends(get_db)):
     fields = data.model_dump()
-    fields["position_id"] = uuid.UUID(fields["position_id"]) if fields.get("position_id") else None
-    fields["assigned_to_member_id"] = uuid.UUID(fields["assigned_to_member_id"]) if fields.get("assigned_to_member_id") else None
+    for key in ("position_id", "assigned_to_member_id", "objective_id", "meeting_id", "motion_id", "closed_by_member_id"):
+        if key in fields:
+            fields[key] = uuid.UUID(fields[key]) if fields.get(key) else None
     try:
         t = await committee_service.create_task(db, club.id, **fields)
     except ValueError as e:
@@ -279,6 +291,16 @@ class TaskPatch(BaseModel):
     status: Optional[str] = None
     is_recurring: Optional[bool] = None
     recurrence_note: Optional[str] = None
+    # Migration 217 — the planning side of an action.
+    objective_id: Optional[str] = None
+    budget_estimate: Optional[float] = None
+    actual_expenditure: Optional[float] = None
+    percent_complete: Optional[int] = None
+    start_date: Optional[date] = None
+    outcome_notes: Optional[str] = None
+    meeting_id: Optional[str] = None
+    motion_id: Optional[str] = None
+    closed_by_member_id: Optional[str] = None
 
 
 @router.patch("/tasks/{task_id}")
@@ -286,10 +308,9 @@ async def update_task(task_id: str, data: TaskPatch, _: User = _require, club: O
                       db: AsyncSession = Depends(get_db)):
     t = await _task_or_404(db, club, task_id)
     fields = data.model_dump(exclude_unset=True)
-    if "position_id" in fields:
-        fields["position_id"] = uuid.UUID(fields["position_id"]) if fields["position_id"] else None
-    if "assigned_to_member_id" in fields:
-        fields["assigned_to_member_id"] = uuid.UUID(fields["assigned_to_member_id"]) if fields["assigned_to_member_id"] else None
+    for key in ("position_id", "assigned_to_member_id", "objective_id", "meeting_id", "motion_id", "closed_by_member_id"):
+        if key in fields:
+            fields[key] = uuid.UUID(fields[key]) if fields[key] else None
     await committee_service.update_task(db, t, **fields)
     await db.commit()
     return committee_service._task_dict(t)
@@ -747,5 +768,173 @@ async def delete_nomination(meeting_id: str, nomination_id: str, _: User = _requ
     m = await _meeting_or_404(db, club, meeting_id)
     n = await _nomination_or_404(db, club, m, nomination_id)
     await committee_service.delete_nomination(db, n)
+    await db.commit()
+    return {"deleted": True}
+
+
+# ─── Governance (migration 217) ───────────────────────────────────────────────
+
+
+class MotionVote(BaseModel):
+    member_id: str
+    vote: str          # for | against | abstain
+
+
+class MotionVotes(BaseModel):
+    votes: List[MotionVote] = []
+
+
+@router.put("/meetings/{meeting_id}/motions/{motion_id}/votes")
+async def set_motion_votes(meeting_id: str, motion_id: str, data: MotionVotes, _: User = _require,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Record who voted which way. Replaces the whole list, and re-derives the
+    motion's tallies from it."""
+    m = await _meeting_or_404(db, club, meeting_id)
+    motion = await _motion_or_404(db, club, m, motion_id)
+    await committee_service.set_motion_votes(db, motion, [v.model_dump() for v in data.votes])
+    await db.commit()
+    # commit() expires the instance, and serialising it would then lazy-load
+    # from inside the response — the MissingGreenlet trap. Refresh explicitly.
+    await db.refresh(motion)
+    await committee_service.load_motion_votes(db, [motion])
+    return committee_service._motion_dict(motion)
+
+
+class ResolutionBody(BaseModel):
+    resolution_ref: Optional[str] = None
+    on: bool = True
+
+
+@router.post("/meetings/{meeting_id}/motions/{motion_id}/resolution")
+async def set_resolution(meeting_id: str, motion_id: str, data: ResolutionBody, _: User = _require,
+                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Turn a carried motion into a standing resolution, or take that back."""
+    m = await _meeting_or_404(db, club, meeting_id)
+    motion = await _motion_or_404(db, club, m, motion_id)
+    try:
+        await committee_service.make_resolution(db, motion, ref=data.resolution_ref, on=data.on)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    await db.commit()
+    await db.refresh(motion)   # see the note on set_motion_votes
+    return committee_service._motion_dict(motion)
+
+
+@router.get("/resolutions")
+async def list_resolutions(_: User = _require, club: Organisation = Depends(get_current_club),
+                           db: AsyncSession = Depends(get_db)):
+    """Every standing resolution the club has passed, newest first — the
+    register a committee actually refers back to."""
+    rows = (await db.execute(
+        select(MeetingMotion, CommitteeMeeting)
+        .join(CommitteeMeeting, CommitteeMeeting.id == MeetingMotion.meeting_id)
+        .where(CommitteeMeeting.organisation_id == club.id, MeetingMotion.is_resolution.is_(True))
+        .order_by(MeetingMotion.resolved_at.desc().nullslast())
+    )).all()
+    return {"resolutions": [{
+        **committee_service._motion_dict(motion),
+        "meeting_title": meeting.title,
+        "meeting_at": meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
+    } for motion, meeting in rows]}
+
+
+class TaskDeps(BaseModel):
+    depends_on: List[str] = []
+
+
+@router.put("/tasks/{task_id}/dependencies")
+async def set_task_dependencies(task_id: str, data: TaskDeps, _: User = _require,
+                                club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    t = await _task_or_404(db, club, task_id)
+    kept = await committee_service.set_task_dependencies(db, t.id, [uuid.UUID(d) for d in data.depends_on])
+    await db.commit()
+    return {"task_id": str(t.id), "depends_on": [str(k) for k in kept]}
+
+
+class NoteCreate(BaseModel):
+    body: str
+    author_member_id: Optional[str] = None
+
+
+@router.get("/notes/{entity_type}/{entity_id}")
+async def list_notes(entity_type: str, entity_id: str, _: User = _require,
+                     club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"notes": await committee_service.list_notes(db, club.id, entity_type, uuid.UUID(entity_id))}
+
+
+@router.post("/notes/{entity_type}/{entity_id}")
+async def add_note(entity_type: str, entity_id: str, data: NoteCreate, current_user: User = _require,
+                   club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        note = await committee_service.add_note(
+            db, club.id, entity_type, uuid.UUID(entity_id), data.body,
+            author_member_id=uuid.UUID(data.author_member_id) if data.author_member_id else None,
+            author_user_id=current_user.id,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    await db.commit()
+    return note
+
+
+@router.delete("/notes/{note_id}")
+async def delete_note(note_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+                      db: AsyncSession = Depends(get_db)):
+    if not await committee_service.delete_note(db, club.id, uuid.UUID(note_id)):
+        raise HTTPException(status_code=404, detail="Note not found")
+    await db.commit()
+    return {"deleted": True}
+
+
+class ObjectiveUpsert(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    plan: Optional[str] = None
+    season_year: Optional[int] = None
+    status: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+@router.get("/objectives")
+async def list_objectives(include_archived: bool = False, _: User = _require,
+                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"objectives": await committee_service.list_objectives(db, club.id, include_archived=include_archived)}
+
+
+@router.get("/objectives/progress")
+async def objective_progress(_: User = _require, club: Organisation = Depends(get_current_club),
+                             db: AsyncSession = Depends(get_db)):
+    """The club's plan, reported against the actions serving it."""
+    return {"objectives": await committee_service.objective_progress(db, club.id)}
+
+
+@router.post("/objectives")
+async def create_objective(data: ObjectiveUpsert, _: User = _require,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        o = await committee_service.upsert_objective(db, club.id, **data.model_dump(exclude_none=True))
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    await db.commit()
+    return o
+
+
+@router.patch("/objectives/{objective_id}")
+async def update_objective(objective_id: str, data: ObjectiveUpsert, _: User = _require,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        o = await committee_service.upsert_objective(db, club.id, uuid.UUID(objective_id),
+                                                     **data.model_dump(exclude_none=True))
+    except ValueError as err:
+        raise HTTPException(status_code=404, detail=str(err))
+    await db.commit()
+    return o
+
+
+@router.delete("/objectives/{objective_id}")
+async def delete_objective(objective_id: str, _: User = _require,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    if not await committee_service.delete_objective(db, club.id, uuid.UUID(objective_id)):
+        raise HTTPException(status_code=404, detail="Objective not found")
     await db.commit()
     return {"deleted": True}

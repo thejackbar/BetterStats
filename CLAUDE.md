@@ -1,5 +1,63 @@
 # BetterStats — Claude Session Notes
 
+## BetterClubhouse follow-ups: roster, orphaned editors, governance (v9.4.0, Aug 2026)
+
+- **The roster was blank for any club that opened it before configuring areas.**
+  `get_or_create_week` created the week row on first visit, generated shifts from
+  zero patterns, and every later visit found that empty week and returned it —
+  permanently. It now fills a week that is still genuinely empty (`_has_shifts`
+  guard, so a roster in progress is never touched). Reproduced and fixed against
+  a real Postgres: 0 shifts → 30. **The roster screen also reports the real
+  error + HTTP status now**; it used to say "Could not load the roster." for a
+  403, a 500 and a timeout alike.
+- **~5,300 lines of working CRUD were unrouted** since commit `6ff23c6`, when
+  the redesign screens took `/admin/committee`, `/admin/events`, `/admin/assets`
+  etc. The redesign screens are read-only viewers; the editors
+  (`AdminCommittee` 885 lines, `AdminFamilies` 926, `AdminClubDiary` 890,
+  `AdminAssets` 693, `AdminEvents` 646 with the QR code + ticketing, plus
+  Qualifications/Volunteers/Roles/Activities) had nowhere to be reached from.
+  They now live under `/admin/clubhouse/*/manage` and each viewer carries a
+  `ManageLink` to its editor. **Folding the CRUD into the viewers is still the
+  right end state** — this is the bridge, not the destination.
+- **Migration 217 — committee governance.** `club_objectives` (the business /
+  strategic plan an action serves), `committee_task_dependencies`,
+  `meeting_motion_votes` (named votes; the tallies on `meeting_motions` stay,
+  and are *derived* from names when names exist), `committee_notes`
+  (polymorphic: task | motion | meeting | objective), plus columns on
+  `committee_tasks` (budget_estimate, actual_expenditure, percent_complete,
+  start_date, objective_id, meeting_id, motion_id, outcome_notes,
+  closed_by_member_id) and `meeting_motions` (is_resolution, resolution_ref,
+  resolved_at). `committee_documents` gained `entity_type`/`entity_id` so a
+  quote hangs off the action that asked for it — **still link-based by design**,
+  the club's docs stay in Drive/Dropbox. Only a **carried** motion can become a
+  resolution (422 otherwise). `GET /committee/objectives/progress` reports the
+  plan against the actions serving it. All verified end to end against a real
+  Postgres, not just compiled.
+- **`await db.refresh(obj)` after `commit()` before serialising an ORM object** —
+  the resolution endpoint hit `MissingGreenlet` exactly as the Square-sync note
+  warns. commit() expires the instance and the response then lazy-loads outside
+  the greenlet.
+- **`owes_money` is a club audience field** (`comms_segments.SPECIAL_FIELDS`).
+  A balance is derived, never stored, so it can't be SQL: `build_query`
+  resolves the owing player ids in Python via `services/fees.owing_player_ids`
+  (the same `_financials` the Accounts screen runs) and the rule becomes
+  `player_id IN (...)`. **Don't reimplement the balance in SQL** — that's how
+  the sidebar badge and an audience start disagreeing.
+- **Local verification harness**: a real Postgres + the app is reachable in this
+  environment. `Base.metadata.create_all` gets the ORM tables; the raw-SQL
+  tables only exist because the lifespan creates them, and the lifespan aborts
+  on the first failing statement (it ALTERs tables that later raw-SQL blocks
+  create). Replay the `text(...)` statements from `main.py` skipping failures,
+  and boot with the lifespan stubbed out.
+- **Still not built**: a Gantt view for committee actions (the data — start
+  date, due date, dependencies, percent — is all there now, and `ClubDiary.jsx`
+  already derives a critical path from the same shape, so it is a frontend
+  job); file *upload* against a committee record (links only); emailing everyone
+  rostered for a period; committee ↔ BetterStats Awards "Office Bearer" sync
+  (two unrelated things sharing a name — Clubhouse's is a *role type*, Awards'
+  is an achievement category); and editing UI for the new governance fields
+  beyond the API.
+
 ## BetterAdmin → BetterClubhouse: four sub-modules merged into one (v9.3.0, Aug 2026)
 
 BetterFees, BetterComms, BetterMerch and BetterClubManager shared a codebase but

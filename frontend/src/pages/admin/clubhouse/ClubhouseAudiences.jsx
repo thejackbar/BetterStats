@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
@@ -25,6 +25,11 @@ import { money } from './data'
 
 const COLS = 'minmax(180px,1fr) 160px 110px 120px'
 const MIN_W = 700
+
+// The audiences Today can ask for by name when an officer follows an action.
+const PRESETS = {
+  owing: { name: 'Owes money', rules: [{ field: 'owes_money', op: 'eq', value: 'yes' }] },
+}
 
 // How reachable a person is, from what the contact record actually holds.
 function reachability(c) {
@@ -87,12 +92,21 @@ export default function ClubhouseAudiences() {
 
   useEffect(() => { load(); api.commsSegmentOptions().then(setOpts).catch(() => {}) }, [load])
 
-  // Today's "Email these N" arrives with an audience name to preselect.
+  // Today's "Email these N" arrives asking for a kind of audience. Select a
+  // saved one that already describes it, or open an unsaved draft carrying the
+  // rule — the officer pressed a button about people who owe money, so landing
+  // on an empty builder would make them describe it again.
   const wanted = location.state?.audience
+  const seeded = useRef(false)
   useEffect(() => {
-    if (!wanted || !audiences?.length) return
-    const hit = audiences.find(a => a.name.toLowerCase().includes(wanted))
-    if (hit) setSelId(hit.id)
+    if (!wanted || audiences == null || seeded.current) return
+    seeded.current = true
+    const hit = audiences.find(a =>
+      (a.definition?.rules || []).some(r => r.field === PRESETS[wanted]?.rules[0].field) ||
+      a.name.toLowerCase().includes(wanted))
+    if (hit) { setSelId(hit.id); return }
+    const preset = PRESETS[wanted]
+    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules }) }
   }, [wanted, audiences])
 
   const selected = useMemo(() => audiences?.find(a => a.id === selId) || null, [audiences, selId])

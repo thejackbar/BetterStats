@@ -312,6 +312,13 @@ async def get_or_create_week(db: AsyncSession, org_id, week_start: date) -> dict
     row = (await db.execute(text("SELECT id, status FROM roster_weeks WHERE organisation_id=:org AND week_start=:ws"), {"org": org_id, "ws": ws})).mappings().first()
     if row:
         wid, status = row["id"], row["status"]
+        # A week created BEFORE the club configured any operational areas has no
+        # shifts, and nothing regenerated it — every later visit found the empty
+        # week row and returned it, so the roster stayed blank forever. Fill a
+        # week that is still genuinely empty. It can never duplicate a roster in
+        # progress, because a week with any shift at all is left alone.
+        if status == "draft" and not await _has_shifts(db, wid):
+            await _generate_shifts(db, org_id, wid)
     else:
         wid = uuid.uuid4()
         await db.execute(text("INSERT INTO roster_weeks (id, organisation_id, week_start, status) VALUES (:id, :org, :ws, 'draft')"), {"id": wid, "org": org_id, "ws": ws})
@@ -319,6 +326,12 @@ async def get_or_create_week(db: AsyncSession, org_id, week_start: date) -> dict
         await _generate_shifts(db, org_id, wid)
     shifts = await _shift_rows(db, wid)
     return {"id": str(wid), "week_start": ws.isoformat(), "status": status, "shifts": shifts}
+
+
+async def _has_shifts(db: AsyncSession, week_id) -> bool:
+    return bool((await db.execute(
+        text("SELECT 1 FROM roster_shifts WHERE roster_week_id = :wid LIMIT 1"), {"wid": week_id}
+    )).first())
 
 
 async def _generate_shifts(db: AsyncSession, org_id, week_id) -> None:

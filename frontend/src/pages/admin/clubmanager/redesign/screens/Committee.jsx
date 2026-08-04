@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout , ManageLink } from '../ui'
 
 // Committee — positions, meetings (agenda / attendance / motions) and the
 // club's committee tasks (the closest thing to action items), all on real data.
@@ -93,6 +93,7 @@ export default function Committee({ st, patch, narrow }) {
         <Caption tone={C.faint} style={{ marginTop: 2 }}>Positions, meetings, motions and actions</Caption>
       </div>
       <SegTabs value={tab} onChange={k => patch({ cteTab: k })} tabs={[{ key: 'meetings', label: 'Meetings' }, { key: 'positions', label: 'Positions' }, { key: 'motions', label: 'Motions & actions' }]} />
+      <ManageLink to="/admin/clubhouse/committee/manage">Manage meetings &amp; positions</ManageLink>
       {children}
     </ScreenHeader>
   )

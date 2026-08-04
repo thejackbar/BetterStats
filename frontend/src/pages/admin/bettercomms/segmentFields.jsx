@@ -32,6 +32,13 @@ const MODULE_OPTS = [
 // /segments/options (the club's real roles / teams), so we never guess vocab.
 export const CLUB_FIELD_DEFS = {
   tag: { label: 'Has tag', input: 'text', ops: [['has', 'is']] },
+  // The one condition that reads the ledger rather than the roster. Resolved
+  // server-side from the same fees calculation the Accounts screen runs, so
+  // "email everyone who owes" targets exactly the people that screen shows.
+  owes_money: {
+    label: 'Owes money', input: 'select', ops: IS_OP,
+    options: [['yes', 'yes, still owes'], ['no', 'no, settled or in credit']],
+  },
   source: {
     label: 'In the directory as', input: 'select', ops: IS_OP,
     options: [['player', 'A player'], ['member', 'A fee member'], ['import', 'Imported'], ['manual', 'Added manually']],

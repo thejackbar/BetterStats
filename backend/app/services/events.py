@@ -139,6 +139,42 @@ async def registered_count(session: AsyncSession, event_id) -> int:
     return int(total)
 
 
+async def financials(session: AsyncSession, event_id) -> dict:
+    """What an event took, and what is still outstanding.
+
+    Every figure comes from the registrations themselves — `amount_cents` is
+    what was charged and `payment_status` is where that money got to — so this
+    is a read over data the club already has, not a second ledger. Costs are not
+    tracked against an event yet, so this reports income, not profit.
+    """
+    rows = (await session.execute(
+        select(EventRegistration.payment_status,
+               func.count(EventRegistration.id),
+               func.coalesce(func.sum(EventRegistration.quantity), 0),
+               func.coalesce(func.sum(EventRegistration.amount_cents), 0))
+        .where(EventRegistration.event_id == event_id)
+        .group_by(EventRegistration.payment_status)
+    )).all()
+
+    by_status = {
+        status: {"registrations": int(n), "tickets": int(qty), "amount": round(int(cents) / 100, 2)}
+        for status, n, qty, cents in rows
+    }
+    take = lambda k, f: by_status.get(k, {}).get(f, 0)
+    paid = take("paid", "amount")
+    awaiting = take("awaiting_payment", "amount")
+    return {
+        "taken": paid,
+        "awaiting_payment": awaiting,
+        "cancelled": take("cancelled", "amount"),
+        "free_registrations": take("free", "registrations"),
+        # What the event is worth once everyone settles up.
+        "expected": round(paid + awaiting, 2),
+        "tickets_sold": sum(v["tickets"] for k, v in by_status.items() if k != "cancelled"),
+        "by_status": by_status,
+    }
+
+
 async def list_registrations(session: AsyncSession, event_id) -> list[EventRegistration]:
     stmt = select(EventRegistration).where(EventRegistration.event_id == event_id).order_by(EventRegistration.created_at.desc())
     return (await session.execute(stmt)).scalars().all()

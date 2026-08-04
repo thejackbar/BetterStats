@@ -368,6 +368,30 @@ export const api = {
     request(`/club-admin/committee/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   committeeDeleteTask: (id) =>
     request(`/club-admin/committee/tasks/${id}`, { method: 'DELETE' }),
+  // Governance (migration 217) — resolutions, named votes, action dependencies,
+  // notes and the strategic objectives actions are measured against.
+  committeeSetTaskDependencies: (taskId, dependsOn) =>
+    request(`/club-admin/committee/tasks/${taskId}/dependencies`, { method: 'PUT', body: JSON.stringify({ depends_on: dependsOn }) }),
+  committeeSetMotionVotes: (meetingId, motionId, votes) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/${motionId}/votes`, { method: 'PUT', body: JSON.stringify({ votes }) }),
+  committeeSetResolution: (meetingId, motionId, { resolution_ref, on = true } = {}) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/${motionId}/resolution`, { method: 'POST', body: JSON.stringify({ resolution_ref, on }) }),
+  committeeListResolutions: () => request('/club-admin/committee/resolutions'),
+  committeeListNotes: (entityType, entityId) =>
+    request(`/club-admin/committee/notes/${entityType}/${entityId}`),
+  committeeAddNote: (entityType, entityId, body, authorMemberId) =>
+    request(`/club-admin/committee/notes/${entityType}/${entityId}`, { method: 'POST', body: JSON.stringify({ body, author_member_id: authorMemberId || null }) }),
+  committeeDeleteNote: (noteId) =>
+    request(`/club-admin/committee/notes/${noteId}`, { method: 'DELETE' }),
+  committeeListObjectives: (includeArchived) =>
+    request(`/club-admin/committee/objectives${includeArchived ? '?include_archived=true' : ''}`),
+  committeeObjectiveProgress: () => request('/club-admin/committee/objectives/progress'),
+  committeeCreateObjective: (data) =>
+    request('/club-admin/committee/objectives', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateObjective: (id, data) =>
+    request(`/club-admin/committee/objectives/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteObjective: (id) =>
+    request(`/club-admin/committee/objectives/${id}`, { method: 'DELETE' }),
   committeeListDocuments: (category) =>
     request(`/club-admin/committee/documents${category ? `?category=${category}` : ''}`),
   committeeCreateDocument: (data) =>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs , ManageLink } from '../ui'
 import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
 
 // Events — the club's real events (club_events) with their registrations.
@@ -63,6 +63,7 @@ export default function Events({ st, patch, narrow }) {
         <Caption tone={C.faint} style={{ marginTop: 2 }}>TICKETING, RSVPS AND WHO IS COMING</Caption>
       </div>
       <SegTabs value={view} onChange={setView} tabs={[{ key: 'events', label: 'Events' }, { key: 'types', label: 'Event types' }]} />
+      <ManageLink to="/admin/clubhouse/events/manage">Manage events &amp; tickets</ManageLink>
     </ScreenHeader>
   )
 
@@ -92,7 +93,11 @@ export default function Events({ st, patch, narrow }) {
   const regInfo = sel ? (regs[sel.id] || { registrations: [], registered_count: 0, capacity: sel.capacity }) : null
   const attendees = regInfo?.registrations || []
   const sold = regInfo?.registered_count ?? attendees.reduce((a, r) => a + (r.quantity || 1), 0)
-  const revenue = attendees.reduce((a, r) => a + ((payChip(r.payment_status).label === 'PAID') ? (r.amount_cents || 0) : 0), 0)
+  // The server rolls this up over every registration; the client-side reduce is
+  // the fallback for a backend that predates it.
+  const fin = regInfo?.financials
+  const revenue = fin ? Math.round(fin.taken * 100)
+    : attendees.reduce((a, r) => a + ((payChip(r.payment_status).label === 'PAID') ? (r.amount_cents || 0) : 0), 0)
   const capacity = sel?.capacity || regInfo?.capacity || 0
   const pctCap = capacity ? Math.min(100, Math.round((sold / capacity) * 100)) : 0
 
@@ -129,14 +134,20 @@ export default function Events({ st, patch, narrow }) {
             </div>
             <div style={{ fontFamily: MONO, fontSize: 11, color: C.faint, margin: '5px 0 20px' }}>{fmtWhen(sel.starts_at)}{sel.location ? ' · ' + sel.location : ''}{sel.event_type ? ' · ' + sel.event_type : ''}</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 16 }}>
               {[
                 { value: capacity ? sold + '/' + capacity : String(sold), label: sel.is_ticketed ? 'TICKETS SOLD' : 'REGISTERED' },
                 { value: revenue ? money(revenue) : '—', label: 'REVENUE' },
                 { value: sel.is_ticketed && sel.ticket_price_cents ? money(sel.ticket_price_cents) : (sel.is_ticketed ? 'Free' : '—'), label: 'TICKET PRICE' },
+                ...(fin && fin.awaiting_payment > 0
+                  ? [{ value: money(Math.round(fin.awaiting_payment * 100)), label: 'AWAITING PAYMENT', warn: true }]
+                  : []),
+                ...(fin && fin.expected !== fin.taken
+                  ? [{ value: money(Math.round(fin.expected * 100)), label: 'EXPECTED IN TOTAL' }]
+                  : []),
               ].map((s, i) => (
                 <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
-                  <div style={{ fontWeight: 700, fontSize: 19, color: C.accent, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
+                  <div style={{ fontWeight: 700, fontSize: 19, color: s.warn ? C.warn : C.accent, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
                   <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faint, marginTop: 3 }}>{s.label}</div>
                 </div>
               ))}

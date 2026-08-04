@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -67,6 +67,17 @@ def _task_dict(t: CommitteeTask) -> dict:
         "due_date": t.due_date.isoformat() if t.due_date else None,
         "status": t.status, "is_recurring": t.is_recurring, "recurrence_note": t.recurrence_note,
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+        # Migration 217 — the planning side of an action.
+        "objective_id": str(t.objective_id) if t.objective_id else None,
+        "budget_estimate": float(t.budget_estimate) if t.budget_estimate is not None else None,
+        "actual_expenditure": float(t.actual_expenditure) if t.actual_expenditure is not None else None,
+        "percent_complete": t.percent_complete or 0,
+        "start_date": t.start_date.isoformat() if t.start_date else None,
+        "closed_by_member_id": str(t.closed_by_member_id) if t.closed_by_member_id else None,
+        "outcome_notes": t.outcome_notes,
+        "meeting_id": str(t.meeting_id) if t.meeting_id else None,
+        "motion_id": str(t.motion_id) if t.motion_id else None,
+        "depends_on": [str(d) for d in (getattr(t, "_depends_on", None) or [])],
     }
 
 
@@ -74,6 +85,7 @@ def _document_dict(d: CommitteeDocument) -> dict:
     return {
         "id": str(d.id), "title": d.title, "category": d.category, "url": d.url,
         "position_id": str(d.position_id) if d.position_id else None, "notes": d.notes,
+        "entity_type": d.entity_type, "entity_id": str(d.entity_id) if d.entity_id else None,
     }
 
 
@@ -127,6 +139,12 @@ def _motion_dict(m: MeetingMotion) -> dict:
         "seconded_by_member_id": str(m.seconded_by_member_id) if m.seconded_by_member_id else None,
         "votes_for": m.votes_for, "votes_against": m.votes_against, "votes_abstain": m.votes_abstain,
         "outcome": m.outcome, "notes": m.notes,
+        # Migration 217 — a carried motion recorded as a standing decision, and
+        # the named votes behind the tallies when a club records them.
+        "is_resolution": bool(m.is_resolution),
+        "resolution_ref": m.resolution_ref,
+        "resolved_at": m.resolved_at.isoformat() if m.resolved_at else None,
+        "votes": [{"member_id": str(v.member_id), "vote": v.vote} for v in (getattr(m, "_votes", None) or [])],
     }
 
 
@@ -351,11 +369,18 @@ async def create_task(session: AsyncSession, org_id, **fields) -> CommitteeTask:
 
 async def update_task(session: AsyncSession, t: CommitteeTask, **fields) -> CommitteeTask:
     for f in ("title", "description", "category", "position_id", "assigned_to_member_id",
-              "due_date", "status", "is_recurring", "recurrence_note"):
+              "due_date", "status", "is_recurring", "recurrence_note",
+              "objective_id", "budget_estimate", "actual_expenditure", "percent_complete",
+              "start_date", "closed_by_member_id", "outcome_notes", "meeting_id", "motion_id"):
         if f in fields and fields[f] is not None:
             setattr(t, f, fields[f])
     if "status" in fields and fields["status"] is not None:
-        t.completed_at = func.now() if fields["status"] == "done" else None
+        done = fields["status"] == "done"
+        t.completed_at = func.now() if done else None
+        # Closing an action means it is finished, so say so rather than leaving
+        # a 60%-complete row sitting in the register marked done.
+        if done and (t.percent_complete or 0) < 100:
+            t.percent_complete = 100
     t.updated_at = func.now()
     return t
 
@@ -548,6 +573,7 @@ async def meeting_detail(session: AsyncSession, org_id, meeting_id) -> dict:
     nominations = (await session.execute(
         select(AgmNomination).where(AgmNomination.meeting_id == meeting_id).order_by(AgmNomination.created_at)
     )).scalars().all()
+    await load_motion_votes(session, motions)
     return {
         "agenda_items": [_agenda_item_dict(i) for i in agenda],
         "motions": [_motion_dict(mo) for mo in motions],
@@ -676,3 +702,237 @@ async def update_nomination(session: AsyncSession, org_id, n: AgmNomination, *, 
 
 async def delete_nomination(session: AsyncSession, n: AgmNomination) -> None:
     await session.delete(n)
+
+
+# ─── Governance (migration 217) ───────────────────────────────────────────────
+#
+# The layer above a meeting: a carried motion recorded as a resolution, who
+# voted which way, what an action costs and waits on, the plan it serves, and
+# the notes and documents hung off any of it.
+
+_VOTES = ("for", "against", "abstain")
+_ENTITIES = ("task", "motion", "meeting", "objective")
+
+
+async def set_motion_votes(session: AsyncSession, motion: MeetingMotion, votes: list[dict]) -> MeetingMotion:
+    """Replace the named votes on a motion and re-derive its tallies.
+
+    The tallies stay the stored summary because a club that counts hands has
+    nothing else. Once names ARE recorded they become the truth, so they are
+    what the tallies are computed from — two numbers that could disagree with
+    the list beside them would be worse than one.
+    """
+    from app.models.db import MeetingMotionVote
+
+    await session.execute(delete(MeetingMotionVote).where(MeetingMotionVote.motion_id == motion.id))
+    tally = {"for": 0, "against": 0, "abstain": 0}
+    for v in votes:
+        choice = (v.get("vote") or "").strip().lower()
+        member_id = v.get("member_id")
+        if choice not in _VOTES or not member_id:
+            continue
+        session.add(MeetingMotionVote(motion_id=motion.id, member_id=member_id, vote=choice))
+        tally[choice] += 1
+    if votes:
+        motion.votes_for, motion.votes_against, motion.votes_abstain = (
+            tally["for"], tally["against"], tally["abstain"])
+    await session.flush()
+    return motion
+
+
+async def load_motion_votes(session: AsyncSession, motions: list[MeetingMotion]) -> None:
+    """Attach each motion's named votes for serialisation. One query for the
+    whole meeting rather than one per motion."""
+    from app.models.db import MeetingMotionVote
+
+    ids = [m.id for m in motions]
+    if not ids:
+        return
+    rows = (await session.execute(
+        select(MeetingMotionVote).where(MeetingMotionVote.motion_id.in_(ids))
+    )).scalars().all()
+    by_motion: dict = {}
+    for r in rows:
+        by_motion.setdefault(r.motion_id, []).append(r)
+    for m in motions:
+        m._votes = by_motion.get(m.id, [])
+
+
+async def make_resolution(session: AsyncSession, motion: MeetingMotion, *,
+                          ref: Optional[str] = None, on: bool = True) -> MeetingMotion:
+    """Record a carried motion as a standing resolution, or take that back.
+
+    Only a carried motion can become one: a resolution the meeting did not pass
+    is not a resolution, and letting one be recorded anyway would quietly
+    corrupt the minutes.
+    """
+    if on and (motion.outcome or "").lower() not in ("carried", "passed"):
+        raise ValueError("Only a carried motion can be recorded as a resolution")
+    motion.is_resolution = bool(on)
+    motion.resolution_ref = (ref or "").strip()[:60] or None if on else None
+    motion.resolved_at = func.now() if on else None
+    await session.flush()
+    return motion
+
+
+async def set_task_dependencies(session: AsyncSession, task_id, depends_on: list) -> list:
+    """Replace what an action waits on. Self-dependency is dropped rather than
+    rejected — it is a slip, not a decision worth an error."""
+    from app.models.db import CommitteeTaskDependency
+
+    await session.execute(delete(CommitteeTaskDependency).where(CommitteeTaskDependency.task_id == task_id))
+    kept = []
+    for dep in dict.fromkeys(depends_on or []):
+        if str(dep) == str(task_id):
+            continue
+        session.add(CommitteeTaskDependency(task_id=task_id, depends_on_task_id=dep))
+        kept.append(dep)
+    await session.flush()
+    return kept
+
+
+async def load_task_dependencies(session: AsyncSession, tasks: list[CommitteeTask]) -> None:
+    from app.models.db import CommitteeTaskDependency
+
+    ids = [t.id for t in tasks]
+    if not ids:
+        return
+    rows = (await session.execute(
+        select(CommitteeTaskDependency).where(CommitteeTaskDependency.task_id.in_(ids))
+    )).scalars().all()
+    by_task: dict = {}
+    for r in rows:
+        by_task.setdefault(r.task_id, []).append(r.depends_on_task_id)
+    for t in tasks:
+        t._depends_on = by_task.get(t.id, [])
+
+
+async def list_notes(session: AsyncSession, org_id, entity_type: str, entity_id) -> list[dict]:
+    from app.models.db import CommitteeNote
+
+    rows = (await session.execute(
+        select(CommitteeNote).where(
+            CommitteeNote.organisation_id == org_id,
+            CommitteeNote.entity_type == entity_type,
+            CommitteeNote.entity_id == entity_id,
+        ).order_by(CommitteeNote.created_at.desc())
+    )).scalars().all()
+    return [{
+        "id": str(n.id), "body": n.body,
+        "author_member_id": str(n.author_member_id) if n.author_member_id else None,
+        "author_user_id": str(n.author_user_id) if n.author_user_id else None,
+        "created_at": n.created_at.isoformat() if n.created_at else None,
+    } for n in rows]
+
+
+async def add_note(session: AsyncSession, org_id, entity_type: str, entity_id, body: str, *,
+                   author_member_id=None, author_user_id=None) -> dict:
+    from app.models.db import CommitteeNote
+
+    if entity_type not in _ENTITIES:
+        raise ValueError(f"entity_type must be one of {', '.join(_ENTITIES)}")
+    text_body = (body or "").strip()
+    if not text_body:
+        raise ValueError("A note needs some text")
+    n = CommitteeNote(organisation_id=org_id, entity_type=entity_type, entity_id=entity_id,
+                      body=text_body, author_member_id=author_member_id, author_user_id=author_user_id)
+    session.add(n)
+    await session.flush()
+    return {"id": str(n.id), "body": n.body,
+            "author_member_id": str(n.author_member_id) if n.author_member_id else None,
+            "author_user_id": str(n.author_user_id) if n.author_user_id else None,
+            "created_at": None}
+
+
+async def delete_note(session: AsyncSession, org_id, note_id) -> bool:
+    from app.models.db import CommitteeNote
+
+    n = (await session.execute(
+        select(CommitteeNote).where(CommitteeNote.id == note_id, CommitteeNote.organisation_id == org_id)
+    )).scalar_one_or_none()
+    if not n:
+        return False
+    await session.delete(n)
+    return True
+
+
+def _objective_dict(o) -> dict:
+    return {
+        "id": str(o.id), "title": o.title, "description": o.description, "plan": o.plan,
+        "season_year": o.season_year, "status": o.status, "sort_order": o.sort_order,
+    }
+
+
+async def list_objectives(session: AsyncSession, org_id, *, include_archived: bool = False) -> list[dict]:
+    from app.models.db import ClubObjective
+
+    stmt = select(ClubObjective).where(ClubObjective.organisation_id == org_id)
+    if not include_archived:
+        stmt = stmt.where(ClubObjective.status != "archived")
+    stmt = stmt.order_by(ClubObjective.sort_order, ClubObjective.title)
+    return [_objective_dict(o) for o in (await session.execute(stmt)).scalars().all()]
+
+
+async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **fields) -> dict:
+    from app.models.db import ClubObjective
+
+    if objective_id:
+        o = (await session.execute(
+            select(ClubObjective).where(ClubObjective.id == objective_id,
+                                        ClubObjective.organisation_id == org_id)
+        )).scalar_one_or_none()
+        if not o:
+            raise ValueError("Objective not found")
+    else:
+        title = (fields.get("title") or "").strip()
+        if not title:
+            raise ValueError("Title is required")
+        o = ClubObjective(organisation_id=org_id, title=title[:300])
+        session.add(o)
+    for f in ("title", "description", "plan", "season_year", "status", "sort_order"):
+        if f in fields and fields[f] is not None:
+            setattr(o, f, fields[f])
+    o.updated_at = func.now()
+    await session.flush()
+    return _objective_dict(o)
+
+
+async def delete_objective(session: AsyncSession, org_id, objective_id) -> bool:
+    from app.models.db import ClubObjective
+
+    o = (await session.execute(
+        select(ClubObjective).where(ClubObjective.id == objective_id,
+                                    ClubObjective.organisation_id == org_id)
+    )).scalar_one_or_none()
+    if not o:
+        return False
+    await session.delete(o)   # actions fall back to no objective (FK SET NULL)
+    return True
+
+
+async def objective_progress(session: AsyncSession, org_id) -> list[dict]:
+    """Each objective with the actions serving it rolled up: how many are done,
+    what they were budgeted and what they have cost. This is the club's plan
+    reported against itself, from the same action register the committee already
+    keeps rather than a second spreadsheet."""
+    objectives = await list_objectives(session, org_id)
+    rows = (await session.execute(
+        select(CommitteeTask).where(CommitteeTask.organisation_id == org_id,
+                                    CommitteeTask.objective_id.isnot(None))
+    )).scalars().all()
+    by_obj: dict = {}
+    for t in rows:
+        by_obj.setdefault(str(t.objective_id), []).append(t)
+    out = []
+    for o in objectives:
+        tasks = by_obj.get(o["id"], [])
+        done = [t for t in tasks if (t.status or "") == "done"]
+        out.append({
+            **o,
+            "actions": len(tasks),
+            "actions_done": len(done),
+            "percent_complete": round(sum(t.percent_complete or 0 for t in tasks) / len(tasks)) if tasks else 0,
+            "budget": float(sum(t.budget_estimate or 0 for t in tasks)),
+            "spent": float(sum(t.actual_expenditure or 0 for t in tasks)),
+        })
+    return out
