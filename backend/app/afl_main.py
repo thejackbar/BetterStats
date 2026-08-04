@@ -23,12 +23,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import inspect as sa_inspect, text
+from sqlalchemy.schema import CreateColumn
 
 from app.config.settings import settings
 from app.models.db import Base, engine
 import app.models.afl  # noqa: F401 — register the AFL tables on the shared Base
-from app.routers import auth
+from app.routers import auth, images
 from app.routers.afl import (
     clubs as afl_clubs,
     organisations as afl_organisations,
@@ -37,6 +38,15 @@ from app.routers.afl import (
     records as afl_records,
     leaderboard as afl_leaderboard,
     club_admin as afl_club_admin,
+    players_admin as afl_players_admin,
+    player_import as afl_player_import,
+    merge as afl_merge,
+    award_definitions as afl_award_definitions,
+    achievements as afl_achievements,
+    sponsors as afl_sponsors,
+    users_admin as afl_users_admin,
+    super_clubs as afl_super_clubs,
+    imports as afl_imports,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +60,50 @@ if settings.sport != "afl":
     )
 
 
+async def _sync_missing_columns(conn):
+    """Base.metadata.create_all only creates TABLES that don't exist yet — it
+    never ALTERs a table that's already there to add a column the model
+    gained afterwards. That's invisible for cricket-only models (cricket's
+    own main.py lifespan mirrors its migrations with idempotent ALTERs), but
+    a column added to a SHARED model (Organisation, Player, User, ...) after
+    the AFL database already has that table previously went unnoticed here —
+    e.g. the club-custom-fonts migration added five columns to Organisation;
+    AFL's organisations table predated it, so create_all silently skipped
+    them and every request touching Organisation (login, /auth/me, club
+    lookup — nearly everything) started 500ing with UndefinedColumnError.
+    Diff the ORM metadata against the live schema and add whatever's
+    missing, so any future shared-model column addition self-heals here
+    instead of taking AFL down again. Each column runs in its own SAVEPOINT
+    so one that can't apply cleanly (e.g. NOT NULL with no default on an
+    already-populated table) is logged and skipped without aborting the
+    outer transaction the rest of this lifespan still needs."""
+    def _inspect(sync_conn):
+        inspector = sa_inspect(sync_conn)
+        return {t: {c["name"] for c in inspector.get_columns(t)} for t in inspector.get_table_names()}
+
+    existing = await conn.run_sync(_inspect)
+    for table in Base.metadata.tables.values():
+        existing_cols = existing.get(table.name)
+        if existing_cols is None:
+            continue  # brand new table — create_all just made it with every column already
+        for column in table.columns:
+            if column.name in existing_cols:
+                continue
+
+            def _compile_ddl(sync_conn, col=column):
+                return str(CreateColumn(col).compile(dialect=sync_conn.dialect))
+
+            ddl = await conn.run_sync(_compile_ddl)
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN IF NOT EXISTS {ddl}'))
+                logger.info("afl_main: added missing column %s.%s (shared-model migration self-heal)",
+                            table.name, column.name)
+            except Exception:  # noqa: BLE001 — one bad column must not abort the whole boot
+                logger.exception("afl_main: could not add column %s.%s — needs a manual ALTER",
+                                  table.name, column.name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -60,6 +114,7 @@ async def lifespan(app: FastAPI):
         except Exception:  # noqa: BLE001 — extension may need superuser; PG13+ doesn't need it
             logger.info("pgcrypto extension not created (fine on Postgres 13+)")
         await conn.run_sync(Base.metadata.create_all)
+        await _sync_missing_columns(conn)
 
         # Raw-SQL tables the shared code writes that live outside the ORM
         # metadata (created by cricket's lifespan there; mirrored here).
@@ -91,6 +146,148 @@ async def lifespan(app: FastAPI):
             "INSERT INTO platform_settings (id, settings) VALUES (1, '{}') "
             "ON CONFLICT (id) DO NOTHING"))
 
+        # Phase 1 admin-tools tables (Player list / Import Players / Merge
+        # Grades / Awards / Sponsors / Users / All Clubs) — raw-SQL-only in
+        # cricket's main.py lifespan (never added to the ORM Base), so they
+        # don't exist in a fresh AFL database via create_all and must be
+        # mirrored here the same idempotent way. Sponsors need no entry —
+        # org_sponsors IS ORM-mapped (models.db.Sponsor) and already created
+        # by create_all above.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                user_id UUID,
+                action TEXT NOT NULL,
+                target_type TEXT,
+                target_id TEXT,
+                details JSONB DEFAULT '{}'
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created "
+            "ON audit_logs(org_id, created_at DESC)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_grade_merge_logs_org_active "
+            "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_award_definitions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                achievement TEXT,
+                display_name TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_award_defs_org ON org_award_definitions(org_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS player_achievements (
+                id SERIAL PRIMARY KEY,
+                org_id UUID NOT NULL,
+                player_id UUID,
+                player_name TEXT NOT NULL,
+                season TEXT,
+                season_end TEXT,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                achievement TEXT NOT NULL,
+                detail TEXT,
+                import_batch_id UUID,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_player ON player_achievements(player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_org ON player_achievements(org_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_import_batch "
+            "ON player_achievements(import_batch_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS achievement_import_batches (
+                id UUID PRIMARY KEY,
+                org_id UUID NOT NULL,
+                filename TEXT,
+                row_count INTEGER NOT NULL DEFAULT 0,
+                created_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'imported',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        # Merge Players bookkeeping — AFL-scoped schema (only the two AFL stat
+        # tables need tracking for undo, vs cricket's ~12-column merge_logs).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                keep_player_id UUID,
+                keep_player_name TEXT,
+                removed_player_id UUID,
+                removed_player_name TEXT,
+                removed_player_playhq_id TEXT,
+                keep_original_playhq_id TEXT,
+                line_ids JSONB DEFAULT '[]',
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_merge_logs_org "
+            "ON afl_merge_logs(org_id, merged_at DESC)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_merge_pair_ignores (
+                id SERIAL PRIMARY KEY,
+                org_id UUID NOT NULL,
+                player_a_id UUID NOT NULL,
+                player_b_id UUID NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (org_id, player_a_id, player_b_id)
+            )
+        """))
+        # Import Stats — historical CSV import (routers/afl/imports.py). Reuses
+        # the shared import_batches table (models.db.ImportBatch, already
+        # ORM-mapped and 100% sport-agnostic — no mirror needed for it here).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_imported_stats (
+                id SERIAL PRIMARY KEY,
+                organisation_id UUID NOT NULL,
+                import_batch_id UUID NOT NULL,
+                player_id UUID NOT NULL,
+                season_id UUID,
+                season_label TEXT,
+                grade_label TEXT,
+                games_played INTEGER NOT NULL DEFAULT 0,
+                goals INTEGER NOT NULL DEFAULT 0,
+                behinds INTEGER NOT NULL DEFAULT 0,
+                bog_count INTEGER NOT NULL DEFAULT 0,
+                captain_games INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_org_player "
+            "ON afl_imported_stats(organisation_id, player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_batch "
+            "ON afl_imported_stats(import_batch_id)"))
+
     # Mark any sync runs orphaned by a restart, same as the cricket boot does.
     from app.models.db import async_session_maker
     async with async_session_maker() as session:
@@ -116,6 +313,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(images.router)
 app.include_router(afl_clubs.router)
 app.include_router(afl_organisations.router)
 app.include_router(afl_games.router)
@@ -123,6 +321,15 @@ app.include_router(afl_players.router)
 app.include_router(afl_records.router)
 app.include_router(afl_leaderboard.router)
 app.include_router(afl_club_admin.router)
+app.include_router(afl_players_admin.router)
+app.include_router(afl_player_import.router)
+app.include_router(afl_merge.router)
+app.include_router(afl_award_definitions.router)
+app.include_router(afl_achievements.router)
+app.include_router(afl_sponsors.router)
+app.include_router(afl_users_admin.router)
+app.include_router(afl_super_clubs.router)
+app.include_router(afl_imports.router)
 
 
 @app.get("/health")

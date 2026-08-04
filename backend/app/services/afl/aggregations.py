@@ -81,6 +81,46 @@ async def player_game_log(db: AsyncSession, org_id: uuid.UUID,
     return [dict(r._mapping) for r in res]
 
 
+def _resolve_canonical_grade(chain: dict[str, str], name: str, _seen: Optional[set] = None) -> str:
+    """Follow a grade_merge_logs alias chain to its root, guarding a cycle."""
+    seen = _seen or set()
+    if name in seen:
+        return name
+    seen.add(name)
+    nxt = chain.get(name)
+    if nxt is None:
+        return name
+    return _resolve_canonical_grade(chain, nxt, seen)
+
+
+async def matching_grade_ids(db: AsyncSession, org_id: uuid.UUID, grade_id: uuid.UUID) -> list[uuid.UUID]:
+    """Every grade_id (any season) that shares a merge group with ``grade_id`` —
+    so filtering "this grade" transparently absorbs whatever's been merged
+    into (or was merged from) it, the way Merge Grades promises. A grade
+    exists once per season it's fielded in (grades.season_id), so "this
+    grade across all time" is every row sharing its name/merge-group, not
+    just the one row the caller happened to pick."""
+    name_row = await db.execute(text("SELECT name FROM grades WHERE id = :gid"), {"gid": str(grade_id)})
+    name = name_row.scalar()
+    if not name:
+        return [grade_id]
+
+    logs = await db.execute(text(
+        "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
+    ), {"org": str(org_id)})
+    chain = {r.alias_name: r.canonical_name for r in logs}
+
+    canonical = _resolve_canonical_grade(chain, name)
+    group_names = {canonical} | {a for a in chain if _resolve_canonical_grade(chain, a) == canonical}
+
+    rows = await db.execute(text("""
+        SELECT gr.id FROM grades gr JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org AND gr.name = ANY(:names)
+    """), {"org": str(org_id), "names": list(group_names)})
+    ids = [r.id for r in rows]
+    return ids or [grade_id]
+
+
 async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
                                season_id: Optional[uuid.UUID] = None) -> dict:
     """Headline W/L/D across the club (optionally one season)."""

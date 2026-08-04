@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.services.afl import aggregations
+from app.services.afl.aggregations import matching_grade_ids
 
 router = APIRouter(prefix="/organisations", tags=["afl-organisations"])
 
@@ -31,8 +32,8 @@ async def get_results(org_id: uuid.UUID,
         clauses.append("s.id = :season")
         params["season"] = str(season_id)
     if grade_id:
-        clauses.append("gr.id = :grade")
-        params["grade"] = str(grade_id)
+        clauses.append("gr.id = ANY(:grade)")
+        params["grade"] = await matching_grade_ids(db, org_id, grade_id)
     if finals_only:
         clauses.append("g.is_final")
     where = " AND ".join(clauses)

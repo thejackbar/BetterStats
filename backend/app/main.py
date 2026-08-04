@@ -1328,6 +1328,21 @@ async def lifespan(app: FastAPI):
             "ON usage_events(resolved_marketing_club_id, created_at DESC) "
             "WHERE resolved_marketing_club_id IS NOT NULL"
         ))
+        # Migration 214: ip_hash had never been indexed here, so
+        # usage_tracker._enrich_geo's post-lookup backfill (WHERE ip_hash = ...)
+        # was a full scan of an append-only, never-pruned table on every
+        # newly-seen IP — holding a connection and row locks long enough for
+        # concurrent ones to drain the pool ("QueuePool limit of size 20
+        # overflow 30 reached"). The second index covers the Usage map's own
+        # read: anonymous geo-enriched rows by recency.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_ip_hash_created "
+            "ON usage_events(ip_hash, created_at DESC) WHERE ip_hash IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_geo_map "
+            "ON usage_events(created_at DESC) WHERE lat IS NOT NULL AND user_id IS NULL"
+        ))
         # Backup/restore task tracking (migration 170) — one row per backup or
         # restore run (scheduled via the host systemd timer, or triggered on
         # demand from Super Admin), so the Backups page can show a history plus
@@ -4385,6 +4400,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE club_role_types ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'volunteer'"))
         await conn.execute(text("ALTER TABLE committee_positions ADD COLUMN IF NOT EXISTS is_office_bearer BOOLEAN NOT NULL DEFAULT FALSE"))
 
+    # Migration 215: per-club custom typography (display + body font, each
+    # preset or uploaded). Byte-identical to alembic/versions/215_club_custom_fonts.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_config JSONB"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_display_data BYTEA"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_display_mime TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_body_data BYTEA"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_body_mime TEXT"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -4491,7 +4515,12 @@ _USAGE_SKIP_PREFIXES = (
     "/health",
     "/uploads/",
     "/club-admin/notifications/count",
-    "/usage/event",
+    # Whole /usage/ family, not just /usage/event: the endpoints here record
+    # their own breadcrumb, so a middleware `api` row on top is a second write
+    # (and a second pooled connection) per call for no extra information.
+    # /usage/heartbeat fires every ~25s per open tab, so it was the single
+    # biggest source of that duplication.
+    "/usage/",
     "/club-admin/usage/",
     "/docs",
     "/openapi.json",

@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
+from app.services.afl.aggregations import matching_grade_ids
 
 router = APIRouter(prefix="/afl-records", tags=["afl-records"])
 
@@ -23,9 +24,11 @@ async def get_records(org_id: uuid.UUID,
     grade_line = ""
     grade_pss = "AND pss.grade_id IS NULL"
     if grade_id:
-        params["grade"] = str(grade_id)
-        grade_line = "AND gr.id = :grade"
-        grade_pss = "AND pss.grade_id = :grade"
+        # Every grade_id (any season) merged into/with this one — so a
+        # merged grade's games count under whichever name you filter by.
+        params["grade"] = await matching_grade_ids(db, org_id, grade_id)
+        grade_line = "AND gr.id = ANY(:grade)"
+        grade_pss = "AND pss.grade_id = ANY(:grade)"
 
     most_goals_game = await db.execute(text(f"""
         SELECT l.player_id, p.name, p.display_name_override, l.goals,

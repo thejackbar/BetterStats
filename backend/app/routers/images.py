@@ -14,6 +14,7 @@ from app.models.db import (
     ClubCommitteeMember, ClubGalleryImage, ClubNews, ClubRoomMedia, Organisation,
     Player, SocialMediaAsset, Sponsor, get_db,
 )
+from app.services import fonts as font_service
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -62,6 +63,18 @@ async def get_org_logo(org_id: str, format: str | None = None, db: AsyncSession 
             mime = "image/png"
         except Exception:
             pass  # fall back to the stored bytes rather than 500 the image
+    return Response(content=data, media_type=mime, headers=_CACHE_HEADERS)
+
+
+@router.get("/organisations/{org_id}/font/{role}")
+async def get_org_font(org_id: str, role: str, db: AsyncSession = Depends(get_db)):
+    if role not in font_service.FONT_ROLES:
+        raise HTTPException(404, "Unknown font role")
+    org = await db.get(Organisation, _parse_uuid(org_id))
+    data = getattr(org, f"font_{role}_data", None) if org else None
+    if not data:
+        raise HTTPException(404, "No font")
+    mime = getattr(org, f"font_{role}_mime", None) or "font/woff2"
     return Response(content=data, media_type=mime, headers=_CACHE_HEADERS)
 
 

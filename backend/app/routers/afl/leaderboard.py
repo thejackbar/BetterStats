@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
+from app.services.afl.aggregations import matching_grade_ids
 
 router = APIRouter(prefix="/afl-leaderboard", tags=["afl-leaderboard"])
 
@@ -36,8 +37,8 @@ async def leaderboard(org_id: uuid.UUID,
         clauses.append("pss.season_id = :season")
         params["season"] = str(season_id)
     if grade_id:
-        clauses.append("pss.grade_id = :grade")
-        params["grade"] = str(grade_id)
+        clauses.append("pss.grade_id = ANY(:grade)")
+        params["grade"] = await matching_grade_ids(db, org_id, grade_id)
     else:
         clauses.append("pss.grade_id IS NULL")
     where = " AND ".join(clauses)

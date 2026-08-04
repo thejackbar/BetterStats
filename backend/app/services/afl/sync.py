@@ -237,7 +237,7 @@ async def _upsert_teams_and_grades(session: AsyncSession, org: Organisation,
     return out
 
 
-async def _resolve_org_player(session: AsyncSession, org: Organisation,
+async def _resolve_org_player(session: AsyncSession, org_id: uuid.UUID,
                               profile_id: Optional[str], participant_id: str,
                               name: str, cache: dict) -> Optional[uuid.UUID]:
     """Find-or-create the players row for one of OUR participants. Keyed on the
@@ -247,26 +247,25 @@ async def _resolve_org_player(session: AsyncSession, org: Organisation,
     if raw_key in cache:
         return cache[raw_key]
     res = await session.execute(select(Player).where(
-        Player.organisation_id == org.id, Player.grassroots_id == raw_key))
+        Player.organisation_id == org_id, Player.grassroots_id == raw_key))
     player = res.scalar_one_or_none()
     if player is None:
         player = Player(
-            id=derive_id(org.id, f"player:{raw_key}"),
-            organisation_id=org.id,
+            id=derive_id(org_id, f"player:{raw_key}"),
+            organisation_id=org_id,
             grassroots_id=raw_key,
             playhq_id=str(participant_id),
             name=name,
         )
         session.add(player)
-        try:
-            await session.flush()
-        except Exception:
-            # Unique-race fallback: someone else inserted this player in the
-            # same run — reread.
-            await session.rollback()
-            res = await session.execute(select(Player).where(
-                Player.organisation_id == org.id, Player.grassroots_id == raw_key))
-            player = res.scalar_one()
+        # No try/rollback here: a rollback expires EVERY object in the session,
+        # and the next plain attribute read (details.playhq_id, org.id, ...)
+        # then triggers a lazy re-SELECT outside an await — the
+        # "greenlet_spawn has not been called" failure. The sync is
+        # single-threaded, so there's no real insert race; a genuine failure
+        # bubbles to the per-game handler, which rolls back cleanly and moves
+        # on to the next game.
+        await session.flush()
     cache[raw_key] = player.id
     return player.id
 
@@ -309,12 +308,17 @@ def _bog_by_line_key(side_stats: dict) -> tuple[dict, dict]:
     return by_pid, by_name
 
 
-async def _sync_game_stats(session: AsyncSession, org: Organisation,
+async def _sync_game_stats(session: AsyncSession, org_id: uuid.UUID,
                            game_row: Game, details: AflGameDetails,
                            our_team_ids: set[str], player_cache: dict) -> bool:
     """Pull gameView for one game and store scores, periods, player lines and
     best players. Returns True when stats landed."""
-    gv = await phq.get_game(details.playhq_id)
+    # Capture the ORM reads we need as plain values ONCE, before any flush
+    # could expire them mid-loop (see _resolve_org_player's note).
+    playhq_gid = details.playhq_id
+    game_pk = game_row.id
+
+    gv = await phq.get_game(playhq_gid)
     if not gv:
         return False
 
@@ -363,16 +367,16 @@ async def _sync_game_stats(session: AsyncSession, org: Organisation,
             game_row.result = "W" if winner_val == our_side else "L"
 
     stats = gv.get("statistics") or {}
-    await session.execute(delete(AflGamePeriod).where(AflGamePeriod.game_id == game_row.id))
-    await session.execute(delete(AflPlayerGameLine).where(AflPlayerGameLine.game_id == game_row.id))
+    await session.execute(delete(AflGamePeriod).where(AflGamePeriod.game_id == game_pk))
+    await session.execute(delete(AflPlayerGameLine).where(AflPlayerGameLine.game_id == game_pk))
 
     for side, side_stats, team in (("HOME", stats.get("home"), home),
                                    ("AWAY", stats.get("away"), away)):
         side_stats = side_stats or {}
         for prow in _extract_periods(side_stats):
             session.add(AflGamePeriod(
-                id=derive_id(org.id, f"period:{details.playhq_id}:{side}:{prow['period_number']}"),
-                game_id=game_row.id, side=side, **prow,
+                id=derive_id(org_id, f"period:{playhq_gid}:{side}:{prow['period_number']}"),
+                game_id=game_pk, side=side, **prow,
             ))
 
         bog_by_pid, bog_by_name = _bog_by_line_key(side_stats)
@@ -397,10 +401,10 @@ async def _sync_game_stats(session: AsyncSession, org: Organisation,
             player_id = None
             if is_ours:
                 player_id = await _resolve_org_player(
-                    session, org, profile_id, participant_id, name, player_cache)
+                    session, org_id, profile_id, participant_id, name, player_cache)
             session.add(AflPlayerGameLine(
-                id=derive_id(org.id, f"line:{details.playhq_id}:{side}:{participant_id}"),
-                game_id=game_row.id, side=side, team_name=team_name,
+                id=derive_id(org_id, f"line:{playhq_gid}:{side}:{participant_id}"),
+                game_id=game_pk, side=side, team_name=team_name,
                 playhq_participant_id=participant_id,
                 playhq_profile_id=str(profile_id) if profile_id else None,
                 player_id=player_id, name=name,
@@ -431,10 +435,10 @@ async def _sync_game_stats(session: AsyncSession, org: Organisation,
             profile_id = (part.get("profile") or {}).get("id")
             if is_ours:
                 player_id = await _resolve_org_player(
-                    session, org, profile_id, key, name, player_cache)
+                    session, org_id, profile_id, key, name, player_cache)
             session.add(AflPlayerGameLine(
-                id=derive_id(org.id, f"line:{details.playhq_id}:{side}:{key}"),
-                game_id=game_row.id, side=side, team_name=team_name,
+                id=derive_id(org_id, f"line:{playhq_gid}:{side}:{key}"),
+                game_id=game_pk, side=side, team_name=team_name,
                 playhq_participant_id=key,
                 playhq_profile_id=str(profile_id) if profile_id else None,
                 player_id=player_id, name=name,
@@ -444,17 +448,21 @@ async def _sync_game_stats(session: AsyncSession, org: Organisation,
     return True
 
 
-async def _sync_game_events(session: AsyncSession, org: Organisation,
+async def _sync_game_events(session: AsyncSession, org_id: uuid.UUID,
                             game_row: Game, details: AflGameDetails) -> int:
     """Store the play-by-play feed. Scorer lines resolve to our players by
     jumper number + name against the game's own lines."""
-    events = await phq.get_game_events(details.playhq_id)
+    # Plain values captured once — see _resolve_org_player's note on why ORM
+    # attribute reads must not happen after a flush/rollback mid-run.
+    playhq_gid = details.playhq_id
+    game_pk = game_row.id
+    events = await phq.get_game_events(playhq_gid)
     if not events:
         details.events_synced_at = datetime.now(timezone.utc)
         return 0
 
     res = await session.execute(select(AflPlayerGameLine).where(
-        AflPlayerGameLine.game_id == game_row.id,
+        AflPlayerGameLine.game_id == game_pk,
         AflPlayerGameLine.player_id.is_not(None)))
     our_lines = res.scalars().all()
     # Per-side maps: jumper numbers repeat across the two teams, and in an
@@ -462,7 +470,7 @@ async def _sync_game_events(session: AsyncSession, org: Organisation,
     by_number = {(l.side, l.jumper_number): l.player_id for l in our_lines if l.jumper_number}
     by_name = {(l.side, _norm_name(l.name)): l.player_id for l in our_lines}
 
-    await session.execute(delete(AflGameEvent).where(AflGameEvent.game_id == game_row.id))
+    await session.execute(delete(AflGameEvent).where(AflGameEvent.game_id == game_pk))
     ordered = sorted(events, key=lambda e: int(e.get("timestamp") or 0))
     for i, ev in enumerate(ordered):
         scorer_number = scorer_name = None
@@ -477,8 +485,8 @@ async def _sync_game_events(session: AsyncSession, org: Organisation,
             player_id = (by_number.get((ev_side, scorer_number))
                          or by_name.get((ev_side, _norm_name(scorer_name))))
         session.add(AflGameEvent(
-            id=derive_id(org.id, f"event:{details.playhq_id}:{ev.get('id')}"),
-            game_id=game_row.id,
+            id=derive_id(org_id, f"event:{playhq_gid}:{ev.get('id')}"),
+            game_id=game_pk,
             playhq_event_id=str(ev.get("id")),
             sequence=i,
             period_value=ev.get("period"),
@@ -538,17 +546,23 @@ async def sync_organisation(org_id: uuid.UUID,
         run_id = await start_sync_run(org_id, "afl_full" if full else "afl_sync",
                                       triggered_by_user_id=triggered_by_user_id)
     stats = {"seasons": 0, "grades": 0, "teams": 0, "games_discovered": 0,
-             "games_stats_synced": 0, "events_stored": 0, "players": 0,
-             "season_stat_rows": 0}
+             "games_stats_synced": 0, "games_failed": 0, "events_stored": 0,
+             "players": 0, "season_stat_rows": 0}
     try:
         async with async_session_maker() as session:
             org = await session.get(Organisation, org_id)
             if not org or not org.playhq_id:
                 raise ValueError("Organisation missing or has no playhq_id")
+            # Plain copies: a rollback anywhere below expires every ORM object
+            # in the session, and a later plain read of org.id would then try
+            # to re-SELECT outside an await ("greenlet_spawn has not been
+            # called"). org_pk/org_playhq are immune to that.
+            org_pk = org.id
+            org_playhq = org.playhq_id
 
             _progress(stats, "Discovering competitions", 2)
             await update_sync_run(run_id, stats)
-            data = await phq.get_org_competitions(org.playhq_id, force=full)
+            data = await phq.get_org_competitions(org_playhq, force=full)
             profile = data.get("organisation") or {}
             if profile.get("name"):
                 org.name = org.name or profile["name"]
@@ -589,7 +603,7 @@ async def sync_organisation(org_id: uuid.UUID,
                         if h_id not in our_team_ids and a_id not in our_team_ids:
                             continue
                         raw_gid = str(gm.get("id"))
-                        game_row_id = derive_id(org.id, f"game:{raw_gid}")
+                        game_row_id = derive_id(org_pk, f"game:{raw_gid}")
                         game_row = await session.get(Game, game_row_id)
                         our_side = "HOME" if h_id in our_team_ids else "AWAY"
                         opp = away if our_side == "HOME" else home
@@ -651,22 +665,27 @@ async def sync_organisation(org_id: uuid.UUID,
                 # leaderboards progressively instead of only at the end.
                 if idx and idx % 100 == 0:
                     try:
-                        await _rollup_season_stats(session, org.id)
+                        await _rollup_season_stats(session, org_pk)
                         await session.commit()
                     except Exception:  # noqa: BLE001 — final rollup still runs
                         await session.rollback()
                 game_row = await session.get(Game, game_row_id)
                 details = await session.get(AflGameDetails, game_row_id)
                 try:
-                    ok = await _sync_game_stats(session, org, game_row, details,
+                    ok = await _sync_game_stats(session, org_pk, game_row, details,
                                                 our_team_ids, player_cache)
                     if ok:
                         stats["games_stats_synced"] += 1
                         stats["events_stored"] += await _sync_game_events(
-                            session, org, game_row, details)
+                            session, org_pk, game_row, details)
                     await session.commit()
-                except phq.PlayHQError as exc:
+                except Exception as exc:  # noqa: BLE001
+                    # One unusable game (upstream error, unexpected payload
+                    # shape) must not abort a 900-game sync. Roll back just
+                    # this game's writes and carry on; the count surfaces on
+                    # the admin Data Sync page.
                     await session.rollback()
+                    stats["games_failed"] = stats.get("games_failed", 0) + 1
                     logger.warning("game %s stats failed: %s", raw_gid, exc)
                 # Gentle pacing between game fetches.
                 await asyncio.sleep(0.2)
@@ -676,7 +695,7 @@ async def sync_organisation(org_id: uuid.UUID,
             # ── Rollup ───────────────────────────────────────────────────
             _progress(stats, "Computing season totals", 95)
             await update_sync_run(run_id, stats)
-            stats["season_stat_rows"] = await _rollup_season_stats(session, org.id)
+            stats["season_stat_rows"] = await _rollup_season_stats(session, org_pk)
             await session.commit()
 
         _progress(stats, "Done", 100)

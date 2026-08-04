@@ -74,25 +74,57 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+_MAX_ATTEMPTS = 5
+# CloudFront in front of api.playhq.com sometimes hard-blocks a request with
+# a plain "Request blocked" 403 (a WAF/rate-reputation response, not an
+# application-level auth failure — verified live: identical body on both the
+# discover and spectator hosts, for a request built exactly like a normal
+# browser call). Observed to be a TEMPORARY per-IP flag that clears after a
+# short cooldown (sync history: one run's afl_sync succeeded, ~30min later an
+# afl_full's very first call 403'd) — so unlike a genuine 4xx (bad query,
+# missing var), a 403 here is worth retrying with a real backoff rather than
+# failing the whole sync run instantly.
+_RETRYABLE_STATUS = {403, 429}
+
+
 async def _post(url: str, headers: dict, operation: str, query: str,
                 variables: dict) -> dict:
     payload = {"operationName": operation, "variables": variables, "query": query}
     async with _semaphore:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            for attempt in range(3):
+            for attempt in range(_MAX_ATTEMPTS):
+                last_attempt = attempt == _MAX_ATTEMPTS - 1
                 try:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     body = resp.json()
                     break
                 except httpx.HTTPStatusError as exc:
-                    # A 4xx is a bad request on our side — retrying it is
-                    # pointless and hammers the API for nothing.
-                    if 400 <= exc.response.status_code < 500 or attempt == 2:
+                    status = exc.response.status_code
+                    if status in _RETRYABLE_STATUS and not last_attempt:
+                        # Longer, growing waits than a genuine transient
+                        # error gets — a WAF cooldown is measured in tens of
+                        # seconds, not the 2/4/6s used below.
+                        wait = 10 * (2 ** attempt)
+                        logger.warning(
+                            "%s: got %s from PlayHQ (likely a CloudFront WAF "
+                            "block, not our request) — retrying in %ss (attempt %s/%s)",
+                            operation, status, wait, attempt + 1, _MAX_ATTEMPTS)
+                        await asyncio.sleep(wait)
+                        continue
+                    # Any other 4xx is a bad request on our side — retrying
+                    # it is pointless and hammers the API for nothing.
+                    if status in _RETRYABLE_STATUS:
+                        raise PlayHQError(
+                            f"{operation}: still blocked by PlayHQ (HTTP {status}) after "
+                            f"{_MAX_ATTEMPTS} attempts — this is very likely an upstream "
+                            f"CloudFront rate/reputation block on this server's IP, not a "
+                            f"bug in the request. Wait a while and retry.") from exc
+                    if 400 <= status < 500 or last_attempt:
                         raise PlayHQError(f"{operation}: {exc}") from exc
                     await asyncio.sleep(2 * (attempt + 1))
                 except (httpx.HTTPError, ValueError) as exc:
-                    if attempt == 2:
+                    if last_attempt:
                         raise PlayHQError(f"{operation}: {exc}") from exc
                     await asyncio.sleep(2 * (attempt + 1))
     if body.get("errors"):

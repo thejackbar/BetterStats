@@ -148,7 +148,10 @@ export function AuthProvider({ children }) {
     if (data?.club_slug) {
       try { sessionStorage.setItem('bs_last_slug', data.club_slug) } catch {}
     }
-    window.location.assign('/admin')
+    // Base-path aware (see API_BASE above) — a bare '/admin' lands on the
+    // umbrella betterat.football landing page for a silo built under a path
+    // prefix (e.g. AFL's /afl/), not that silo's own admin app.
+    window.location.assign(import.meta.env.BASE_URL + 'admin')
   }, [])
 
   const clearJustLoggedIn = useCallback(() => setJustLoggedIn(false), [])

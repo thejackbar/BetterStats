@@ -1369,6 +1369,20 @@ export const api = {
       })
   },
   adminDeleteLogo: () => request('/club-admin/logo', { method: 'DELETE' }),
+  adminUploadFont: (role, file, family) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (family) form.append('family', family)
+    return fetch(`${BASE}/club-admin/font/${role}`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeleteFont: (role) => request(`/club-admin/font/${role}`, { method: 'DELETE' }),
   adminUploadPlayerPhoto: (playerId, file) => {
     const form = new FormData()
     form.append('file', file)
