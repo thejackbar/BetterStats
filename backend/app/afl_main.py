@@ -184,6 +184,36 @@ async def lifespan(app: FastAPI):
                 undone_at TIMESTAMPTZ
             )
         """))
+        # Merge Players bookkeeping — AFL-scoped schema (only the two AFL stat
+        # tables need tracking for undo, vs cricket's ~12-column merge_logs).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                keep_player_id UUID,
+                keep_player_name TEXT,
+                removed_player_id UUID,
+                removed_player_name TEXT,
+                removed_player_playhq_id TEXT,
+                keep_original_playhq_id TEXT,
+                line_ids JSONB DEFAULT '[]',
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_merge_logs_org "
+            "ON afl_merge_logs(org_id, merged_at DESC)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_merge_pair_ignores (
+                id SERIAL PRIMARY KEY,
+                org_id UUID NOT NULL,
+                player_a_id UUID NOT NULL,
+                player_b_id UUID NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (org_id, player_a_id, player_b_id)
+            )
+        """))
 
     # Mark any sync runs orphaned by a restart, same as the cricket boot does.
     from app.models.db import async_session_maker

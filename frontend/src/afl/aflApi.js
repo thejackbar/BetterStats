@@ -134,10 +134,25 @@ export const aflApi = {
 
   // Admin — Better HQ: Users (platform-wide)
   superListUsers: () => request('/club-admin/super/users'),
+  superCreateUser: (body) => request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(body) }),
   superUpdateUser: (id, body) => request(`/club-admin/super/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   superDeleteUser: (id) => request(`/club-admin/super/users/${id}`, { method: 'DELETE' }),
   superResetPassword: (id, newPassword) => request(`/club-admin/super/users/${id}/reset-password`, {
     method: 'POST', body: JSON.stringify({ new_password: newPassword }),
+  }),
+
+  // Admin — Merge Players
+  mergeCandidates: () => request('/club-admin/merge-candidates'),
+  playerMergeInfo: (playerId) => request(`/club-admin/player-info/${playerId}`),
+  ignorePair: (playerAId, playerBId) => request('/club-admin/ignore-pair', {
+    method: 'POST', body: JSON.stringify({ player_a_id: playerAId, player_b_id: playerBId }),
+  }),
+  playerMergeHistory: () => request('/club-admin/merge-history'),
+  mergePlayers: (keepPlayerId, removePlayerId) => request('/club-admin/merge-players', {
+    method: 'POST', body: JSON.stringify({ keep_player_id: keepPlayerId, remove_player_id: removePlayerId }),
+  }),
+  undoMergePlayers: (mergeLogId) => request('/club-admin/undo-merge-players', {
+    method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
 
   // Admin — Better HQ: All Clubs

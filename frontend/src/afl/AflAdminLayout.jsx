@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { aflApi } from './aflApi'
+import ClubSwitcher from './components/ClubSwitcher'
 
 // Self-contained AFL admin shell — deliberately NOT built on cricket's
 // ModuleLayout/ModuleSwitcher/BookmarkButton/TrialBanner, which assume the
@@ -15,6 +16,7 @@ const NAV = [
   { to: '/admin/players', label: 'Players' },
   { to: '/admin/players/import', label: 'Import Players' },
   { heading: 'Clean Your Data' },
+  { to: '/admin/merge', label: 'Merge Players' },
   { to: '/admin/merge-grades', label: 'Merge Grades' },
   { heading: 'Records & Content' },
   { to: '/admin/award-definitions', label: 'Award Types' },
@@ -31,18 +33,23 @@ const SUPER_NAV = [
 ]
 
 export default function AflAdminLayout() {
-  const { user, loading: authLoading, logout } = useAuth()
+  // useAuth() has no separate `loading` flag — `user === undefined` IS the
+  // loading state (see contexts/AuthContext.jsx), only settling to a real
+  // object or `null` once /auth/me resolves. Checking a nonexistent `loading`
+  // field here would silently always read false, firing the "not logged in"
+  // redirect on every fresh page load before the auth check even completed.
+  const { user, logout, switchClub } = useAuth()
   const navigate = useNavigate()
   const [settings, setSettings] = useState(null)
   const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
-    if (authLoading) return
+    if (user === undefined) return
     if (!user) { navigate('/login'); return }
     aflApi.getAdminSettings().then(setSettings).catch(() => {})
-  }, [authLoading, user, navigate])
+  }, [user, navigate])
 
-  if (authLoading) {
+  if (user === undefined) {
     return <div className="min-h-screen bg-pb-bg pt-24 flex justify-center"><LoadingSpinner /></div>
   }
   if (!user) return null
@@ -99,6 +106,9 @@ export default function AflAdminLayout() {
     <div className="min-h-screen bg-pb-bg text-pb-text flex">
       <aside className="w-60 pb-hairline-r bg-pb-surface hidden md:flex flex-col sticky top-0 h-screen">
         <Brand />
+        {user.can_switch_clubs && (
+          <div className="px-4 py-3 pb-hairline-b"><ClubSwitcher /></div>
+        )}
         <nav className="flex-1 overflow-y-auto py-2"><NavItems /></nav>
         <div className="px-4 py-3 pb-hairline-t text-sm text-pb-faint flex items-center justify-between">
           <span className="truncate">{user.display_name || user.username}</span>
@@ -113,6 +123,9 @@ export default function AflAdminLayout() {
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 bottom-0 w-64 bg-pb-surface pb-hairline-r flex flex-col">
             <Brand />
+            {user.can_switch_clubs && (
+              <div className="px-4 py-3 pb-hairline-b"><ClubSwitcher /></div>
+            )}
             <nav className="flex-1 overflow-y-auto py-2"><NavItems onNavigate={() => setMobileOpen(false)} /></nav>
           </aside>
         </div>
@@ -128,6 +141,15 @@ export default function AflAdminLayout() {
             Sign out
           </button>
         </header>
+        {user.acting_as_club && (
+          <div className="px-4 py-2 text-center text-xs font-mono tracking-wide2 uppercase"
+               style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+            Managing {user.club_name} as Super Admin ·{' '}
+            <button onClick={() => switchClub(null)} className="underline">
+              return to {user.home_club_name || 'home club'}
+            </button>
+          </div>
+        )}
         <main className="flex-1 p-4 md:p-6 max-w-[1200px] w-full mx-auto">
           <Outlet context={{ settings }} />
         </main>

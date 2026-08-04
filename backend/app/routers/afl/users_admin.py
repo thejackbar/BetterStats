@@ -276,6 +276,51 @@ async def _super_admin_count(db: AsyncSession) -> int:
     return res.scalar() or 0
 
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    club_id: str
+    role: str = "club_admin"
+
+
+@router.post("/club-admin/super/users", status_code=201)
+async def create_user(
+    data: UserCreate, _: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db),
+):
+    """Create a Better HQ account directly (username + password set here and
+    handed to the person, not an email invite — mirrors cricket's own
+    super-admin create-user flow) and assign it a club + role in one step."""
+    username = data.username.lower().strip()
+    if not username or len(username) < 3 or len(username) > 32:
+        raise HTTPException(422, "Username must be 3-32 characters")
+    existing = await db.execute(select(User).where(User.username == username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "Username already taken")
+    if len(data.password) < 10:
+        raise HTTPException(422, "Password must be at least 10 characters")
+    club = await db.get(Organisation, uuid.UUID(data.club_id))
+    if not club:
+        raise HTTPException(404, "Club not found")
+
+    user = User(username=username, password_hash=_hash_password(data.password), display_name=data.display_name)
+    db.add(user)
+    await db.flush()
+
+    membership = ClubMembership(
+        club_id=club.id, user_id=user.id,
+        role=data.role if data.role in ("super_admin", "club_admin") else "club_admin",
+    )
+    db.add(membership)
+    await db.flush()
+    if membership.role == "club_admin":
+        from app.services.memberships import ensure_primary_admin
+        await ensure_primary_admin(db, club.id)
+
+    await db.commit()
+    return {"id": str(user.id), "username": user.username, "club_id": data.club_id, "role": membership.role}
+
+
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     display_name: Optional[str] = None
