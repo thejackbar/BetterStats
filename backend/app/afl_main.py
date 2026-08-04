@@ -261,6 +261,20 @@ async def lifespan(app: FastAPI):
                 UNIQUE (org_id, player_a_id, player_b_id)
             )
         """))
+        # player_name_aliases (models.db.PlayerNameAlias) IS ORM-mapped, so
+        # Base.metadata.create_all above already creates the table itself
+        # (and _sync_missing_columns already self-heals any future column
+        # added to it) — no CREATE TABLE mirror needed here. What create_all
+        # can't add is the org-scoped uniqueness constraint (no
+        # __table_args__ on the model) that seed_alias_on_rename's
+        # ON CONFLICT (organisation_id, alias_key) relies on, so that index
+        # is still mirrored explicitly.
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_name_alias_key "
+            "ON player_name_aliases(organisation_id, alias_key)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_player_name_aliases_player "
+            "ON player_name_aliases(player_id)"))
         # Import Stats — historical CSV import (routers/afl/imports.py). Reuses
         # the shared import_batches table (models.db.ImportBatch, already
         # ORM-mapped and 100% sport-agnostic — no mirror needed for it here).

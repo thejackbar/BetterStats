@@ -23,6 +23,7 @@ an exact recorded alias or it isn't. Two ways a row gets created:
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Optional
 
 from sqlalchemy import text
@@ -61,18 +62,37 @@ async def seed_alias_on_rename(db: AsyncSession, org_id, player_id, old_name: Op
     player (``ON CONFLICT DO NOTHING``): a genuine collision just means this
     particular old name isn't captured, which is a rare, low-stakes edge case,
     not something worth blocking the rename itself over.
+
+    The INSERT runs inside its own SAVEPOINT: catching the Python exception
+    alone isn't enough to make this safe for a caller who does more work in
+    the same transaction afterward (a rename is very often one step inside a
+    bigger merge/rename operation) — once one statement in a Postgres
+    transaction fails, every later statement in that same transaction fails
+    too with "current transaction is aborted" until something rolls back, so
+    a bare try/except here would silently poison the caller's transaction
+    the moment this INSERT can't run (e.g. player_name_aliases missing from
+    a database that predates it — see the AFL merge-players 500 this was
+    written to fix). The SAVEPOINT contains that failure to just this insert.
     """
     key = normalise_name_key(old_name)
     if not key:
         return
     try:
-        await db.execute(
-            text(
-                "INSERT INTO player_name_aliases (organisation_id, player_id, alias_name, alias_key, source) "
-                "VALUES (:org, :pid, :name, :key, 'rename') "
-                "ON CONFLICT (organisation_id, alias_key) DO NOTHING"
-            ),
-            {"org": org_id, "pid": player_id, "name": old_name, "key": key},
-        )
+        async with db.begin_nested():
+            # id supplied here, not left to a database default: the ORM model
+            # (PlayerNameAlias) only has a Python-side default=uuid.uuid4,
+            # which a raw SQL INSERT bypassing the ORM never sees — and
+            # whichever code path creates this table first (Base.metadata.
+            # create_all vs. the raw-SQL migration mirror) decides whether a
+            # server-side DEFAULT ends up on the column at all. Generating it
+            # here makes this INSERT correct regardless of either.
+            await db.execute(
+                text(
+                    "INSERT INTO player_name_aliases (id, organisation_id, player_id, alias_name, alias_key, source) "
+                    "VALUES (:id, :org, :pid, :name, :key, 'rename') "
+                    "ON CONFLICT (organisation_id, alias_key) DO NOTHING"
+                ),
+                {"id": str(uuid.uuid4()), "org": org_id, "pid": player_id, "name": old_name, "key": key},
+            )
     except Exception:
         pass

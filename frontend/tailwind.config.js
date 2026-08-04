@@ -45,15 +45,16 @@ export default {
         },
       },
       fontFamily: {
-        // --pb-font-display/-body are always defined (default value in
+        // --pb-font-display/-body/-mono are always defined (default value in
         // styles/theme.css :root, overridden per-club by buildThemeCss when a
         // club picks its own typography — see lib/theme.js). `sans` mirrors
         // `body` so ordinary unstyled text (not explicitly font-display'd)
         // also reflects a club's body-font choice, matching what "body text"
-        // means to a club admin.
+        // means to a club admin. `mono` (numbers/stats) covers the many
+        // font-mono uses across stat figures and tabular data.
         display: ['var(--pb-font-display)'],
         body:    ['var(--pb-font-body)'],
-        mono:    ['JetBrains Mono', 'Fira Code', 'monospace'],
+        mono:    ['var(--pb-font-mono)'],
         sans:    ['var(--pb-font-body)'],
       },
       letterSpacing: {

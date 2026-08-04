@@ -271,6 +271,7 @@ export default function AflAdminMergePlayers() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState(null)
   const [bulkProgress, setBulkProgress] = useState(null)
+  const [bulkIgnoreBusy, setBulkIgnoreBusy] = useState(false)
   const [error, setError] = useState(null)
 
   const refreshCandidates = () => aflApi.mergeCandidates().then(setCandidates).catch(() => setCandidates([]))
@@ -278,6 +279,7 @@ export default function AflAdminMergePlayers() {
 
   const visible = (candidates || []).filter(c => !skipped.has(`${c.player_a.id}:${c.player_b.id}`))
   const bulkEligible = visible.filter(c => c.kind !== 'fuzzy' && !c.redacted)
+  const redactedCount = visible.filter(c => c.redacted).length
 
   const onMerged = () => {
     setMergedCount(n => n + 1)
@@ -312,6 +314,20 @@ export default function AflAdminMergePlayers() {
     setBulkBusy(false)
   }
 
+  const bulkIgnoreRedacted = async () => {
+    if (!window.confirm(`Ignore all ${redactedCount} pair(s) involving a private/redacted player ("********")? These can't be told apart to confirm as real duplicates, so they'll drop off this list.`)) return
+    setBulkIgnoreBusy(true)
+    setError(null)
+    try {
+      await aflApi.bulkIgnoreRedacted()
+      refreshCandidates()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBulkIgnoreBusy(false)
+    }
+  }
+
   if (candidates === null) return <p className="text-sm text-pb-faint">Loading…</p>
 
   return (
@@ -341,6 +357,18 @@ export default function AflAdminMergePlayers() {
           </div>
           <button disabled={bulkBusy} onClick={bulkApprove} className="px-4 py-2 rounded font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">
             {bulkBusy ? (bulkProgress ? `Merging ${bulkProgress.done}/${bulkProgress.total}…` : 'Merging…') : `Bulk approve ${bulkEligible.length}`}
+          </button>
+        </div>
+      )}
+
+      {redactedCount > 0 && (
+        <div className="pb-card p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-semibold text-sm">{redactedCount} pair{redactedCount === 1 ? '' : 's'} involving a private/redacted player</div>
+            <div className="text-xs text-pb-faint">CA hides a junior's name as "********" — two redacted players can never be confirmed as the same person, so there's nothing to review here.</div>
+          </div>
+          <button disabled={bulkIgnoreBusy} onClick={bulkIgnoreRedacted} className="px-4 py-2 rounded font-semibold border border-pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-50">
+            {bulkIgnoreBusy ? 'Ignoring…' : `Ignore all ${redactedCount}`}
           </button>
         </div>
       )}

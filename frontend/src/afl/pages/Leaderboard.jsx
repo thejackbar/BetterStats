@@ -36,7 +36,7 @@ export default function Leaderboard() {
   }, [club.id, stat, seasonId, gradeId, gradeDisabled])
 
   const gradeOptions = (club.grades || [])
-    .filter(g => !seasonId || g.season_id === seasonId)
+    .filter(g => !seasonId || (g.season_ids || []).includes(seasonId))
     .map(g => ({ value: g.id, label: g.display_name_override || g.name }))
 
   return (

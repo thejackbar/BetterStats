@@ -82,8 +82,8 @@ export const aflApi = {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
   listGradesWithStats: () => request('/club-admin/grades-with-stats'),
-  classifyGrade: (gradeName, { category, is_public } = {}) => request('/club-admin/grades/classify', {
-    method: 'PATCH', body: JSON.stringify({ grade_name: gradeName, category, is_public }),
+  classifyGrade: (gradeName, { category, is_public, display_name } = {}) => request('/club-admin/grades/classify', {
+    method: 'PATCH', body: JSON.stringify({ grade_name: gradeName, category, is_public, display_name }),
   }),
   applyGradeSuggestions: () => request('/club-admin/grades/apply-suggestions', { method: 'POST' }),
 
@@ -148,6 +148,7 @@ export const aflApi = {
 
   // Admin — Merge Players
   mergeCandidates: () => request('/club-admin/merge-candidates'),
+  bulkIgnoreRedacted: () => request('/club-admin/merge-candidates/bulk-ignore-redacted', { method: 'POST' }),
   playerMergeInfo: (playerId) => request(`/club-admin/player-info/${playerId}`),
   ignorePair: (playerAId, playerBId) => request('/club-admin/ignore-pair', {
     method: 'POST', body: JSON.stringify({ player_a_id: playerAId, player_b_id: playerBId }),
