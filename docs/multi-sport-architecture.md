@@ -337,6 +337,50 @@ that FIFA football's soccer/football label still follows the hostname the
 visitor ends up on (so a UK visitor lands on and stays on a football-named
 host, never a soccer one).
 
+### Worked example: the BetterFootball landing and the AFL rollout
+
+AFL is the first new code, so here is the concrete flow, and it has two layers
+with the boundary between them at club registration.
+
+1. **The BetterFootball landing (`betterat.football`).** A static landing page
+   in the same style as `betterat.cricket`, branded BetterFootball. Its one job
+   is to let the visitor choose a football-family code: AFL, FIFA football, and
+   others as they arrive. It holds no club data. At launch it can list FIFA
+   football as "coming soon" while AFL is the only built code.
+2. **The chosen code's static pages.** Picking AFL transfers the visitor to a
+   set of static marketing pages specific to AFL, again in the `betterat.cricket`
+   style, carrying the "Get your club on BetterFootball today" invitation. These
+   pages reuse cricket's whole marketing-page machinery through the
+   `SportProfile` (AFL labels, AFL branding), so they are configuration over the
+   shared frontend, not a rebuild.
+3. **Registration is the boundary.** When the visitor takes up "Get your club on
+   BetterFootball" and goes through club registration, they are now interacting
+   with the **AFL stack**: `bs-afl-frontend`, `bs-afl-backend`, `bs-afl-db`.
+   Every club, player and match they create lives in the AFL database. This is
+   where runtime separation matters, and it is entirely the AFL stack's.
+
+So the landing is the one shared football-family asset (a thin chooser, no data),
+and each code owns everything from its own marketing pages through registration
+and the app. Two clean ways to serve steps 1 and 2 are worth calling out; either
+works, pick per how much you want to share:
+
+- **Each code's own frontend serves its own marketing pages** (the cricket
+  pattern: `betterstats-frontend` already serves both marketing and app). Then
+  `betterat.football` is a tiny separate chooser that redirects to the chosen
+  code's address, and the visitor is on `bs-afl-frontend` from the AFL marketing
+  pages onward. Maximum reuse, fewest new parts.
+- **A small shared BetterFootball front-door** serves the landing and every
+  code's static pages, and hands off to `bs-afl-*` only at registration. Slightly
+  more to build, but it keeps all football-family marketing in one place.
+
+Adding FIFA football later is then purely additive: flip its landing choice from
+"coming soon" to live and stand up `bs-football-*`. The AFL stack is not touched.
+
+Note on branding: "BetterFootball" reads as the family umbrella here. Whether a
+code's own pages say BetterFootball, BetterAFL or (for FIFA football in the UK)
+"Football" is a `SportProfile` value, not hardcoded, so it stays consistent with
+the soccer/football labelling rule above.
+
 Three things to hold the line on:
 
 - **Disambiguate "football" in the app, by asking.** No per-code subdomain, no
