@@ -126,6 +126,13 @@ export default function PlayerProfile() {
                   <td className="px-3 py-2 text-right"><ResultPill result={g.result} /></td>
                 </tr>
               ))}
+              {(data.game_log || []).length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-4 text-center text-pb-faint text-sm">
+                  {(c.games || 0) > 0
+                    ? "No individual game records — this player's history comes from an imported season-totals spreadsheet, which doesn't include a game-by-game breakdown."
+                    : 'No games recorded yet.'}
+                </td></tr>
+              )}
             </tbody>
           </table>
         </div>

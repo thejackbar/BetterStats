@@ -62,13 +62,17 @@ async def career_totals(db: AsyncSession, org_id: uuid.UUID,
 
 async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
                            player_id: uuid.UUID) -> list[dict]:
-    """Synced-only for now — unlike career_totals above, this doesn't yet
-    combine in afl_imported_stats rows. A season covered purely by an Import
-    Stats upload won't appear in this per-season breakdown even though it
-    does count toward the player's career total. Flagged as a follow-up:
-    needs the same combine plus synthesising a whole-season (grade_id NULL)
-    row for an import-only season, since an imported row is only ever
-    per-grade shaped."""
+    """Combines synced (afl_player_season_stats) with imported (Import Stats
+    upload) rows, same sync-wins-per-season rule as career_totals. An
+    imported row is inherently per-grade shaped (one row per uploaded sheet
+    row) — there's no separate "whole season" aggregate row the way a synced
+    season has (grade_id NULL alongside its own per-grade breakdown rows).
+    So for any season covered ONLY by import, a whole-season total row is
+    synthesised in Python by summing that season's per-grade rows, mirroring
+    what the sync's own rollup would have produced. compare_players()
+    filters this list down to grade_id IS NULL rows only, so without this
+    synthesis an import-only season would silently vanish from Compare too.
+    """
     res = await db.execute(text("""
         SELECT pss.season_id, s.name AS season_name, s.year,
                pss.grade_id, gr.name AS grade_name,
@@ -78,9 +82,46 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
         JOIN seasons s ON s.id = pss.season_id
         LEFT JOIN grades gr ON gr.id = pss.grade_id
         WHERE pss.organisation_id = :org AND pss.player_id = :pid
-        ORDER BY s.year DESC NULLS LAST, s.name DESC, pss.grade_id NULLS FIRST
+        UNION ALL
+        SELECT i.season_id, s.name AS season_name, s.year,
+               i.grade_id, gr.name AS grade_name,
+               i.games_played AS games, i.goals, i.behinds, i.bog_count AS bogs,
+               i.captain_games
+        FROM afl_imported_stats i
+        LEFT JOIN seasons s ON s.id = i.season_id
+        LEFT JOIN grades gr ON gr.id = i.grade_id
+        WHERE i.organisation_id = :org AND i.player_id = :pid
+          AND NOT EXISTS (
+            SELECT 1 FROM afl_player_season_stats s2
+            WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+              AND s2.grade_id IS NULL AND s2.games > 0
+          )
     """), {"org": str(org_id), "pid": str(player_id)})
-    return [dict(r._mapping) for r in res]
+    rows = [dict(r._mapping) for r in res]
+
+    have_total = {r["season_id"] for r in rows if r["grade_id"] is None and r["season_id"] is not None}
+    synthesised: dict = {}
+    for r in rows:
+        sid = r["season_id"]
+        if sid is None or sid in have_total:
+            continue
+        t = synthesised.setdefault(sid, {
+            "season_id": sid, "season_name": r["season_name"], "year": r["year"],
+            "grade_id": None, "grade_name": None,
+            "games": 0, "goals": 0, "behinds": 0, "bogs": 0, "captain_games": 0,
+        })
+        for f in ("games", "goals", "behinds", "bogs", "captain_games"):
+            t[f] += r[f] or 0
+    rows.extend(synthesised.values())
+
+    # Three stable sorts, least-significant first (Python's sort is stable,
+    # so each later pass only breaks ties the previous pass left standing) —
+    # mirrors the original "year DESC NULLS LAST, name DESC, grade_id NULLS
+    # FIRST" ordering (whole-season row before its own per-grade breakdown).
+    rows.sort(key=lambda r: r["grade_id"] is not None)
+    rows.sort(key=lambda r: r["season_name"] or "", reverse=True)
+    rows.sort(key=lambda r: (r["year"] is None, -(r["year"] or 0)))
+    return rows
 
 
 async def player_game_log(db: AsyncSession, org_id: uuid.UUID,
