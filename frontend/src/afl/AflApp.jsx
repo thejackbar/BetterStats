@@ -14,7 +14,17 @@ import Records from './pages/Records'
 import Leaderboard from './pages/Leaderboard'
 import Compare from './pages/Compare'
 import AflLogin from './pages/AflLogin'
-import AflAdmin from './pages/AflAdmin'
+import AflAdminLayout from './AflAdminLayout'
+import AflAdminSync from './pages/admin/AflAdminSync'
+import AflAdminPlayers from './pages/admin/AflAdminPlayers'
+import AflAdminPlayerImport from './pages/admin/AflAdminPlayerImport'
+import AflAdminMergeGrades from './pages/admin/AflAdminMergeGrades'
+import AflAdminAwardDefinitions from './pages/admin/AflAdminAwardDefinitions'
+import AflAdminAwards from './pages/admin/AflAdminAwards'
+import AflAdminSponsors from './pages/admin/AflAdminSponsors'
+import AflAdminUsers from './pages/admin/AflAdminUsers'
+import AflAdminSuperUsers from './pages/admin/AflAdminSuperUsers'
+import AflAdminSuperClubs from './pages/admin/AflAdminSuperClubs'
 
 /**
  * BetterStats AFL — the bs-afl-frontend app tree, mounted by App.jsx when the
@@ -32,7 +42,18 @@ export default function AflApp() {
             <div className="min-h-screen bg-pb-bg">
               <Routes>
                 <Route path="/login" element={<AflLogin />} />
-                <Route path="/admin/*" element={<AflAdmin />} />
+                <Route path="/admin" element={<AflAdminLayout />}>
+                  <Route index element={<AflAdminSync />} />
+                  <Route path="players" element={<AflAdminPlayers />} />
+                  <Route path="players/import" element={<AflAdminPlayerImport />} />
+                  <Route path="merge-grades" element={<AflAdminMergeGrades />} />
+                  <Route path="award-definitions" element={<AflAdminAwardDefinitions />} />
+                  <Route path="awards" element={<AflAdminAwards />} />
+                  <Route path="sponsors" element={<AflAdminSponsors />} />
+                  <Route path="users" element={<AflAdminUsers />} />
+                  <Route path="super/users" element={<AflAdminSuperUsers />} />
+                  <Route path="super/clubs" element={<AflAdminSuperClubs />} />
+                </Route>
                 <Route path="/:clubSlug" element={<ClubLayout />}>
                   <Route index element={<Dashboard />} />
                   <Route path="players" element={<Players />} />

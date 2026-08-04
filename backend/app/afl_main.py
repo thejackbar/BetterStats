@@ -28,7 +28,7 @@ from sqlalchemy import text
 from app.config.settings import settings
 from app.models.db import Base, engine
 import app.models.afl  # noqa: F401 — register the AFL tables on the shared Base
-from app.routers import auth
+from app.routers import auth, images
 from app.routers.afl import (
     clubs as afl_clubs,
     organisations as afl_organisations,
@@ -37,6 +37,14 @@ from app.routers.afl import (
     records as afl_records,
     leaderboard as afl_leaderboard,
     club_admin as afl_club_admin,
+    players_admin as afl_players_admin,
+    player_import as afl_player_import,
+    merge as afl_merge,
+    award_definitions as afl_award_definitions,
+    achievements as afl_achievements,
+    sponsors as afl_sponsors,
+    users_admin as afl_users_admin,
+    super_clubs as afl_super_clubs,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +99,92 @@ async def lifespan(app: FastAPI):
             "INSERT INTO platform_settings (id, settings) VALUES (1, '{}') "
             "ON CONFLICT (id) DO NOTHING"))
 
+        # Phase 1 admin-tools tables (Player list / Import Players / Merge
+        # Grades / Awards / Sponsors / Users / All Clubs) — raw-SQL-only in
+        # cricket's main.py lifespan (never added to the ORM Base), so they
+        # don't exist in a fresh AFL database via create_all and must be
+        # mirrored here the same idempotent way. Sponsors need no entry —
+        # org_sponsors IS ORM-mapped (models.db.Sponsor) and already created
+        # by create_all above.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                user_id UUID,
+                action TEXT NOT NULL,
+                target_type TEXT,
+                target_id TEXT,
+                details JSONB DEFAULT '{}'
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created "
+            "ON audit_logs(org_id, created_at DESC)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_grade_merge_logs_org_active "
+            "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_award_definitions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                achievement TEXT,
+                display_name TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_award_defs_org ON org_award_definitions(org_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS player_achievements (
+                id SERIAL PRIMARY KEY,
+                org_id UUID NOT NULL,
+                player_id UUID,
+                player_name TEXT NOT NULL,
+                season TEXT,
+                season_end TEXT,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                achievement TEXT NOT NULL,
+                detail TEXT,
+                import_batch_id UUID,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_player ON player_achievements(player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_org ON player_achievements(org_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_import_batch "
+            "ON player_achievements(import_batch_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS achievement_import_batches (
+                id UUID PRIMARY KEY,
+                org_id UUID NOT NULL,
+                filename TEXT,
+                row_count INTEGER NOT NULL DEFAULT 0,
+                created_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'imported',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                undone_at TIMESTAMPTZ
+            )
+        """))
+
     # Mark any sync runs orphaned by a restart, same as the cricket boot does.
     from app.models.db import async_session_maker
     async with async_session_maker() as session:
@@ -116,6 +210,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(images.router)
 app.include_router(afl_clubs.router)
 app.include_router(afl_organisations.router)
 app.include_router(afl_games.router)
@@ -123,6 +218,14 @@ app.include_router(afl_players.router)
 app.include_router(afl_records.router)
 app.include_router(afl_leaderboard.router)
 app.include_router(afl_club_admin.router)
+app.include_router(afl_players_admin.router)
+app.include_router(afl_player_import.router)
+app.include_router(afl_merge.router)
+app.include_router(afl_award_definitions.router)
+app.include_router(afl_achievements.router)
+app.include_router(afl_sponsors.router)
+app.include_router(afl_users_admin.router)
+app.include_router(afl_super_clubs.router)
 
 
 @app.get("/health")
