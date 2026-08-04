@@ -1,4 +1,7 @@
-const BASE = import.meta.env.VITE_API_URL || '/api'
+// BASE_URL is Vite's build base ('/' for cricket; '/afl/' for a silo built to
+// live under a path prefix — see docs/afl-betterstats-plan.md's domain
+// topology). '/' + 'api' keeps cricket byte-identical at '/api'.
+const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
 // nginx can't reach the backend and would otherwise surface a raw

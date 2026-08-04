@@ -24,8 +24,12 @@
 #   docker compose exec bs-afl-backend python -m app.scripts.afl_bootstrap <playhq_org_id> <username> '<password>' --sync
 # First boot creates the schema in the empty database automatically (no
 # init.sql, no alembic — the AFL lifespan owns its schema).
-# nginx-proxy-manager: route afl.betterat.football at
-# bs-afl-frontend on docker-shared-net (mirror the betterstats.cricket entry).
+# nginx-proxy-manager (betterat.football umbrella — ONE proxy host entry):
+#   betterat.football + www.betterat.football -> http://bs-football-landing:80
+#   plus a CUSTOM LOCATION on that same entry: /afl -> http://bs-afl-frontend:80
+# (path passed through with the /afl prefix intact — the AFL nginx expects it).
+# Future codes = one more custom location each. DNS needs only the apex + www;
+# no subdomains anywhere.
 
 services:
   bs-afl-database:
@@ -59,8 +63,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://afl:${AFL_DB_PASSWORD}@bs-afl-database/betterstats_afl
       SYNC_DATABASE_URL: postgresql://afl:${AFL_DB_PASSWORD}@bs-afl-database/betterstats_afl
       SECRET_KEY: ${AFL_SECRET_KEY}
-      PUBLIC_BASE_URL: https://afl.betterat.football
-      CORS_ORIGINS: https://afl.betterat.football
+      PUBLIC_BASE_URL: https://betterat.football/afl
+      CORS_ORIGINS: https://betterat.football
     expose:
       - "8000"
     depends_on:
@@ -75,12 +79,27 @@ services:
       context: /srv/docker/betterstats/frontend
       args:
         VITE_SPORT: afl
+        VITE_BASE: /afl/
         NGINX_CONF: nginx.afl.conf
+        WEB_ROOT: /usr/share/nginx/html/afl
     container_name: bs-afl-frontend
     expose:
       - "80"
     depends_on:
       - bs-afl-backend
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+  # The umbrella landing page for betterat.football (choose-your-code page).
+  # Static HTML built from the repo (football-landing/) so it evolves through
+  # the normal git flow. Not part of any code's silo on purpose — a silo
+  # redeploy never touches it.
+  bs-football-landing:
+    build: /srv/docker/betterstats/football-landing
+    container_name: bs-football-landing
+    expose:
+      - "80"
     restart: unless-stopped
     networks:
       - docker-shared-net

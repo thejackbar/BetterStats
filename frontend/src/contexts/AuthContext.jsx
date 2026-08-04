@@ -2,6 +2,10 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { clearAttribution } from '../lib/visitor'
 import { coreLiveFromPlan } from '../lib/modules'
 
+// Base-path aware API root ('/api' for cricket; '/afl/api' under a silo's
+// path prefix). Mirrors lib/api.js's BASE.
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
+
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
@@ -17,7 +21,7 @@ export function AuthProvider({ children }) {
 
   const fetchMe = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/me', { credentials: 'include' })
+      const res = await fetch(API_BASE + '/auth/me', { credentials: 'include' })
       if (res.ok) {
         setUser(await res.json())
         // A flow that mints a session server-side and then hard-reloads
@@ -44,7 +48,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!user || user.role === 'super_admin' || !user.club_id) { setAccountPlan(null); return }
     let alive = true
-    fetch('/api/club-admin/account/plan', { credentials: 'include' })
+    fetch(API_BASE + '/club-admin/account/plan', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (alive) setAccountPlan(Array.isArray(d?.modules) ? d.modules : null) })
       .catch(() => {})
@@ -52,7 +56,7 @@ export function AuthProvider({ children }) {
   }, [user?.club_id, user?.role])
 
   const login = async (username, password) => {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(API_BASE + '/auth/login', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -76,7 +80,7 @@ export function AuthProvider({ children }) {
   // invited admin's own password and logs them in, the same shape login()
   // itself uses (the backend response is a _build_me payload either way).
   const acceptInvite = async (token, password, confirmPassword) => {
-    const res = await fetch(`/api/auth/invite/${token}/accept`, {
+    const res = await fetch(`${API_BASE}/auth/invite/${token}/accept`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -99,7 +103,7 @@ export function AuthProvider({ children }) {
   // — same shape as acceptInvite, but for an EXISTING account (a club admin
   // clicked "Send password reset email" on this user from Club Users).
   const resetPassword = async (token, password, confirmPassword) => {
-    const res = await fetch(`/api/auth/reset-password/${token}/accept`, {
+    const res = await fetch(`${API_BASE}/auth/reset-password/${token}/accept`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -119,7 +123,7 @@ export function AuthProvider({ children }) {
   }
 
   const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    await fetch(API_BASE + '/auth/logout', { method: 'POST', credentials: 'include' })
     setUser(null)
   }
 
@@ -128,7 +132,7 @@ export function AuthProvider({ children }) {
   // club scope (a soft context update would leave already-mounted pages showing
   // the previous club's data). Pass null to return to the home club.
   const switchClub = useCallback(async (clubId) => {
-    const res = await fetch('/api/auth/switch-club', {
+    const res = await fetch(API_BASE + '/auth/switch-club', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

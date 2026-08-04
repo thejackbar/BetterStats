@@ -21,9 +21,14 @@ window.addEventListener('vite:preloadError', (event) => {
   window.location.reload()
 })
 
+// Vite's BASE_URL is '/' for cricket (basename '/' — behaviour unchanged) and
+// the path prefix for a silo built to live under one, e.g. '/afl/' for the
+// betterat.football umbrella topology (docs/afl-betterstats-plan.md).
+const BASENAME = import.meta.env.BASE_URL.replace(/\/+$/, '') || '/'
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={BASENAME}>
       <App />
     </BrowserRouter>
   </React.StrictMode>

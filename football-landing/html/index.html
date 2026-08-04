@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BetterSports — better tools for football clubs</title>
+  <meta name="description" content="Club stats, records and admin tools for Australian football codes. Pick your code to get started. AFL is live now, with more codes on the way.">
+  <meta property="og:title" content="BetterSports — better tools for football clubs">
+  <meta property="og:description" content="Club stats, records and admin tools for Australian football codes. AFL is live now.">
+  <meta property="og:url" content="https://betterat.football/">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cellipse cx='50' cy='50' rx='46' ry='30' fill='%2316c784' transform='rotate(-30 50 50)'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #0a0d14;
+      --surface: #10141d;
+      --surface2: #161b27;
+      --hairline: #1d2331;
+      --text: #e6e8ef;
+      --dim: #8a90a2;
+      --faint: #5b6072;
+      --accent: #16c784;
+      --accent2: #3b82f6;
+      --gradient: linear-gradient(135deg, #16c784 0%, #3b82f6 100%);
+      --amber: #f5b542;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; width: 100%; }
+    header { padding: 22px 0; border-bottom: 1px solid var(--hairline); }
+    .brand { font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; }
+    .brand span { background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    main { flex: 1; }
+    .hero { padding: 72px 0 40px; }
+    .eyebrow {
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 18px;
+    }
+    h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.1; letter-spacing: -0.02em; max-width: 620px; }
+    .sub { margin-top: 18px; color: var(--dim); font-size: 1.05rem; line-height: 1.6; max-width: 560px; }
+    .pick {
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--faint); margin: 46px 0 14px;
+    }
+    .codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; padding-bottom: 40px; }
+    .code {
+      background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+      padding: 22px; display: flex; flex-direction: column; gap: 10px; min-height: 172px;
+      text-decoration: none; color: var(--text); position: relative; transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    a.code:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .code h2 { font-size: 1.25rem; letter-spacing: -0.01em; }
+    .code p { color: var(--dim); font-size: 0.88rem; line-height: 1.5; flex: 1; }
+    .chip {
+      align-self: flex-start; font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700;
+      padding: 3px 8px; border-radius: 99px;
+    }
+    .chip.live { background: rgba(22, 199, 132, 0.15); color: var(--accent); }
+    .chip.soon { background: var(--surface2); color: var(--faint); }
+    .go { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+    .code.soon-card { opacity: 0.72; }
+    .ball {
+      position: absolute; top: 20px; right: 20px; width: 34px; height: 34px; opacity: 0.9;
+    }
+    .cross {
+      border-top: 1px solid var(--hairline); padding: 26px 0 30px;
+      color: var(--faint); font-size: 0.88rem;
+    }
+    .cross a { color: var(--dim); text-decoration: underline; text-underline-offset: 3px; }
+    .cross a:hover { color: var(--text); }
+    footer { border-top: 1px solid var(--hairline); padding: 22px 0; color: var(--faint); font-size: 0.8rem; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+    footer a { color: var(--dim); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="brand">Better<span>Sports</span></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap">
+      <section class="hero">
+        <div class="eyebrow">betterat.football</div>
+        <h1>Better tools for football clubs.</h1>
+        <p class="sub">
+          Club stats your players will actually look at, honour boards and records
+          that keep your history alive, and admin tools that hand volunteers their
+          weekends back. Built by the team behind BetterCricket.
+        </p>
+      </section>
+
+      <div class="pick">Pick your code</div>
+      <section class="codes">
+        <a class="code" href="/afl/">
+          <svg class="ball" viewBox="0 0 100 100" aria-hidden="true">
+            <ellipse cx="50" cy="50" rx="46" ry="28" fill="none" stroke="#16c784" stroke-width="5" transform="rotate(-30 50 50)"/>
+            <line x1="32" y1="60" x2="68" y2="40" stroke="#16c784" stroke-width="4"/>
+            <line x1="42" y1="48" x2="46" y2="55" stroke="#16c784" stroke-width="3"/>
+            <line x1="50" y1="44" x2="54" y2="51" stroke="#16c784" stroke-width="3"/>
+            <line x1="58" y1="40" x2="62" y2="47" stroke="#16c784" stroke-width="3"/>
+          </svg>
+          <span class="chip live">Live now</span>
+          <h2>AFL</h2>
+          <p>Games, goals, best on grounds, quarter-by-quarter scores and play-by-play,
+             synced straight from PlayHQ. Records and leaderboards for every team in your club.</p>
+          <span class="go">Get started &rarr;</span>
+        </a>
+
+        <div class="code soon-card">
+          <span class="chip soon">Coming soon</span>
+          <h2>Football / Soccer</h2>
+          <p>Fixtures, results, goal scorers and club records for the round-ball game.</p>
+        </div>
+
+        <div class="code soon-card">
+          <span class="chip soon">Coming soon</span>
+          <h2>Rugby League</h2>
+          <p>Team lists, results and point scorers for league clubs.</p>
+        </div>
+
+        <div class="code soon-card">
+          <span class="chip soon">Coming soon</span>
+          <h2>Rugby Union</h2>
+          <p>Match results, records and club history for union clubs.</p>
+        </div>
+      </section>
+
+      <div class="cross">
+        Run a cricket club too? BetterCricket is live at
+        <a href="https://betterat.cricket">betterat.cricket</a>.
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>&copy; BetterSports</span>
+      <a href="mailto:support@bettersports.com.au">support@bettersports.com.au</a>
+    </div>
+  </footer>
+</body>
+</html>

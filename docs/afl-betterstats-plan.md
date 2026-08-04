@@ -121,28 +121,45 @@ Website module. Admin: login + Data Sync (Sync Now / Full Rebuild / history)
 - Other modules (Socials, Fees/Admin, IQ) reuse their cricket code where
   sport-agnostic; each gets an AFL review before enabling.
 
-## betterat.football domain topology (umbrella + per-code subdomains)
+## betterat.football domain topology (umbrella + per-code PATH prefixes)
 
 betterat.football is an umbrella for MULTIPLE football-code silos, unlike
-betterat.cricket's single-product hostname. The handoff between codes happens
-at the nginx-proxy-manager layer via HOSTNAMES — there is deliberately no
-umbrella proxy container (it would be a shared failure point across silos and
-a second proxy layer to debug behind NPM):
+betterat.cricket's single-product hostname. **No subdomains anywhere** (per
+direct instruction — a football user only ever sees `betterat.football`, and
+nothing is addressed by subdomain even internally). Each code is namespaced by
+a URL PATH, and the handoff happens entirely in nginx-proxy-manager. There is
+deliberately no umbrella proxy container (it would be a shared failure point
+across silos and a second proxy layer to debug behind NPM).
 
-- `betterat.football` (+ www) → `bs-football-landing` — a stock nginx:alpine
-  container bind-mounting a static HTML folder
-  (`/srv/docker/football-landing/html`). Holds the "choose your code" page and
-  each code's static marketing page; its CTAs link across into the silos. Not
-  part of any silo, so a silo redeploy never touches it.
-- `afl.betterat.football` → `bs-afl-frontend` — the AFL silo, an exact mirror
-  of the betterat.cricket → betterstats-frontend entry. Future codes get their
-  own subdomain + entry (`soccer.` → that code's frontend), one per silo.
-- Consequence: bs-afl-backend's `PUBLIC_BASE_URL`/`CORS_ORIGINS` are
-  `https://afl.betterat.football`. Sessions are isolated between codes for
-  free — the `bs_session` cookie is host-only (no Domain attribute is set).
-- Rejected: path-prefix routing (`betterat.football/afl/...`) — the silo
-  frontends are built root-relative, so prefixing needs Vite base + router
-  basename surgery per build, and club slugs would collide across codes.
+- **DNS**: only the apex `betterat.football` A record + `www`. A wildcard `*`
+  host is NOT required — nothing is ever addressed by subdomain.
+- **ONE NPM proxy host entry** — `betterat.football` + `www.betterat.football`
+  → `http://bs-football-landing:80`, with **custom locations** on that same
+  entry per code: `/afl` → `http://bs-afl-frontend:80` (path forwarded with
+  the `/afl` prefix intact — the AFL nginx expects it). Each future code adds
+  one more custom location. No new DNS, cert or NPM host per code.
+- `bs-football-landing` — the umbrella "choose your code" page, built from
+  `football-landing/` IN THIS REPO (so messaging/layout evolve through the
+  normal git flow, not hand-managed HTML on the box). Not part of any silo, so
+  a silo redeploy never touches it.
+- **Path-prefix build support** (what makes this work): `VITE_BASE` sets Vite's
+  `base` (so asset URLs are `/afl/assets/...`), `main.jsx` derives the router
+  `basename` from `import.meta.env.BASE_URL`, and both api clients +
+  `AuthContext` derive their API root from it too (`/afl/api`). The frontend
+  Dockerfile's `WEB_ROOT` arg places the built files at the matching path
+  inside the image. **Cricket is byte-identical** — `VITE_BASE` unset ⇒ base
+  `/`, basename `/`, API root `/api`, web root unchanged.
+- Consequence: bs-afl-backend's `PUBLIC_BASE_URL` is
+  `https://betterat.football/afl`, `CORS_ORIGINS` is `https://betterat.football`.
+- Club slugs can't collide across codes — each code owns its own path
+  namespace (`/afl/<club>`), and each silo has its own database anyway.
+- **Filesystem**: no new folders on the box. `/srv/docker/betterstats` is a
+  checkout of this one multi-sport repo; every silo's build context points
+  into it (`backend/`, `frontend/`, `football-landing/`). Renaming that path
+  to something sport-neutral was considered and rejected — it would break
+  deploy.sh, the systemd unit, the backup agent's mount and every compose
+  build path for zero functional gain (a symlink gives the nicer name if ever
+  wanted). The real separation is containers + database + volume + secret key.
 
 ## Deploy notes (for Elton)
 

@@ -1,7 +1,7 @@
 // BetterStats AFL API client — the AFL silo's endpoints only. Auth + club
 // resolution reuse the shared client (`api` from lib/api.js): the AFL backend
 // serves the same /auth/* and /clubs/{slug} shapes.
-const BASE = import.meta.env.VITE_API_URL || '/api'
+const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }

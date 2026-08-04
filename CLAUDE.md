@@ -33,7 +33,8 @@ same source. Full architecture + product decisions:
 - **Frontend**: one app, sport picked at build time — `VITE_SPORT=afl` mounts
   `src/afl/AflApp.jsx` (App.jsx early-returns it; cricket bundle unchanged).
   AFL pages reuse the shared theme tokens/contexts/components. Dockerfile
-  args: `VITE_SPORT=afl` + `NGINX_CONF=nginx.afl.conf` (which proxies /api to
+  args: `VITE_SPORT=afl` + `VITE_BASE=/afl/` + `NGINX_CONF=nginx.afl.conf` +
+  `WEB_ROOT=.../html/afl` (nginx proxies /afl/api to
   `bs-afl-backend` — never the cricket backend).
 - **Stats model (pass 1, per product decision)**: games played, goals,
   behinds, Best on Ground (flat count; per-game ranking stored for future
