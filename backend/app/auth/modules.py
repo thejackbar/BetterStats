@@ -57,7 +57,7 @@ MANAGED_MODULES = ALL_MODULES + (MODULE_CORE,)
 # only group today (fees + comms + merch move together); everything else is 1:1.
 # Subscriptions, trials and requests act on billable modules; entitlement gating
 # still uses the underlying keys.
-MODULE_ADMIN = "admin"     # BetterAdmin umbrella
+MODULE_ADMIN = "admin"     # BetterClubhouse umbrella (was BetterAdmin)
 MODULE_GROUPS: dict[str, tuple[str, ...]] = {
     MODULE_ADMIN: (MODULE_FEES, MODULE_COMMS, MODULE_MERCH, MODULE_CRM),
 }
@@ -67,7 +67,12 @@ BILLABLE_MODULE_NAMES = {
     MODULE_CORE: "BetterStats",
     MODULE_SELECT: "BetterSelect",
     MODULE_SOCIALS: "BetterSocials",
-    MODULE_ADMIN: "BetterAdmin",
+    # The merged back office. The key stays "admin" — entitlement, billing and
+    # every stored subscription row are keyed on it — but a club reads the
+    # module by this name. The Stripe Product created from
+    # services/billing_pricing.py still carries the old name until it is renamed
+    # in the Stripe dashboard, and so does the public pricing page.
+    MODULE_ADMIN: "BetterClubhouse",
     MODULE_IQ: "BetterIQ",
     MODULE_FANTASY: "BetterFantasyCricket",
 }

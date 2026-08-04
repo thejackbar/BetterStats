@@ -5,9 +5,10 @@
 // app's theme instead of hard-coding a palette. The module accent, status and
 // area colours stay as their semantic values.
 
-// The BetterClubManager accent (moduleBrand('clubmanager')). Set as --pb-accent
-// on the app root so `var(--pb-accent)` and any pb-accent utility resolve to it.
-export const ACCENT = '#6366F1'
+// The indigo these screens used to carry is retired: they render inside the
+// BetterClubhouse shell now, which sets --pb-accent to the merged module's
+// amber. Everything here just follows the surrounding surface's accent.
+export const ACCENT = 'var(--pb-accent)'
 
 export const C = {
   bg: 'var(--pb-bg)',
@@ -46,7 +47,7 @@ export function SegTabs({ tabs, value, onChange }) {
         return (
           <button key={t.key} onClick={() => onChange(t.key)}
             style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              background: active ? 'rgba(99,102,241,0.15)' : 'transparent', color: active ? C.accent : C.faint }}>
+              background: active ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', color: active ? C.accent : C.faint }}>
             {t.label}
             {t.badge != null && t.badge > 0 && (
               <span style={{ fontFamily: MONO, fontSize: 9, padding: '1px 5px', borderRadius: 999, background: 'rgba(245,181,66,0.18)', color: C.warn, marginLeft: 5 }}>{t.badge}</span>
@@ -72,7 +73,7 @@ const TONE = {
   ok: { bg: 'rgba(22,199,132,0.12)', fg: '#16c784' },
   warn: { bg: 'rgba(245,181,66,0.12)', fg: '#f5b542' },
   block: { bg: 'rgba(239,91,91,0.12)', fg: '#ef5b5b' },
-  info: { bg: 'rgba(99,102,241,0.12)', fg: '#6366F1' },
+  info: { bg: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', fg: 'var(--pb-accent)' },
 }
 
 // The toast / feedback strip that sits directly under a screen header.

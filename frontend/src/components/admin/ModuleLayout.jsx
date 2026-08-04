@@ -5,15 +5,37 @@ import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
 import { moduleBrand } from '../../lib/moduleBrand'
+import { TINT, Caption, HelpDot, initials } from './ui'
 import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 
-// Generic chrome for a Better module surface (BetterFees, BetterSocials, …) —
-// a focused sidebar with just that module's tools, separate from the main admin
-// "noise", exactly like BetterSelect. Parameterised by `moduleName` (the suffix
-// after "Better") and a `nav` array. BetterSelect predates this and keeps its
-// own copy (BetterSelectLayout) so it isn't disturbed.
+// Generic chrome for a Better module surface (BetterClubhouse, BetterSocials, …)
+// — a focused sidebar with just that module's tools, separate from the main
+// admin "noise". Parameterised by `moduleName` (the suffix after "Better") and a
+// `nav` array. BetterSelect predates this and keeps its own copy
+// (BetterSelectLayout) so it isn't disturbed.
+//
+// Shape follows the BetterClubhouse handoff: a 232px sidebar carrying the club
+// identity, the module lockup, grouped nav and — in its footer — the platform
+// chrome (module switcher, account, bookmarks). Moving the chrome down there is
+// the load-bearing decision: it leaves the screen header free to carry the
+// title, its caption, filters and stat readouts, and every screen inherits the
+// chrome instead of each layout re-declaring it.
+//
+// Optional header slots (all default to nothing, so existing screens that only
+// pass `title`/`actions` are unchanged):
+//   caption   — the mono line under the title. Carries the live count.
+//   onHelp    — renders the `?` that reopens the screen's introduction.
+//   filters   — pills/search, sitting left of the `margin-left: auto` break.
+//   stats     — right-aligned StatReadouts.
+//   actions   — the primary action, last.
+//   bare      — the screen manages its own padding and width (full-bleed
+//               master-detail screens); otherwise children get the standard pad.
+//   hideHeader— the screen draws its own sticky header. A transitional escape
+//               hatch for the promoted ClubManager screens, which already had
+//               one; below `lg` a slim bar still carries the ☰ so the sidebar
+//               stays reachable.
 
 // Club branding is identical across a module's pages, so fetch settings once per
 // session and reuse them — navigating between tools shouldn't refetch.
@@ -27,10 +49,35 @@ function loadClubBranding() {
   return _clubPromise
 }
 
-export default function ModuleLayout({ moduleName, nav = [], children, title, actions }) {
+// "2026/27" from today — the season line under the club name. Australian
+// season rolls in July, matching services/votes.py's season_year_for.
+function seasonLabel(d = new Date()) {
+  const start = d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1
+  return `${start}/${String((start + 1) % 100).padStart(2, '0')} SEASON`
+}
+
+function NavBadge({ count, toneKey }) {
+  if (!count) return null
+  const warn = toneKey !== 'block'
+  return (
+    <span
+      className="ml-auto font-mono text-[9px] rounded-full px-[5px] py-px shrink-0"
+      style={warn
+        ? { background: 'rgba(245,181,66,0.18)', color: '#f5b542' }
+        : { background: 'rgba(239,91,91,0.18)', color: '#ef5b5b' }}
+    >
+      {count}
+    </span>
+  )
+}
+
+export default function ModuleLayout({
+  moduleName, nav = [], children, title, caption, onHelp, filters, stats, actions,
+  bare = false, hideHeader = false,
+}) {
   // Each module surface wears its own brand colour (BetterSocials magenta,
-  // BetterFees / BetterComms the BetterAdmin amber). moduleName ("Socials" /
-  // "Fees" / "Comms") resolves to the right brand via the shared registry.
+  // BetterClubhouse amber). moduleName ("Socials" / "Clubhouse") resolves to the
+  // right brand via the shared registry.
   const brand = moduleBrand((moduleName || '').toLowerCase())
   const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
@@ -40,12 +87,18 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette first…
 
+  // Close the off-canvas sidebar whenever the route changes, so following a
+  // nav item on a phone doesn't leave the drawer covering what you asked for.
+  useEffect(() => { setMobileOpen(false) }, [location.pathname])
+
   // Nav may include `{ heading }` separators — kept regardless of cap (they
   // carry no `to`/`cap`); ordinary items are filtered by capability. A heading
   // left with no visible items under it (all cap-filtered away, or trailing) is
-  // dropped so a label never dangles.
+  // dropped so a label never dangles. This filter is what stops one large
+  // sidebar feeling large: a treasurer sees Today, Money and People and nothing
+  // else.
   const items = nav
-    .filter(i => i.heading || i.cap == null || hasCapability(i.cap))
+    .filter(i => i.heading || i.cap == null || (Array.isArray(i.cap) ? i.cap.some(hasCapability) : hasCapability(i.cap)))
     .filter((i, idx, arr) => !i.heading || (arr[idx + 1] && !arr[idx + 1].heading))
 
   // Label stored when bookmarking the current page — module name + page so the
@@ -54,42 +107,87 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
   const pageName = title || activeNav?.label
   const bookmarkLabel = `Better${moduleName}` + (pageName ? ` · ${pageName}` : '')
 
-  const NavItems = ({ onNavigate }) => (
+  const NavItems = () => (
     <>
       {items.map((item, idx) => {
         if (item.heading) {
           return (
-            <div key={`h-${idx}`} className="px-4 pt-4 pb-1 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
+            <div key={`h-${idx}`} className="px-4 pt-[15px] pb-1 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
               {item.heading}
             </div>
           )
         }
         const active = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
         return (
-          <Link key={item.to} to={item.to} onClick={onNavigate}
-            className={`flex items-center gap-3 px-4 py-2 text-sm transition-colors ${active ? 'bg-pb-accent/10 text-pb-accent border-r-2 border-pb-accent' : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'}`}>
-            <Icon name={item.icon} size={18} className="shrink-0" />
-            <span>{item.label}</span>
+          <Link
+            key={item.to} to={item.to}
+            className={`flex items-center gap-[11px] w-full px-4 py-[9px] text-[13.5px] border-r-2 transition-colors ${active ? 'border-pb-accent' : 'border-transparent text-pb-faint hover:text-pb-text hover:bg-pb-surface2'}`}
+            style={active ? { background: TINT.nav, color: 'var(--pb-accent-ink)' } : undefined}
+          >
+            <Icon name={item.icon} size={17} className="shrink-0" />
+            <span className="truncate">{item.label}</span>
+            <NavBadge count={item.badge} toneKey={item.badgeTone} />
           </Link>
         )
       })}
     </>
   )
 
+  // Club identity + module lockup. The `← Back to admin` link the older layouts
+  // carried is gone — the switcher in the footer replaces it.
   const Brand = () => (
-    <div className="px-4 py-4 border-b pb-hairline">
+    <div className="p-4 border-b pb-hairline shrink-0">
       <div className="flex items-center gap-2.5">
         {club?.logo_url
-          ? <img src={club.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 shrink-0" />
-          : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
+          ? <img src={club.logo_url} alt="" className="w-8 h-8 rounded-[5px] object-contain bg-pb-surface2 shrink-0" />
+          : <span
+              className="w-8 h-8 rounded-[5px] font-display font-bold text-[15px] flex items-center justify-center shrink-0"
+              style={{ background: TINT.chip, color: 'var(--pb-accent-ink)' }}
+            >{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
-          <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
+          <div className="font-display font-bold text-sm leading-[1.2] truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
+          <div className="font-mono text-[10px] tracking-wide2 text-pb-faintest">{seasonLabel()}</div>
         </div>
       </div>
-      {/* Module lockup — which Better module this surface is */}
-      <ModuleLockup name={`Better${moduleName}`} logo={brand.logo} className="mt-3" />
-      <Link to="/admin" className="block mt-3 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
+      <ModuleLockup
+        name={`Better${moduleName}`} logo={brand.logo} size={26}
+        accent="var(--pb-accent-ink)"
+        textClassName="font-display font-bold text-sm leading-none"
+        className="mt-3"
+      />
     </div>
+  )
+
+  // The platform chrome the per-module sidebars used to leave to the header.
+  const SidebarFooter = () => (
+    <div className="border-t pb-hairline px-3 py-[11px] shrink-0">
+      <div className="font-mono text-[9px] tracking-[0.12em] uppercase text-pb-faintest mb-1.5">Switch module</div>
+      <ModuleSwitcher wrap compact className="flex gap-1" />
+      <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t pb-hairline">
+        <span className="w-6 h-6 rounded-full bg-pb-surface2 border border-pb-hairline2 text-pb-dim font-display font-semibold text-[9px] flex items-center justify-center shrink-0">
+          {initials(user?.display_name || user?.username)}
+        </span>
+        <span className="text-[12.5px] text-pb-dim truncate flex-1 min-w-0" title={user?.display_name || user?.username}>
+          {user?.display_name || user?.username}
+        </span>
+        <BookmarkButton pageLabel={bookmarkLabel} drop="up" />
+        <button
+          onClick={async () => { await logout(); navigate('/login') }}
+          title="Log out" aria-label="Log out"
+          className="text-pb-faint hover:text-pb-text shrink-0"
+        >
+          <Icon name="back" size={15} />
+        </button>
+      </div>
+    </div>
+  )
+
+  const Sidebar = () => (
+    <>
+      <Brand />
+      <nav className="flex-1 overflow-y-auto py-2 pb-scroll"><NavItems /></nav>
+      <SidebarFooter />
+    </>
   )
 
   return (
@@ -98,47 +196,53 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
     // Applecross is red), which reads as alarming on headers/labels/status dots.
     // Re-point --pb-accent to the module's brand colour for everything inside the
     // module — custom properties inherit, so this one override cascades to every
-    // child without touching the rest of the app.
-    <div className="min-h-screen bg-pb-bg text-pb-text flex"
+    // child without touching the rest of the app. `pb-ink` re-derives the
+    // light-mode-safe text version of it from this element (see theme.css).
+    <div className="min-h-screen bg-pb-bg text-pb-text flex pb-ink"
       style={{ '--pb-accent': brand.accent, '--pb-accent-rgb': brand.accentRgb }}>
-      {/* Sidebar */}
-      <aside className="w-60 border-r pb-hairline bg-pb-surface hidden md:flex flex-col sticky top-0 h-screen">
-        <Brand />
-        <nav className="flex-1 overflow-y-auto py-2"><NavItems /></nav>
+      {/* Sidebar — one breakpoint for the whole module: a column at ≥1024px,
+          a drawer behind ☰ below it. */}
+      <aside className="w-[232px] flex-none border-r pb-hairline bg-pb-surface hidden lg:flex flex-col sticky top-0 h-screen">
+        <Sidebar />
       </aside>
 
-      {/* Mobile sidebar */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-60 bg-pb-surface border-r pb-hairline flex flex-col">
-            <Brand />
-            <div className="px-3 py-2.5 border-b pb-hairline"><ModuleSwitcher wrap className="flex" onNavigate={() => setMobileOpen(false)} /></div>
-            <nav className="flex-1 overflow-y-auto py-2"><NavItems onNavigate={() => setMobileOpen(false)} /></nav>
+          <aside className="absolute left-0 top-0 bottom-0 w-[232px] bg-pb-surface border-r pb-hairline flex flex-col ch-rise">
+            <Sidebar />
           </aside>
         </div>
       )}
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-30 bg-pb-surface/80 backdrop-blur border-b pb-hairline px-4 md:px-6 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setMobileOpen(true)} className="md:hidden text-pb-faint">☰</button>
-            {title
-              ? <h1 className="font-display font-bold text-lg md:text-xl">{title}</h1>
-              : <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span className="text-pb-accent">{moduleName}</span></span>}
+        {hideHeader ? (
+          <div className="lg:hidden sticky top-0 z-40 bg-pb-surface border-b pb-hairline px-5 py-2">
+            <button onClick={() => setMobileOpen(true)} className="text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
           </div>
-          <ModuleSwitcher className="hidden md:flex min-w-0" />
-          <div className="flex items-center gap-3">
-            {actions}
-            <BookmarkButton pageLabel={bookmarkLabel} />
-            <div className="hidden sm:flex items-center gap-2 text-sm text-pb-faint">
-              <span>{user?.display_name || user?.username}</span>
-              <button onClick={async () => { await logout(); navigate('/login') }} className="text-pb-faint hover:text-pb-text underline">Logout</button>
+        ) : (
+        <header className="sticky top-0 z-40 bg-pb-surface border-b pb-hairline px-5 py-3.5 flex items-center gap-3.5 flex-wrap">
+          <button onClick={() => setMobileOpen(true)} className="lg:hidden text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="min-w-0">
+              {title
+                ? <h1 className="font-display font-bold text-[19px] tracking-[-0.01em] truncate">{title}</h1>
+                : <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span style={{ color: 'var(--pb-accent-ink)' }}>{moduleName}</span></span>}
+              {caption && <Caption screen className="mt-0.5">{caption}</Caption>}
             </div>
+            {onHelp && <HelpDot onClick={onHelp} />}
+          </div>
+          {filters}
+          <div className="ml-auto flex items-center gap-[26px]">
+            {stats}
+            {actions && <div className="flex items-center gap-2">{actions}</div>}
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6 max-w-[1400px] w-full mx-auto">{children}</main>
+        )}
+        {bare
+          ? <div className="flex-1 min-w-0 min-h-0 flex flex-col">{children}</div>
+          : <main className="flex-1 p-5 md:px-6 md:py-[22px] max-w-[1400px] w-full">{children}</main>}
       </div>
     </div>
   )
