@@ -45,10 +45,16 @@ export default {
         },
       },
       fontFamily: {
-        display: ['Geist', 'Barlow Condensed', 'Oswald', 'sans-serif'],
-        body:    ['Geist', 'Inter', 'system-ui', 'sans-serif'],
+        // --pb-font-display/-body are always defined (default value in
+        // styles/theme.css :root, overridden per-club by buildThemeCss when a
+        // club picks its own typography — see lib/theme.js). `sans` mirrors
+        // `body` so ordinary unstyled text (not explicitly font-display'd)
+        // also reflects a club's body-font choice, matching what "body text"
+        // means to a club admin.
+        display: ['var(--pb-font-display)'],
+        body:    ['var(--pb-font-body)'],
         mono:    ['JetBrains Mono', 'Fira Code', 'monospace'],
-        sans:    ['Geist', 'Inter', 'system-ui', 'sans-serif'],
+        sans:    ['var(--pb-font-body)'],
       },
       letterSpacing: {
         wide2: "0.08em",

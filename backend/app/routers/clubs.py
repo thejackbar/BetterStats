@@ -12,6 +12,7 @@ from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get
 from app.routers.organisations import _season_sort_key
 from app.auth.modules import org_core_live
 from app.services import club_lock, email_service, rate_limit
+from app.services import fonts as font_service
 from app.config.settings import settings
 
 router = APIRouter(prefix="/clubs", tags=["clubs"])
@@ -80,6 +81,7 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
         "hero_image_url": org.hero_image_url,
         "theme_mode": org.theme_mode,
         "theme_config": org.theme_config or {},
+        **font_service.public_font_fields(org),
         "contact_email": org.contact_email,
         "player_name_format": org.player_name_format or "last_first",
         "website_enabled": bool(org.website_enabled),
