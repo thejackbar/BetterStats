@@ -51,8 +51,8 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   (People / Money / Stock / Comms / Club / Setup) with `Today` above the first
   heading. Items carry `cap` (a capability, or an array meaning any-of),
   `module` (one of the umbrella's paid keys — the whole group disappears for a
-  club that doesn't hold it) and `super` (the ClubManager screens, still on demo
-  data and still `requireRole="super_admin"` in App.jsx). **The four old layouts
+  club that doesn't hold it) and `super` (the promoted ClubManager screens —
+  real data, but still `requireRole="super_admin"` in App.jsx). **The four old layouts
   are thin wrappers over it now**, which is how every existing screen inherited
   the shell without being rewritten. `BetterMerchLayout` still owns the
   storefront flag and passes `storefront` down.

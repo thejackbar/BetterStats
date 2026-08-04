@@ -16,8 +16,9 @@ import ModuleLayout from './ModuleLayout'
 // Each item carries the gate it needs and is dropped when the gate fails:
 //   cap    — a capability (an array means "any of these")
 //   module — one of the umbrella's paid modules the club must hold
-//   super  — a super-admin-only preview (the ClubManager screens, which still
-//            run on demo data and are gated to super_admin in App.jsx)
+//   super  — the promoted ClubManager screens. They run on real data, but are
+//            still gated to super_admin in App.jsx while their CRUD is
+//            finished, so the nav must hide them the same way.
 // A heading whose items all fall away is dropped by ModuleLayout, so a
 // treasurer holding only BetterFees sees Today, Money and nothing else.
 
@@ -50,6 +51,11 @@ function buildNav({ modules, isSuper, counts, storefront }) {
     { to: '/admin/assets', label: 'Facilities', icon: 'nets', super: true },
 
     { heading: 'Setup' },
+    // The catalogue every other screen reads from: roles (a committee-flagged
+    // role IS a committee position), activities, qualification types,
+    // operational areas. Dropping it from the sidebar left the whole
+    // configuration layer unreachable except by typing a URL.
+    { to: '/admin/clubhouse/areas-roles', label: 'Areas & roles', icon: 'settings', super: true },
     { to: '/admin/clubhouse/integrations', label: 'Integrations', icon: 'share', cap: [CAP.MANAGE_FEES, CAP.MANAGE_MERCH, CAP.MANAGE_COMMS] },
     { to: '/admin/clubhouse/reports', label: 'Reports', icon: 'ladders', cap: [CAP.MANAGE_FEES, CAP.MANAGE_MERCH] },
     { to: '/admin/clubhouse/settings', label: 'Settings', icon: 'settings' },

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 
@@ -70,13 +70,17 @@ export default function CommsCampaigns() {
   return (
     <BetterCommsLayout
       title="Emails"
-      actions={
+      actions={<>
+        <Link to="/admin/comms/templates"
+          className="px-3 py-1.5 rounded-lg text-[13px] border border-pb-hairline2 text-pb-dim hover:text-pb-text whitespace-nowrap">
+          Templates
+        </Link>
         <button onClick={newEmail} disabled={creating}
           className="px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60"
           style={{ background: 'var(--pb-accent)' }}>
           {creating ? 'Creating…' : '+ New email'}
         </button>
-      }
+      </>}
     >
       {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
 
