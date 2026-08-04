@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: #0a0d14; }
+  a { color: #f59e0b; text-decoration: none; }
+  a:hover { color: #ffcf7a; text-decoration: underline; }
+  ::selection { background: rgba(245,158,11,0.28); }
+  .sc { scrollbar-width: thin; }
+  .sc::-webkit-scrollbar { width: 8px; height: 8px; }
+  .sc::-webkit-scrollbar-thumb { background: #262d3d; border-radius: 8px; }
+  .sc::-webkit-scrollbar-track { background: transparent; }
+  @keyframes chRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  /* Side pane divider follows the wrap: a left rule beside the table, a top rule
+     once it stacks under it. Not expressible inline. */
+  .sidepane { border-left: 1px solid #1d2331; max-width: 420px; }
+  .listpane { border-right: 1px solid #1d2331; flex: 0 1 270px; max-width: 340px; }
+  @media (max-width: 900px) { .listpane { border-right: none; border-bottom: 1px solid #1d2331; flex-basis: 100%; } }
+  @media (max-width: 1200px) { .sidepane { border-left: none; border-top: 1px solid #1d2331; max-width: none; } }
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;background:#0a0d14;color:#e6e8ef;font-family:Geist,system-ui,sans-serif;">
+
+  <aside class="sc" style="width:232px;flex:0 0 232px;border-right:1px solid #1d2331;background:#10141d;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto;">
+    <div style="padding:16px;border-bottom:1px solid #1d2331;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="width:32px;height:32px;border-radius:5px;background:rgba(245,158,11,0.15);color:var(--acc,#f59e0b);font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">K</span>
+        <div style="min-width:0;">
+          <div style="font-weight:700;font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Kalamunda CC</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;color:#3a3f50;">2026/27 SEASON</div>
+        </div>
+      </div>
+      <span style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;">
+        <span title="Placeholder mark" style="width:26px;height:26px;border-radius:8px;flex-shrink:0;background:repeating-linear-gradient(135deg,#f5b542 0 3px,#c47f18 3px 6px);"></span>
+        <span style="font-weight:700;font-size:14px;line-height:1;">Better<span style="color:var(--acc,#f59e0b);">Clubhouse</span></span>
+      </span>
+    </div>
+
+    <nav style="flex:1;padding:8px 0;">
+      <button onClick="{{ goToday }}" style="{{ stToday }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>
+        <span>Today</span>
+        <span style="{{ badgeToday }}">{{ needsYou }}</span>
+      </button>
+
+      <div style="padding:15px 16px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;">PEOPLE</div>
+      <button onClick="{{ goDirectory }}" style="{{ stDirectory }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>
+        <span>Directory</span>
+      </button>
+      <button onClick="{{ goRoster }}" style="{{ stRoster }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="4.5" width="18" height="16" rx="2"></rect><path d="M3 9h18M8 3v3M16 3v3"></path></svg>
+        <span>Roster</span>
+        <span style="{{ badgeRoster }}">2</span>
+      </button>
+      <button onClick="{{ goCommittee }}" style="{{ stCommittee }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="4" y="3.5" width="16" height="17" rx="2"></rect><path d="M8 8.5h8M8 12h8M8 15.5h5"></path></svg>
+        <span>Committee</span>
+      </button>
+
+      <div style="padding:15px 16px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;">MONEY</div>
+      <button onClick="{{ goAccounts }}" style="{{ stAccounts }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="2.5" y="6" width="19" height="12" rx="2"></rect><circle cx="12" cy="12" r="2.5"></circle><path d="M6 9.5v5M18 9.5v5"></path></svg>
+        <span>Accounts</span>
+        <span style="{{ badgeAccounts }}">{{ owingCount }}</span>
+      </button>
+      <button onClick="{{ goPayments }}" style="{{ stPayments }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg>
+        <span>Payments</span>
+      </button>
+      <button onClick="{{ goRateCard }}" style="{{ stRateCard }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="4" y="3.5" width="16" height="17" rx="2"></rect><path d="M8 8.5h8M8 12h8M8 15.5h5"></path></svg>
+        <span>Rate card</span>
+      </button>
+
+      <div style="padding:15px 16px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;">STOCK</div>
+      <button onClick="{{ goInventory }}" style="{{ stInventory }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg>
+        <span>Inventory</span>
+        <span style="{{ badgeInventory }}">{{ reorderCount }}</span>
+      </button>
+      <button onClick="{{ goEquipment }}" style="{{ stEquipment }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9"></path></svg>
+        <span>Equipment</span>
+      </button>
+
+      <div style="padding:15px 16px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;">COMMS</div>
+      <button onClick="{{ goEmails }}" style="{{ stEmails }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg>
+        <span>Emails</span>
+      </button>
+      <button onClick="{{ goAudiences }}" style="{{ stAudiences }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>
+        <span>Audiences</span>
+      </button>
+
+      <div style="padding:15px 16px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;">CLUB</div>
+      <button onClick="{{ goDiary }}" style="{{ stDiary }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>
+        <span>Diary</span>
+      </button>
+      <button onClick="{{ goEvents }}" style="{{ stEvents }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="13" r="8"></circle><path d="M12 13V9M9 2h6M12 5V2"></path></svg>
+        <span>Events</span>
+      </button>
+
+      <div style="padding:15px 16px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;">SETUP</div>
+      <button onClick="{{ goIntegrations }}" style="{{ stIntegrations }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="6" cy="12" r="2.4"></circle><circle cx="17" cy="6" r="2.4"></circle><circle cx="17" cy="18" r="2.4"></circle><path d="M8.1 11l6.8-3.9M8.1 13l6.8 3.9"></path></svg>
+        <span>Integrations</span>
+      </button>
+      <button onClick="{{ goSettings }}" style="{{ stSettings }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9"></path></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div style="border-top:1px solid #1d2331;padding:11px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#3a3f50;padding:0 4px;">SWITCH MODULE</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:11.5px;color:#5b6072;"><img src="assets/betterstats.svg" alt="" style="width:14px;height:14px;border-radius:4px;flex-shrink:0;" />Stats</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:11.5px;color:#5b6072;"><img src="assets/betterselect.svg" alt="" style="width:14px;height:14px;border-radius:4px;flex-shrink:0;" />Select</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:11.5px;color:#5b6072;"><img src="assets/betteriq.svg" alt="" style="width:14px;height:14px;border-radius:4px;flex-shrink:0;" />IQ</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:11.5px;color:#5b6072;"><img src="assets/bettersocials.svg" alt="" style="width:14px;height:14px;border-radius:4px;flex-shrink:0;" />Socials</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:11.5px;font-weight:600;color:var(--acc,#f59e0b);background:rgba(245,158,11,0.14);border:1px solid rgba(245,158,11,0.38);"><span style="width:14px;height:14px;border-radius:4px;flex-shrink:0;background:repeating-linear-gradient(135deg,#f5b542 0 2px,#c47f18 2px 4px);"></span>Clubhouse</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 4px 0;border-top:1px solid #1d2331;">
+        <span style="width:24px;height:24px;border-radius:50%;background:#161b27;border:1.5px solid #262d3d;color:#8a90a2;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">DN</span>
+        <span style="font-size:12.5px;color:#8a90a2;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">D. Naismith</span>
+        <span style="color:#5b6072;display:flex;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></span>
+      </div>
+    </div>
+  </aside>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+    <sc-if value="{{ isToday }}" hint-placeholder-val="{{ true }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">Today</h1>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">Sat 16 Jan · round 9 at home</div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:26px;">
+          <div style="white-space:nowrap;"><div style="font-weight:700;font-size:19px;color:#f5b542;font-variant-numeric:tabular-nums;">{{ totalOwedFmt }}</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;">OWED TO THE CLUB</div></div>
+          <div style="white-space:nowrap;"><div style="font-weight:700;font-size:19px;font-variant-numeric:tabular-nums;">{{ peopleCount }}</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;">PEOPLE</div></div>
+          <div style="white-space:nowrap;"><div style="font-weight:700;font-size:19px;font-variant-numeric:tabular-nums;">{{ needsYou }}</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;">THINGS NEED YOU</div></div>
+        </div>
+      </header>
+
+      <div style="padding:22px 24px;max-width:74rem;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;text-transform:uppercase;margin-bottom:10px;">Blocking first</div>
+        <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:28px;">
+          <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
+            <div style="{{ a.cardStyle }}">
+              <span style="{{ a.numStyle }}">{{ a.count }}</span>
+              <div style="min-width:0;flex:1;">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <span style="font-size:14.5px;font-weight:600;">{{ a.unit }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.08em;padding:2px 6px;border-radius:4px;background:#161b27;border:1px solid #262d3d;color:#8a90a2;">{{ a.area }}</span>
+                </div>
+                <div style="font-size:12.5px;color:#8a90a2;margin-top:4px;line-height:1.5;">{{ a.detail }}</div>
+                <div style="display:flex;gap:7px;margin-top:11px;flex-wrap:wrap;">
+                  <button onClick="{{ a.primary }}" style="padding:7px 13px;border-radius:8px;font-size:12.5px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">{{ a.primaryLabel }}</button>
+                  <button onClick="{{ a.secondary }}" style="padding:7px 13px;border-radius:8px;font-size:12.5px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">{{ a.secondaryLabel }}</button>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;text-transform:uppercase;margin-bottom:10px;">The week ahead</div>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;">
+          <div style="background:#10141d;border:1px solid #1d2331;border-radius:10px;padding:14px 16px;"><div style="font-weight:700;font-size:21px;color:var(--acc,#f59e0b);">11 Feb</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;margin-top:4px;">NEXT MEETING</div><div style="font-size:12px;color:#8a90a2;margin-top:7px;line-height:1.45;">February general meeting · 4 open actions</div></div>
+          <div style="background:#10141d;border:1px solid #1d2331;border-radius:10px;padding:14px 16px;"><div style="font-weight:700;font-size:21px;color:var(--acc,#f59e0b);">2</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;margin-top:4px;">EVENTS TAKING RSVPS</div><div style="font-size:12px;color:#8a90a2;margin-top:7px;line-height:1.45;">Presentation night 62 of 120 · Quiz night 38</div></div>
+          <div style="background:#10141d;border:1px solid #1d2331;border-radius:10px;padding:14px 16px;"><div style="font-weight:700;font-size:21px;color:var(--acc,#f59e0b);">$1,840</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;margin-top:4px;">TAKEN THIS WEEK</div><div style="font-size:12px;color:#8a90a2;margin-top:7px;line-height:1.45;">Square $1,205 · bank transfer $635</div></div>
+          <div style="background:#10141d;border:1px solid #1d2331;border-radius:10px;padding:14px 16px;"><div style="font-weight:700;font-size:21px;color:var(--acc,#f59e0b);">6</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;margin-top:4px;">DIARY DUE THIS WEEK</div><div style="font-size:12px;color:#8a90a2;margin-top:7px;line-height:1.45;">Nothing blocked · 3 need a volunteer</div></div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isDirectory }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;"><h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">Directory</h1><button onClick="{{ reopenIntro }}" title="What is this screen for?" style="width:18px;height:18px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#5b6072;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">?</button></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">{{ dirCaption }}</div>
+        </div>
+        <input placeholder="Search name or role…" value="{{ query }}" onChange="{{ setQuery }}" style="flex:1;min-width:170px;max-width:280px;background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:8px 12px;color:#e6e8ef;font-size:13.5px;outline:none;font-family:inherit;" />
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <sc-for list="{{ dirSegs }}" as="s" hint-placeholder-count="6">
+            <button onClick="{{ s.pick }}" style="{{ s.style }}">{{ s.label }}</button>
+          </sc-for>
+        </div>
+        <button onClick="{{ emailFiltered }}" style="padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;">{{ emailFilteredLabel }}</button>
+      </header>
+
+      <div style="flex:1;display:flex;flex-wrap:wrap;align-items:stretch;min-height:0;">
+        <div class="sc listpane" style="min-width:240px;background:#10141d;overflow-y:auto;padding:10px;">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <sc-for list="{{ dirList }}" as="p" hint-placeholder-count="8">
+              <div onClick="{{ p.select }}" style="{{ p.rowStyle }}">
+                <span style="width:30px;height:30px;border-radius:50%;background:#161b27;border:1.5px solid #262d3d;color:#8a90a2;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ p.initials }}</span>
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5b6072;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.roleLine }}</div>
+                </div>
+                <span style="{{ p.flagStyle }}"></span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a3f50;flex-shrink:0;">{{ p.hoursLabel }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div class="sc" style="flex:1 1 390px;min-width:380px;overflow-y:auto;padding:22px 24px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;row-gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+            <span style="width:52px;height:52px;border-radius:50%;background:#161b27;border:1.5px solid #262d3d;color:#8a90a2;font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ selInitials }}</span>
+            <div style="min-width:200px;flex:1 1 240px;">
+              <div style="font-weight:700;font-size:22px;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ selName }}</div>
+              <div style="font-size:12.5px;color:#5b6072;margin-top:3px;">{{ selContact }}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">
+                <sc-for list="{{ selSegs }}" as="s" hint-placeholder-count="3">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.08em;padding:3px 7px;border-radius:4px;background:#161b27;border:1px solid #262d3d;color:#8a90a2;">{{ s }}</span>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button onClick="{{ emailSel }}" style="padding:7px 13px;border-radius:8px;font-size:12.5px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">Email</button>
+              <button onClick="{{ goAccounts }}" style="padding:7px 13px;border-radius:8px;font-size:12.5px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Open account</button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:24px;">
+            <sc-for list="{{ selStats }}" as="s" hint-placeholder-count="4">
+              <div style="background:#10141d;border:1px solid #1d2331;border-radius:8px;padding:11px 13px;">
+                <div style="font-weight:700;font-size:19px;color:var(--acc,#f59e0b);font-variant-numeric:tabular-nums;">{{ s.value }}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;margin-top:3px;">{{ s.label }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px 28px;">
+            <section>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:9px;">CLUB ROLES</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px;">
+                <sc-for list="{{ selRoles }}" as="r" hint-placeholder-count="2">
+                  <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,0.15);color:var(--acc,#f59e0b);border-radius:5px;padding:3px 9px;font-size:12.5px;">{{ r }}</span>
+                </sc-for>
+                <span style="{{ noRolesStyle }}">No club roles assigned.</span>
+              </div>
+            </section>
+
+            <section>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:9px;">ACCOUNT</div>
+              <div style="background:#10141d;border:1px solid #1d2331;border-radius:8px;overflow:hidden;">
+                <sc-for list="{{ selLedger }}" as="l" hint-placeholder-count="3">
+                  <div style="{{ l.rowStyle }}">
+                    <span style="font-size:12.5px;color:#8a90a2;flex:1;min-width:0;">{{ l.label }}</span>
+                    <span style="{{ l.amountStyle }}">{{ l.amount }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </section>
+
+            <section>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:9px;">QUALIFICATIONS</div>
+              <div style="display:flex;flex-direction:column;gap:5px;">
+                <sc-for list="{{ selQuals }}" as="q" hint-placeholder-count="2">
+                  <div style="display:flex;align-items:center;gap:9px;background:#10141d;border:1px solid #1d2331;border-radius:7px;padding:8px 11px;">
+                    <div style="min-width:0;flex:1;">
+                      <div style="font-size:13px;">{{ q.name }}</div>
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5b6072;margin-top:2px;">{{ q.expiry }}</div>
+                    </div>
+                    <span style="{{ q.badgeStyle }}">{{ q.status }}</span>
+                  </div>
+                </sc-for>
+                <span style="{{ noQualsStyle }}">None recorded.</span>
+              </div>
+            </section>
+
+            <section>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:9px;">KIT ISSUED</div>
+              <div style="display:flex;flex-direction:column;gap:5px;">
+                <sc-for list="{{ selKit }}" as="k" hint-placeholder-count="2">
+                  <div style="display:flex;align-items:baseline;gap:9px;font-size:12.5px;">
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#3a3f50;width:46px;flex-shrink:0;">{{ k.date }}</span>
+                    <span style="flex:1;min-width:0;color:#8a90a2;">{{ k.item }}</span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#f5b542;">{{ k.amount }}</span>
+                  </div>
+                </sc-for>
+                <span style="{{ noKitStyle }}">Nothing issued this season.</span>
+              </div>
+            </section>
+          </div>
+
+          <div style="margin-top:26px;padding-top:16px;border-top:1px solid #1d2331;font-size:12.5px;line-height:1.6;color:#5b6072;max-width:70ch;text-wrap:pretty;">One record, everything on it. This is the same drawer whether you arrive from the roster, an account, an audience or a stock movement — which is the whole point of collapsing the three person lists into one.</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isAccounts }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;"><h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">Accounts</h1><button onClick="{{ reopenIntro }}" title="What is this screen for?" style="width:18px;height:18px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#5b6072;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">?</button></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">{{ acctCaption }}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <sc-for list="{{ acctFilters }}" as="f" hint-placeholder-count="3">
+            <button onClick="{{ f.pick }}" style="{{ f.style }}">{{ f.label }}</button>
+          </sc-for>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <button style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Import bank CSV</button>
+          <button onClick="{{ emailOwing }}" style="padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;">Email these {{ owingCount }}</button>
+        </div>
+      </header>
+
+      <div style="border-bottom:1px solid #1d2331;background:rgba(245,181,66,0.07);padding:10px 20px;display:flex;align-items:center;gap:10px;font-size:13px;color:#f5b542;flex-wrap:wrap;">
+        <span style="font-weight:600;">{{ kitOwedFmt }} of this is issued kit.</span>
+        <span style="opacity:0.85;">Stock charges land on the member's account, so the balance below is everything they owe the club.</span>
+      </div>
+
+      <div style="padding:20px 24px;">
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:18px;">
+          <sc-for list="{{ acctKpis }}" as="k" hint-placeholder-count="5">
+            <div style="{{ k.cardStyle }}">
+              <div style="{{ k.valueStyle }}">{{ k.value }}</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;margin-top:3px;">{{ k.label }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div class="sc" style="background:#10141d;border:1px solid #1d2331;border-radius:10px;overflow-x:auto;">
+          <div style="min-width:860px;display:grid;grid-template-columns:minmax(180px,1fr) 120px 120px 90px 90px 100px 116px;background:#161b27;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#5b6072;">
+            <div style="padding:10px 12px 10px 18px;">PERSON</div><div style="padding:10px 12px;">TIER</div><div style="padding:10px 12px;">FAMILY</div>
+            <div style="padding:10px 12px;text-align:right;">SUBS</div><div style="padding:10px 12px;text-align:right;">MATCH</div><div style="padding:10px 12px;text-align:right;">KIT</div><div style="padding:10px 18px 10px 12px;text-align:right;">BALANCE</div>
+          </div>
+          <sc-for list="{{ acctRows }}" as="r" hint-placeholder-count="6">
+            <div onClick="{{ r.open }}" style="{{ r.rowStyle }}">
+              <div style="padding:10px 12px 10px 18px;display:flex;align-items:center;gap:10px;min-width:0;">
+                <span style="width:28px;height:28px;border-radius:50%;background:#161b27;border:1.5px solid #262d3d;color:#8a90a2;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ r.initials }}</span>
+                <div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.name }}</div><div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5b6072;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.roleLine }}</div></div>
+              </div>
+              <div style="{{ r.tierStyle }}">{{ r.tier }}</div>
+              <div style="padding:10px 12px;"><span style="{{ r.familyStyle }}">{{ r.family }}</span></div>
+              <div style="padding:10px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ r.subs }}</div>
+              <div style="padding:10px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ r.match }}</div>
+              <div style="padding:10px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ r.kit }}</div>
+              <div style="{{ r.balanceStyle }}">{{ r.balance }}</div>
+            </div>
+          </sc-for>
+          <div style="min-width:860px;display:grid;grid-template-columns:minmax(180px,1fr) 120px 120px 90px 90px 100px 116px;border-top:1px solid #262d3d;background:#161b27;align-items:center;">
+            <div style="padding:11px 12px 11px 18px;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#5b6072;">{{ acctFooter }}</div>
+            <div></div><div></div>
+            <div style="padding:11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ sumSubs }}</div>
+            <div style="padding:11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ sumMatch }}</div>
+            <div style="padding:11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ sumKit }}</div>
+            <div style="padding:11px 18px 11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--acc,#f59e0b);">{{ sumBalance }}</div>
+          </div>
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;color:#3a3f50;margin-top:12px;">CLICK A ROW TO OPEN THE PERSON RECORD — THE SAME ONE THE DIRECTORY SHOWS</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isAudiences }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;"><h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">Audiences</h1><button onClick="{{ reopenIntro }}" title="What is this screen for?" style="width:18px;height:18px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#5b6072;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">?</button></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">Saved questions about the Directory · 5 saved</div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <button style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Export CSV</button>
+          <button style="padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">New audience</button>
+        </div>
+      </header>
+
+      <div style="flex:1;display:flex;flex-wrap:wrap;align-items:stretch;min-height:0;">
+        <div class="sc listpane" style="min-width:240px;background:#10141d;overflow-y:auto;padding:10px;">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <sc-for list="{{ audiences }}" as="a" hint-placeholder-count="5">
+              <div onClick="{{ a.select }}" style="{{ a.rowStyle }}">
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.name }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5b6072;">{{ a.sub }}</div>
+                </div>
+                <span style="{{ a.countStyle }}">{{ a.count }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:14px;padding:12px 11px;border-top:1px solid #1d2331;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#3a3f50;margin-bottom:7px;">GONE FROM THE SIDEBAR</div>
+            <div style="font-size:12px;line-height:1.6;color:#5b6072;">Contacts, Lists and Segments were three screens answering one question. A hand-picked list is now just an audience whose rule is "these people".</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#3a3f50;margin:14px 0 7px;">CLUB SCOPE ONLY</div>
+            <div style="font-size:12px;line-height:1.6;color:#5b6072;">Every field here reads the club's own data. The Clubs Directory context switch and its prospect fields — trials, demos, customer status, engagement score — are Super Admin only and never reach a club build.</div>
+          </div>
+        </div>
+
+        <div class="sc" style="flex:1 1 390px;min-width:380px;overflow-y:auto;padding:22px 24px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:700;font-size:22px;letter-spacing:-0.01em;">{{ audName }}</div>
+              <div style="font-size:12.5px;color:#5b6072;margin-top:3px;">{{ audBlurb }}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Duplicate</button>
+              <button onClick="{{ emailAud }}" style="padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">Email these {{ audCount }}</button>
+            </div>
+          </div>
+
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:9px;">MATCH PEOPLE WHERE ALL OF THESE ARE TRUE</div>
+          <div style="background:#10141d;border:1px solid #1d2331;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:9px;margin-bottom:20px;">
+            <sc-for list="{{ audRules }}" as="r" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:7px 11px;font-size:13px;">{{ r.field }} ▾</span>
+                <span style="background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:7px 11px;font-size:13px;color:#8a90a2;">{{ r.op }} ▾</span>
+                <span style="background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:7px 11px;font-size:13px;font-family:'JetBrains Mono',monospace;">{{ r.value }}</span>
+                <span style="color:#3a3f50;font-size:14px;margin-left:auto;">✕</span>
+              </div>
+            </sc-for>
+            <div style="display:flex;align-items:center;gap:14px;padding-top:4px;flex-wrap:wrap;">
+              <span style="font-size:12.5px;color:#8a90a2;">+ Add a condition</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;color:#3a3f50;">FIELDS COME FROM THE DIRECTORY, ACCOUNTS, ROSTER, EVENTS &amp; EMAIL ACTIVITY</span>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+            <span style="font-size:14px;"><b style="color:var(--acc,#f59e0b);font-weight:600;">{{ audCount }}</b> people match</span>
+            <span style="color:#3a3f50;">·</span>
+            <span style="font-size:12.5px;color:#8a90a2;">{{ audReachable }} reachable by email</span>
+            <span style="color:#3a3f50;">·</span>
+            <span style="font-size:12.5px;color:#f5b542;">{{ audUnreachable }} need another route</span>
+          </div>
+
+          <div class="sc" style="background:#10141d;border:1px solid #1d2331;border-radius:10px;overflow-x:auto;">
+            <div style="min-width:700px;display:grid;grid-template-columns:minmax(180px,1fr) 160px 110px 120px;background:#161b27;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#5b6072;">
+              <div style="padding:9px 12px 9px 16px;">PERSON</div><div style="padding:9px 12px;">IN THE DIRECTORY AS</div><div style="padding:9px 12px;text-align:right;">BALANCE</div><div style="padding:9px 16px 9px 12px;text-align:right;">REACHABLE</div>
+            </div>
+            <sc-for list="{{ audRows }}" as="r" hint-placeholder-count="5">
+              <div onClick="{{ r.open }}" style="min-width:700px;display:grid;grid-template-columns:minmax(180px,1fr) 160px 110px 120px;border-top:1px solid #1d2331;align-items:center;cursor:pointer;">
+                <div style="padding:9px 12px 9px 16px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.name }}</div>
+                <div style="padding:9px 12px;font-size:11.5px;color:#8a90a2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.segLine }}</div>
+                <div style="{{ r.balanceStyle }}">{{ r.balance }}</div>
+                <div style="{{ r.reachStyle }}">{{ r.reach }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;color:#3a3f50;margin-top:12px;">JUNIOR BALANCES ROUTE TO A GUARDIAN AUTOMATICALLY, BECAUSE FAMILIES ALREADY EXIST IN THE DIRECTORY</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isInventory }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;"><h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">Inventory</h1><button onClick="{{ reopenIntro }}" title="What is this screen for?" style="width:18px;height:18px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#5b6072;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">?</button></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">{{ invCaption }}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <sc-for list="{{ invCats }}" as="c" hint-placeholder-count="3">
+            <button onClick="{{ c.pick }}" style="{{ c.style }}">{{ c.label }}</button>
+          </sc-for>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:26px;">
+          <div style="white-space:nowrap;"><div style="font-weight:700;font-size:19px;color:var(--acc,#f59e0b);font-variant-numeric:tabular-nums;">{{ stockValueFmt }}</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;">STOCK AT COST</div></div>
+          <div style="white-space:nowrap;"><div style="font-weight:700;font-size:19px;font-variant-numeric:tabular-nums;">{{ unitsOnHand }}</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b6072;">UNITS ON HAND</div></div>
+        </div>
+      </header>
+
+      <div style="flex:1;display:flex;flex-wrap:wrap;align-items:stretch;min-height:0;">
+        <div class="sc" style="flex:1 1 560px;min-width:0;overflow-y:auto;padding:20px 22px;">
+          <div class="sc" style="background:#10141d;border:1px solid #1d2331;border-radius:10px;overflow-x:auto;">
+            <div style="min-width:620px;display:grid;grid-template-columns:minmax(160px,1fr) 90px 80px 90px 90px 100px;background:#161b27;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#5b6072;">
+              <div style="padding:10px 12px 10px 16px;">PRODUCT</div><div style="padding:10px 12px;text-align:right;">ON HAND</div><div style="padding:10px 12px;text-align:right;">REORDER</div><div style="padding:10px 12px;text-align:right;">COST</div><div style="padding:10px 12px;text-align:right;">RETAIL</div><div style="padding:10px 16px 10px 12px;text-align:right;">STATUS</div>
+            </div>
+            <sc-for list="{{ invRows }}" as="p" hint-placeholder-count="6">
+              <div onClick="{{ p.pick }}" style="{{ p.rowStyle }}">
+                <div style="padding:11px 12px 11px 16px;min-width:0;">
+                  <div style="font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5b6072;">{{ p.meta }}</div>
+                </div>
+                <div style="{{ p.qtyStyle }}">{{ p.qty }}</div>
+                <div style="padding:11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#5b6072;">{{ p.reorder }}</div>
+                <div style="padding:11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ p.cost }}</div>
+                <div style="padding:11px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8a90a2;">{{ p.retail }}</div>
+                <div style="padding:11px 16px 11px 12px;text-align:right;"><span style="{{ p.badgeStyle }}">{{ p.status }}</span></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;color:#3a3f50;margin-top:12px;">PICK A LINE TO LOAD IT INTO THE MOVEMENT PANEL</div>
+        </div>
+
+        <div class="sc sidepane" style="flex:1 1 346px;min-width:300px;background:#10141d;overflow-y:auto;padding:20px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:12px;">RECORD A MOVEMENT</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px;">
+            <sc-for list="{{ movementKinds }}" as="k" hint-placeholder-count="6">
+              <button onClick="{{ k.pick }}" style="{{ k.style }}">{{ k.label }}</button>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <label style="display:block;">
+              <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:#5b6072;margin-bottom:5px;">PRODUCT</span>
+              <span style="display:block;background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:8px 11px;font-size:13px;">{{ invSelLabel }}</span>
+            </label>
+            <div style="display:flex;gap:10px;">
+              <label style="flex:1;min-width:0;">
+                <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:#5b6072;margin-bottom:5px;">QTY</span>
+                <input type="number" min="1" value="{{ moveQty }}" onChange="{{ setMoveQty }}" style="width:100%;box-sizing:border-box;background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:8px 11px;font-size:13px;font-family:'JetBrains Mono',monospace;color:#e6e8ef;outline:none;" />
+              </label>
+              <label style="flex:1;min-width:0;">
+                <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:#5b6072;margin-bottom:5px;">PRICE EACH</span>
+                <span style="display:block;background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:8px 11px;font-size:13px;font-family:'JetBrains Mono',monospace;">{{ invSelRetail }}</span>
+              </label>
+            </div>
+            <label style="display:block;">
+              <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:#5b6072;margin-bottom:5px;">ISSUE TO</span>
+              <select value="{{ issueTo }}" onChange="{{ setIssueTo }}" style="width:100%;box-sizing:border-box;background:#161b27;border:1px solid #262d3d;border-radius:8px;padding:8px 11px;font-size:13px;color:#e6e8ef;outline:none;font-family:inherit;cursor:pointer;">
+                <sc-for list="{{ issueOptions }}" as="o" hint-placeholder-count="5">
+                  <option value="{{ o.id }}">{{ o.label }}</option>
+                </sc-for>
+              </select>
+            </label>
+          </div>
+
+          <div style="margin-top:16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.35);border-radius:9px;padding:13px 15px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.12em;color:var(--acc,#f59e0b);margin-bottom:7px;">WHAT THIS DOES</div>
+            <div style="font-size:12.5px;line-height:1.6;color:#e6e8ef;">{{ movePreview }}</div>
+          </div>
+
+          <div style="display:flex;gap:7px;margin-top:14px;">
+            <button onClick="{{ commitMovement }}" style="flex:1;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">{{ commitLabel }}</button>
+            <button onClick="{{ commitFree }}" style="padding:9px 14px;border-radius:8px;font-size:13px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Issue free</button>
+          </div>
+
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid #1d2331;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:10px;">RECENT</div>
+            <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;">
+              <sc-for list="{{ movements }}" as="m" hint-placeholder-count="4">
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#3a3f50;width:44px;flex-shrink:0;">{{ m.date }}</span>
+                  <span style="flex:1;min-width:0;">{{ m.label }}</span>
+                  <span style="{{ m.amountStyle }}">{{ m.amount }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isIntro }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">{{ introTitle }}</h1>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">Introduction</div>
+        </div>
+        <button onClick="{{ introEnter }}" style="margin-left:auto;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;">Skip</button>
+      </header>
+
+      <div style="padding:30px 24px;max-width:56rem;">
+        <div style="background:#10141d;border:1px solid #1d2331;border-radius:12px;padding:30px 32px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:12px;">WHAT THIS SCREEN IS FOR</div>
+          <p style="margin:0 0 22px;font-size:19px;font-weight:600;line-height:1.45;letter-spacing:-0.01em;max-width:46ch;text-wrap:pretty;">{{ introLede }}</p>
+
+          <div style="display:flex;flex-direction:column;gap:11px;margin-bottom:4px;">
+            <sc-for list="{{ introPoints }}" as="pt" hint-placeholder-count="3">
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--acc,#f59e0b);flex-shrink:0;margin-top:8px;"></span>
+                <span style="font-size:13.5px;line-height:1.65;color:#8a90a2;max-width:76ch;text-wrap:pretty;">{{ pt }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="{{ introNoteStyle }}">{{ introNote }}</div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:26px;">
+            <button onClick="{{ introEnter }}" style="padding:10px 18px;border-radius:8px;font-size:13.5px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;">{{ introCta }} →</button>
+            <button onClick="{{ introSkipOnce }}" style="padding:10px 18px;border-radius:8px;font-size:13.5px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;white-space:nowrap;">Don't show introductions again</button>
+          </div>
+
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid #1d2331;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px;color:#5b6072;">
+            <span>{{ introFirstVisit }}</span>
+            <button onClick="{{ introSettings }}" style="background:transparent;border:none;padding:0;font-family:inherit;font-size:12.5px;color:var(--acc,#f59e0b);cursor:pointer;text-decoration:underline;">Change this in Settings</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSettings }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">Settings</h1>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">How BetterClubhouse behaves for your club</div>
+        </div>
+      </header>
+
+      <div style="padding:24px;max-width:56rem;display:flex;flex-direction:column;gap:14px;">
+        <div style="background:#10141d;border:1px solid #1d2331;border-radius:11px;padding:24px 26px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:10px;">SCREEN INTRODUCTIONS</div>
+          <div style="font-size:15.5px;font-weight:600;margin-bottom:8px;">Show an introduction when a screen opens</div>
+          <p style="margin:0 0 18px;font-size:13.5px;line-height:1.65;color:#8a90a2;max-width:72ch;text-wrap:pretty;">An introduction explains what a screen is for before you get to it. Useful while a committee is finding its feet; an extra click once they are not.</p>
+
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
+            <sc-for list="{{ introModes }}" as="m" hint-placeholder-count="3">
+              <button onClick="{{ m.pick }}" style="{{ m.style }}">{{ m.label }}</button>
+            </sc-for>
+          </div>
+
+          <div style="background:#161b27;border:1px solid #1d2331;border-radius:9px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#8a90a2;max-width:74ch;text-wrap:pretty;">{{ introModeNote }}</div>
+
+          <div style="{{ resetSeenStyle }}">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid #1d2331;">
+              <span style="font-size:12.5px;color:#8a90a2;">{{ seenCount }} screens have already introduced themselves to you.</span>
+              <button onClick="{{ resetSeen }}" style="padding:7px 13px;border-radius:8px;font-size:12.5px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Show them all again</button>
+            </div>
+          </div>
+
+          <div style="margin-top:18px;padding-top:16px;border-top:1px solid #1d2331;font-size:12.5px;line-height:1.65;color:#5b6072;max-width:74ch;text-wrap:pretty;">Set per person, not per club — a new treasurer joining in March gets the introductions even if the rest of the committee turned them off in October. Deep links skip the introduction either way: pressing "Open accounts" on Today takes you to the work, because you already said what you wanted.</div>
+        </div>
+
+        <div style="background:#10141d;border:1px solid #1d2331;border-radius:11px;padding:24px 26px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#3a3f50;margin-bottom:14px;">ALSO ON THIS SCREEN, NOT BUILT IN THIS PROTOTYPE</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+            <div style="background:#161b27;border:1px solid #1d2331;border-radius:9px;padding:14px 16px;"><div style="font-size:13.5px;font-weight:600;margin-bottom:5px;">Season &amp; currency</div><div style="font-size:12.5px;line-height:1.6;color:#8a90a2;">Which season is open, and how money is formatted.</div></div>
+            <div style="background:#161b27;border:1px solid #1d2331;border-radius:9px;padding:14px 16px;"><div style="font-size:13.5px;font-weight:600;margin-bottom:5px;">Who can see what</div><div style="font-size:12.5px;line-height:1.6;color:#8a90a2;">Capabilities per officer — this is what decides which sidebar groups appear.</div></div>
+            <div style="background:#161b27;border:1px solid #1d2331;border-radius:9px;padding:14px 16px;"><div style="font-size:13.5px;font-weight:600;margin-bottom:5px;">Notifications</div><div style="font-size:12.5px;line-height:1.6;color:#8a90a2;">What the committee gets emailed about, and how often.</div></div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isStub }}">
+      <header style="position:sticky;top:0;z-index:40;border-bottom:1px solid #1d2331;background:#10141d;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;"><h1 style="margin:0;font-weight:700;font-size:19px;letter-spacing:-0.01em;">{{ stubTitle }}</h1><button onClick="{{ reopenIntro }}" title="What is this screen for?" style="width:18px;height:18px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#5b6072;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">?</button></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#5b6072;text-transform:uppercase;margin-top:2px;">Not built in this prototype</div>
+        </div>
+      </header>
+      <div style="padding:22px 24px;max-width:62rem;">
+        <div style="background:#10141d;border:1px solid #1d2331;border-radius:11px;padding:26px 28px;">
+          <div style="font-size:15.5px;font-weight:600;margin-bottom:10px;">{{ stubTitle }} keeps the shell and gets the same treatment.</div>
+          <p style="margin:0 0 16px;font-size:13.5px;line-height:1.7;color:#8a90a2;max-width:70ch;text-wrap:pretty;">{{ stubBody }}</p>
+          <div style="display:flex;flex-wrap:wrap;gap:7px;">
+            <button onClick="{{ goToday }}" style="padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">Back to Today</button>
+            <button onClick="{{ goDirectory }}" style="padding:8px 14px;border-radius:8px;font-size:13px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Open the Directory</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <sc-if value="{{ drawerOpen }}">
+    <div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end;background:rgba(0,0,0,0.55);">
+      <div onClick="{{ stop }}" class="sc" style="width:440px;max-width:92vw;background:#10141d;border-left:1px solid #262d3d;overflow-y:auto;animation:chRise 180ms ease both;box-shadow:0 0 40px rgba(0,0,0,0.5);">
+        <div style="padding:20px;border-bottom:1px solid #1d2331;display:flex;align-items:flex-start;gap:13px;">
+          <span style="width:44px;height:44px;border-radius:50%;background:#161b27;border:1.5px solid #262d3d;color:#8a90a2;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ drawerInitials }}</span>
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:700;font-size:18px;letter-spacing:-0.01em;">{{ drawerName }}</div>
+            <div style="font-size:12.5px;color:#5b6072;margin-top:2px;">{{ drawerContact }}</div>
+          </div>
+          <button onClick="{{ closeDrawer }}" style="background:transparent;border:none;color:#5b6072;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;">✕</button>
+        </div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:20px;">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:#3a3f50;margin-bottom:8px;">BALANCE</div>
+            <div style="font-weight:700;font-size:26px;font-variant-numeric:tabular-nums;color:#f5b542;">{{ drawerBalance }}</div>
+            <div style="font-size:12.5px;color:#8a90a2;margin-top:4px;">{{ drawerBalanceNote }}</div>
+          </div>
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:#3a3f50;margin-bottom:8px;">IN THE DIRECTORY AS</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;">
+              <sc-for list="{{ drawerSegs }}" as="s" hint-placeholder-count="3">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.08em;padding:3px 7px;border-radius:4px;background:#161b27;border:1px solid #262d3d;color:#8a90a2;">{{ s }}</span>
+              </sc-for>
+            </div>
+          </div>
+          <div style="display:flex;gap:7px;">
+            <button onClick="{{ openInDirectory }}" style="flex:1;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--acc,#f59e0b);color:#0a0d14;border:none;cursor:pointer;font-family:inherit;">Open full record</button>
+            <button onClick="{{ closeDrawer }}" style="padding:9px 14px;border-radius:8px;font-size:13px;border:1px solid #262d3d;background:transparent;color:#8a90a2;cursor:pointer;font-family:inherit;">Close</button>
+          </div>
+          <div style="font-size:12px;line-height:1.6;color:#5b6072;border-top:1px solid #1d2331;padding-top:14px;text-wrap:pretty;">Opened from {{ drawerFrom }}. Same record, same drawer, wherever you click a person in the module.</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ toastOpen }}">
+    <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:120;display:flex;align-items:center;gap:12px;background:#10141d;border:1px solid rgba(245,158,11,0.5);border-radius:10px;padding:13px 18px;box-shadow:0 8px 40px rgba(0,0,0,0.6);animation:chRise 160ms ease both;max-width:min(92vw,640px);">
+      <span style="font-size:13.5px;font-weight:600;color:var(--acc,#f59e0b);flex-shrink:0;">{{ toastTitle }}</span>
+      <span style="font-size:13px;color:#8a90a2;min-width:0;">{{ toastBody }}</span>
+      <button onClick="{{ clearToast }}" style="background:transparent;border:none;color:#5b6072;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;">✕</button>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;: {&quot;editor&quot;: &quot;color&quot;, &quot;default&quot;: &quot;#f59e0b&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;options&quot;: [&quot;#f59e0b&quot;, &quot;#6366f1&quot;, &quot;#16c784&quot;], &quot;section&quot;: &quot;Brand&quot;, &quot;label&quot;: &quot;Module accent&quot;}, &quot;showBadges&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Navigation&quot;, &quot;label&quot;: &quot;Count badges in the sidebar&quot;}}">
+const MONO = "'JetBrains Mono', monospace";
+
+const PEOPLE = [
+  { id: 'cb', name: 'Chloe Bevan', email: 'guardian: raf.bevan@x.com', phone: '0400 118 224', tier: 'Junior', family: 'Bevan', segs: ['Player', 'Junior'], roles: [], subs: 90, match: 0, kit: 45, hours: 0, junior: true,
+    quals: [], kitItems: [{ date: '09 JAN', item: 'Junior playing shirt · S', amount: '$45' }] },
+  { id: 'ad', name: 'Amrit Dhillon', email: 'amrit.dhillon@x.com', phone: '0417 552 019', tier: 'Student', family: null, segs: ['Player', 'Volunteer'], roles: ['Scorer'], subs: 60, match: 45, kit: 120, hours: 14,
+    quals: [{ name: 'Level 1 Scorer', expiry: 'expires 3 Mar 2028', days: 400 }], kitItems: [{ date: '15 JAN', item: 'Playing shirt · M', amount: '$45' }, { date: '02 DEC', item: 'Training tracksuit', amount: '$75' }] },
+  { id: 'pc', name: 'Pat Carmody', email: null, phone: '0402 771 630', tier: null, family: null, segs: ['Life member', 'Volunteer', 'Committee'], roles: ['Canteen Manager', 'First Aid Officer'], subs: 0, match: 0, kit: 38, hours: 64,
+    quals: [{ name: 'Food Handling', expiry: 'expires 2 Feb 2027', days: 18 }, { name: 'Senior First Aid', expiry: 'expired 14 Nov 2026', days: -63 }], kitItems: [{ date: '20 DEC', item: 'Club polo · L', amount: '$38' }] },
+  { id: 'jh', name: 'Jaya Hartono', email: 'jaya.hartono@x.com', phone: '0433 908 117', tier: 'Non-playing', family: 'Hartono', segs: ['Parent', 'Volunteer'], roles: ['Canteen', 'Team Manager'], subs: 360, match: 90, kit: 95, hours: 31,
+    quals: [{ name: 'Working with Children', expiry: 'expires 11 Aug 2029', days: 1000 }, { name: 'Food Handling', expiry: 'expires 20 Mar 2027', days: 64 }], kitItems: [{ date: '11 JAN', item: 'Club polo · M ×2', amount: '$76' }, { date: '18 NOV', item: 'Training cap', amount: '$19' }] },
+  { id: 'se', name: 'Sam Ellery', email: 'sam.ellery@x.com', phone: '0428 116 442', tier: 'Senior A', family: null, segs: ['Player', 'Committee'], roles: ['Treasurer'], subs: 0, match: 0, kit: 0, hours: 48, credit: 40,
+    quals: [{ name: 'Working with Children', expiry: 'expires 2 Jun 2028', days: 500 }], kitItems: [] },
+  { id: 'ra', name: 'Rhys Alderson', email: 'rhys.a@x.com', phone: '0499 003 187', tier: 'Senior A', family: null, segs: ['Player'], roles: [], subs: 0, match: 0, kit: 0, hours: 0, quals: [], kitItems: [] },
+  { id: 'mk', name: 'Mei Kwan', email: 'mei.kwan@x.com', phone: '0466 221 903', tier: 'Senior B', family: 'Kwan', segs: ['Player', 'Volunteer'], roles: ['Canteen'], subs: 120, match: 30, kit: 0, hours: 9,
+    quals: [{ name: 'Food Handling', expiry: 'expires 8 Sep 2027', days: 230 }], kitItems: [] },
+  { id: 'tb', name: 'Tom Brereton', email: 'tom.b@x.com', phone: '0411 764 220', tier: 'Non-playing', family: null, segs: ['Third party'], roles: ['Grounds Contractor'], subs: 0, match: 0, kit: 0, hours: 0, quals: [], kitItems: [] },
+];
+
+const PRODUCTS = [
+  { id: 'p1', name: 'Club polo', meta: 'M · APPAREL', cat: 'apparel', qty: 2, reorder: 6, cost: 22, retail: 38 },
+  { id: 'p2', name: 'Club polo', meta: 'L · APPAREL', cat: 'apparel', qty: 14, reorder: 6, cost: 22, retail: 38 },
+  { id: 'p3', name: 'Playing shirt', meta: 'M · APPAREL', cat: 'apparel', qty: 21, reorder: 8, cost: 28, retail: 45 },
+  { id: 'p4', name: 'Training cap', meta: 'OSFA · APPAREL', cat: 'apparel', qty: 4, reorder: 10, cost: 9.5, retail: 20 },
+  { id: 'p5', name: 'Wet-weather jacket', meta: 'L · APPAREL', cat: 'apparel', qty: 7, reorder: 4, cost: 54, retail: 85 },
+  { id: 'p6', name: 'Match balls', meta: '156G RED · EQUIPMENT', cat: 'equipment', qty: 0, reorder: 12, cost: 31, retail: 0 },
+  { id: 'p7', name: 'Training stumps', meta: 'SET · EQUIPMENT', cat: 'equipment', qty: 9, reorder: 4, cost: 46, retail: 0 },
+  { id: 'p8', name: 'Soft drink', meta: '375ML · FOOD & DRINK', cat: 'food', qty: 96, reorder: 48, cost: 1.1, retail: 3 },
+  { id: 'p9', name: 'Sports drink', meta: '600ML · FOOD & DRINK', cat: 'food', qty: 18, reorder: 24, cost: 2.2, retail: 4.5 },
+];
+
+const AUDIENCES = [
+  { id: 'owes', name: 'Owes money', sub: '2 conditions · live', blurb: 'Re-runs every time you send, so it always reflects who fits today.',
+    rules: [{ field: 'Account balance', op: 'is more than', value: '$0' }, { field: 'Has a contact route', op: 'is', value: 'yes' }],
+    match: (p) => (p.subs + p.match + p.kit) > 0 },
+  { id: 'parents', name: 'Junior parents', sub: '1 condition · live', blurb: 'Everyone in the Directory recorded as a parent or guardian.',
+    rules: [{ field: 'In the Directory as', op: 'is', value: 'Parent' }], match: (p) => p.segs.indexOf('Parent') >= 0 },
+  { id: 'canteen', name: 'Canteen volunteers', sub: '1 condition · live', blurb: 'Holds a Canteen club role — the audience the roster gap emails.',
+    rules: [{ field: 'Club role', op: 'is', value: 'Canteen' }], match: (p) => p.roles.some(r => r.indexOf('Canteen') >= 0) },
+  { id: 'quals', name: 'Quals to renew', sub: '1 condition · live', blurb: 'A qualification expired or expiring inside 60 days.',
+    rules: [{ field: 'Qualification expiry', op: 'is within', value: '60 days' }], match: (p) => p.quals.some(q => q.days <= 60) },
+  { id: 'all', name: 'Whole club', sub: 'Everyone with a contact route', blurb: 'The default audience. Junior members route to a guardian.',
+    rules: [{ field: 'Has a contact route', op: 'is', value: 'yes' }], match: () => true },
+];
+
+const KINDS = [
+  { key: 'received', label: 'Received' }, { key: 'sold', label: 'Sold' }, { key: 'issued', label: 'Issued' },
+  { key: 'used', label: 'Used' }, { key: 'write_off', label: 'Write-off' }, { key: 'stocktake', label: 'Stocktake' },
+];
+
+// The interim "what is this screen" page. Genuinely useful to a new club officer
+// and genuinely irritating to a practised one, so it is a setting: show it every
+// time, only on a screen's first visit, or never.
+const INTRO = {
+  directory: { lede: 'Every person connected to the club — one record each.', points: ['Players read through from BetterStats; you add and edit everyone else: committee, volunteers, parents, life members, umpires, contractors.', 'A record carries club roles, committee terms, qualifications, volunteer hours, family links, account balance and kit issued.', 'Filter the list, then email exactly who is left — filtering and sending are one motion.'], note: 'This replaced three separate people lists: fee members, comms contacts, and the old volunteer register.' },
+  roster: { lede: 'Who is on for what, week by week.', points: ['Shifts sit against club areas — canteen, bar, scoring, ground prep — and each area can require a qualification.', 'An unfilled shift or an expired ticket shows up on Today before Saturday, not after it.', 'Email the people eligible for a gap straight from the gap.'], note: 'Qualification gating is shared with the Directory, so a lapsed ticket blocks rostering automatically.' },
+  committee: { lede: 'Positions, meetings, motions and the actions that come out of them.', points: ['Positions are held for a term, so you keep the history of who did what and when.', 'Meetings carry an agenda and minutes; motions carry actions with an owner and a due date.', 'Vacant positions and overdue actions are surfaced on Today.'], note: 'A committee position is recorded on the person’s Directory record, not separately.' },
+  accounts: { lede: 'What every person owes the club, in one number.', points: ['Membership subs, match-day fees and kit issued from stock all land on the same account.', 'Match days accrue from appearances automatically — you set the tier, the fees follow.', 'Families roll up, so you can chase a household rather than three children.'], note: 'Kit charges arrive here from Inventory. There is no second balance kept anywhere else.' },
+  payments: { lede: 'The reconciliation ledger for one season.', points: ['Search, match against a bank-statement CSV, and remove mistakes.', 'Square and bank transfers arrive through the one payments connection set up in Integrations.', 'Deliberately a dense table — this is a reconciling tool, not a dashboard.'] },
+  rateCard: { lede: 'What each membership tier costs.', points: ['One screen defines the tiers, their prices, and what each membership type means.', 'Change a rate and the accounts recalculate for the open season.', 'Carry the card forward at rollover, then bulk-edit only the exceptions.'], note: 'This merged the old Fee Schedule and Membership Types screens, which asked you to guess which one to edit.' },
+  inventory: { lede: 'Stock the club buys, sells, issues and uses up.', points: ['Lines carry cost, retail, a reorder point and an expiry where it matters.', 'Movements are typed: received, sold, issued, used, written off, counted.', 'Issuing kit to a member posts the charge to their account in the same action.'] },
+  equipment: { lede: 'The gear the club owns rather than sells.', points: ['Assets carry a condition, a service date and a replacement date.', 'Service due and overdue behave like any other renewal and appear on Today.', 'Loans out and back are tracked against a person’s record.'] },
+  emails: { lede: 'Bulk email to the club.', points: ['Pick an Audience, write once, send. The audience resolves at send time, so it is never stale.', 'Templates cover the emails you send every season: subs reminders, selections, event invitations.', 'Bounces and unsubscribes come back onto the person’s record.'], note: 'Club scope only. BetterCricket’s own marketing campaigns are a separate, Super Admin surface and never appear here.' },
+  audiences: { lede: 'Saved questions about the Directory.', points: ['An audience is a rule, not a frozen list — "owes money", "junior parents", "canteen volunteers".', 'A hand-picked group is just an audience whose rule is "these people".', 'Anywhere you have filtered people, you can save that filter as an audience.'], note: 'This replaced Contacts, Lists and Segments, which were three screens answering one question.' },
+  diary: { lede: 'The season’s running to-do list, in order.', points: ['Tasks have dates, owners and dependencies, so the diary knows what is blocking what.', 'Recurring jobs regenerate each season instead of being retyped.', 'Overdue and blocked tasks are the first thing Today shows you.'] },
+  events: { lede: 'Things the club puts on that members come to.', points: ['An event has a date, a capacity, a price and a guest list.', 'Registration takes money through the club’s one payments connection and confirms by email.', 'Who registered becomes an audience you can email.'], note: 'In BetterClubhouse, "event" only ever means this. Email opens and clicks are called activity.' },
+  integrations: { lede: 'The outside services the club is connected to.', points: ['Square for card payments, Xero for the books, an email provider for sending.', 'One connection each, shared by every screen that needs it.', 'Each shows a live status, so "is that connected?" has one answer.'], note: 'This replaced two separate Square pages, a Xero page, and provider settings buried inside Comms.' },
+  settings: { lede: 'How BetterClubhouse behaves for your club.', points: ['Season, currency, and who can see what.', 'Whether screens open with an introduction like this one.', 'Notification preferences for the committee.'] },
+};
+
+const SCREEN_TITLES = {
+  today: 'Today', directory: 'Directory', roster: 'Roster', committee: 'Committee',
+  accounts: 'Accounts', payments: 'Payments', rateCard: 'Rate card',
+  inventory: 'Inventory', equipment: 'Equipment', emails: 'Emails', audiences: 'Audiences',
+  diary: 'Diary', events: 'Events', integrations: 'Integrations', settings: 'Settings',
+};
+
+const INTRO_MODES = [
+  { key: 'always', label: 'Every time' },
+  { key: 'once', label: 'First visit only' },
+  { key: 'never', label: 'Never' },
+];
+
+const STUBS = {
+  roster: { title: 'Roster', body: 'Shifts against club areas for the week, with qualification gating. Two canteen shifts are unfilled on Saturday — that gap is what Today surfaces, and the "email the eligible" button here is the same audience machinery as the Comms screens. Still on demo data upstream, so it is stubbed rather than faked.' },
+  committee: { title: 'Committee', body: 'Positions with terms, meetings with agendas, and motions with actions. It already runs on live data; the only change here is the shell and the button language. Vacant positions and overdue actions feed Today.' },
+  payments: { title: 'Payments', body: 'The reconciliation ledger for one season — search, match against a bank CSV, remove mistakes. Kept as a dense mono-headed table, because that is genuinely the right tool for reconciling, and it is one of the things worth keeping from BetterFees.' },
+  rateCard: { title: 'Rate card', body: 'Fee Schedule and Membership Types merged. One screen defines what each tier costs and what a membership type means, which removes the question of which of the two former screens you were meant to edit.' },
+  equipment: { title: 'Equipment', body: 'Assets with condition, service and replacement dates. Service due and overdue become renewals — the same primitive as qualifications and stock expiry — so they land on Today without a second implementation.' },
+  emails: { title: 'Emails', body: 'Campaign list and composer. The composer now takes an Audience rather than picking between contacts, lists and segments; arriving from Accounts or the Roster pre-fills both the audience and a matching template. This is the club build, so there is no Comms context bar and no Clubs Directory switch — BetterCricket\'s own marketing campaigns and their prospect fields live behind a Super Admin surface and are never rendered here.' },
+  diary: { title: 'Diary', body: 'The running club diary with dependencies and a critical path. Overdue and blocked tasks are the first two rows of Today, which is already true in the current build and is the pattern the other three sub-modules should copy.' },
+  events: { title: 'Events', body: 'Club activities on a date that members attend and pay for — and the only thing allowed to use the word "event" in this module. Registration takes payments through the one Square connection and confirmations through the one email provider.' },
+  integrations: { title: 'Integrations', body: 'Square, Xero and the email provider as three connections with a status each. This replaces two separate Square pages, a Xero page, and the provider settings buried inside Comms — one place to answer "is that connected?"' },
+};
+
+const money = (n) => {
+  const v = Number(n || 0);
+  return '$' + v.toLocaleString(undefined, { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+};
+const initialsOf = (name) => name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+const balanceOf = (p) => p.subs + p.match + p.kit;
+const roleLineOf = (p) => (p.roles.length ? p.roles.join(' · ') : (p.segs[0] || 'Member')).toUpperCase();
+const reachOf = (p) => (p.email ? (p.junior ? 'VIA GUARDIAN' : 'EMAIL') : 'NO ADDRESS');
+
+class Component extends DCLogic {
+  state = {
+    screen: 'today', query: '', dirSeg: 'All', dirSel: 'pc',
+    acctFilter: 'owing', audSel: 'owes',
+    invCat: 'apparel', invSel: 'p1', moveKind: 'issued', moveQty: 1, issueTo: 'cb',
+    products: PRODUCTS.map(p => ({ ...p })),
+    charges: {},
+    movements: [
+      { date: '15 JAN', label: 'Issued playing shirt · A. Dhillon', amount: '$45', tone: 'warn' },
+      { date: '15 JAN', label: 'Sold 12 soft drinks · canteen', amount: '$36', tone: 'dim' },
+      { date: '14 JAN', label: 'Used 4 match balls · round 8', amount: '—', tone: 'faint' },
+      { date: '12 JAN', label: 'Received 24 club polos', amount: '$528', tone: 'dim' },
+    ],
+    drawer: null, drawerFrom: '', toast: null,
+    introMode: 'once', seen: { today: true }, intro: false,
+  };
+
+  // The accent is set as a custom property on the root rather than interpolated
+  // into every style, so the page paints on the amber fallback immediately and
+  // the tweak repaints in place.
+  applyAccent() {
+    const acc = this.props.accent || '#f59e0b';
+    document.documentElement.style.setProperty('--acc', acc);
+  }
+  componentDidMount() { this.applyAccent(); }
+  componentDidUpdate() { this.applyAccent(); }
+
+  set = (p) => this.setState(s => ({ ...s, ...p }));
+  // Today is the front door and never gets an interim page.
+  wantsIntro(screen) {
+    if (screen === 'today' || !INTRO[screen]) return false;
+    const m = this.state.introMode;
+    if (m === 'never') return false;
+    if (m === 'always') return true;
+    return !this.state.seen[screen];
+  }
+  go = (screen) => () => this.set({ screen, drawer: null, intro: this.wantsIntro(screen) });
+  // A cross-screen action (a Today button, "open accounts") skips the interim
+  // page — the officer already said what they wanted.
+  jump = (p) => this.set({ ...p, intro: false, drawer: null, seen: { ...this.state.seen, [p.screen]: true } });
+  enter = () => this.set({ intro: false, seen: { ...this.state.seen, [this.state.screen]: true } });
+  toast = (title, body) => this.set({ toast: { title, body } });
+
+  people() {
+    const ch = this.state.charges;
+    return PEOPLE.map(p => ch[p.id] ? { ...p, kit: p.kit + ch[p.id].amount, kitItems: [...ch[p.id].items, ...p.kitItems] } : p);
+  }
+
+  navStyle(key) {
+    const on = this.state.screen === key;
+    return {
+      display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '9px 16px',
+      fontSize: 13.5, background: on ? 'rgba(245,158,11,0.1)' : 'transparent',
+      color: on ? 'var(--acc,#f59e0b)' : '#5b6072', border: 'none',
+      borderRight: on ? '2px solid var(--acc,#f59e0b)' : '2px solid transparent',
+      textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+    };
+  }
+  badge(tone, show) {
+    if (show === false) return { display: 'none' };
+    const c = tone === 'red' ? ['rgba(239,91,91,0.18)', '#ef5b5b'] : ['rgba(245,181,66,0.18)', '#f5b542'];
+    return { marginLeft: 'auto', fontFamily: MONO, fontSize: 9, padding: '1px 5px', borderRadius: 999, background: c[0], color: c[1], flexShrink: 0 };
+  }
+  pill(on, tone) {
+    const c = tone === 'amber' ? ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', '#f5b542'] : ['rgba(245,158,11,0.5)', 'rgba(245,158,11,0.12)', 'var(--acc,#f59e0b)'];
+    return {
+      padding: '5px 11px', borderRadius: 999, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+      border: '1px solid ' + (on ? c[0] : '#262d3d'), background: on ? c[1] : 'transparent', color: on ? c[2] : '#8a90a2',
+    };
+  }
+  openPerson = (id, from) => () => this.set({ drawer: id, drawerFrom: from });
+
+  renderVals() {
+    const st = this.state;
+    const badges = this.props.showBadges !== false;
+    const people = this.people();
+    const nav = {};
+    ['today', 'directory', 'roster', 'committee', 'accounts', 'payments', 'rateCard', 'inventory', 'equipment', 'emails', 'audiences', 'diary', 'events', 'integrations', 'settings'].forEach(k => {
+      nav['st' + k[0].toUpperCase() + k.slice(1)] = this.navStyle(k);
+      nav['go' + k[0].toUpperCase() + k.slice(1)] = this.go(k);
+    });
+
+    const owing = people.filter(p => balanceOf(p) > 0);
+    const totalOwed = owing.reduce((a, p) => a + balanceOf(p), 0);
+    const kitOwed = people.reduce((a, p) => a + p.kit, 0);
+    const subsOwed = people.reduce((a, p) => a + p.subs, 0);
+    const matchOwed = people.reduce((a, p) => a + p.match, 0);
+    const reorder = st.products.filter(p => p.qty < p.reorder);
+    const renewals = people.reduce((a, p) => a + p.quals.filter(q => q.days <= 60).length, 0);
+    const overdueRenewals = people.reduce((a, p) => a + p.quals.filter(q => q.days < 0).length, 0);
+    const canteenEligible = people.filter(p => p.roles.some(r => r.indexOf('Canteen') >= 0) && p.quals.some(q => q.name === 'Food Handling' && q.days > 0));
+
+    // ── Today ────────────────────────────────────────────────────────────────
+    const attentionCard = (tone) => {
+      const c = { block: 'rgba(239,91,91,0.28)', warn: 'rgba(245,181,66,0.28)', calm: '#1d2331' }[tone];
+      return { display: 'flex', alignItems: 'flex-start', gap: 14, background: '#10141d', border: '1px solid ' + c, borderRadius: 10, padding: '15px 17px' };
+    };
+    const attentionNum = (tone) => ({
+      fontWeight: 700, fontSize: 26, lineHeight: 1, fontVariantNumeric: 'tabular-nums', flexShrink: 0, width: 44,
+      color: { block: '#ef5b5b', warn: '#f5b542', calm: '#8a90a2' }[tone],
+    });
+    const attention = [
+      { count: owing.length, unit: 'members owe the club money', area: 'MONEY', tone: 'warn',
+        detail: money(subsOwed + matchOwed) + ' in subs and match fees, plus ' + money(kitOwed) + ' of kit issued and not paid for.',
+        primaryLabel: 'Email these ' + owing.length, secondaryLabel: 'Open accounts',
+        primary: () => { this.jump({ screen: 'audiences', audSel: 'owes' }); this.toast('Audience loaded', owing.length + ' people who owe money — compose opens with the subs reminder template.'); },
+        secondary: () => this.jump({ screen: 'accounts', acctFilter: 'owing' }) },
+      { count: 2, unit: 'canteen shifts unfilled on Saturday', area: 'PEOPLE', tone: 'block',
+        detail: 'Canteen 12–3 and 3–6. ' + canteenEligible.length + ' people hold the Canteen role with a current food-handling ticket.',
+        primaryLabel: 'Email the ' + canteenEligible.length + ' eligible', secondaryLabel: 'Open the roster',
+        primary: () => { this.jump({ screen: 'audiences', audSel: 'canteen' }); this.toast('Audience loaded', 'Canteen volunteers, filtered to current tickets.'); },
+        secondary: () => this.jump({ screen: 'roster' }) },
+      { count: overdueRenewals + reorder.length, unit: 'renewals and reorders overdue', area: 'CLUB · STOCK', tone: 'block',
+        detail: overdueRenewals + ' expired qualification(s) and ' + reorder.length + ' stock lines below their reorder point. ' + renewals + ' more renewals fall due within 60 days.',
+        primaryLabel: 'Open inventory', secondaryLabel: 'Review in the Directory',
+        primary: () => this.jump({ screen: 'inventory', invCat: 'apparel' }),
+        secondary: () => this.jump({ screen: 'directory', dirSeg: 'Quals to renew' }) },
+      { count: 1, unit: 'email waiting to be sent', area: 'COMMS', tone: 'calm',
+        detail: '"Subs reminder — outstanding balances" has been a draft for five days. Its audience now resolves to ' + owing.length + ' people.',
+        primaryLabel: 'Open the draft', secondaryLabel: 'See audiences',
+        primary: () => this.jump({ screen: 'emails' }), secondary: () => this.jump({ screen: 'audiences' }) },
+    ].map(a => ({ ...a, cardStyle: attentionCard(a.tone), numStyle: attentionNum(a.tone) }));
+
+    // ── Directory ────────────────────────────────────────────────────────────
+    const SEGS = ['All', 'Player', 'Volunteer', 'Committee', 'Parent', 'Quals to renew'];
+    const q = st.query.trim().toLowerCase();
+    const dirList = people.filter(p => {
+      if (st.dirSeg === 'Quals to renew') { if (!p.quals.some(x => x.days <= 60)) return false; }
+      else if (st.dirSeg !== 'All' && p.segs.indexOf(st.dirSeg) < 0) return false;
+      if (q && p.name.toLowerCase().indexOf(q) < 0 && p.roles.join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+    const selId = dirList.some(p => p.id === st.dirSel) ? st.dirSel : (dirList[0] ? dirList[0].id : null);
+    const sel = people.find(p => p.id === selId) || people[0];
+    const selFlagged = sel.quals.filter(x => x.days <= 60).length;
+    const qualBadge = (days) => {
+      const fg = days < 0 ? '#ef5b5b' : days <= 60 ? '#f5b542' : '#16c784';
+      return { fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 7px', borderRadius: 4, border: '1px solid ' + fg + '66', color: fg, flexShrink: 0 };
+    };
+    const ledgerRow = (i) => ({ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i ? '1px solid #1d2331' : 'none' });
+
+    // ── Accounts ─────────────────────────────────────────────────────────────
+    const acctList = st.acctFilter === 'owing' ? owing
+      : st.acctFilter === 'needsTier' ? people.filter(p => !p.tier)
+      : people;
+    const acctRows = acctList.map(p => {
+      const bal = balanceOf(p);
+      const credit = p.credit || 0;
+      return {
+        initials: initialsOf(p.name), name: p.name, roleLine: roleLineOf(p),
+        tier: p.tier || '⚠ needs tier',
+        tierStyle: p.tier
+          ? { padding: '10px 12px', fontSize: 13, color: '#8a90a2' }
+          : { padding: '10px 12px', fontFamily: MONO, fontSize: 10, color: '#f5b542' },
+        family: p.family || '—',
+        familyStyle: p.family
+          ? { fontSize: 12, background: 'rgba(245,158,11,0.15)', color: 'var(--acc,#f59e0b)', borderRadius: 5, padding: '2px 8px' }
+          : { fontSize: 12, color: '#3a3f50' },
+        subs: money(p.subs), match: money(p.match), kit: money(p.kit),
+        balance: bal > 0 ? money(bal) : (credit ? '+' + money(credit) : money(0)),
+        balanceStyle: {
+          padding: '10px 18px 10px 12px', textAlign: 'right', fontFamily: MONO, fontSize: 12.5, fontWeight: 600,
+          color: bal > 0 ? '#f5b542' : credit ? '#16c784' : '#3a3f50',
+        },
+        rowStyle: {
+          minWidth: 860, display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) 120px 120px 90px 90px 100px 116px',
+          borderTop: '1px solid #1d2331', alignItems: 'center', cursor: 'pointer',
+          background: bal > 0 ? 'rgba(245,158,11,0.04)' : 'transparent',
+        },
+        open: this.openPerson(p.id, 'Accounts'),
+      };
+    });
+    const kpiCard = (accent) => ({ background: '#10141d', border: '1px solid ' + (accent ? 'rgba(245,158,11,0.4)' : '#1d2331'), borderRadius: 10, padding: '13px 15px' });
+    const kpiVal = (tone) => ({ fontWeight: 700, fontSize: 19, fontVariantNumeric: 'tabular-nums', color: tone === 'accent' ? 'var(--acc,#f59e0b)' : tone === 'warn' ? '#f5b542' : '#e6e8ef' });
+    const acctKpis = [
+      { value: String(people.length), label: 'PEOPLE', cardStyle: kpiCard(false), valueStyle: kpiVal() },
+      { value: String(owing.length), label: 'OWE MONEY', cardStyle: kpiCard(false), valueStyle: kpiVal('warn') },
+      { value: money(subsOwed + matchOwed), label: 'SUBS & MATCH FEES', cardStyle: kpiCard(false), valueStyle: kpiVal() },
+      { value: money(kitOwed), label: 'ISSUED KIT', cardStyle: kpiCard(false), valueStyle: kpiVal() },
+      { value: money(totalOwed), label: 'TOTAL OUTSTANDING', cardStyle: kpiCard(true), valueStyle: kpiVal('accent') },
+    ];
+
+    // ── Audiences ────────────────────────────────────────────────────────────
+    const aud = AUDIENCES.find(a => a.id === st.audSel) || AUDIENCES[0];
+    const audMembers = people.filter(aud.match);
+    const audRows = audMembers.map(p => {
+      const bal = balanceOf(p);
+      const reach = reachOf(p);
+      return {
+        name: p.name, segLine: p.segs.join(' · '),
+        balance: bal > 0 ? money(bal) : money(0),
+        balanceStyle: { padding: '9px 12px', textAlign: 'right', fontFamily: MONO, fontSize: 11, color: bal > 0 ? '#f5b542' : '#3a3f50' },
+        reach,
+        reachStyle: { padding: '9px 16px 9px 12px', textAlign: 'right', fontFamily: MONO, fontSize: 9.5, color: reach === 'EMAIL' ? '#16c784' : reach === 'VIA GUARDIAN' ? '#f5b542' : '#ef5b5b' },
+        open: this.openPerson(p.id, aud.name),
+      };
+    });
+
+    // ── Inventory ────────────────────────────────────────────────────────────
+    const CATS = [{ key: 'apparel', label: 'Apparel' }, { key: 'equipment', label: 'Equipment' }, { key: 'food', label: 'Food & drink' }, { key: 'low', label: 'Needs reorder' }];
+    const invList = st.invCat === 'low' ? st.products.filter(p => p.qty < p.reorder) : st.products.filter(p => p.cat === st.invCat);
+    const invSel = st.products.find(p => p.id === st.invSel) || invList[0] || st.products[0];
+    const invRows = invList.map(p => {
+      const out = p.qty <= 0, low = p.qty < p.reorder;
+      const fg = out ? '#ef5b5b' : low ? '#f5b542' : '#16c784';
+      const label = out ? 'REORDER' : low ? 'LOW' : 'OK';
+      return {
+        name: p.name, meta: p.meta, qty: String(p.qty), reorder: String(p.reorder),
+        cost: money(p.cost), retail: p.retail ? money(p.retail) : '—',
+        qtyStyle: { padding: '11px 12px', textAlign: 'right', fontFamily: MONO, fontSize: 11.5, fontWeight: low ? 600 : 400, color: out ? '#ef5b5b' : low ? '#f5b542' : '#e6e8ef' },
+        status: label,
+        badgeStyle: { fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 7px', borderRadius: 4, border: '1px solid ' + fg + '66', color: fg },
+        rowStyle: {
+          minWidth: 620, display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) 90px 80px 90px 90px 100px', borderTop: '1px solid #1d2331',
+          alignItems: 'center', cursor: 'pointer',
+          background: p.id === invSel.id ? 'rgba(245,158,11,0.07)' : 'transparent',
+        },
+        pick: () => this.set({ invSel: p.id }),
+      };
+    });
+    const issuePerson = people.find(p => p.id === st.issueTo) || people[0];
+    const qty = Math.max(1, Number(st.moveQty) || 1);
+    const chargeAmt = qty * (invSel.retail || 0);
+    const isIssue = st.moveKind === 'issued';
+    const newBal = balanceOf(issuePerson) + chargeAmt;
+    const movePreview = isIssue
+      ? 'Takes ' + qty + ' × ' + invSel.name + ' out of stock and posts ' + money(chargeAmt) + ' to ' + issuePerson.name.split(' ')[0] + "'s account. Balance goes " + money(balanceOf(issuePerson)) + ' → ' + money(newBal) + (issuePerson.junior ? ', and because they are a junior the reminder routes to a guardian.' : '.')
+      : 'Records a ' + (KINDS.find(k => k.key === st.moveKind) || KINDS[0]).label.toLowerCase() + ' of ' + qty + ' × ' + invSel.name + '. Stock moves; no account is charged.';
+
+    const commit = (charge) => () => {
+      const p = st.products.map(x => x.id === invSel.id ? { ...x, qty: Math.max(0, x.qty - qty) } : x);
+      const amount = charge ? chargeAmt : 0;
+      const charges = { ...st.charges };
+      if (charge && isIssue) {
+        const prev = charges[issuePerson.id] || { amount: 0, items: [] };
+        charges[issuePerson.id] = { amount: prev.amount + amount, items: [{ date: '16 JAN', item: invSel.name + ' · ' + invSel.meta.split(' · ')[0] + (qty > 1 ? ' ×' + qty : ''), amount: money(amount) }, ...prev.items] };
+      }
+      const label = (isIssue ? 'Issued ' : 'Recorded ') + qty + ' × ' + invSel.name + (isIssue ? ' · ' + issuePerson.name : '');
+      this.set({
+        products: p, charges,
+        movements: [{ date: '16 JAN', label, amount: amount ? money(amount) : '—', tone: amount ? 'warn' : 'faint' }, ...st.movements],
+        toast: charge && isIssue
+          ? { title: 'Issued and charged', body: money(amount) + ' posted to ' + issuePerson.name + '. Their balance is now ' + money(newBal) + '.' }
+          : { title: 'Movement recorded', body: qty + ' × ' + invSel.name + ' — no charge raised.' },
+      });
+    };
+
+    const drawerP = st.drawer ? people.find(p => p.id === st.drawer) : null;
+
+    return Object.assign(nav, {
+      // shell
+      needsYou: String(attention.reduce((a, x) => a + x.count, 0)),
+      owingCount: String(owing.length),
+      reorderCount: String(reorder.length),
+      badgeToday: this.badge('warn', badges), badgeRoster: this.badge('warn', badges),
+      badgeAccounts: this.badge('warn', badges), badgeInventory: this.badge('red', badges),
+
+      isToday: st.screen === 'today',
+      isDirectory: st.screen === 'directory' && !st.intro,
+      isAccounts: st.screen === 'accounts' && !st.intro,
+      isAudiences: st.screen === 'audiences' && !st.intro,
+      isInventory: st.screen === 'inventory' && !st.intro,
+      isStub: !!STUBS[st.screen] && !st.intro,
+      stubTitle: (STUBS[st.screen] || {}).title || '',
+      stubBody: (STUBS[st.screen] || {}).body || '',
+
+      // interim introduction page
+      isIntro: st.intro && !!INTRO[st.screen],
+      introTitle: SCREEN_TITLES[st.screen] || '',
+      introLede: (INTRO[st.screen] || {}).lede || '',
+      introPoints: (INTRO[st.screen] || {}).points || [],
+      introNote: (INTRO[st.screen] || {}).note || '',
+      introNoteStyle: (INTRO[st.screen] || {}).note
+        ? { marginTop: 20, background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 9, padding: '13px 16px', fontSize: 12.5, lineHeight: 1.6, color: '#e6e8ef' }
+        : { display: 'none' },
+      introCta: 'Continue to ' + (SCREEN_TITLES[st.screen] || ''),
+      introEnter: this.enter,
+      reopenIntro: () => this.set({ intro: true }),
+      introFirstVisit: st.introMode === 'once' ? 'You are seeing this because it is your first visit to this screen.' : 'You are seeing this because introductions are set to show every time.',
+      introSkipOnce: () => this.set({ introMode: 'never', intro: false, seen: { ...st.seen, [st.screen]: true }, toast: { title: 'Introductions off', body: 'Screens will open straight onto the work. Turn them back on in Settings.' } }),
+      introSettings: () => this.set({ screen: 'settings', intro: false, seen: { ...st.seen, settings: true } }),
+
+      // settings
+      isSettings: st.screen === 'settings' && !st.intro,
+      introModes: INTRO_MODES.map(m => ({
+        label: m.label, style: this.pill(st.introMode === m.key),
+        pick: () => this.set({ introMode: m.key }),
+      })),
+      introModeNote: {
+        always: 'Every screen opens with its introduction, every time. Good while a new committee is learning the system, or when a role changes hands mid-season.',
+        once: 'A screen explains itself the first time each person opens it, then gets out of the way. This is the default.',
+        never: 'Screens open straight onto the work. The introductions are still reachable from the ? beside each screen title.',
+      }[st.introMode],
+      seenCount: String(Object.keys(st.seen).filter(k => st.seen[k] && k !== 'today').length),
+      resetSeen: () => this.set({ seen: { today: true }, toast: { title: 'Introductions reset', body: 'Every screen will introduce itself once more.' } }),
+      resetSeenStyle: st.introMode === 'once' ? {} : { display: 'none' },
+
+      // today
+      totalOwedFmt: money(totalOwed), peopleCount: String(people.length), attention,
+
+      // directory
+      dirCaption: 'One record per person · ' + dirList.length + ' of ' + people.length + ' shown',
+      query: st.query, setQuery: (e) => this.set({ query: e.target.value }),
+      dirSegs: SEGS.map(s => ({
+        label: s === 'All' ? 'Everyone' : (s === 'Quals to renew' ? s : s + 's'),
+        style: this.pill(st.dirSeg === s, s === 'Quals to renew' ? 'amber' : 'accent'),
+        pick: () => this.set({ dirSeg: s }),
+      })),
+      emailFilteredLabel: 'Email these ' + dirList.length,
+      emailFiltered: () => this.toast('Compose opened', dirList.length + ' recipients from the current Directory filter — filtering and sending are one motion.'),
+      dirList: dirList.map(p => ({
+        initials: initialsOf(p.name), name: p.name, roleLine: roleLineOf(p),
+        hoursLabel: p.hours ? p.hours + 'h' : '',
+        flagStyle: p.quals.some(x => x.days <= 60)
+          ? { width: 6, height: 6, borderRadius: '50%', background: '#f5b542', flexShrink: 0 }
+          : { display: 'none' },
+        rowStyle: {
+          display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 8, cursor: 'pointer',
+          border: '1px solid ' + (p.id === selId ? 'rgba(245,158,11,0.4)' : 'transparent'),
+          background: p.id === selId ? 'rgba(245,158,11,0.08)' : 'transparent',
+        },
+        select: () => this.set({ dirSel: p.id }),
+      })),
+      selInitials: initialsOf(sel.name), selName: sel.name,
+      selContact: [sel.email, sel.phone].filter(Boolean).join('  ·  ') || 'No contact details recorded',
+      selSegs: sel.segs,
+      emailSel: () => this.toast('Compose opened', 'One recipient: ' + sel.name + (sel.junior ? ' — routed to a guardian.' : '.')),
+      selStats: [
+        { value: sel.hours + 'h', label: 'HOURS THIS SEASON' },
+        { value: money(balanceOf(sel)), label: 'ACCOUNT BALANCE' },
+        { value: String(sel.roles.length), label: 'CLUB ROLES' },
+        { value: String(selFlagged), label: 'QUALS TO RENEW' },
+      ],
+      selRoles: sel.roles,
+      noRolesStyle: sel.roles.length ? { display: 'none' } : { fontSize: 13, color: '#5b6072' },
+      selLedger: [
+        { label: 'Membership subs', amount: money(sel.subs) },
+        { label: 'Match-day fees', amount: money(sel.match) },
+        { label: 'Kit issued', amount: money(sel.kit) },
+        { label: 'Balance', amount: money(balanceOf(sel)), total: true },
+      ].map((l, i) => ({
+        label: l.label, amount: l.amount, rowStyle: ledgerRow(i),
+        amountStyle: { fontFamily: MONO, fontSize: l.total ? 12.5 : 11, fontWeight: l.total ? 700 : 400, color: l.total ? (balanceOf(sel) > 0 ? '#f5b542' : '#16c784') : '#8a90a2', flexShrink: 0 },
+      })),
+      selQuals: sel.quals.map(x => ({
+        name: x.name, expiry: x.expiry,
+        status: x.days < 0 ? 'EXPIRED' : x.days <= 60 ? 'EXPIRES SOON' : 'CURRENT',
+        badgeStyle: qualBadge(x.days),
+      })),
+      noQualsStyle: sel.quals.length ? { display: 'none' } : { fontSize: 13, color: '#5b6072' },
+      selKit: sel.kitItems,
+      noKitStyle: sel.kitItems.length ? { display: 'none' } : { fontSize: 13, color: '#5b6072' },
+
+      // accounts
+      acctCaption: 'One balance per person · ' + acctList.length + ' of ' + people.length + ' shown',
+      acctFilters: [
+        { key: 'all', label: 'Everyone' }, { key: 'owing', label: 'Owes money' }, { key: 'needsTier', label: 'Needs tier' },
+      ].map(f => ({ label: f.label, style: this.pill(st.acctFilter === f.key, f.key === 'owing' ? 'amber' : 'accent'), pick: () => this.set({ acctFilter: f.key }) })),
+      kitOwedFmt: money(kitOwed),
+      emailOwing: () => { this.jump({ screen: 'audiences', audSel: 'owes' }); this.toast('Audience loaded', owing.length + ' people who owe money.'); },
+      acctKpis, acctRows,
+      acctFooter: acctList.length + ' SHOWN · ' + people.length + ' TOTAL',
+      sumSubs: money(acctList.reduce((a, p) => a + p.subs, 0)),
+      sumMatch: money(acctList.reduce((a, p) => a + p.match, 0)),
+      sumKit: money(acctList.reduce((a, p) => a + p.kit, 0)),
+      sumBalance: money(acctList.reduce((a, p) => a + balanceOf(p), 0)),
+
+      // audiences
+      audiences: AUDIENCES.map(a => {
+        const on = a.id === st.audSel;
+        const n = people.filter(a.match).length;
+        return {
+          name: a.name, sub: a.sub, count: String(n),
+          countStyle: { fontFamily: MONO, fontSize: 11, color: on ? 'var(--acc,#f59e0b)' : '#3a3f50', flexShrink: 0 },
+          rowStyle: {
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 11px', borderRadius: 8, cursor: 'pointer',
+            border: '1px solid ' + (on ? 'rgba(245,158,11,0.4)' : 'transparent'),
+            background: on ? 'rgba(245,158,11,0.08)' : 'transparent',
+          },
+          select: () => this.set({ audSel: a.id }),
+        };
+      }),
+      audName: aud.name, audBlurb: aud.blurb, audRules: aud.rules,
+      audCount: String(audMembers.length),
+      audReachable: String(audMembers.filter(p => p.email).length),
+      audUnreachable: String(audMembers.filter(p => !p.email).length),
+      audRows,
+      emailAud: () => this.toast('Compose opened', aud.name + ' — ' + audMembers.length + ' recipients, resolved at send time, not frozen.'),
+
+      // inventory
+      invCaption: (CATS.find(c => c.key === st.invCat) || CATS[0]).label + ' · ' + invList.length + ' of ' + st.products.length + ' lines shown',
+      invCats: CATS.map(c => ({ label: c.label, style: this.pill(st.invCat === c.key, c.key === 'low' ? 'amber' : 'accent'), pick: () => this.set({ invCat: c.key }) })),
+      stockValueFmt: money(st.products.reduce((a, p) => a + p.qty * p.cost, 0)),
+      unitsOnHand: st.products.reduce((a, p) => a + p.qty, 0).toLocaleString(),
+      invRows,
+      movementKinds: KINDS.map(k => ({ label: k.label, style: this.pill(st.moveKind === k.key), pick: () => this.set({ moveKind: k.key }) })),
+      invSelLabel: invSel.name + ' · ' + invSel.meta.split(' · ')[0],
+      invSelRetail: invSel.retail ? money(invSel.retail) : '—',
+      moveQty: st.moveQty, setMoveQty: (e) => this.set({ moveQty: e.target.value }),
+      issueTo: st.issueTo, setIssueTo: (e) => this.set({ issueTo: e.target.value }),
+      issueOptions: people.map(p => ({ id: p.id, label: p.name + ' · ' + (p.tier || 'no tier') + ' · ' + money(balanceOf(p)) })),
+      movePreview,
+      commitLabel: isIssue ? 'Issue & charge' : 'Record',
+      commitMovement: commit(true), commitFree: commit(false),
+      movements: st.movements.map(m => ({
+        date: m.date, label: m.label, amount: m.amount,
+        amountStyle: { fontFamily: MONO, fontSize: 11, color: m.tone === 'warn' ? '#f5b542' : m.tone === 'faint' ? '#3a3f50' : '#8a90a2', flexShrink: 0 },
+      })),
+
+      // drawer + toast
+      drawerOpen: !!drawerP,
+      drawerInitials: drawerP ? initialsOf(drawerP.name) : '',
+      drawerName: drawerP ? drawerP.name : '',
+      drawerContact: drawerP ? ([drawerP.email, drawerP.phone].filter(Boolean).join('  ·  ') || 'No contact details recorded') : '',
+      drawerBalance: drawerP ? money(balanceOf(drawerP)) : '',
+      drawerBalanceNote: drawerP ? (money(drawerP.subs) + ' subs · ' + money(drawerP.match) + ' match fees · ' + money(drawerP.kit) + ' kit') : '',
+      drawerSegs: drawerP ? drawerP.segs : [],
+      drawerFrom: st.drawerFrom,
+      openInDirectory: () => this.jump({ screen: 'directory', dirSel: st.drawer, dirSeg: 'All', query: '' }),
+      closeDrawer: () => this.set({ drawer: null }),
+      stop: (e) => e.stopPropagation(),
+
+      toastOpen: !!st.toast,
+      toastTitle: st.toast ? st.toast.title : '',
+      toastBody: st.toast ? st.toast.body : '',
+      clearToast: () => this.set({ toast: null }),
+    });
+  }
+}
+</script>
+</body>
+</html>
