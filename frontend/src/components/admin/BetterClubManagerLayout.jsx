@@ -58,8 +58,8 @@ export function navFromGroups(groups) {
 
 // BetterClubManager stopped being its own surface when it merged into
 // BetterClubhouse — these tools are the People and Club sections of that one
-// sidebar. GROUPS above is still exported because BetterClubManagerHome's
-// ModuleHub reads it; the shell it renders is the merged one.
+// sidebar. This wrapper stays only so the pages that still import it keep
+// compiling; the shell they get is the merged one.
 export default function BetterClubManagerLayout(props) {
   return <BetterClubhouseLayout {...props} />
 }

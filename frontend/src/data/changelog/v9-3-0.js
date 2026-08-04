@@ -1,7 +1,7 @@
 export default {
   version: 'v9.3.0',
   date: '2026-08-04',
-  sortKey: '2026-08-04T12:00:00Z',
+  sortKey: '2026-08-04T15:00:00Z',
   title: 'BetterAdmin is now BetterClubhouse — one back office instead of four',
   items: [
     'BetterFees, BetterComms, BetterMerch and BetterClubManager are one module now: BetterClubhouse, with one sidebar, one amber accent and six sections — People, Money, Stock, Comms, Club and Setup. Every tool kept the address it already had, so your bookmarks still work.',
