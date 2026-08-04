@@ -4400,6 +4400,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE club_role_types ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'volunteer'"))
         await conn.execute(text("ALTER TABLE committee_positions ADD COLUMN IF NOT EXISTS is_office_bearer BOOLEAN NOT NULL DEFAULT FALSE"))
 
+    # Migration 215: per-club custom typography (display + body font, each
+    # preset or uploaded). Byte-identical to alembic/versions/215_club_custom_fonts.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_config JSONB"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_display_data BYTEA"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_display_mime TEXT"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_body_data BYTEA"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_body_mime TEXT"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

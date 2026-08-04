@@ -2,7 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
-import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss, deriveDarkPalette, gradientCss } from '../../lib/theme'
+import {
+  BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss,
+  deriveDarkPalette, gradientCss, resolveClubFonts, DISPLAY_FONT_PRESETS, BODY_FONT_PRESETS,
+} from '../../lib/theme'
 import { validateImageFile } from '../../lib/validation'
 import { BASE_URL } from '../../data/marketing'
 
@@ -32,6 +35,59 @@ function ColorField({ label, hint, value, fallback, onChange, onReset }) {
           className="flex-1 bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-accent" />
       </div>
       {hint && <p className="font-mono text-[10px] text-pb-faintest mt-1">{hint}</p>}
+    </div>
+  )
+}
+
+const FONT_ALLOWED_EXTS = '.woff2,.woff,.ttf,.otf'
+
+function FontRoleField({ role, label, hint, presets, config, sampleText, busy, onSelectPreset, onSelectDefault, onUpload, onRemove }) {
+  const fileRef = useRef(null)
+  const source = config?.source
+
+  const handlePick = (e) => {
+    const value = e.target.value
+    if (!value) { onSelectDefault(); return }
+    onSelectPreset(value)
+  }
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const stem = file.name.replace(/\.[^.]+$/, '')
+    const family = window.prompt('Font name (shown in Typography settings)', stem) || stem
+    onUpload(file, family)
+  }
+
+  return (
+    <div>
+      <label className={LABEL}>{label}</label>
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <select value={source === 'preset' ? config.preset : ''} onChange={handlePick} disabled={busy}
+          className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+          <option value="">App default</option>
+          {presets.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
+        </select>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+          className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-50">
+          {busy ? 'Uploading…' : 'Upload your own font'}
+        </button>
+        {source === 'upload' && (
+          <button type="button" onClick={onRemove} disabled={busy}
+            className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-red transition disabled:opacity-50">
+            Remove
+          </button>
+        )}
+      </div>
+      <input ref={fileRef} type="file" accept={FONT_ALLOWED_EXTS} className="hidden" onChange={handleFile} />
+      {source === 'upload' && (
+        <p className="font-mono text-[10px] text-pb-faint mb-1">Uploaded: {config.family}</p>
+      )}
+      <p className="font-mono text-[10px] text-pb-faintest">{hint}</p>
+      <p className="mt-2 text-lg text-pb-text truncate" style={{ fontFamily: `var(--pb-font-${role})` }}>
+        {sampleText}
+      </p>
     </div>
   )
 }
@@ -115,6 +171,9 @@ export default function AdminSettings() {
   const [logoBusy, setLogoBusy] = useState(false)
   const [logoEditorSource, setLogoEditorSource] = useState(null)
   const [pinInput, setPinInput] = useState('')
+  const [fontConfig, setFontConfig] = useState({})
+  const [fontMeta, setFontMeta] = useState({})
+  const [fontBusy, setFontBusy] = useState({ display: false, body: false })
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -122,6 +181,11 @@ export default function AdminSettings() {
       setSettings(s)
       setLogoUrl(s.logo_url || null)
       setTheme(resolveTheme(s.theme_config))
+      setFontConfig(s.font_config || {})
+      setFontMeta({
+        font_display_url: s.font_display_url, font_display_format: s.font_display_format,
+        font_body_url: s.font_body_url, font_body_format: s.font_body_format,
+      })
       setForm({
         name: s.name || '',
         contact_email: s.contact_email || '',
@@ -147,9 +211,10 @@ export default function AdminSettings() {
       document.head.appendChild(el)
       return el
     })()
-    style.textContent = buildThemeCss(theme)
+    const fonts = resolveClubFonts({ font_config: fontConfig, ...fontMeta })
+    style.textContent = buildThemeCss(theme, fonts)
     return () => { document.getElementById('admin-theme-preview')?.remove() }
-  }, [theme])
+  }, [theme, fontConfig, fontMeta])
 
   const flash = (text) => {
     setMsg(text)
@@ -222,12 +287,50 @@ export default function AdminSettings() {
     }
   }
 
+  const selectFontPreset = (role, preset) =>
+    setFontConfig(c => ({ ...c, [role]: { source: 'preset', preset } }))
+  const selectFontDefault = (role) =>
+    setFontConfig(c => { const n = { ...c }; delete n[role]; return n })
+
+  const uploadFont = async (role, file, family) => {
+    setFontBusy(b => ({ ...b, [role]: true }))
+    setMsg('')
+    try {
+      const res = await api.adminUploadFont(role, file, family)
+      setFontConfig(res.font_config || {})
+      setFontMeta({
+        font_display_url: res.font_display_url, font_display_format: res.font_display_format,
+        font_body_url: res.font_body_url, font_body_format: res.font_body_format,
+      })
+      flash(`${role === 'display' ? 'Heading' : 'Body'} font updated`)
+    } catch (err) {
+      flashError(err.message)
+    } finally {
+      setFontBusy(b => ({ ...b, [role]: false }))
+    }
+  }
+
+  const removeFont = async (role) => {
+    setFontBusy(b => ({ ...b, [role]: true }))
+    setMsg('')
+    try {
+      const res = await api.adminDeleteFont(role)
+      setFontConfig(res.font_config || {})
+      setFontMeta(m => ({ ...m, [`font_${role}_url`]: null, [`font_${role}_format`]: null }))
+      flash(`${role === 'display' ? 'Heading' : 'Body'} font removed`)
+    } catch (err) {
+      flashError(err.message)
+    } finally {
+      setFontBusy(b => ({ ...b, [role]: false }))
+    }
+  }
+
   const save = async (e) => {
     e.preventDefault()
     setSaving(true)
     setMsg('')
     try {
-      const payload = { ...form, theme_config: theme }
+      const payload = { ...form, theme_config: theme, font_config: fontConfig }
       if (/^\d{4}$/.test(pinInput)) payload.access_pin = pinInput
       await api.adminPatchSettings(payload)
       setPinInput('')
@@ -471,6 +574,30 @@ export default function AdminSettings() {
               <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
                 Cards, panels and borders are derived from the base so a custom dark colour (navy, maroon…) stays cohesive.
               </p>
+            </div>
+          </div>
+
+          {/* --- Typography --- */}
+          <div className="pt-5 pb-hairline-t">
+            <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide2 mb-1">Typography</h2>
+            <p className="font-mono text-[10px] text-pb-faintest mb-4">
+              Pick a built-in font or upload your own (e.g. to match your club's own website) — separately for headings and body text.
+            </p>
+            <div className="space-y-6">
+              <FontRoleField role="display" label="Headings" hint="Page titles, navigation, section headers. Font files: woff2, woff, ttf or otf, max 6 MB."
+                presets={DISPLAY_FONT_PRESETS} config={fontConfig.display} busy={fontBusy.display}
+                sampleText="The Applecross Cricket Club"
+                onSelectPreset={p => selectFontPreset('display', p)}
+                onSelectDefault={() => selectFontDefault('display')}
+                onUpload={(file, family) => uploadFont('display', file, family)}
+                onRemove={() => removeFont('display')} />
+              <FontRoleField role="body" label="Body text" hint="Ordinary paragraph and table text across the site. Font files: woff2, woff, ttf or otf, max 6 MB."
+                presets={BODY_FONT_PRESETS} config={fontConfig.body} busy={fontBusy.body}
+                sampleText="Season averages, records and match reports."
+                onSelectPreset={p => selectFontPreset('body', p)}
+                onSelectDefault={() => selectFontDefault('body')}
+                onUpload={(file, family) => uploadFont('body', file, family)}
+                onRemove={() => removeFont('body')} />
             </div>
           </div>
 

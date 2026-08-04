@@ -67,6 +67,82 @@ export const PALETTE_FIELDS = [
   { key: 'text', label: 'Text' },
 ]
 
+/**
+ * Public-site typography. FONT_STACKS are the app defaults (mirrors
+ * tailwind.config.js's `display`/`body` fontFamily) — always the fallback
+ * tail of a club's chosen font, and what's used when a club hasn't set one.
+ *
+ * DISPLAY_FONT_PRESETS / BODY_FONT_PRESETS are the curated built-in choices —
+ * every family here is already loaded site-wide via the big Google Fonts
+ * <link> in index.html, so picking a preset needs no extra network request.
+ * Keep the key set in sync by hand with backend/app/services/fonts.py
+ * (DISPLAY_FONT_PRESET_KEYS / BODY_FONT_PRESET_KEYS) — no shared build step
+ * between the two.
+ */
+export const FONT_STACKS = {
+  display: "'Geist','Barlow Condensed','Oswald',sans-serif",
+  body: "'Geist','Inter',system-ui,sans-serif",
+}
+
+export const DISPLAY_FONT_PRESETS = [
+  { key: 'barlow_condensed', name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif" },
+  { key: 'oswald', name: 'Oswald', family: "'Oswald', sans-serif" },
+  { key: 'anton', name: 'Anton', family: "'Anton', sans-serif" },
+  { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
+  { key: 'archivo_black', name: 'Archivo Black', family: "'Archivo Black', sans-serif" },
+  { key: 'teko', name: 'Teko', family: "'Teko', sans-serif" },
+  { key: 'big_shoulders', name: 'Big Shoulders', family: "'Big Shoulders Display', sans-serif" },
+  { key: 'antonio', name: 'Antonio', family: "'Antonio', sans-serif" },
+  { key: 'saira_condensed', name: 'Saira Condensed', family: "'Saira Condensed', sans-serif" },
+  { key: 'abril', name: 'Abril Fatface', family: "'Abril Fatface', serif" },
+  { key: 'bungee', name: 'Bungee', family: "'Bungee', sans-serif" },
+  { key: 'playfair', name: 'Playfair Display', family: "'Playfair Display', serif" },
+  { key: 'fredoka', name: 'Fredoka', family: "'Fredoka', sans-serif" },
+]
+
+export const BODY_FONT_PRESETS = [
+  { key: 'inter', name: 'Inter', family: "'Inter', sans-serif" },
+  { key: 'geist', name: 'Geist', family: "'Geist', sans-serif" },
+  { key: 'hanken', name: 'Hanken Grotesk', family: "'Hanken Grotesk', sans-serif" },
+  { key: 'archivo', name: 'Archivo', family: "'Archivo', sans-serif" },
+  { key: 'spectral', name: 'Spectral', family: "'Spectral', serif" },
+  { key: 'cormorant', name: 'Cormorant Garamond', family: "'Cormorant Garamond', serif" },
+]
+
+export const FONT_PRESETS_BY_ROLE = { display: DISPLAY_FONT_PRESETS, body: BODY_FONT_PRESETS }
+
+/**
+ * Resolve a club's chosen fonts (from its font_config + resolved upload
+ * URLs) into what buildThemeCss needs: a CSS font-family value per role, plus
+ * an optional @font-face descriptor for an uploaded file. Returns
+ * `{ display: {...}|null, body: {...}|null }` — null means "use the app default".
+ */
+export function resolveClubFonts(club) {
+  const cfg = (club && club.font_config) || {}
+  const out = {}
+  for (const role of ['display', 'body']) {
+    const entry = cfg[role]
+    if (entry && entry.source === 'preset') {
+      const preset = FONT_PRESETS_BY_ROLE[role].find(f => f.key === entry.preset)
+      if (preset) { out[role] = { cssFamily: preset.family, fontFace: null }; continue }
+    }
+    if (entry && entry.source === 'upload') {
+      const url = club && club[`font_${role}_url`]
+      const format = club && club[`font_${role}_format`]
+      if (url) {
+        const family = String(entry.family || 'Club Font').replace(/['"\\]/g, '').slice(0, 60)
+        out[role] = {
+          cssFamily: `'${family}', ${FONT_STACKS[role]}`,
+          fontFace: { family, url, format: format || 'woff2' },
+        }
+        continue
+      }
+    }
+    out[role] = null
+  }
+  return out
+}
+
 /** Expand #abc → #aabbcc and lowercase; returns null if not a 3/6-digit hex. */
 function normHex(hex) {
   const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec((hex || '').trim())
@@ -164,10 +240,28 @@ export function resolveTheme(config) {
   }
 }
 
-/** Build the CSS text injected as <style id="club-theme">. */
-export function buildThemeCss(config) {
+/** Build the @font-face rule(s) for a club's uploaded font(s), if any. */
+function buildFontFaceCss(fonts) {
+  if (!fonts) return ''
+  return ['display', 'body']
+    .map(role => fonts[role]?.fontFace)
+    .filter(Boolean)
+    .map(f => `@font-face{font-family:'${f.family}';src:url('${f.url}') format('${f.format}');font-display:swap;}`)
+    .join('')
+}
+
+/**
+ * Build the CSS text injected as <style id="club-theme">.
+ * `fonts` is the result of resolveClubFonts(club) — pass it whenever the
+ * caller has a club object with font_config, so --pb-font-display/-body and
+ * any @font-face rules are included alongside the colour palette.
+ */
+export function buildThemeCss(config, fonts) {
   const t = resolveTheme(config)
+  const fontFaces = buildFontFaceCss(fonts)
   const shared = [
+    `--pb-font-display:${fonts?.display?.cssFamily || FONT_STACKS.display}`,
+    `--pb-font-body:${fonts?.body?.cssFamily || FONT_STACKS.body}`,
     `--pb-accent:${t.accent}`,
     `--pb-accent-2:${t.accent2}`,
     `--pb-gradient:${gradientCss(t.accent, t.accent2)}`,
@@ -206,7 +300,8 @@ export function buildThemeCss(config) {
     ].join(';')
   }
 
-  return `:root{${shared}}` +
+  return fontFaces +
+    `:root{${shared}}` +
     `[data-theme="dark"]{${palette(t.dark)};${safeVars('dark')}}` +
     `[data-theme="light"]{${palette(t.light)};${safeVars('light')}}`
 }
