@@ -127,7 +127,10 @@ function valueLabel(value, idName, kind) {
 // should be called ("1969", "Summer 1972/73") — no reason to ask the admin
 // to retype it. Pulls out a 4-digit year if one's present anywhere in it.
 function parseSeasonGuess(label) {
-  const s = String(label || '').trim()
+  // A bare-year Excel cell sometimes comes through float-typed (1980.0) —
+  // the parser stringifies every cell as-is, so a clean ".0" tail is worth
+  // stripping before it becomes a season's permanent display name.
+  const s = String(label || '').trim().replace(/^(\d{4})\.0$/, '$1')
   const m = s.match(/(19|20)\d{2}/)
   return { name: s, year: m ? parseInt(m[0], 10) : null }
 }

@@ -120,6 +120,9 @@ class SettingsPatch(BaseModel):
     theme_mode: Optional[str] = None
     player_name_format: Optional[str] = None
     is_active: Optional[bool] = None
+    public_show_bog_leaderboard: Optional[bool] = None
+    public_show_club_bf_leaderboard: Optional[bool] = None
+    public_show_comp_bf_leaderboard: Optional[bool] = None
 
 
 @router.get("/settings")
@@ -131,6 +134,9 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
         "theme_mode": club.theme_mode, "is_active": club.is_active,
         "player_name_format": club.player_name_format,
         "logo_url": club.logo_url,
+        "public_show_bog_leaderboard": club.public_show_bog_leaderboard,
+        "public_show_club_bf_leaderboard": club.public_show_club_bf_leaderboard,
+        "public_show_comp_bf_leaderboard": club.public_show_comp_bf_leaderboard,
     }
 
 

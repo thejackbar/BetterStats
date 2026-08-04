@@ -27,6 +27,7 @@ const NAV = [
   { to: '/admin/sponsors', label: 'Sponsors' },
   { heading: 'Account' },
   { to: '/admin/users', label: 'Users' },
+  { to: '/admin/settings', label: 'Settings' },
 ]
 
 const SUPER_NAV = [

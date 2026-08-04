@@ -5,24 +5,35 @@ import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
 import { Select, PlayerCell, displayName } from '../components/bits'
 
-const STATS = [
-  { key: 'goals', label: 'Goals' },
+const ALL_STATS = [
   { key: 'games', label: 'Games' },
-  { key: 'bogs', label: 'Best on Ground' },
-  { key: 'club_bf_votes', label: 'Club B&F votes' },
-  { key: 'comp_bf_votes', label: 'Competition B&F votes' },
+  { key: 'goals', label: 'Goals' },
+  { key: 'bogs', label: 'Best on Ground', flag: 'public_show_bog_leaderboard' },
+  { key: 'club_bf_votes', label: 'Club B&F votes', flag: 'public_show_club_bf_leaderboard' },
+  { key: 'comp_bf_votes', label: 'Competition B&F votes', flag: 'public_show_comp_bf_leaderboard' },
 ]
 
 export default function Leaderboard() {
   const { club } = useOutletContext()
-  const [stat, setStat] = useState('goals')
+  // Games and Goals always show; the rest are each a club's own opt-out
+  // (Settings → Public leaderboard) — default true, so nothing already-live
+  // disappears until a club actively turns one off.
+  const STATS = ALL_STATS.filter(s => !s.flag || club[s.flag] !== false)
+  const [stat, setStat] = useState('games')
   const [seasonId, setSeasonId] = useState(null)
   const [gradeId, setGradeId] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const base = `/${club.slug}`
 
-  const statInfo = STATS.find(s => s.key === stat)
+  // The active stat could be one this club has since turned off — fall back
+  // to the always-available Games tab rather than showing a dead selection.
+  useEffect(() => {
+    if (!STATS.some(s => s.key === stat)) setStat('games')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [club.id])
+
+  const statInfo = STATS.find(s => s.key === stat) || STATS[0]
 
   useEffect(() => { setGradeId(null) }, [seasonId])
 

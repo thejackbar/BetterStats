@@ -22,6 +22,13 @@ export default function Dashboard() {
   if (loading && !data) return <div className="pt-16 flex justify-center"><LoadingSpinner /></div>
   const s = data?.summary || {}
 
+  // A result card is only shown when it's trustworthy: a specific season
+  // that actually has real synced match data, or — with no season picked —
+  // a club whose entire history is synced (no Import Stats upload sitting
+  // underneath it). Otherwise "Games: 145" reads as the whole story when
+  // it's really just the synced sliver of a much longer real history.
+  const showResults = seasonId ? (s.played || 0) > 0 : !data?.has_imported_history
+
   const board = (title, rows, statKey, statLabel) => (
     <div className="pb-card p-4">
       <SectionTitle>{title}</SectionTitle>
@@ -41,29 +48,31 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-bold">{club.name}</h1>
-        <div className="ml-auto">
-          <Select
-            value={seasonId}
-            onChange={setSeasonId}
-            placeholder="All seasons"
-            options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))}
-          />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex items-stretch gap-3.5">
+          <span className="w-1 rounded-full shrink-0" style={{ background: 'var(--pb-gradient)' }} />
+          <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-pb-text">{club.name}</h1>
         </div>
+        <Select
+          value={seasonId}
+          onChange={setSeasonId}
+          placeholder="All seasons"
+          options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))}
+        />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Games" value={s.played} accent large />
-        <StatCard label="Wins" value={s.wins} large />
-        <StatCard label="Losses" value={s.losses} large />
-        <StatCard label="Draws" value={s.draws} large />
-      </div>
+      {showResults && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Games" value={s.played} accent large />
+          <StatCard label="Wins" value={s.wins} large />
+          <StatCard label="Losses" value={s.losses} large />
+          <StatCard label="Draws" value={s.draws} large />
+        </div>
+      )}
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid md:grid-cols-2 gap-4">
         {board('Leading goal kickers', data?.top_goal_kickers, 'goals', 'goals')}
         {board('Most games', data?.most_games, 'games', 'games')}
-        {board('Most best on grounds', data?.most_bogs, 'bogs', 'BOG')}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">

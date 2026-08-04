@@ -63,9 +63,21 @@ async def get_results(org_id: uuid.UUID,
 async def get_summary(org_id: uuid.UUID,
                       season_id: Optional[uuid.UUID] = None,
                       db: AsyncSession = Depends(get_db)):
-    """Dashboard payload: headline W/L/D, top goal kickers, most games, most
-    BOGs, recent + upcoming games."""
+    """Dashboard payload: headline W/L/D, top goal kickers, most games,
+    recent + upcoming games."""
     summary = await aggregations.club_results_summary(db, org_id, season_id)
+
+    # Whole-org flag (not scoped to the selected season) — the frontend uses
+    # this to decide whether the club's Games/Wins/Losses/Draws card is safe
+    # to show for "All seasons": a club with ANY imported history has a
+    # summary that only ever reflects its synced fraction of a much longer
+    # real history, which reads as a complete total when it isn't. A season-
+    # scoped view doesn't need this — summary.played for that one season is
+    # either real or it isn't.
+    has_imported = await db.execute(text(
+        "SELECT EXISTS(SELECT 1 FROM afl_imported_stats WHERE organisation_id = :org)"
+    ), {"org": str(org_id)})
+    has_imported_history = bool(has_imported.scalar())
 
     params: dict = {"org": str(org_id)}
     season_clause_s = ""
@@ -75,7 +87,7 @@ async def get_summary(org_id: uuid.UUID,
         season_clause_s = "AND s.season_id = :season"
         season_clause_i = "AND i.season_id = :season"
 
-    _TOP_COLS = {"goals": "goals", "games": "games", "bogs": "bog_count"}
+    _TOP_COLS = {"goals": "goals", "games": "games"}
 
     # Combines synced (afl_player_season_stats) with imported (Import Stats
     # upload) the same way the leaderboard/admin Players list do — without
@@ -141,9 +153,9 @@ async def get_summary(org_id: uuid.UUID,
 
     return {
         "summary": summary,
+        "has_imported_history": has_imported_history,
         "top_goal_kickers": await _top("goals"),
         "most_games": await _top("games"),
-        "most_bogs": await _top("bogs"),
         "recent_games": [dict(r._mapping) for r in recent],
         "upcoming_games": [dict(r._mapping) for r in upcoming],
     }

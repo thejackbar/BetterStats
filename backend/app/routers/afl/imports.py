@@ -128,7 +128,14 @@ async def _org_players(db: AsyncSession, org_id) -> list:
 
 
 async def _org_seasons(db: AsyncSession, org_id) -> list:
-    rows = (await db.execute(select(Season).where(Season.organisation_id == org_id))).scalars().all()
+    # No ORDER BY here previously — the Seasons step's "search all seasons"
+    # picker (and GET /seasons below, which the wizard's dropdown reads)
+    # showed seasons in whatever arbitrary order Postgres happened to
+    # return, not chronological.
+    rows = (await db.execute(
+        select(Season).where(Season.organisation_id == org_id)
+        .order_by(Season.year.desc().nulls_last(), Season.name.desc())
+    )).scalars().all()
     return [(str(s.id), s.name or "", s.year) for s in rows]
 
 

@@ -26,6 +26,7 @@ import AflAdminAwardDefinitions from './pages/admin/AflAdminAwardDefinitions'
 import AflAdminAwards from './pages/admin/AflAdminAwards'
 import AflAdminSponsors from './pages/admin/AflAdminSponsors'
 import AflAdminUsers from './pages/admin/AflAdminUsers'
+import AflAdminSettings from './pages/admin/AflAdminSettings'
 import AflAdminSuperUsers from './pages/admin/AflAdminSuperUsers'
 import AflAdminSuperClubs from './pages/admin/AflAdminSuperClubs'
 
@@ -57,6 +58,7 @@ export default function AflApp() {
                   <Route path="awards" element={<AflAdminAwards />} />
                   <Route path="sponsors" element={<AflAdminSponsors />} />
                   <Route path="users" element={<AflAdminUsers />} />
+                  <Route path="settings" element={<AflAdminSettings />} />
                   <Route path="super/users" element={<AflAdminSuperUsers />} />
                   <Route path="super/clubs" element={<AflAdminSuperClubs />} />
                 </Route>

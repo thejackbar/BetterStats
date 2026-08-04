@@ -93,4 +93,7 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         "sport": "afl",
         "seasons": [dict(r._mapping) for r in seasons],
         "grades": grades,
+        "public_show_bog_leaderboard": org.public_show_bog_leaderboard,
+        "public_show_club_bf_leaderboard": org.public_show_club_bf_leaderboard,
+        "public_show_comp_bf_leaderboard": org.public_show_comp_bf_leaderboard,
     }

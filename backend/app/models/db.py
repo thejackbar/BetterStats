@@ -287,6 +287,15 @@ class Organisation(Base):
     # all-time club records — those are already scoped to a `players` join
     # that a NULL player_id naturally never matches.
     include_fill_ins_in_stats = Column(Boolean, nullable=False, server_default="true", default=True)
+    # ─── AFL — optional public leaderboard categories (migration 217) ────────
+    # Games and Goals are always shown; a club decides whether Best on Ground
+    # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
+    # only ever populated via a historical Import Stats upload, never synced)
+    # clutter the public leaderboard tab list or not. Default on (opt-out),
+    # preserving what every club already saw before this toggle existed.
+    public_show_bog_leaderboard = Column(Boolean, nullable=False, server_default="true", default=True)
+    public_show_club_bf_leaderboard = Column(Boolean, nullable=False, server_default="true", default=True)
+    public_show_comp_bf_leaderboard = Column(Boolean, nullable=False, server_default="true", default=True)
     # ─── Better ecosystem entitlements (migration 056) ───────────────────────
     # module_overrides is the explicit list of modules a club holds, and the
     # single source of truth for entitlement (see app/auth/modules.py). Core

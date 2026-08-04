@@ -1,9 +1,61 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line,
+} from 'recharts'
 import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
 import { SectionTitle, ResultPill } from '../components/bits'
+
+// ── Charts — mirrors BetterStats (Core)'s player-profile chart language
+// (pages/PlayerProfile.jsx: recharts, CSS-var colours, a single shared
+// tooltip style) but kept to a single Y axis per chart throughout, rather
+// than cricket's runs/wickets dual-axis SeasonChart — two measures of
+// different scale get their own chart, not a second axis on one.
+const CHART_TOOLTIP = {
+  contentStyle: { background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline2, var(--pb-hairline))', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: 'var(--pb-dim)' },
+  itemStyle: { color: 'var(--pb-text)' },
+}
+
+function SeasonBarChart({ rows, dataKey, name, color }) {
+  const chartData = (rows || []).filter(r => r.season_id).slice().reverse()
+  if (!chartData.length) return null
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" vertical={false} />
+        <XAxis dataKey="season_name" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} allowDecimals={false} width={32} />
+        <Tooltip {...CHART_TOOLTIP} />
+        <Bar dataKey={dataKey} name={name} fill={color} radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function CumulativeGoalsChart({ rows }) {
+  const seasons = (rows || []).filter(r => r.season_id).slice().reverse()
+  if (!seasons.length) return null
+  let cumulative = 0
+  const chartData = seasons.map(s => {
+    cumulative += (s.goals || 0)
+    return { season: s.season_name, total: cumulative, season_goals: s.goals || 0 }
+  })
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" vertical={false} />
+        <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} allowDecimals={false} width={40} />
+        <Tooltip {...CHART_TOOLTIP} formatter={(v, key) => [Number(v).toLocaleString(), key === 'total' ? 'Career total' : 'Season goals']} />
+        <Bar dataKey="season_goals" name="season_goals" fill="var(--pb-chart-1)" fillOpacity={0.25} radius={[2, 2, 0, 0]} />
+        <Line type="monotone" dataKey="total" name="total" stroke="var(--pb-chart-1)" strokeWidth={2} dot={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
 
 export default function PlayerProfile() {
   const { club } = useOutletContext()
@@ -21,24 +73,28 @@ export default function PlayerProfile() {
   if (!data) return <div className="pt-16 flex justify-center"><LoadingSpinner /></div>
   const c = data.career || {}
 
-  // Whole-season rows only for the season table (grade rows shown nested).
+  // Whole-season rows only for the season table + charts (per-grade rows nested under them).
   const seasonRows = (data.seasons || []).filter(s => !s.grade_id)
   const gradeRows = (data.seasons || []).filter(s => s.grade_id)
+  const hasChartData = seasonRows.filter(s => s.season_id).length >= 2
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        {data.photo_url
-          ? <img src={data.photo_url} alt="" className="h-16 w-16 rounded-full object-cover" />
-          : <span className="h-16 w-16 rounded-full bg-pb-surface2 flex items-center justify-center text-xl text-pb-faint">
-              {(data.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('')}
-            </span>}
-        <div>
-          <h1 className="text-2xl font-bold">{data.name}</h1>
-          <p className="text-sm text-pb-faint">
-            {c.first_year ? (c.first_year === c.last_year ? c.first_year : `${c.first_year} – ${c.last_year}`) : ''}
-            {c.seasons ? ` · ${c.seasons} season${c.seasons > 1 ? 's' : ''}` : ''}
-          </p>
+      <div className="flex items-stretch gap-3.5">
+        <span className="w-1 rounded-full shrink-0" style={{ background: 'var(--pb-gradient)' }} />
+        <div className="flex items-center gap-4">
+          {data.photo_url
+            ? <img src={data.photo_url} alt="" className="h-20 w-20 rounded-full object-cover" />
+            : <span className="h-20 w-20 rounded-full bg-pb-surface2 flex items-center justify-center text-2xl text-pb-faint">
+                {(data.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('')}
+              </span>}
+          <div>
+            <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-pb-text">{data.name}</h1>
+            <p className="text-sm text-pb-dim font-mono mt-1">
+              {c.first_year ? (c.first_year === c.last_year ? c.first_year : `${c.first_year} – ${c.last_year}`) : ''}
+              {c.seasons ? ` · ${c.seasons} season${c.seasons > 1 ? 's' : ''}` : ''}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -54,6 +110,26 @@ export default function PlayerProfile() {
           large
         />
       </div>
+
+      {hasChartData && (
+        <div>
+          <SectionTitle>Career trajectory</SectionTitle>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="pb-card p-4">
+              <p className="font-mono text-[10px] tracking-wide uppercase text-pb-faint mb-2">Goals by season</p>
+              <SeasonBarChart rows={seasonRows} dataKey="goals" name="Goals" color="var(--pb-chart-1)" />
+            </div>
+            <div className="pb-card p-4">
+              <p className="font-mono text-[10px] tracking-wide uppercase text-pb-faint mb-2">Games by season</p>
+              <SeasonBarChart rows={seasonRows} dataKey="games" name="Games" color="var(--pb-chart-2)" />
+            </div>
+          </div>
+          <div className="pb-card p-4 mt-4">
+            <p className="font-mono text-[10px] tracking-wide uppercase text-pb-faint mb-2">Cumulative career goals</p>
+            <CumulativeGoalsChart rows={seasonRows} />
+          </div>
+        </div>
+      )}
 
       <div>
         <SectionTitle>Season by season</SectionTitle>
@@ -87,6 +163,9 @@ export default function PlayerProfile() {
                   ))}
                 </Fragment>
               ))}
+              {seasonRows.length === 0 && (
+                <tr><td colSpan={5} className="px-3 py-4 text-center text-pb-faint text-sm">No seasons recorded yet.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
