@@ -66,6 +66,20 @@ async def list_players(
     """), {"org": str(club.id)})
     imported = {str(r.player_id): dict(r._mapping) for r in imported_res}
 
+    # Club/competition B&F vote tallies have no synced counterpart at all —
+    # PlayHQ carries no concept of club-internal best & fairest voting, so
+    # unlike games/goals/behinds/bogs there's nothing to reconcile against
+    # afl_player_season_stats here, just a straight sum of every imported row.
+    votes_res = await db.execute(text("""
+        SELECT player_id,
+               COALESCE(SUM(club_bf_votes), 0) AS club_bf_votes,
+               COALESCE(SUM(comp_bf_votes), 0) AS comp_bf_votes
+        FROM afl_imported_stats
+        WHERE organisation_id = :org
+        GROUP BY player_id
+    """), {"org": str(club.id)})
+    votes = {str(r.player_id): dict(r._mapping) for r in votes_res}
+
     last_res = await db.execute(text("""
         SELECT l.player_id, MAX(g.played_at) AS last_played
         FROM afl_player_game_lines l
@@ -92,6 +106,8 @@ async def list_players(
             "goals": summary.get(str(p.id), {}).get("goals", 0) + imported.get(str(p.id), {}).get("goals", 0),
             "behinds": summary.get(str(p.id), {}).get("behinds", 0) + imported.get(str(p.id), {}).get("behinds", 0),
             "bogs": summary.get(str(p.id), {}).get("bogs", 0) + imported.get(str(p.id), {}).get("bogs", 0),
+            "club_bf_votes": votes.get(str(p.id), {}).get("club_bf_votes", 0),
+            "comp_bf_votes": votes.get(str(p.id), {}).get("comp_bf_votes", 0),
             "has_imported_stats": str(p.id) in imported,
             "last_played": last_played.get(str(p.id)),
         }

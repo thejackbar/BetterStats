@@ -7,8 +7,9 @@ const STEPS = ['Upload', 'Columns', 'Players', 'Seasons', 'Grades', 'Confirm']
 const FIELD_LABELS = {
   player_name: 'Player name', season_label: 'Season', grade_label: 'Grade / team',
   games_played: 'Games', goals: 'Goals', behinds: 'Behinds', bog_count: 'Best on Ground', captain_games: 'Captain games',
+  club_bf_votes: 'Club B&F votes', comp_bf_votes: 'Competition B&F votes',
 }
-const FIELD_ORDER = ['player_name', 'season_label', 'grade_label', 'games_played', 'goals', 'behinds', 'bog_count', 'captain_games']
+const FIELD_ORDER = ['player_name', 'season_label', 'grade_label', 'games_played', 'goals', 'behinds', 'bog_count', 'captain_games', 'club_bf_votes', 'comp_bf_votes']
 const REQUIRED_FIELDS = new Set(['player_name'])
 
 function Stepper({ step }) {
@@ -83,7 +84,10 @@ function PastImports({ refreshKey }) {
                         {players.map((p, i) => (
                           <div key={i} className="text-xs flex justify-between">
                             <span>{p.player_name} {p.season_label ? `— ${p.season_label}` : ''} {p.grade_label ? `(${p.grade_label})` : ''}</span>
-                            <span className="text-pb-faint">{p.games_played}g {p.goals}gl {p.behinds}b</span>
+                            <span className="text-pb-faint">
+                              {p.games_played}g {p.goals}gl {p.behinds}b
+                              {(p.club_bf_votes || p.comp_bf_votes) ? ` · ${p.club_bf_votes || 0} club/${p.comp_bf_votes || 0} comp votes` : ''}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -376,7 +380,7 @@ export default function AflAdminImport() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="pb-hairline-b">
-                <tr>{['Player', 'Rows', 'Games', 'Goals', 'Behinds', ''].map(h => (
+                <tr>{['Player', 'Rows', 'Games', 'Goals', 'Behinds', 'Club B&F', 'Comp B&F', ''].map(h => (
                   <th key={h} className="px-2 py-1.5 text-left font-mono text-[10px] uppercase text-pb-faint">{h}</th>
                 ))}</tr>
               </thead>
@@ -388,6 +392,8 @@ export default function AflAdminImport() {
                     <td className="px-2 py-1.5 text-right pb-num">{p.games}</td>
                     <td className="px-2 py-1.5 text-right pb-num">{p.goals}</td>
                     <td className="px-2 py-1.5 text-right pb-num">{p.behinds}</td>
+                    <td className="px-2 py-1.5 text-right pb-num">{p.club_bf_votes || 0}</td>
+                    <td className="px-2 py-1.5 text-right pb-num">{p.comp_bf_votes || 0}</td>
                     <td className="px-2 py-1.5 text-right">
                       {p.already_synced_overlap && <span className="text-[9px] text-pb-faint">already synced</span>}
                     </td>
